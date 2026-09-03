@@ -288,6 +288,7 @@ function RejectPrompt(props: {
   onCancel: () => void
 }) {
   let input: TextareaRenderable
+  const enabled = Keymap.useEnabled()
   const theme = useTheme("elevated")
   const config = useConfig().data
   const dimensions = useTerminalDimensions()
@@ -364,7 +365,7 @@ function RejectPrompt(props: {
             }))(val)
             val.traits = { status: "REJECT" }
           }}
-          focused
+          focused={enabled()}
           textColor={theme.text.default}
           focusedTextColor={theme.text.default}
           cursorColor={theme.text.default}

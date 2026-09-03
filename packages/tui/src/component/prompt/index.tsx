@@ -187,6 +187,8 @@ export function Prompt(props: PromptProps) {
   let anchor: BoxRenderable
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
+  const enabled = Keymap.useEnabled()
+  const disabled = () => props.disabled || !enabled()
   const leader = Keymap.useLeaderActive()
   const muted = () => leader() || props.muted
   const local = useLocal()
@@ -259,6 +261,7 @@ export function Prompt(props: PromptProps) {
   const [pendingDirectory, setPendingDirectory] = createSignal<string>()
   Keymap.createLayer(() => ({
     mode: "global",
+    enabled: !disabled(),
     commands: [
       {
         id: "session.cd",
@@ -348,8 +351,7 @@ export function Prompt(props: PromptProps) {
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    if (props.disabled) input.cursorColor = theme.background.surface.offset
-    if (!props.disabled) input.cursorColor = theme.text.default
+    input.cursorColor = disabled() ? theme.background.surface.offset : theme.text.default
     if (config.cursor) input.cursorStyle = config.cursor
   })
 
@@ -372,12 +374,13 @@ export function Prompt(props: PromptProps) {
   function enqueuePaste(run: (changed: () => boolean) => Promise<void>) {
     pasteQueue = pasteQueue
       .then(async () => {
-        if (disposed || input.isDestroyed) return
+        if (disposed || input.isDestroyed || disabled()) return
         const before = { sessionID: props.sessionID, mode: store.mode, text: input.plainText }
         await run(
           () =>
             disposed ||
             input.isDestroyed ||
+            disabled() ||
             props.sessionID !== before.sessionID ||
             store.mode !== before.mode ||
             input.plainText !== before.text,
@@ -648,15 +651,18 @@ export function Prompt(props: PromptProps) {
 
   Keymap.createLayer(() => ({
     mode: "global",
+    enabled: !disabled(),
     commands: promptCommands(),
   }))
 
   Keymap.createLayer(() => ({
     priority: 1,
+    enabled: !disabled(),
     bindings: ["prompt.queue"],
   }))
 
   Keymap.createLayer(() => ({
+    enabled: !disabled(),
     bindings: [
       "prompt.submit",
       "prompt.editor",
@@ -674,12 +680,13 @@ export function Prompt(props: PromptProps) {
 
   const ref: PromptRef = {
     get focused() {
-      return input.focused
+      return !disabled() && input.focused
     },
     get current() {
       return store.prompt
     },
     focus() {
+      if (disabled()) return
       input.focus()
     },
     blur() {
@@ -733,11 +740,13 @@ export function Prompt(props: PromptProps) {
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    if (props.visible === false || props.disabled || dialog.stack.length > 0) {
+    if (props.visible === false || disabled() || dialog.stack.length > 0) {
       if (input.focused) input.blur()
+      input.focusable = false
       return
     }
 
+    input.focusable = true
     // Slot/plugin updates can remount the background prompt while a dialog is open.
     // Keep focus with the dialog and let the prompt reclaim it after the dialog closes.
     if (!input.focused) input.focus()
@@ -933,13 +942,14 @@ export function Prompt(props: PromptProps) {
 
   Keymap.createLayer(() => ({
     mode: "global",
+    enabled: !disabled(),
     commands: stashCommands(),
   }))
 
   Keymap.createLayer(() => {
     return {
       target: inputTarget,
-      enabled: inputTarget() !== undefined && !props.disabled,
+      enabled: inputTarget() !== undefined && !disabled(),
       bindings: ["prompt.paste"],
     }
   })
@@ -947,7 +957,7 @@ export function Prompt(props: PromptProps) {
   Keymap.createLayer(() => {
     return {
       target: inputTarget,
-      enabled: inputTarget() !== undefined && !props.disabled && store.prompt.text !== "",
+      enabled: inputTarget() !== undefined && !disabled() && store.prompt.text !== "",
       bindings: ["prompt.clear"],
     }
   })
@@ -959,7 +969,7 @@ export function Prompt(props: PromptProps) {
         cursorVersion()
         return (
           inputTarget() !== undefined &&
-          !props.disabled &&
+          !disabled() &&
           store.mode === "normal" &&
           !auto()?.visible &&
           input?.visualCursor.offset === 0
@@ -983,7 +993,7 @@ export function Prompt(props: PromptProps) {
     return {
       priority: 1,
       target: inputTarget,
-      enabled: inputTarget() !== undefined && store.mode === "shell",
+      enabled: inputTarget() !== undefined && !disabled() && store.mode === "shell",
       commands: [
         { bind: "escape", title: "Exit shell mode", group: "Prompt", run: () => setStore("mode", "normal") },
         {
@@ -1002,7 +1012,7 @@ export function Prompt(props: PromptProps) {
       target: inputTarget,
       enabled: (() => {
         cursorVersion()
-        return inputTarget() !== undefined && store.mode === "shell" && input?.visualCursor.offset === 0
+        return inputTarget() !== undefined && !disabled() && store.mode === "shell" && input?.visualCursor.offset === 0
       })(),
       commands: [
         { bind: "backspace", title: "Exit shell mode", group: "Prompt", run: () => setStore("mode", "normal") },
@@ -1016,7 +1026,7 @@ export function Prompt(props: PromptProps) {
       target: inputTarget,
       enabled: (() => {
         cursorVersion()
-        return inputTarget() !== undefined && !props.disabled && !auto()?.visible && input !== undefined
+        return inputTarget() !== undefined && !disabled() && !auto()?.visible && input !== undefined
       })(),
       commands: [
         {
@@ -1052,7 +1062,7 @@ export function Prompt(props: PromptProps) {
       target: inputTarget,
       enabled: (() => {
         cursorVersion()
-        return inputTarget() !== undefined && !props.disabled && !auto()?.visible && input !== undefined
+        return inputTarget() !== undefined && !disabled() && !auto()?.visible && input !== undefined
       })(),
       commands: [
         {
@@ -1087,6 +1097,7 @@ export function Prompt(props: PromptProps) {
 
   let submitting = false
   async function submit(delivery: SessionInbox.Delivery = "steer") {
+    if (disabled()) return false
     // Prevent overlapping invocations (e.g. a double-pressed Enter, or the
     // input's native onSubmit racing another dispatch). Without this guard,
     // a second call slips past the empty-input check before the first call
@@ -1110,7 +1121,6 @@ export function Prompt(props: PromptProps) {
       setStore("prompt", "text", input.plainText)
       syncExtmarksWithPromptParts()
     }
-    if (props.disabled) return false
     if (move.creating()) return false
     if (auto()?.visible) return false
     const trimmed = store.prompt.text.trim()
@@ -1663,7 +1673,7 @@ export function Prompt(props: PromptProps) {
   const promptBg = createMemo(() => theme.raise(theme.background.surface.offset))
 
   return (
-    <>
+    <Keymap.Scope enabled={!disabled()}>
       <box ref={(r: BoxRenderable) => (anchor = r)} visible={props.visible !== false} width="100%">
         <box
           width="100%"
@@ -1769,18 +1779,19 @@ export function Prompt(props: PromptProps) {
               }}
               onCursorChange={() => setCursorVersion((value) => value + 1)}
               onKeyDown={(e: { preventDefault(): void }) => {
-                if (props.disabled) {
+                if (disabled()) {
                   e.preventDefault()
                   return
                 }
               }}
               onSubmit={() => {
+                if (disabled()) return
                 // IME: double-defer so the last composed character (e.g. Korean
                 // hangul) is flushed to plainText before we read it for submission.
                 setTimeout(() => setTimeout(() => submit(), 0), 0)
               }}
               onPaste={(event: PasteEvent) => {
-                if (props.disabled) {
+                if (disabled()) {
                   event.preventDefault()
                   return
                 }
@@ -1816,12 +1827,16 @@ export function Prompt(props: PromptProps) {
                 setTimeout(() => {
                   // setTimeout is a workaround and needs to be addressed properly
                   if (!input || input.isDestroyed) return
-                  input.cursorColor = theme.text.default
+                  input.cursorColor = disabled() ? theme.background.surface.offset : theme.text.default
                   if (config.cursor) input.cursorStyle = config.cursor
                 }, 0)
               }}
               onMouseDown={(r: MouseEvent) => {
-                if (props.disabled || r.button !== 0) return
+                if (disabled()) {
+                  r.preventDefault()
+                  return
+                }
+                if (r.button !== 0) return
                 r.target?.focus()
                 const extmark = input.extmarks
                   .getAtOffset(input.cursorOffset)
@@ -1831,7 +1846,7 @@ export function Prompt(props: PromptProps) {
                 r.stopPropagation()
               }}
               focusedBackgroundColor="transparent"
-              cursorColor={props.disabled ? theme.background.surface.offset : theme.text.default}
+              cursorColor={disabled() ? theme.background.surface.offset : theme.text.default}
               syntaxStyle={syntax()}
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
@@ -2016,6 +2031,6 @@ export function Prompt(props: PromptProps) {
         hasSkill={(id) => store.prompt.skills?.some((skill) => skill.id === id) ?? false}
         promptPartTypeId={() => promptPartTypeId}
       />
-    </>
+    </Keymap.Scope>
   )
 }

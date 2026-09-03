@@ -48,6 +48,8 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
   const keymap = Keymap.use()
+  const enabled = Keymap.useEnabled()
+  const active = () => enabled() && keymap.mode.current() === FORM_MODE
   const config = useConfig().data
   const clipboard = useClipboard()
   const toast = useToast()
@@ -68,6 +70,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   })
 
   let textarea: TextareaRenderable | undefined
+  const [inputTarget, setInputTarget] = createSignal<TextareaRenderable>()
   let review: ScrollBoxRenderable | undefined
   let measureReview: (() => void) | undefined
 
@@ -216,9 +219,22 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     if (measureReview) renderer.off(CliRenderEvents.FRAME, measureReview)
   })
 
+  // Refs publish after initialization so burst typing stays with the interceptor until the editor is ready.
+  createEffect(() => {
+    const target = inputTarget()
+    if (!target || target.isDestroyed) return
+    if (!active()) {
+      target.blur()
+      target.focusable = false
+      return
+    }
+    target.focusable = true
+    target.focus()
+  })
+
   onCleanup(
     keymap.intercept("key", ({ event, consume }) => {
-      if (keymap.mode.current() !== FORM_MODE) return
+      if (!active()) return
       if (textual() || !other() || (store.editing && renderer.currentFocusedEditor === textarea)) return
       if (event.ctrl || event.meta || event.option || event.super || event.hyper) return
       if ((!store.editing && event.sequence === " ") || !/^[^\p{C}\p{Zl}\p{Zp}]$/u.test(event.sequence)) return
@@ -328,7 +344,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   }
 
   usePaste((event) => {
-    if (keymap.mode.current() !== FORM_MODE) return
+    if (!active()) return
     const value = stripAnsiSequences(decodePasteBytes(event.bytes)).replace(/\r\n?/g, "\n")
     if (store.editing && renderer.currentFocusedEditor === textarea) {
       textarea.insertText(value)
@@ -343,7 +359,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     return clipboard
       .read()
       .then((content) => {
-        if (content?.mime !== "text/plain") return
+        if (!active() || content?.mime !== "text/plain") return
         const value = stripAnsiSequences(content.data).replace(/\r\n?/g, "\n")
         if (store.editing || textual()) {
           textarea?.insertText(value)
@@ -878,8 +894,9 @@ export function FormPrompt(props: { form: FormWithLocation }) {
                     textarea = val
                     val.traits = { status: "ANSWER" }
                     queueMicrotask(() => {
-                      val.focus()
+                      if (val.isDestroyed) return
                       val.gotoLineEnd()
+                      setInputTarget(val)
                     })
                   }}
                   initialValue={
@@ -1017,9 +1034,10 @@ export function FormPrompt(props: { form: FormWithLocation }) {
                               textarea = val
                               val.traits = { status: "ANSWER" }
                               queueMicrotask(() => {
+                                if (val.isDestroyed) return
                                 val.setText(input())
-                                val.focus()
                                 val.gotoLineEnd()
+                                setInputTarget(val)
                               })
                             }}
                             initialValue={input()}

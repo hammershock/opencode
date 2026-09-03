@@ -236,10 +236,7 @@ function Status() {
 Register a fenced-code renderer by language; the returned function unregisters it.
 
 ```ts
-const unregister = context.markdown.registerCodeBlockRenderer(
-  "acme",
-  (_token, render) => render.defaultRender(),
-)
+const unregister = context.markdown.registerCodeBlockRenderer("acme", (_token, render) => render.defaultRender())
 return unregister
 ```
 
@@ -340,7 +337,14 @@ Custom JSX dialogs can set their size and close themselves.
 
 ```tsx
 context.ui.dialog.set({ size: "large", centered: true })
-context.ui.dialog.show(() => <box><text>Acme</text></box>, () => console.log("closed"))
+context.ui.dialog.show(
+  () => (
+    <box>
+      <text>Acme</text>
+    </box>
+  ),
+  () => console.log("closed"),
+)
 context.ui.dialog.clear()
 ```
 
@@ -403,6 +407,77 @@ context.ui.slot({ append: "home.footer", render: () => <text>After footer conten
 context.ui.slot({ before: "home.footer", render: () => <text>Before footer slot</text> })
 context.ui.slot({ after: "home.footer", render: () => <text>After footer slot</text> })
 context.ui.slot({ replace: "home.footer", render: () => <text>New footer</text> })
+```
+
+### Session panels
+
+Register a named replacement for `session.panel`, then open it from a command. The host owns sizing, focus, and
+full-screen presentation; the plugin owns its contents.
+
+```tsx
+context.ui.slot({
+  name: "review",
+  replace: "session.panel",
+  render: (panel) => <ReviewPanel panel={panel} />,
+})
+
+context.ui.slot({
+  append: "app",
+  render: () => {
+    context.keymap.layer(() => ({
+      mode: "global",
+      commands: [
+        {
+          id: "acme.review",
+          title: "Open review",
+          slash: { name: "review" },
+          run: () => {
+            context.ui.panel.open("review")
+          },
+        },
+      ],
+    }))
+    return null
+  },
+})
+```
+
+- Names are scoped to the plugin. Opening an unknown name or opening outside a session returns `false`.
+- Unlike composed slots, this slot renders only the explicitly selected named contribution.
+- Changing presentation preserves the mounted contribution. Closing it or unregistering its plugin disposes it.
+- Its keyboard layers and input modes are active only while the panel owns input.
+
+The slot receives reactive `sessionID`, `width`, `presentation`, `focused`, and `canSplit` properties, plus `focus`,
+`close`, and `toggleFullscreen` actions. Use `canSplit` to gate the presentation shortcut rather than checking terminal
+width inside the plugin.
+
+```tsx
+import type { PanelInput } from "@opencode-ai/plugin/tui/context"
+import { usePlugin } from "@opencode-ai/plugin/tui"
+
+function ReviewPanel(props: { panel: PanelInput }) {
+  const context = usePlugin()
+  context.keymap.layer(() => ({
+    commands: [
+      {
+        id: "acme.review.fullscreen",
+        bind: "f",
+        enabled: () => props.panel.canSplit,
+        run: props.panel.toggleFullscreen,
+      },
+    ],
+  }))
+  return <text>Reviewing {props.panel.sessionID}</text>
+}
+```
+
+You can request full-screen presentation initially, inspect your active panel, or close it without affecting another
+plugin's panel.
+
+```ts
+context.ui.panel.open("review", { presentation: "fullscreen" })
+const current = context.ui.panel.current()
+context.ui.panel.close()
 ```
 
 ## Formatting

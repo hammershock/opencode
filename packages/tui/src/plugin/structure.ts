@@ -6,6 +6,10 @@
 
 export type PlacementKind = "prepend" | "append" | "before" | "after" | "replace"
 
+export function namedSlotKey(path: string, name: string) {
+  return `slot:${path}:${name}`
+}
+
 // Normalized from the public SlotClaim shape by the plugin API: exactly one
 // placement kind, the target path erased to a string so the resolver stays
 // independent of the slot map.

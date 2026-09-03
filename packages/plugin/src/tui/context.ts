@@ -162,6 +162,20 @@ type PromptFooterInput = {
   readonly showDetails: boolean
 }
 
+export type PanelPresentation = "panel" | "fullscreen"
+
+/** Client-local state of the selected session panel. The host owns its layout and input scope. */
+export interface PanelInput {
+  readonly sessionID: string
+  readonly width: number
+  readonly presentation: PanelPresentation
+  readonly focused: boolean
+  readonly canSplit: boolean
+  readonly focus: () => void
+  readonly close: () => void
+  readonly toggleFullscreen: () => void
+}
+
 /**
  * The host UI's slot tree. Every path is one slot: a named boundary a plugin
  * may render around, inside, or take over. Paths are absolute and
@@ -180,6 +194,7 @@ export interface SlotMap {
   readonly "prompt.footer.status": PromptFooterInput
   readonly "prompt.footer.file": PromptFooterInput
   readonly "session.composer.top": { readonly sessionID: string }
+  readonly "session.panel": PanelInput
   readonly "sidebar.content": { readonly sessionID: string }
   readonly "sidebar.footer": { readonly sessionID: string }
 }
@@ -203,45 +218,58 @@ export type SlotPath = keyof SlotMap
  * `render` receives the target slot's input, reactively. The `?: never`
  * fields make the variants mutually exclusive: a claim with two placement
  * keys is a type error, not a silent priority pick.
+ *
+ * `session.panel` is an exclusive named replacement selected by ui.panel.open,
+ * not by plugin enable order. Its instance survives presentation changes.
  */
 export type SlotClaim<Path extends SlotPath = SlotPath> = Path extends SlotPath
-  ? { readonly render: (input: SlotMap[Path]) => JSX.Element } & (
-      | {
-          readonly prepend: Path
-          readonly append?: never
-          readonly before?: never
-          readonly after?: never
-          readonly replace?: never
-        }
-      | {
-          readonly append: Path
-          readonly prepend?: never
-          readonly before?: never
-          readonly after?: never
-          readonly replace?: never
-        }
-      | {
-          readonly before: Path
-          readonly prepend?: never
-          readonly append?: never
-          readonly after?: never
-          readonly replace?: never
-        }
-      | {
-          readonly after: Path
-          readonly prepend?: never
-          readonly append?: never
-          readonly before?: never
-          readonly replace?: never
-        }
-      | {
-          readonly replace: Path
-          readonly prepend?: never
-          readonly append?: never
-          readonly before?: never
-          readonly after?: never
-        }
-    )
+  ? { readonly render: (input: SlotMap[Path]) => JSX.Element } & (Path extends "session.panel"
+      ? { readonly name: string }
+      : { readonly name?: string }) &
+      (Path extends "session.panel"
+        ? {
+            readonly replace: Path
+            readonly prepend?: never
+            readonly append?: never
+            readonly before?: never
+            readonly after?: never
+          }
+        :
+            | {
+                readonly prepend: Path
+                readonly append?: never
+                readonly before?: never
+                readonly after?: never
+                readonly replace?: never
+              }
+            | {
+                readonly append: Path
+                readonly prepend?: never
+                readonly before?: never
+                readonly after?: never
+                readonly replace?: never
+              }
+            | {
+                readonly before: Path
+                readonly prepend?: never
+                readonly append?: never
+                readonly after?: never
+                readonly replace?: never
+              }
+            | {
+                readonly after: Path
+                readonly prepend?: never
+                readonly append?: never
+                readonly before?: never
+                readonly replace?: never
+              }
+            | {
+                readonly replace: Path
+                readonly prepend?: never
+                readonly append?: never
+                readonly before?: never
+                readonly after?: never
+              })
   : never
 
 export interface App {
@@ -449,6 +477,14 @@ export interface UI {
     register(page: Page): () => void
     navigate(destination: Destination): void
     current(): Route
+  }
+  readonly panel: {
+    /** Opens a named session.panel contribution owned by this plugin in the current session. */
+    open(name: string, options?: { readonly presentation?: PanelPresentation }): boolean
+    /** Closes this plugin's active panel. Other plugins' panels are unaffected. */
+    close(): void
+    /** This plugin's active panel, if any. Reactive when read in a Solid computation. */
+    current(): { readonly name: string; readonly sessionID: string } | undefined
   }
   readonly tabs: {
     /** Returns whether session tabs are enabled for this TUI. */

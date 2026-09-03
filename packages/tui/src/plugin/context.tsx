@@ -19,7 +19,7 @@ import { fileURLToPath } from "url"
 import type { Page } from "@opencode-ai/plugin/tui/context"
 import { Hash } from "@opencode-ai/util/hash"
 import { Host } from "@opencode-ai/plugin/host"
-import { resolveSlots, type Claim } from "./structure"
+import { namedSlotKey, resolveSlots, type Claim } from "./structure"
 import { createStore, produce, reconcile as reconcileStore, unwrap } from "solid-js/store"
 import { isDeepEqual } from "remeda"
 import "#runtime-plugin-support"
@@ -60,6 +60,7 @@ type Value = {
     // A mounted <Slot> instance registers its path; the disposer unregisters.
     readonly register: (path: string) => () => void
     readonly resolved: () => ReturnType<typeof resolveSlots<SlotRender>>
+    readonly named: (path: string, plugin: string, name: string) => RegisteredSlot | undefined
   }
   readonly markdown: () => MarkdownOptions["renderNode"]
   readonly activate: (id: string) => Promise<boolean>
@@ -457,18 +458,20 @@ export function PluginProvider(props: ParentProps<{ packages: PackageSource; dir
   // order within one plugin. The resolver's last-wins rules depend on it.
   const claims = createMemo(() =>
     Object.entries(store.registrations).flatMap(([id, registration]) =>
-      Object.entries(registration.active ? registration.slots : {}).map(([key, slot]) => {
-        // Rows downstream diff by reference; a stable claim per render
-        // function keeps untouched plugins' slot rows (and their state)
-        // alive across other plugins' reloads.
-        const cached = slotItems.get(slot.render)
-        if (cached) return cached
-        // Placements are immutable once registered; unwrap the store proxy
-        // so resolver reads don't subscribe tracked scopes.
-        const item = { key: `${id}/${key}`, plugin: id, placement: unwrap(slot.placement), render: slot.render }
-        slotItems.set(slot.render, item)
-        return item
-      }),
+      Object.entries(registration.active ? registration.slots : {})
+        .filter(([, slot]) => slot.placement.target !== "session.panel")
+        .map(([key, slot]) => {
+          // Rows downstream diff by reference; a stable claim per render
+          // function keeps untouched plugins' slot rows (and their state)
+          // alive across other plugins' reloads.
+          const cached = slotItems.get(slot.render)
+          if (cached) return cached
+          // Placements are immutable once registered; unwrap the store proxy
+          // so resolver reads don't subscribe tracked scopes.
+          const item = { key: `${id}/${key}`, plugin: id, placement: unwrap(slot.placement), render: slot.render }
+          slotItems.set(slot.render, item)
+          return item
+        }),
     ),
   )
   // Object.keys tracks the store's keys node only: refcount changes on an
@@ -555,7 +558,15 @@ export function PluginProvider(props: ParentProps<{ packages: PackageSource; dir
             active: plugin.active,
           })),
         route: (id, name) => store.registrations[id]?.routes[name]?.render,
-        slots: { register: registerSlot, resolved },
+        slots: {
+          register: registerSlot,
+          resolved,
+          named(path, plugin, name) {
+            const registration = store.registrations[plugin]
+            if (!registration?.active) return
+            return registration.slots[namedSlotKey(path, name)]
+          },
+        },
         markdown,
         // Manual dialog toggles join the same chain as reconciles so a
         // toggle mid-reload cannot mix registrations across generations.

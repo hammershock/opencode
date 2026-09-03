@@ -74,7 +74,11 @@ export function PluginRoute(props: { readonly fallback: (id: string, name: strin
 const SlotParent = createContext<string>()
 
 // `input` is required exactly when the path publishes a non-empty input.
-type SlotProps<Path extends SlotPath> = ParentProps<{ readonly path: Path }> &
+type SlotProps<Path extends SlotPath> = ParentProps<{
+  readonly path: Path
+  readonly selection?: { readonly plugin: string; readonly name: string }
+}> &
+  (Path extends "session.panel" ? { readonly selection: { readonly plugin: string; readonly name: string } } : {}) &
   ({} extends SlotMap[Path] ? { readonly input?: SlotMap[Path] } : { readonly input: SlotMap[Path] })
 
 // One named boundary of the host UI's slot tree. The host's own content are
@@ -97,6 +101,26 @@ export function Slot<Path extends SlotPath>(props: SlotProps<Path>) {
   }
   onCleanup(plugins.slots.register(path))
   const input = () => (props as { readonly input?: SlotMap[Path] }).input ?? ({} as SlotMap[Path])
+  // Selected panels use the same owned registrations and boundary as composed
+  // slots, but choose a named contribution instead of last-enabled replacement.
+  const selected = createMemo(() => {
+    const selection = props.selection
+    if (!selection) return
+    return plugins.slots.named(path, selection.plugin, selection.name)
+  })
+  if (path === "session.panel") {
+    return (
+      <SlotParent.Provider value={path}>
+        <Show keyed when={selected()}>
+          {(claim) => (
+            <PluginBoundary id={props.selection!.plugin} where={`slot ${path}`}>
+              {createComponent(claim.render, mergeProps(input))}
+            </PluginBoundary>
+          )}
+        </Show>
+      </SlotParent.Provider>
+    )
+  }
   const slotted = createMemo(
     () => plugins.slots.resolved().slotted.get(path) ?? emptySlotted<SlotRender>(),
     emptySlotted<SlotRender>(),

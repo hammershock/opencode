@@ -1,7 +1,7 @@
 import { PluginContextProvider } from "@opencode-ai/plugin/tui"
 import type { JSX } from "solid-js"
 import type { Context, Dialog, Page, SlotClaim, SlotMap, SlotPath, Toast } from "@opencode-ai/plugin/tui/context"
-import type { Placement, PlacementKind } from "./structure"
+import { namedSlotKey, type Placement, type PlacementKind } from "./structure"
 import { infoStringToFiletype, type MarkdownCodeBlockRenderer } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { useClient } from "../context/client"
@@ -20,6 +20,7 @@ import { useToast } from "../ui/toast"
 import { useAttention } from "../context/attention"
 import { useStorage } from "../context/storage"
 import { useSessionTabs } from "../context/session-tabs"
+import { useOptionalPanel } from "../context/panel"
 import { abbreviateHome } from "../util/path-format"
 
 export type Dispose = () => Promise<void>
@@ -30,6 +31,7 @@ export type SlotRender = (input: SlotMap[SlotPath]) => JSX.Element
 
 // A registered claim as stored by the plugin provider's registry.
 export type RegisteredSlot = {
+  readonly name?: string
   readonly placement: Placement
   readonly render: SlotRender
 }
@@ -68,6 +70,7 @@ export function usePluginHost() {
     attention: useAttention(),
     storage: useStorage(),
     sessionTabs: useSessionTabs(),
+    panel: useOptionalPanel(),
   }
 }
 
@@ -97,11 +100,12 @@ export function createPluginContext(input: {
   }
   // Unregistering after deactivation is a no-op: deactivate already resets
   // the registration's routes and slots wholesale.
-  const registration = (kind: "routes" | "slots" | "markdown", name: string) => {
+  const registration = (kind: "routes" | "slots" | "markdown", name: string, onRemove?: () => void) => {
     let registered = true
     const unregister = () => {
       if (!registered) return
       registered = false
+      onRemove?.()
       if (!input.registry.active()) return
       input.registry.remove(kind, name)
     }
@@ -174,6 +178,22 @@ export function createPluginContext(input: {
           return host.route.data
         },
       },
+      panel: {
+        open(name, options) {
+          if (!host.panel || !input.registry.active()) return false
+          if (!input.registry.has("slots", namedSlotKey("session.panel", name))) return false
+          const route = host.route.data
+          if (route.type !== "session") return false
+          host.panel.open({ plugin: input.id, name, sessionID: route.sessionID }, options?.presentation)
+          return true
+        },
+        close: () => host.panel?.release(input.id),
+        current() {
+          const current = host.panel?.current()
+          if (current?.plugin !== input.id) return
+          return { name: current.name, sessionID: current.sessionID }
+        },
+      },
       tabs: {
         enabled: host.sessionTabs.enabled,
         list: () =>
@@ -206,19 +226,25 @@ export function createPluginContext(input: {
         },
       },
       slot(value: SlotClaim) {
-        // Keys are counter-suffixed so one plugin may claim several places;
-        // order within the plugin is registration order.
-        const key = `slot#${claims++}`
         // Exactly one placement kind, enforced at runtime for untyped plugins.
         const kinds = placements.filter((item) => value[item] !== undefined)
         if (kinds.length !== 1) throw new Error("Slot claim requires exactly one placement key")
         const kind = kinds[0]
+        const target = value[kind] as string
+        if (value.name !== undefined && !value.name) throw new Error("Slot names cannot be empty")
+        if (target === "session.panel" && !value.name) throw new Error("Session panels require a slot name")
+        if (target === "session.panel" && kind !== "replace") throw new Error("Session panels use replacement claims")
+        const key = value.name ? namedSlotKey(target, value.name) : `slot#${claims++}`
+        if (input.registry.has("slots", key)) throw new Error(`Slot already registered: ${value.name}`)
         input.registry.set("slots", key, {
-          placement: { kind, target: value[kind] as string },
+          name: value.name,
+          placement: { kind, target },
           // The registration map erases the path-specific input type.
           render: (slotInput) => provide(() => (value.render as SlotRender)(slotInput)),
         })
-        return registration("slots", key)
+        return registration("slots", key, () => {
+          if (target === "session.panel") host.panel?.release(input.id, value.name)
+        })
       },
     },
   }

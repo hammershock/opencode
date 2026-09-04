@@ -58,9 +58,13 @@ import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 import { DialogSelect } from "../../ui/dialog-select"
+import { DialogPrompt } from "../../ui/dialog-prompt"
+import { DialogConfirm } from "../../ui/dialog-confirm"
 import {
+  addRexdTarget,
   changeRexdSessionDirectory,
   executeRexdTargetCommand,
+  hasRexdTarget,
   parseDirectoryArgument,
   readRexdSession,
 } from "../../util/rexd-session"
@@ -1047,6 +1051,14 @@ export function Prompt(props: PromptProps) {
         return false
       }
     }
+    if (trimmed === "/target add" || trimmed.startsWith("/target add ")) {
+      input.extmarks.clear()
+      input.clear()
+      setStore("prompt", { input: "", parts: [] })
+      setStore("extmarkToPartIndex", new Map())
+      void addTarget(trimmed.slice("/target add".length).trim())
+      return true
+    }
     if (trimmed === "/target" || trimmed.startsWith("/target ")) {
       if (!props.sessionID) {
         toast.show({ message: "Create or open a session before selecting a remote target.", variant: "warning" })
@@ -1239,6 +1251,59 @@ export function Prompt(props: PromptProps) {
     input.clear()
     if (finishMoveProgress) move.finishSubmit()
     return true
+  }
+
+  async function addTarget(initialAlias: string) {
+    const alias = await DialogPrompt.show(dialog, "Target alias", {
+      value: initialAlias,
+      placeholder: "gpu-server",
+    })
+    if (!alias?.trim()) return
+    if (hasRexdTarget(paths.home, alias.trim())) {
+      const overwrite = await DialogConfirm.show(
+        dialog,
+        "Replace target?",
+        `Target \"${alias.trim()}\" already exists. Replace its configuration?`,
+      )
+      if (!overwrite) return
+    }
+
+    const host = await DialogPrompt.show(dialog, "SSH host", { value: alias.trim(), placeholder: "hostname or IP" })
+    if (!host?.trim()) return
+    const user = await DialogPrompt.show(dialog, "SSH user", { placeholder: "optional" })
+    if (user === null) return
+    const remoteHome = user.trim() === "root" ? "/root" : user.trim() ? `/home/${user.trim()}` : "/"
+    const defaultCwd = await DialogPrompt.show(dialog, "Default remote working directory", {
+      value: remoteHome,
+      placeholder: "/home/user/workspace",
+    })
+    if (!defaultCwd?.trim()) return
+    const roots = await DialogPrompt.show(dialog, "Workspace roots", {
+      value: defaultCwd.trim(),
+      placeholder: "Comma-separated absolute paths",
+    })
+    if (!roots?.trim()) return
+    const command = await DialogPrompt.show(dialog, "REXD command", {
+      value: `${remoteHome.replace(/\/$/, "")}/.local/bin/rexd --stdio`,
+      placeholder: "/path/to/rexd --stdio",
+    })
+    if (!command?.trim()) return
+
+    try {
+      const result = addRexdTarget(paths.home, {
+        alias,
+        host,
+        user,
+        defaultCwd,
+        workspaceRoots: roots.split(","),
+        command,
+      })
+      dialog.clear()
+      toast.show({ message: `Added target: ${result.alias}`, variant: "success" })
+    } catch (error) {
+      dialog.clear()
+      toast.show({ title: "Cannot add target", message: errorMessage(error), variant: "error" })
+    }
   }
 
   function pasteText(text: string, virtualText: string) {

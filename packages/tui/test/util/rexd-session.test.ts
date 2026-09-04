@@ -4,8 +4,10 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import path from "path"
 import {
+  addRexdTarget,
   changeRexdSessionDirectory,
   executeRexdTargetCommand,
+  hasRexdTarget,
   parseDirectoryArgument,
   readRexdSession,
   writeRexdSessionDirectory,
@@ -83,5 +85,20 @@ describe("REXD session context", () => {
     expect(changeRexdSessionDirectory(item.home, item.sessionID, "~/repo")?.directory).toBe("/workspace/home/repo")
     expect(changeRexdSessionDirectory(item.home, item.sessionID, "'/workspace/a b'")?.directory).toBe("/workspace/a b")
     expect(parseDirectoryArgument("foo\\ bar")).toBe("foo bar")
+  })
+
+  test("adds a target without replacing other target entries", () => {
+    const item = fixture()
+    const added = addRexdTarget(item.home, {
+      alias: "gpu-2",
+      host: "10.0.0.2",
+      user: "hammer",
+      defaultCwd: "/data/project",
+      workspaceRoots: ["/data", "/models"],
+      command: "/home/hammer/.local/bin/rexd --stdio",
+    })
+    expect(added.alias).toBe("gpu-2")
+    expect(hasRexdTarget(item.home, "gpu")).toBe(true)
+    expect(hasRexdTarget(item.home, "gpu-2")).toBe(true)
   })
 })

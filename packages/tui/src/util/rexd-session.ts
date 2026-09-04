@@ -147,9 +147,54 @@ export function executeRexdTargetCommand(home: string, sessionID: string, input:
   return { title: "REXD target", message: "Usage: /target <list|use|status|clear> [alias]" }
 }
 
+export function hasRexdTarget(home: string, alias: string) {
+  const config = readJson<{ targets?: Record<string, Target> }>(path.join(home, ".config", "rexd", "targets.json"))
+  return Boolean(config?.targets?.[alias])
+}
+
+export function addRexdTarget(
+  home: string,
+  input: {
+    alias: string
+    host: string
+    user?: string
+    defaultCwd: string
+    workspaceRoots: string[]
+    command: string
+  },
+) {
+  const alias = input.alias.trim()
+  if (!/^[A-Za-z0-9._-]+$/.test(alias)) throw new Error("Alias may only contain letters, numbers, '.', '_' and '-'")
+  if (!input.host.trim()) throw new Error("SSH host is required")
+  const defaultCwd = path.posix.normalize(input.defaultCwd.trim())
+  if (!defaultCwd.startsWith("/")) throw new Error("Default working directory must be absolute")
+  const roots = input.workspaceRoots.map((root) => path.posix.normalize(root.trim())).filter(Boolean)
+  if (!roots.length || roots.some((root) => !root.startsWith("/"))) {
+    throw new Error("Workspace roots must contain absolute paths")
+  }
+
+  const file = path.join(home, ".config", "rexd", "targets.json")
+  const config = readJson<{ version?: number; targets?: Record<string, Target> }>(file) ?? {}
+  const target = {
+    transport: "ssh",
+    host: input.host.trim(),
+    ...(input.user?.trim() ? { user: input.user.trim() } : {}),
+    command: input.command.trim(),
+    workspaceRoots: roots,
+    defaultCwd,
+    rootPolicy: { mode: "strict" },
+  }
+  writeJson(file, { ...config, version: config.version ?? 1, targets: { ...config.targets, [alias]: target } })
+  return { alias, target }
+}
+
 function writeState(file: string, state: SessionState) {
+  writeJson(file, state)
+}
+
+function writeJson(file: string, value: unknown) {
   mkdirSync(path.dirname(file), { recursive: true })
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`
-  writeFileSync(temporary, JSON.stringify(state, null, 2))
+  writeFileSync(temporary, JSON.stringify(value, null, 2) + "\n")
   renameSync(temporary, file)
 }

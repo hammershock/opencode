@@ -28,7 +28,8 @@ tar -xzf "${tmp}/${asset}" -C "$tmp"
 bin_dir="${HOME}/.local/bin"
 install_dir="${HOME}/.local/lib/opencode-rexd"
 plugin_dir="${HOME}/.config/opencode/plugins"
-mkdir -p "$bin_dir" "$install_dir" "$plugin_dir"
+command_dir="${HOME}/.config/opencode/commands"
+mkdir -p "$bin_dir" "$install_dir" "$plugin_dir" "$command_dir"
 
 if [[ -f "${plugin_dir}/rexd-target.js" ]]; then
   cp "${plugin_dir}/rexd-target.js" "${plugin_dir}/rexd-target.js.$(date +%Y%m%d%H%M%S).bak"
@@ -38,6 +39,9 @@ install -m 755 "${tmp}/opencode-rexd" "${install_dir}/opencode-rexd"
 install -m 644 "${tmp}/rexd-target.js" "${plugin_dir}/rexd-target.js"
 install -m 644 "${tmp}/rexd-target-tree-sitter.wasm" "${plugin_dir}/rexd-target-tree-sitter.wasm"
 install -m 644 "${tmp}/rexd-target-tree-sitter-bash.wasm" "${plugin_dir}/rexd-target-tree-sitter-bash.wasm"
+install -m 644 "${tmp}/commands/target.md" "${command_dir}/target.md"
+install -m 644 "${tmp}/commands/cd.md" "${command_dir}/cd.md"
+install -m 644 "${tmp}/commands/permissions.md" "${command_dir}/permissions.md"
 ln -sfn "${install_dir}/opencode-rexd" "${bin_dir}/opencode-rexd"
 codesign --force --sign - "${install_dir}/opencode-rexd" >/dev/null
 

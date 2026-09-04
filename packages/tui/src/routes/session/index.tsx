@@ -162,6 +162,7 @@ const context = createContext<{
   showTimestamps: () => boolean
   showDetails: () => boolean
   showGenericToolOutput: () => boolean
+  expandToolOutput: () => boolean
   diffWrapMode: () => "word" | "none"
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
@@ -266,6 +267,7 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
+  const [expandToolOutput, setExpandToolOutput] = createSignal(false)
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -749,6 +751,19 @@ export function Session() {
       },
     },
     {
+      title: expandToolOutput() ? "Collapse command outputs" : "Expand command outputs",
+      value: "session.toggle.output_expansion",
+      category: "Session",
+      slash: {
+        name: "expand",
+        aliases: ["collapse"],
+      },
+      run: () => {
+        setExpandToolOutput((prev) => !prev)
+        dialog.clear()
+      },
+    },
+    {
       title: "Page up",
       value: "session.page.up",
       category: "Session",
@@ -1168,6 +1183,7 @@ export function Session() {
           showTimestamps,
           showDetails,
           showGenericToolOutput,
+          expandToolOutput,
           diffWrapMode,
           providers,
           sync,
@@ -1804,7 +1820,7 @@ function GenericTool(props: ToolProps) {
   const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
   const collapsed = createMemo(() => collapseToolOutput(output(), maxLines, maxChars()))
   const limited = createMemo(() => {
-    if (expanded() || !collapsed().overflow) return output()
+    if (expanded() || ctx.expandToolOutput() || !collapsed().overflow) return output()
     return collapsed().output
   })
 
@@ -1825,7 +1841,9 @@ function GenericTool(props: ToolProps) {
         <box gap={1}>
           <text fg={theme.text}>{limited()}</text>
           <Show when={collapsed().overflow}>
-            <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
+            <text fg={theme.textMuted}>
+              {expanded() || ctx.expandToolOutput() ? "Run /expand to collapse" : "Run /expand or click to expand"}
+            </text>
           </Show>
         </box>
       </BlockTool>
@@ -2054,7 +2072,7 @@ function Shell(props: ToolProps) {
   const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
   const collapsed = createMemo(() => collapseToolOutput(output(), maxLines, maxChars()))
   const limited = createMemo(() => {
-    if (expanded() || !collapsed().overflow) return output()
+    if (expanded() || ctx.expandToolOutput() || !collapsed().overflow) return output()
     return collapsed().output
   })
 
@@ -2088,7 +2106,9 @@ function Shell(props: ToolProps) {
               <text fg={theme.text}>{limited()}</text>
             </Show>
             <Show when={collapsed().overflow}>
-              <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
+              <text fg={theme.textMuted}>
+                {expanded() || ctx.expandToolOutput() ? "Run /expand to collapse" : "Run /expand or click to expand"}
+              </text>
             </Show>
           </box>
         </BlockTool>

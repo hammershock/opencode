@@ -57,6 +57,13 @@ import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { DialogSelect } from "../../ui/dialog-select"
+import {
+  changeRexdSessionDirectory,
+  executeRexdTargetCommand,
+  parseDirectoryArgument,
+  readRexdSession,
+} from "../../util/rexd-session"
 
 registerOpencodeSpinner()
 
@@ -176,6 +183,12 @@ export function Prompt(props: PromptProps) {
   const shell = createMemo(() => props.placeholders?.shell ?? [])
   const fileContextEnabled = createMemo(() => kv.get("file_context_enabled", true))
   const [dismissedEditorSelectionKey, setDismissedEditorSelectionKey] = createSignal<string>()
+  const [remoteTick, setRemoteTick] = createSignal(0)
+  const workingDirectory = createMemo(() => {
+    remoteTick()
+    if (!props.sessionID) return location()?.directory ?? paths.cwd
+    return readRexdSession(paths.home, props.sessionID)?.label ?? location()?.directory ?? paths.cwd
+  })
   const editorContext = createMemo(() => {
     const selection = fileContextEnabled() ? editor.selection() : undefined
     if (!selection) return
@@ -613,6 +626,11 @@ export function Prompt(props: PromptProps) {
   }
 
   onMount(() => {
+    const timer = setInterval(() => setRemoteTick((value) => value + 1), 500)
+    onCleanup(() => clearInterval(timer))
+  })
+
+  onMount(() => {
     const saved = stashed
     stashed = undefined
     if (store.prompt.input) return
@@ -963,6 +981,83 @@ export function Prompt(props: PromptProps) {
     const trimmed = store.prompt.input.trim()
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
+      return true
+    }
+    if (trimmed === "/permissions") {
+      input.extmarks.clear()
+      input.clear()
+      setStore("prompt", { input: "", parts: [] })
+      setStore("extmarkToPartIndex", new Map())
+      dialog.replace(() => (
+        <DialogSelect
+          title="Permissions"
+          current={local.permission.mode}
+          options={[
+            {
+              title: "Ask before actions",
+              value: "normal" as const,
+              description: "Use configured permission rules and ask when approval is required",
+            },
+            {
+              title: "Auto approve",
+              value: "auto" as const,
+              description: "Automatically approve requests that are not explicitly denied",
+            },
+          ]}
+          onSelect={(option) => {
+            local.permission.set(option.value)
+            dialog.clear()
+            toast.show({
+              message: option.value === "auto" ? "Permissions: auto approve" : "Permissions: ask",
+              variant: "success",
+            })
+          }}
+        />
+      ))
+      return true
+    }
+    if (trimmed === "/cd" || trimmed.startsWith("/cd ")) {
+      if (!props.sessionID) {
+        toast.show({ message: "Create or open a session before changing directory.", variant: "warning" })
+        return false
+      }
+      try {
+        const argument = trimmed.slice("/cd".length)
+        const remote = changeRexdSessionDirectory(paths.home, props.sessionID, argument)
+        const directory = await (async () => {
+          if (remote) return remote.label
+          const value = parseDirectoryArgument(argument)
+          const expanded = value === "~" ? paths.home : value.startsWith("~/") ? path.join(paths.home, value.slice(2)) : value
+          const current = sync.session.get(props.sessionID!)?.directory ?? location()?.directory ?? paths.cwd
+          const destination = path.resolve(current, expanded)
+          await sdk.client.experimental.controlPlane.moveSession(
+            { sessionID: props.sessionID!, destination: { directory: destination }, moveChanges: false },
+            { throwOnError: true },
+          )
+          return destination
+        })()
+        input.extmarks.clear()
+        input.clear()
+        setStore("prompt", { input: "", parts: [] })
+        setStore("extmarkToPartIndex", new Map())
+        toast.show({ message: `Working directory: ${directory}`, variant: "success" })
+        return true
+      } catch (error) {
+        toast.show({ title: "Cannot change directory", message: errorMessage(error), variant: "error" })
+        return false
+      }
+    }
+    if (trimmed === "/target" || trimmed.startsWith("/target ")) {
+      if (!props.sessionID) {
+        toast.show({ message: "Create or open a session before selecting a remote target.", variant: "warning" })
+        return false
+      }
+      const result = executeRexdTargetCommand(paths.home, props.sessionID, trimmed.slice("/target".length))
+      input.extmarks.clear()
+      input.clear()
+      setStore("prompt", { input: "", parts: [] })
+      setStore("extmarkToPartIndex", new Map())
+      dialog.replace(() => <DialogAlert title={result.title} message={result.message} />)
       return true
     }
     const selectedModel = local.model.current()
@@ -1646,7 +1741,7 @@ export function Prompt(props: PromptProps) {
               {props.hint ?? (
                 <Show when={props.sessionID} fallback={<text />}>
                   <box marginLeft={1}>
-                    <text fg={theme.textMuted}>{location()?.directory ?? paths.cwd}</text>
+                    <text fg={theme.textMuted}>{workingDirectory()}</text>
                   </box>
                 </Show>
               )}

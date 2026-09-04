@@ -5,11 +5,15 @@ import { useDirectory } from "../../context/directory"
 import { useConnected } from "../../component/use-connected"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
+import { useTuiPaths } from "../../context/runtime"
+import { readRexdSession } from "../../util/rexd-session"
 
 export function Footer() {
   const { theme } = useTheme()
   const sync = useSync()
   const route = useRoute()
+  const paths = useTuiPaths()
+  const [remoteTick, setRemoteTick] = createStore({ value: 0 })
   const mcp = createMemo(() => Object.values(sync.data.mcp).filter((x) => x.status === "connected").length)
   const mcpError = createMemo(() => Object.values(sync.data.mcp).some((x) => x.status === "failed"))
   const lsp = createMemo(() => Object.keys(sync.data.lsp))
@@ -27,6 +31,7 @@ export function Footer() {
   onMount(() => {
     // Track all timeouts to ensure proper cleanup
     const timeouts: ReturnType<typeof setTimeout>[] = []
+    const remoteTimer = setInterval(() => setRemoteTick("value", (value) => value + 1), 500)
 
     function tick() {
       if (connected()) return
@@ -46,12 +51,19 @@ export function Footer() {
 
     onCleanup(() => {
       timeouts.forEach(clearTimeout)
+      clearInterval(remoteTimer)
     })
+  })
+
+  const workingDirectory = createMemo(() => {
+    remoteTick.value
+    if (route.data.type !== "session") return directory()
+    return readRexdSession(paths.home, route.data.sessionID)?.label ?? directory()
   })
 
   return (
     <box flexDirection="row" justifyContent="space-between" gap={1} flexShrink={0}>
-      <text fg={theme.textMuted}>{directory()}</text>
+      <text fg={theme.textMuted}>{workingDirectory()}</text>
       <box gap={2} flexDirection="row" flexShrink={0}>
         <Switch>
           <Match when={store.welcome}>

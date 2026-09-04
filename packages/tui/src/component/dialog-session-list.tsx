@@ -18,6 +18,8 @@ import { errorMessage } from "../util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
 import { useEvent } from "../context/event"
+import { useTuiPaths } from "../context/runtime"
+import { readRexdSession } from "../util/rexd-session"
 
 type SessionListFilter = { scope?: "project"; path?: string }
 
@@ -50,6 +52,7 @@ export function DialogSessionList() {
   const { theme } = useTheme()
   const sdk = useSDK()
   const event = useEvent()
+  const paths = useTuiPaths()
   const local = useLocal()
   const toast = useToast()
   const [toDelete, setToDelete] = createSignal<string>()
@@ -77,9 +80,12 @@ export function DialogSessionList() {
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
   const sessions = createMemo(() => {
-    const result = searchResults() ?? browseResults() ?? sync.data.session
+    const result = searchResults()
+      ? [...searchResults()!, ...(browseResults() ?? sync.data.session)]
+      : (browseResults() ?? sync.data.session)
     const synced = new Map(sync.data.session.map((session) => [session.id, session]))
-    const ids = new Set(result.map((session) => session.id))
+    const unique = [...new Map(result.map((session) => [session.id, session])).values()]
+    const ids = new Set(unique.map((session) => session.id))
     const extra = [currentSessionID(), ...local.session.pinned()].flatMap((id) => {
       if (!id || ids.has(id)) return []
       const session = synced.get(id)
@@ -87,9 +93,13 @@ export function DialogSessionList() {
       return session ? [session] : []
     })
     const query = search().trim().toLowerCase()
-    return [...result.map((session) => synced.get(session.id) ?? session), ...extra]
+    return [...unique.map((session) => synced.get(session.id) ?? session), ...extra]
       .filter((session) => !deleted().has(session.id))
-      .filter((session) => !query || session.title.toLowerCase().includes(query))
+      .filter((session) => {
+        if (!query) return true
+        const remote = readRexdSession(paths.home, session.id)
+        return session.title.toLowerCase().includes(query) || remote?.label.toLowerCase().includes(query)
+      })
   })
 
   onCleanup(
@@ -230,8 +240,12 @@ export function DialogSessionList() {
           ? x.directory.slice(0, -x.path.length).replace(/\/$/, "")
           : undefined
         : x.directory
-      const footer =
-        directory && directory !== project.data.project.mainDir ? Locale.truncate(path.basename(directory), 20) : ""
+      const remote = readRexdSession(paths.home, x.id)
+      const footer = remote
+        ? Locale.truncate(remote.label, 44)
+        : directory && directory !== project.data.project.mainDir
+          ? Locale.truncate(path.basename(directory), 20)
+          : ""
 
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]

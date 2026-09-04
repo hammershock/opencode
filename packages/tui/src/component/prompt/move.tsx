@@ -10,6 +10,8 @@ import { DialogMoveSession, type MoveSessionSelection } from "../dialog-move-ses
 import { DialogWorkspaceFileChanges } from "../dialog-workspace-file-changes"
 import { useHomeSessionDestination } from "../../routes/home/session-destination"
 import { useProject } from "../../context/project"
+import { DialogPrompt } from "../../ui/dialog-prompt"
+import { readRexdSession, writeRexdSessionDirectory } from "../../util/rexd-session"
 
 function moveReminderText(directory: string) {
   return `<system-reminder>The user has changed the current working directory to "${directory}". This is still the same project but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
@@ -69,6 +71,26 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     const projectID = input.projectID()
     if (!projectID) return
     const sessionID = input.sessionID()
+    const remote = sessionID ? readRexdSession(paths.home, sessionID) : undefined
+    if (sessionID && remote) {
+      dialog.replace(() => (
+        <DialogPrompt
+          title={`Move ${remote.target} session`}
+          placeholder={remote.directory}
+          value={remote.directory}
+          onConfirm={(directory) => {
+            try {
+              writeRexdSessionDirectory(paths.home, sessionID, directory)
+              dialog.clear()
+              toast.show({ message: `Remote working directory changed to ${directory}`, variant: "success" })
+            } catch (error) {
+              toast.show({ title: "Invalid remote directory", message: errorMessage(error), variant: "error" })
+            }
+          }}
+        />
+      ))
+      return
+    }
     const session = sessionID ? sync.session.get(sessionID) : undefined
     dialog.replace(() => (
       <DialogMoveSession

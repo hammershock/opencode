@@ -549,6 +549,17 @@ const layer = Layer.effect(
             }),
           )
 
+          const replacement = yield* plugin.trigger(
+            "shell.execute.before",
+            { command: input.command, cwd, sessionID: input.sessionID, callID: part.callID },
+            { handled: false, output: "" },
+          )
+          if (replacement.handled) {
+            output = replacement.output
+            yield* finish
+            return { info: msg, parts: [part] }
+          }
+
           const exit = yield* restore(
             Effect.gen(function* () {
               const shellEnv = yield* plugin.trigger(

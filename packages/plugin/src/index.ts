@@ -271,6 +271,10 @@ export interface Hooks {
     input: { cwd: string; sessionID?: string; callID?: string },
     output: { env: Record<string, string> },
   ) => Promise<void>
+  "shell.execute.before"?: (
+    input: { command: string; cwd: string; sessionID: string; callID: string },
+    output: { handled: boolean; output: string },
+  ) => Promise<void>
   "tool.execute.after"?: (
     input: { tool: string; sessionID: string; callID: string; args: any },
     output: {

@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import path from "path"
 import {
+  addQuickRexdTarget,
   addRexdTarget,
   changeRexdSessionDirectory,
   executeRexdTargetCommand,
@@ -100,5 +101,14 @@ describe("REXD session context", () => {
     expect(added.alias).toBe("gpu-2")
     expect(hasRexdTarget(item.home, "gpu")).toBe(true)
     expect(hasRexdTarget(item.home, "gpu-2")).toBe(true)
+  })
+
+  test("quick-adds an SSH alias with remote-friendly defaults", () => {
+    const item = fixture()
+    const added = addQuickRexdTarget(item.home, "a100-4gpu")
+    expect(added.target.host).toBe("a100-4gpu")
+    expect(added.target.defaultCwd).toBe("~")
+    expect(added.target.workspaceRoots).toEqual(["/"])
+    expect(added.target.command).toContain("$HOME/.local/bin/rexd")
   })
 })

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "crypto"
+import { spawn } from "child_process"
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs"
 import path from "path"
 
@@ -13,6 +14,10 @@ type Target = {
   host?: string
   user?: string
   home?: string
+  port?: number
+  identityFile?: string
+  sshOptions?: string[]
+  command?: string
   description?: string
   defaultCwd?: string
   workspaceRoots?: string[]
@@ -33,8 +38,17 @@ export function readRexdSession(home: string, sessionID: string) {
   const configFile = path.join(home, ".config", "rexd", "targets.json")
   const config = readJson<{ targets?: Record<string, Target> }>(configFile)
   const target = config?.targets?.[state.activeTargetAlias]
-  const directory = state.remoteCwdOverride ?? target?.defaultCwd ?? target?.workspaceRoots?.[0] ?? "/"
+  const configured = state.remoteCwdOverride ?? target?.defaultCwd ?? target?.workspaceRoots?.[0] ?? "/"
+  const directory = expandRemoteHome(configured, target)
   return { target: state.activeTargetAlias, directory, label: `${state.activeTargetAlias}:${directory}` }
+}
+
+function expandRemoteHome(value: string, target?: Target) {
+  if (!value.startsWith("~")) return value
+  const home = target?.home ?? (target?.user === "root" ? "/root" : target?.user ? `/home/${target.user}` : "~")
+  if (value === "~") return home
+  if (value.startsWith("~/") && home !== "~") return path.posix.join(home, value.slice(2))
+  return value
 }
 
 function readJson<Value>(file: string) {
@@ -152,6 +166,124 @@ export function hasRexdTarget(home: string, alias: string) {
   return Boolean(config?.targets?.[alias])
 }
 
+const REXD_COMMAND = "$HOME/.local/bin/rexd --stdio --config $HOME/.config/rexd/config.toml"
+
+export function addQuickRexdTarget(home: string, alias: string) {
+  return addRexdTarget(home, {
+    alias,
+    host: alias,
+    defaultCwd: "~",
+    workspaceRoots: ["/"],
+    command: REXD_COMMAND,
+  })
+}
+
+export async function prepareRexdTarget(home: string, alias: string) {
+  const file = path.join(home, ".config", "rexd", "targets.json")
+  const config = readJson<{ version?: number; targets?: Record<string, Target> }>(file) ?? {}
+  const target = config.targets?.[alias]
+  if (!target) throw new Error(`Target "${alias}" not found`)
+  if (target.transport !== "ssh" || !target.host) throw new Error(`Target "${alias}" is not an SSH target`)
+
+  const args: string[] = []
+  if (target.port) args.push("-p", String(target.port))
+  if (target.identityFile) args.push("-i", target.identityFile)
+  if (target.sshOptions?.length) args.push(...target.sshOptions)
+  args.push("-T", target.user ? `${target.user}@${target.host}` : target.host, "bash", "-s")
+
+  const script = `set -eu
+bin="$HOME/.local/bin/rexd"
+config="$HOME/.config/rexd/config.toml"
+if [ ! -x "$bin" ]; then
+  echo "Installing REXD"
+  command -v curl >/dev/null 2>&1 || { echo "curl is required to install REXD" >&2; exit 1; }
+  command -v tar >/dev/null 2>&1 || { echo "tar is required to install REXD" >&2; exit 1; }
+  case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; arm64|aarch64) arch=arm64 ;; *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;; esac
+  version="$(curl -fsSL https://api.github.com/repos/samiralibabic/rexd/releases/latest | sed -n 's/.*"tag_name":[[:space:]]*"\\([^"]*\\)".*/\\1/p' | head -n1)"
+  [ -n "$version" ] || { echo "Could not resolve the latest REXD version" >&2; exit 1; }
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  asset="rexd-linux-$arch.tar.gz"
+  base="https://github.com/samiralibabic/rexd/releases/download/$version"
+  curl -fsSL "$base/$asset" -o "$tmp/$asset"
+  curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt"
+  expected="$(awk \"/  $asset\\$/{print \\\$1}\" "$tmp/checksums.txt")"
+  actual="$(sha256sum "$tmp/$asset" | awk '{print $1}')"
+  [ -n "$expected" ] && [ "$expected" = "$actual" ] || { echo "REXD checksum mismatch" >&2; exit 1; }
+  tar -xzf "$tmp/$asset" -C "$tmp"
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 "$tmp/rexd-linux-$arch" "$bin"
+fi
+if [ ! -f "$config" ]; then
+  mkdir -p "$HOME/.config/rexd"
+  cat >"$config" <<'REXD_CONFIG'
+[server]
+stdio = true
+http_listen = ""
+http_path = "/rpc"
+ws_path = "/ws"
+log_level = "info"
+
+[limits]
+default_timeout_ms = 30000
+hard_timeout_ms = 300000
+max_output_bytes = 1048576
+max_file_read_bytes = 1048576
+max_processes_per_session = 8
+max_concurrent_sessions = 16
+
+[security]
+allow_shell = true
+
+[[security.allowed_roots]]
+path = "/"
+
+[audit]
+enabled = false
+path = "/tmp/rexd-audit.log"
+REXD_CONFIG
+fi
+"$bin" -h >/dev/null 2>&1
+probe="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"session.open","params":{"client_name":"opencode-rexd-bootstrap","client_version":"1","workspace_roots":["/"]}}' | "$bin" --stdio --config "$config")"
+printf '%s' "$probe" | grep -q '"result"' || { echo "REXD handshake failed" >&2; exit 1; }
+printf '__OPENCODE_REXD_HOME__=%s\n' "$HOME"
+`
+  const result = await runSsh(args, script)
+  const remoteHome = result.stdout.match(/^__OPENCODE_REXD_HOME__=(.+)$/m)?.[1]?.trim()
+  if (!remoteHome?.startsWith("/")) throw new Error("REXD installed, but the remote home directory could not be detected")
+  const next = {
+    ...target,
+    home: remoteHome,
+    command: REXD_COMMAND,
+  }
+  writeJson(file, { ...config, version: config.version ?? 1, targets: { ...config.targets, [alias]: next } })
+  return { alias, home: remoteHome, installed: result.stdout.includes("Installing REXD") }
+}
+
+function runSsh(args: string[], input: string) {
+  return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn("ssh", args, { stdio: ["pipe", "pipe", "pipe"] })
+    let stdout = ""
+    let stderr = ""
+    const timer = setTimeout(() => {
+      child.kill()
+      reject(new Error("SSH preparation timed out after 120 seconds"))
+    }, 120_000)
+    child.stdout.on("data", (chunk) => (stdout += String(chunk)))
+    child.stderr.on("data", (chunk) => (stderr += String(chunk)))
+    child.on("error", (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on("close", (code) => {
+      clearTimeout(timer)
+      if (code === 0) resolve({ stdout, stderr })
+      else reject(new Error(stderr.trim() || stdout.trim() || `SSH exited with code ${code}`))
+    })
+    child.stdin.end(input)
+  })
+}
+
 export function addRexdTarget(
   home: string,
   input: {
@@ -166,8 +298,9 @@ export function addRexdTarget(
   const alias = input.alias.trim()
   if (!/^[A-Za-z0-9._-]+$/.test(alias)) throw new Error("Alias may only contain letters, numbers, '.', '_' and '-'")
   if (!input.host.trim()) throw new Error("SSH host is required")
-  const defaultCwd = path.posix.normalize(input.defaultCwd.trim())
-  if (!defaultCwd.startsWith("/")) throw new Error("Default working directory must be absolute")
+  const rawDefaultCwd = input.defaultCwd.trim()
+  const defaultCwd = rawDefaultCwd === "~" ? "~" : path.posix.normalize(rawDefaultCwd)
+  if (defaultCwd !== "~" && !defaultCwd.startsWith("/")) throw new Error("Default working directory must be absolute or ~")
   const roots = input.workspaceRoots.map((root) => path.posix.normalize(root.trim())).filter(Boolean)
   if (!roots.length || roots.some((root) => !root.startsWith("/"))) {
     throw new Error("Workspace roots must contain absolute paths")

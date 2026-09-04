@@ -23,7 +23,9 @@ opencode-rexd
 - 会话绑定远程 target 和远程工作目录。
 - 底栏显示 `target:/remote/cwd`。
 - `/sessions` 显示并可搜索 `target:/remote/cwd`。
-- `/target list|status|use|clear` 在 TUI 本地执行，不进入模型上下文、不消耗 token；`/target add` 提供新增主机向导。
+- `/target list|status|use|clear` 在 TUI 本地执行，不进入模型上下文、不消耗 token。
+- `/target add <ssh-alias>` 使用 `cwd=~`、`workspaceRoots=/` 快速配置；不带 alias 时打开完整向导。
+- 首次 `/target use <alias>` 会通过 SSH 自动安装、校验并握手 REXD；成功后才切换会话，失败时保留原 target。
 - `/expand` 通过键盘展开或收起所有截断的命令输出，无需终端支持鼠标点击。
 - Codex 风格 `/cd`，支持相对路径、`.`、`..`、`~`、引号路径和转义空格。
 - Codex 风格 `/permissions`，可选择询问授权或自动批准；auto 模式在底栏显示 `auto`。

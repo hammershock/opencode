@@ -61,11 +61,13 @@ import { DialogSelect } from "../../ui/dialog-select"
 import { DialogPrompt } from "../../ui/dialog-prompt"
 import { DialogConfirm } from "../../ui/dialog-confirm"
 import {
+  addQuickRexdTarget,
   addRexdTarget,
   changeRexdSessionDirectory,
   executeRexdTargetCommand,
   hasRexdTarget,
   parseDirectoryArgument,
+  prepareRexdTarget,
   readRexdSession,
 } from "../../util/rexd-session"
 
@@ -1064,11 +1066,22 @@ export function Prompt(props: PromptProps) {
         toast.show({ message: "Create or open a session before selecting a remote target.", variant: "warning" })
         return false
       }
-      const result = executeRexdTargetCommand(paths.home, props.sessionID, trimmed.slice("/target".length))
       input.extmarks.clear()
       input.clear()
       setStore("prompt", { input: "", parts: [] })
       setStore("extmarkToPartIndex", new Map())
+      const argument = trimmed.slice("/target".length)
+      const [action, alias] = argument.trim().split(/\s+/)
+      if (action === "use" && alias) {
+        try {
+          toast.show({ message: `Preparing ${alias} and checking REXD…`, variant: "info" })
+          await prepareRexdTarget(paths.home, alias)
+        } catch (error) {
+          toast.show({ title: `Cannot activate ${alias}`, message: errorMessage(error), variant: "error" })
+          return true
+        }
+      }
+      const result = executeRexdTargetCommand(paths.home, props.sessionID, argument)
       dialog.replace(() => <DialogAlert title={result.title} message={result.message} />)
       return true
     }
@@ -1254,8 +1267,21 @@ export function Prompt(props: PromptProps) {
   }
 
   async function addTarget(initialAlias: string) {
+    if (initialAlias.trim()) {
+      try {
+        const result = addQuickRexdTarget(paths.home, initialAlias.trim())
+        dialog.clear()
+        toast.show({
+          message: `Configured ${result.alias}: SSH alias=${result.alias}, cwd=~, roots=/`,
+          variant: "success",
+        })
+      } catch (error) {
+        dialog.clear()
+        toast.show({ title: "Cannot add target", message: errorMessage(error), variant: "error" })
+      }
+      return
+    }
     const alias = await DialogPrompt.show(dialog, "Target alias", {
-      value: initialAlias,
       placeholder: "gpu-server",
     })
     if (!alias?.trim()) return

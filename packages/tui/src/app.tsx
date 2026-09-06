@@ -47,7 +47,9 @@ import { DialogDebug } from "./component/dialog-debug"
 import { DialogThemeList } from "./component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { DialogExperimentalCommands } from "./component/dialog-experimental-commands"
-import { SESSION_EXIT_TO_HOME_SETTING } from "./command-toolkit/experimental-settings"
+import { reportOverrideDiagnostic, SESSION_EXIT_TO_HOME_SETTING } from "./command-toolkit/experimental-settings"
+import { installSessionExitOverride } from "./command-toolkit/session-exit"
+import { appExitMetadata } from "./command-toolkit/upstream-app"
 import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
@@ -373,6 +375,19 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const dialog = useDialog()
   const local = useLocal()
   const kv = useKV()
+  const exit = useExit()
+  const exitOverride = createMemo(() =>
+    installSessionExitOverride({
+      enabled: kv.get(SESSION_EXIT_TO_HOME_SETTING, false),
+      exit,
+      home: () => {
+        route.navigate({ type: "home" })
+        dialog.clear()
+      },
+      warning: (warning) => console.warn(JSON.stringify(warning)),
+    }),
+  )
+  createEffect(() => reportOverrideDiagnostic("fork.session.exit-to-home", exitOverride().diagnostic()))
   const keymap = useOpencodeKeymap()
   const event = useEvent()
   const sdk = useSDK()
@@ -381,7 +396,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const { theme, mode, setMode, locked, lock, unlock } = themeState
   const sync = useSync()
   const project = useProject()
-  const exit = useExit()
   const promptRef = usePromptRef()
   const pluginRuntime = usePluginRuntime()
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
@@ -836,23 +850,26 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       },
       {
         name: "app.exit",
-        title: "Exit the app",
-        slashName: "quit",
-        slashAliases: ["q"],
+        title: appExitMetadata.title,
+        slashName: appExitMetadata.slash.aliases[0],
+        slashAliases: appExitMetadata.slash.aliases.slice(1),
         run: () => exit(),
-        category: "System",
+        category: appExitMetadata.category,
       },
       {
         name: "route.exit",
-        title: route.data.type === "session" ? "Return to QuickStart" : "Exit the app",
-        slashName: "exit",
+        title:
+          kv.get(SESSION_EXIT_TO_HOME_SETTING, false) && route.data.type === "session"
+            ? "Return to QuickStart"
+            : appExitMetadata.title,
+        slashName: appExitMetadata.slash.name,
         run: () => {
-          if (kv.get(SESSION_EXIT_TO_HOME_SETTING, false) && route.data.type === "session") {
-            route.navigate({ type: "home" })
-            dialog.clear()
-            return
-          }
-          exit()
+          const current = route.data.type === "session" ? "session" : route.data.type === "home" ? "home" : "other"
+          void exitOverride()
+            .execute({ route: current })
+            .then(() => {
+              reportOverrideDiagnostic("fork.session.exit-to-home", exitOverride().diagnostic())
+            })
         },
         category: "System",
       },

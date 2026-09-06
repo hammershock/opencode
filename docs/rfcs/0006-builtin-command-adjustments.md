@@ -276,4 +276,4 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 7. 所有 override 默认关闭并可在实验功能 panel 分项切换；关闭或运行时应用失败时保留 upstream handler，后者产生可见 warning 而不导致应用或命令失败。
 8. `/rename <title>`、`/permissions`、`/expand`、`/collapse` 和 `/delete` 均由 toolkit 消费，不会成为 prompt、Session message 或 Agent 调用。
 9. `/sessions` 可以显示并搜索 local、Rexd 和同步 metadata 所描述的执行位置，unresolved Session 不会静默消失或改为 local。
-10. 实验性 Location 重绑定只暴露 RFC-0009 workflow；同步删除和 local-only 语义只消费 RFC-0010 domain event，不在 TUI command handler 中重复实现。
+10. 实验性 Location 重绑定只暴露 RFC-0009 workflow；全局同步删除只消费 RFC-0010 domain event，不在 TUI command handler 中重复实现，也不提供 local-only 分支。

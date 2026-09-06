@@ -56,7 +56,7 @@ TUI、`/sync`、`/devices` 和 `/sessions` 只调用类型化 Sync service。百
 <OpenCode user config directory>/sync/sync.db
 ```
 
-`config.json` 保存 provider、namespace ID、随机 device ID、用户可修改的 device name、enabled、30 秒默认 interval 和远端 root，不保存 key、token、AppKey 或 SecretKey。`sync.db` 使用 WAL，保存 outbox、cursors、object cache、local-only 标记和 upload/pull leases。
+`config.json` 保存 provider、namespace ID、随机 device ID、用户可修改的 device name、enabled、30 秒默认 interval 和远端 root，不保存 key、token、AppKey 或 SecretKey。`sync.db` 使用 WAL，保存 outbox、cursors、object cache 和 upload/pull leases。
 
 百度 v1 使用用户自己的开发者 AppKey/SecretKey。配置向导收集凭据、打开 OAuth authorization、交换并刷新 token；AppKey、SecretKey、access token、refresh token 和 sync root key 全部保存到：
 
@@ -79,7 +79,7 @@ v1 不承诺原生 Linux Secret Service 或独立 Windows 客户端。
 2. 要求明确的破坏性确认；
 3. 删除百度网盘旧 namespace 下的全部对象；
 4. 生成新 namespace、root key 和 recovery string；
-5. 以当前设备的非 local-only Session 初始化新空间；
+5. 以当前设备的全部 Session 初始化新空间；
 6. 用户手动把新 recovery string 分发到其他设备。
 
 部分删除或远端删除失败时不启用新 namespace，保留可重试诊断，避免两个空间同时成为 active source。
@@ -136,23 +136,19 @@ Core 只依赖该 contract。百度 adapter 负责 OAuth、分页、precreate、
 
 首次同步先下载各设备 head 并解密 Session metadata projection，使 `/sessions` 可以显示和搜索标题、device、portable target label、directory、时间、同步状态与内容可用性。打开未物化 Session 时按引用下载完整 segments/chunks；空闲时可以限流后台 hydration。下载失败保持 metadata-only，不伪装为空 Session。
 
-## Session 范围与 local-only
+## Session 范围
 
 启用同步后，已有和新建的全部 Session 默认进入同步。Session 中已持久化的图片、文件附件、reasoning 和大型 tool payload 均加密、去重并分块；workspace 中没有作为 Session payload 持久化的普通文件不上传。
 
-用户可以执行 `Keep only on this device`：
-
-1. 把当前 Session 标记为 local-only，并保证 collector 不再上传该 ID；
-2. 写入全局 tombstone，使云端和其他设备删除已有副本；
-3. 当前设备保留完整本地 Session。
-
-local-only Session 以后若重新加入同步，必须复制为新的 Session ID；原 ID 的 tombstone 继续有效，避免离线设备复活旧副本。
+v1 不提供 local-only Session、仅从当前设备删除或“退出同步但本机保留”。同步空间中的 Session 只有存在和全局删除两种生命周期状态，避免同一 Session ID 在设备间产生不同保留语义。
 
 ## 删除、设备与垃圾回收
 
-同步中的 `/delete` 默认是全设备删除：本地删除成功后立即写 durable tombstone/outbox；其他设备拉取后删除 projection 和已物化内容，并忽略该 Session 的更旧事件。恢复内容必须显式 fork 为新 Session ID，不能移除 tombstone 复活原 ID。
+同步中的 `/delete` 始终是全设备删除：本地删除成功后立即写 durable tombstone/outbox；其他设备拉取后删除 projection 和已物化内容，并忽略该 Session 的全部旧事件。同步暂时 disabled 或离线时，删除仍在本地立即生效并保留 durable outbox，恢复同步后必须传播 tombstone。恢复内容必须显式 fork 为新 Session ID，不能移除 tombstone 复活原 ID。
 
-tombstone 只有在所有未撤销设备通过 head ack 后才可以在 compaction 中清理，同时回收不再被引用的 segment 和 chunk。没有固定时间替代 ack。长期离线或丢失设备必须由用户在 `/devices` 中撤销，撤销后不再阻塞垃圾回收。
+tombstone 对同一 Session ID 永久、单调地占优，与事件到达顺序和设备是否见过删除无关。删除后到达的旧 segment、离线设备迟交的 event、崩溃恢复的旧 outbox、旧 head 重放以及重新安装后重新上传的缓存，都必须被 deletion marker 拒绝，不能重新创建 projection。Session ID 永不复用；用户若要恢复内容，只能 fork 为新 ID。
+
+所有未撤销设备通过 head ack 后，compaction 可以回收被删 Session 的 payload segment、attachment chunk 和独立 tombstone object，但必须在加密 namespace index/compacted deletion set 中永久保留最小 deletion marker。这里的“清理 tombstone”只表示回收冗余对象，不得删除逻辑删除事实。没有固定时间可以替代 ack。长期离线或丢失设备必须由用户在 `/devices` 中撤销，撤销后不再阻塞 payload 垃圾回收；被撤销设备的旧 head 仍受 deletion set 约束。
 
 v1 的设备撤销是同步成员与 ack 语义，不是对已经持有 recovery key 和百度凭据的恶意设备进行密码学隔离。需要排除可能泄露 key 的设备时，用户必须执行同步空间 reset 并分发新 key。
 
@@ -164,7 +160,7 @@ v1 的设备撤销是同步成员与 ack 语义，不是对已经持有 recovery
 - loser 从首次冲突 seq 起物化为确定性 sibling Session ID，并保留完整历史；
 - conflict resolution 本身写入同步操作，所有设备重复计算得到相同结果；
 - title 等 metadata 使用 domain revision；revision 较高者胜，相同 revision 使用稳定 device ID 决胜；
-- tombstone 胜过其创建前及未见 tombstone 的离线旧事件，不允许旧 head 复活 Session。
+- tombstone/deletion set 胜过同一 Session ID 的全部事件，包括未见 tombstone 的离线迟到事件；任何 merge、projection rebuild、index hydration 或 compaction 路径都不允许旧 head 复活 Session。
 
 冲突不得丢弃 loser payload，也不得只在 toast 中提示而不持久化结果。
 
@@ -189,7 +185,7 @@ v1 的设备撤销是同步成员与 ack 语义，不是对已经持有 recovery
 - `/sync reset`：执行破坏性的同步空间 reset；
 - `/devices`：列出、重命名和撤销设备，并管理 portable target label binding。
 
-`/sessions` 展示 metadata-only/hydrating/ready/conflict/local-only/unresolved 状态，并支持搜索 device、label 和 directory。UI 不直接访问百度 adapter 或解密对象。
+`/sessions` 展示 metadata-only/hydrating/ready/conflict/unresolved 状态，并支持搜索 device、label 和 directory。UI 不直接访问百度 adapter 或解密对象。
 
 ## 错误与重试
 
@@ -216,7 +212,7 @@ v1 的设备撤销是同步成员与 ack 语义，不是对已经持有 recovery
 2. 实现 recovery key、安全存储、AEAD envelope、chunking、HMAC dedup 和 corruption tests。
 3. 实现百度 SyncProvider、OAuth wizard、macOS Keychain 与 WSL PasswordVault。
 4. 实现 encrypted metadata index、lazy hydration、background scheduler 和多进程 leases。
-5. 接入 tombstone、local-only、device revoke、portable Location 和 deterministic sibling conflict。
+5. 接入全局 tombstone、device revoke、portable Location 和 deterministic sibling conflict。
 6. 使用 RFC-0003 接入 `/sync`、`/devices`，并扩展 `/sessions` 状态展示。
 
 ## 验收条件
@@ -228,8 +224,8 @@ v1 的设备撤销是同步成员与 ack 语义，不是对已经持有 recovery
 5. 两设备创建、离线追加、同 seq 分叉、metadata revision 冲突和 sibling 收敛在不同拉取顺序下结果一致。
 6. outbox、upload/pull lease、进程崩溃、重复对象和 cursor 原子提交测试证明不会丢事件或重复投影。
 7. 新设备先出现可搜索 metadata，打开后正确 hydration；附件分块、去重、partial retry 和后台恢复可验证。
-8. `/delete` 在其他设备删除且重启后不复活；所有有效设备 ack 前不回收 tombstone，撤销设备后可以回收。
-9. local-only 操作全局删除其他副本、本机保留，并且重新同步时生成新 Session ID。
+8. `/delete` 经乱序同步、离线迟交、旧 outbox、重启、重新 hydration、compaction 和设备撤销后均不能复活；所有有效设备 ack 前不回收 payload，之后仍永久保留加密 deletion marker。
+9. 不存在 local-only 或仅本地删除入口；离线或 disabled 时的删除也进入 durable outbox，并在恢复同步后传播全局 tombstone。
 10. portable label 未绑定时保持 unresolved；绑定后通过 RFC-0002 验证才能执行，连接详情从未上传。
 11. 同步失败、锁定或 disabled 时本地 Session 创建、执行和删除仍可用，outbox 保留可恢复状态。
 12. 所有命令使用 toolkit 和 Sync service，不在 TUI 中维护第二套协议或直接持有 credential。

@@ -23,7 +23,7 @@ All fork acceptance uses the command name:
 opencode-rexd
 ```
 
-Do not replace or overwrite the upstream `opencode` command. Installation must update `opencode-rexd` atomically and retain enough information to restore the previously installed test build when a rollout fails.
+Do not replace or overwrite the upstream `opencode` command. Installation directly replaces the existing `opencode-rexd` build after validating the candidate; it does not retain an old-build compatibility or rollback copy.
 
 Canonical environments:
 

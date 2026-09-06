@@ -5,18 +5,15 @@ APP=opencode-rexd
 INSTALL_DIR="${OPENCODE_REXD_INSTALL_DIR:-${HOME}/.local/bin}"
 BINARY=""
 MANIFEST=""
-ROLLBACK=false
-
 usage() {
   cat <<EOF
 Install a local OpenCode Rexd build without replacing the upstream opencode command.
 
 Usage:
   ./script/install-rexd --binary <path> [--manifest <path>] [--install-dir <path>]
-  ./script/install-rexd --rollback [--install-dir <path>]
 
-The previous working build is retained as opencode-rexd.previous and can be
-restored atomically with --rollback.
+An existing opencode-rexd build is replaced. No compatibility copy or rollback
+entrypoint is retained.
 EOF
 }
 
@@ -34,10 +31,6 @@ while [[ $# -gt 0 ]]; do
       INSTALL_DIR="${2:-}"
       shift 2
       ;;
-    --rollback)
-      ROLLBACK=true
-      shift
-      ;;
     -h|--help)
       usage
       exit 0
@@ -52,32 +45,7 @@ done
 
 mkdir -p "$INSTALL_DIR"
 CURRENT="$INSTALL_DIR/$APP"
-PREVIOUS="$INSTALL_DIR/$APP.previous"
 CURRENT_MANIFEST="$INSTALL_DIR/$APP.build.json"
-PREVIOUS_MANIFEST="$INSTALL_DIR/$APP.previous.build.json"
-
-if [[ "$ROLLBACK" == true ]]; then
-  if [[ -n "$BINARY" || -n "$MANIFEST" ]]; then
-    echo "--rollback cannot be combined with --binary or --manifest" >&2
-    exit 2
-  fi
-  if [[ ! -x "$PREVIOUS" ]]; then
-    echo "No previous opencode-rexd build is available" >&2
-    exit 1
-  fi
-  rollback_swap="$INSTALL_DIR/.$APP.rollback.$$"
-  rollback_manifest="$INSTALL_DIR/.$APP.rollback-manifest.$$"
-  trap 'rm -f "$rollback_swap" "$rollback_manifest"' EXIT
-  [[ ! -e "$CURRENT" ]] || mv "$CURRENT" "$rollback_swap"
-  mv "$PREVIOUS" "$CURRENT"
-  [[ ! -e "$rollback_swap" ]] || mv "$rollback_swap" "$PREVIOUS"
-  [[ ! -e "$CURRENT_MANIFEST" ]] || mv "$CURRENT_MANIFEST" "$rollback_manifest"
-  [[ ! -e "$PREVIOUS_MANIFEST" ]] || mv "$PREVIOUS_MANIFEST" "$CURRENT_MANIFEST"
-  [[ ! -e "$rollback_manifest" ]] || mv "$rollback_manifest" "$PREVIOUS_MANIFEST"
-  "$CURRENT" --version >/dev/null
-  echo "Restored $CURRENT ($("$CURRENT" --version))"
-  exit 0
-fi
 
 if [[ -z "$BINARY" || ! -f "$BINARY" ]]; then
   echo "--binary must name an existing build" >&2
@@ -90,21 +58,9 @@ fi
 
 candidate="$INSTALL_DIR/.$APP.candidate.$$"
 candidate_manifest="$INSTALL_DIR/.$APP.candidate-manifest.$$"
-displaced="$INSTALL_DIR/.$APP.displaced.$$"
-displaced_manifest="$INSTALL_DIR/.$APP.displaced-manifest.$$"
-committed=false
 
 cleanup() {
   rm -f "$candidate" "$candidate_manifest"
-  if [[ "$committed" != true && -e "$displaced" ]]; then
-    rm -f "$CURRENT"
-    mv "$displaced" "$CURRENT"
-  fi
-  if [[ "$committed" != true && -e "$displaced_manifest" ]]; then
-    rm -f "$CURRENT_MANIFEST"
-    mv "$displaced_manifest" "$CURRENT_MANIFEST"
-  fi
-  rm -f "$displaced" "$displaced_manifest"
 }
 trap cleanup EXIT
 
@@ -123,15 +79,13 @@ if [[ -n "$MANIFEST" ]]; then
   fi
 fi
 
-rm -f "$PREVIOUS" "$PREVIOUS_MANIFEST"
-[[ ! -e "$CURRENT" ]] || mv "$CURRENT" "$displaced"
-[[ ! -e "$CURRENT_MANIFEST" ]] || mv "$CURRENT_MANIFEST" "$displaced_manifest"
 mv "$candidate" "$CURRENT"
-[[ ! -e "$candidate_manifest" ]] || mv "$candidate_manifest" "$CURRENT_MANIFEST"
+if [[ -e "$candidate_manifest" ]]; then
+  mv "$candidate_manifest" "$CURRENT_MANIFEST"
+else
+  rm -f "$CURRENT_MANIFEST"
+fi
 "$CURRENT" --version >/dev/null
-[[ ! -e "$displaced" ]] || mv "$displaced" "$PREVIOUS"
-[[ ! -e "$displaced_manifest" ]] || mv "$displaced_manifest" "$PREVIOUS_MANIFEST"
-committed=true
 
 echo "Installed $CURRENT ($candidate_version)"
 echo "Add $INSTALL_DIR to PATH if it is not already present."

@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { lstat } from "node:fs/promises"
 import path from "path"
 
 const temporary: string[] = []
@@ -10,7 +9,7 @@ afterEach(async () => {
 })
 
 describe("opencode-rexd installer", () => {
-  test("installs independently and rolls back to the previous build", async () => {
+  test("installs independently and directly replaces the previous build", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")
     const first = await fakeBinary(root, "first", "1.0.0-rexd.first")
@@ -21,9 +20,7 @@ describe("opencode-rexd installer", () => {
 
     expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.second\n")
     expect(await Bun.file(path.join(install, "opencode")).exists()).toBe(false)
-
-    await Bun.$`${installer} --rollback --install-dir ${install}`
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.first\n")
+    expect(await Bun.file(path.join(install, "opencode-rexd.previous")).exists()).toBe(false)
   })
 
   test("rejects a broken candidate without changing the installed build", async () => {
@@ -41,7 +38,7 @@ describe("opencode-rexd installer", () => {
     expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.working\n")
   })
 
-  test("replaces and restores an existing symlink entrypoint", async () => {
+  test("replaces an existing symlink entrypoint without retaining it", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")
     const legacy = await fakeBinary(root, "legacy", "1.0.0-rexd.legacy")
@@ -51,11 +48,7 @@ describe("opencode-rexd installer", () => {
 
     await Bun.$`${installer} --binary ${candidate} --install-dir ${install}`
     expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.candidate\n")
-    expect((await lstat(path.join(install, "opencode-rexd.previous"))).isSymbolicLink()).toBe(true)
-
-    await Bun.$`${installer} --rollback --install-dir ${install}`
-    expect((await lstat(path.join(install, "opencode-rexd"))).isSymbolicLink()).toBe(true)
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.legacy\n")
+    expect(await Bun.file(path.join(install, "opencode-rexd.previous")).exists()).toBe(false)
   })
 })
 

@@ -721,47 +721,64 @@ const Endpoint18_4 = (raw: RawClient["server.target"]) => (input: Endpoint18_4In
     payload: { expectedRevision: input["expectedRevision"], destination: input["destination"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint18_5Request = Parameters<RawClient["server.target"]["target.create"]>[0]
-type Endpoint18_5Input = {
-  readonly input: Endpoint18_5Request["payload"]["input"]
-  readonly expectedRevision: Endpoint18_5Request["payload"]["expectedRevision"]
-}
+type Endpoint18_5Request = Parameters<RawClient["server.target"]["target.wizard.inspect"]>[0]
+type Endpoint18_5Input = { readonly input: Endpoint18_5Request["payload"]["input"] }
 const Endpoint18_5 = (raw: RawClient["server.target"]) => (input: Endpoint18_5Input) =>
+  raw["target.wizard.inspect"]({ payload: { input: input["input"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_6Request = Parameters<RawClient["server.target"]["target.wizard.complete"]>[0]
+type Endpoint18_6Input = {
+  readonly input: Endpoint18_6Request["payload"]["input"]
+  readonly value: Endpoint18_6Request["payload"]["value"]
+  readonly cursor: Endpoint18_6Request["payload"]["cursor"]
+  readonly cwd: Endpoint18_6Request["payload"]["cwd"]
+}
+const Endpoint18_6 = (raw: RawClient["server.target"]) => (input: Endpoint18_6Input) =>
+  raw["target.wizard.complete"]({
+    payload: { input: input["input"], value: input["value"], cursor: input["cursor"], cwd: input["cwd"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint18_7Request = Parameters<RawClient["server.target"]["target.create"]>[0]
+type Endpoint18_7Input = {
+  readonly input: Endpoint18_7Request["payload"]["input"]
+  readonly expectedRevision: Endpoint18_7Request["payload"]["expectedRevision"]
+}
+const Endpoint18_7 = (raw: RawClient["server.target"]) => (input: Endpoint18_7Input) =>
   raw["target.create"]({ payload: { input: input["input"], expectedRevision: input["expectedRevision"] } }).pipe(
     Effect.mapError(mapClientError),
   )
 
-type Endpoint18_6Request = Parameters<RawClient["server.target"]["target.update"]>[0]
-type Endpoint18_6Input = {
-  readonly targetID: Endpoint18_6Request["params"]["targetID"]
-  readonly input: Endpoint18_6Request["payload"]["input"]
-  readonly expectedRevision: Endpoint18_6Request["payload"]["expectedRevision"]
+type Endpoint18_8Request = Parameters<RawClient["server.target"]["target.update"]>[0]
+type Endpoint18_8Input = {
+  readonly targetID: Endpoint18_8Request["params"]["targetID"]
+  readonly input: Endpoint18_8Request["payload"]["input"]
+  readonly expectedRevision: Endpoint18_8Request["payload"]["expectedRevision"]
 }
-const Endpoint18_6 = (raw: RawClient["server.target"]) => (input: Endpoint18_6Input) =>
+const Endpoint18_8 = (raw: RawClient["server.target"]) => (input: Endpoint18_8Input) =>
   raw["target.update"]({
     params: { targetID: input["targetID"] },
     payload: { input: input["input"], expectedRevision: input["expectedRevision"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint18_7Request = Parameters<RawClient["server.target"]["target.remove"]>[0]
-type Endpoint18_7Input = {
-  readonly targetID: Endpoint18_7Request["params"]["targetID"]
-  readonly expectedRevision: Endpoint18_7Request["payload"]["expectedRevision"]
+type Endpoint18_9Request = Parameters<RawClient["server.target"]["target.remove"]>[0]
+type Endpoint18_9Input = {
+  readonly targetID: Endpoint18_9Request["params"]["targetID"]
+  readonly expectedRevision: Endpoint18_9Request["payload"]["expectedRevision"]
 }
-const Endpoint18_7 = (raw: RawClient["server.target"]) => (input: Endpoint18_7Input) =>
+const Endpoint18_9 = (raw: RawClient["server.target"]) => (input: Endpoint18_9Input) =>
   raw["target.remove"]({
     params: { targetID: input["targetID"] },
     payload: { expectedRevision: input["expectedRevision"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint18_8Request = Parameters<RawClient["server.target"]["target.restore"]>[0]
-type Endpoint18_8Input = {
-  readonly targetID: Endpoint18_8Request["params"]["targetID"]
-  readonly input: Endpoint18_8Request["payload"]["input"]
-  readonly referencedSessionIDs: Endpoint18_8Request["payload"]["referencedSessionIDs"]
-  readonly expectedRevision: Endpoint18_8Request["payload"]["expectedRevision"]
+type Endpoint18_10Request = Parameters<RawClient["server.target"]["target.restore"]>[0]
+type Endpoint18_10Input = {
+  readonly targetID: Endpoint18_10Request["params"]["targetID"]
+  readonly input: Endpoint18_10Request["payload"]["input"]
+  readonly referencedSessionIDs: Endpoint18_10Request["payload"]["referencedSessionIDs"]
+  readonly expectedRevision: Endpoint18_10Request["payload"]["expectedRevision"]
 }
-const Endpoint18_8 = (raw: RawClient["server.target"]) => (input: Endpoint18_8Input) =>
+const Endpoint18_10 = (raw: RawClient["server.target"]) => (input: Endpoint18_10Input) =>
   raw["target.restore"]({
     params: { targetID: input["targetID"] },
     payload: {
@@ -771,25 +788,25 @@ const Endpoint18_8 = (raw: RawClient["server.target"]) => (input: Endpoint18_8In
     },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint18_9Request = Parameters<RawClient["server.target"]["target.test"]>[0]
-type Endpoint18_9Input = { readonly targetID: Endpoint18_9Request["params"]["targetID"] }
-const Endpoint18_9 = (raw: RawClient["server.target"]) => (input: Endpoint18_9Input) =>
+type Endpoint18_11Request = Parameters<RawClient["server.target"]["target.test"]>[0]
+type Endpoint18_11Input = { readonly targetID: Endpoint18_11Request["params"]["targetID"] }
+const Endpoint18_11 = (raw: RawClient["server.target"]) => (input: Endpoint18_11Input) =>
   raw["target.test"]({ params: { targetID: input["targetID"] } }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint18_10Request = Parameters<RawClient["server.target"]["target.prepare"]>[0]
-type Endpoint18_10Input = { readonly targetID: Endpoint18_10Request["params"]["targetID"] }
-const Endpoint18_10 = (raw: RawClient["server.target"]) => (input: Endpoint18_10Input) =>
+type Endpoint18_12Request = Parameters<RawClient["server.target"]["target.prepare"]>[0]
+type Endpoint18_12Input = { readonly targetID: Endpoint18_12Request["params"]["targetID"] }
+const Endpoint18_12 = (raw: RawClient["server.target"]) => (input: Endpoint18_12Input) =>
   raw["target.prepare"]({ params: { targetID: input["targetID"] } }).pipe(Effect.mapError(mapClientError))
 
-const Endpoint18_11 = (raw: RawClient["server.target"]) => () =>
+const Endpoint18_13 = (raw: RawClient["server.target"]) => () =>
   raw["target.legacy.preview"]({}).pipe(Effect.mapError(mapClientError))
 
-type Endpoint18_12Request = Parameters<RawClient["server.target"]["target.legacy.import"]>[0]
-type Endpoint18_12Input = {
-  readonly sourceRevision: Endpoint18_12Request["payload"]["sourceRevision"]
-  readonly expectedRevision: Endpoint18_12Request["payload"]["expectedRevision"]
+type Endpoint18_14Request = Parameters<RawClient["server.target"]["target.legacy.import"]>[0]
+type Endpoint18_14Input = {
+  readonly sourceRevision: Endpoint18_14Request["payload"]["sourceRevision"]
+  readonly expectedRevision: Endpoint18_14Request["payload"]["expectedRevision"]
 }
-const Endpoint18_12 = (raw: RawClient["server.target"]) => (input: Endpoint18_12Input) =>
+const Endpoint18_14 = (raw: RawClient["server.target"]) => (input: Endpoint18_14Input) =>
   raw["target.legacy.import"]({
     payload: { sourceRevision: input["sourceRevision"], expectedRevision: input["expectedRevision"] },
   }).pipe(Effect.mapError(mapClientError))
@@ -800,14 +817,16 @@ const adaptGroup18 = (raw: RawClient["server.target"]) => ({
   bindingList: Endpoint18_2(raw),
   bindPortable: Endpoint18_3(raw),
   rebindSession: Endpoint18_4(raw),
-  create: Endpoint18_5(raw),
-  update: Endpoint18_6(raw),
-  remove: Endpoint18_7(raw),
-  restore: Endpoint18_8(raw),
-  testConnection: Endpoint18_9(raw),
-  prepare: Endpoint18_10(raw),
-  previewLegacyImport: Endpoint18_11(raw),
-  importLegacy: Endpoint18_12(raw),
+  inspect: Endpoint18_5(raw),
+  complete: Endpoint18_6(raw),
+  create: Endpoint18_7(raw),
+  update: Endpoint18_8(raw),
+  remove: Endpoint18_9(raw),
+  restore: Endpoint18_10(raw),
+  testConnection: Endpoint18_11(raw),
+  prepare: Endpoint18_12(raw),
+  previewLegacyImport: Endpoint18_13(raw),
+  importLegacy: Endpoint18_14(raw),
 })
 
 type Endpoint19_0Request = Parameters<RawClient["server.environment"]["environment.list"]>[0]

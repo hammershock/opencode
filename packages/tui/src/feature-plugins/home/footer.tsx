@@ -86,7 +86,8 @@ function Directory(props: { api: TuiPluginApi }) {
           { title: "local", description: paths.cwd, value: "local" as const, category: "Targets" },
           ...(targets()?.targets ?? []).map((target) => ({
             title: target.name,
-            description: target.defaultDirectory ?? target.workspaceRoots[0],
+            description: `${targetManager.status(target.id)} · ${target.defaultDirectory ?? target.workspaceRoots[0]}`,
+            footer: targetManager.detail(target.id),
             value: target as TargetDefinition | "local" | "manage",
             category: "Targets",
           })),
@@ -108,10 +109,18 @@ function Directory(props: { api: TuiPluginApi }) {
   return (
     <box flexDirection="row" gap={1} flexShrink={1} overflow="hidden">
       <text fg={theme().textMuted} onMouseUp={openTargets} flexShrink={0}>
-        {destination?.target().type === "rexd" ? (destination.target() as Extract<HomeSessionTarget, { type: "rexd" }>).name : "local"}
+        {destination?.target().type === "rexd"
+          ? (destination.target() as Extract<HomeSessionTarget, { type: "rexd" }>).name
+          : "local"}
       </text>
       <text fg={theme().textMuted}>·</text>
-      <Show when={dir()}>{(value) => <text fg={theme().textMuted} onMouseUp={openDirectory}>{value()}</text>}</Show>
+      <Show when={dir()}>
+        {(value) => (
+          <text fg={theme().textMuted} onMouseUp={openDirectory}>
+            {value()}
+          </text>
+        )}
+      </Show>
     </box>
   )
 }

@@ -17,7 +17,21 @@ export type TargetDefinition = {
 
 export type TargetInput = Omit<TargetDefinition, "id">
 
-export async function targetWizard(dialog: DialogContext, current?: TargetDefinition): Promise<TargetInput | undefined> {
+type WizardServices = {
+  inspect: (input: TargetInput) => Promise<{ home: string } | undefined>
+  complete: (
+    input: TargetInput,
+    value: string,
+    cursor: number,
+    cwd: string,
+  ) => Promise<{ value: string; cursor: number; candidates: string[] } | undefined>
+}
+
+export async function targetWizard(
+  dialog: DialogContext,
+  current?: TargetDefinition,
+  services?: WizardServices,
+): Promise<TargetInput | undefined> {
   const name = await DialogPrompt.show(dialog, current ? "Target name" : "Add target · name", {
     value: current?.name,
     placeholder: "gpu-server",
@@ -35,14 +49,45 @@ export async function targetWizard(dialog: DialogContext, current?: TargetDefini
   if (!host?.trim()) return
   const connection = await connectionInput(dialog, mode, host.trim(), current)
   if (!connection) return
-  const roots = await DialogPrompt.show(dialog, "Workspace roots", {
-    value: current?.workspaceRoots.join(", ") ?? "/",
-    description: () => <text>Comma-separated absolute paths. “/” grants the widest filesystem scope and is not a shell sandbox.</text>,
+  const draft = (workspaceRoots: string[], defaultDirectory?: string): TargetInput => ({
+    name: name.trim(),
+    transport: "ssh",
+    connection,
+    workspaceRoots,
+    ...(defaultDirectory ? { defaultDirectory } : {}),
+    ...(current?.command ? { command: current.command } : {}),
   })
-  const workspaceRoots = roots?.split(",").map((item) => item.trim()).filter(Boolean)
+  const inspected = current || !services ? undefined : await services.inspect(draft(["/"]))
+  const roots = await DialogPrompt.show(dialog, "Workspace root", {
+    value: current?.workspaceRoots.join(", ") ?? "/",
+    description: () => (
+      <text>Comma-separated absolute paths. “/” grants the widest filesystem scope and is not a shell sandbox.</text>
+    ),
+    ...(services
+      ? {
+          complete: (value: string, cursor: number) =>
+            completeRoots(services, draft, value, cursor, inspected?.home ?? "/"),
+        }
+      : {}),
+  })
+  const workspaceRoots = roots
+    ?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
   if (!workspaceRoots?.length) return
   const defaultDirectory = await DialogPrompt.show(dialog, "Default working directory", {
-    value: current?.defaultDirectory ?? workspaceRoots[0],
+    value: current?.defaultDirectory ?? inspected?.home,
+    description: () => (
+      <text>
+        Initial directory for new Sessions. It must be inside a workspace root; the default is the remote HOME.
+      </text>
+    ),
+    ...(services
+      ? {
+          complete: (value: string, cursor: number) =>
+            services.complete(draft(workspaceRoots), value, cursor, inspected?.home ?? "/"),
+        }
+      : {}),
   })
   if (defaultDirectory === null) return
   const hostKey = await DialogConfirm.show(
@@ -51,12 +96,6 @@ export async function targetWizard(dialog: DialogContext, current?: TargetDefini
     "OpenCode never accepts an unknown SSH host key automatically. Continue with this policy?",
   )
   if (!hostKey) return
-  const save = await DialogConfirm.show(
-    dialog,
-    "Save target",
-    "The target will be tested after saving. If verification fails it remains explicitly unverified and cannot create a Session until a later successful prepare.",
-  )
-  if (!save) return
   return {
     name: name.trim(),
     transport: "ssh",
@@ -64,6 +103,29 @@ export async function targetWizard(dialog: DialogContext, current?: TargetDefini
     workspaceRoots,
     ...(defaultDirectory.trim() ? { defaultDirectory: defaultDirectory.trim() } : {}),
     ...(current?.command ? { command: current.command } : {}),
+  }
+}
+
+async function completeRoots(
+  services: WizardServices,
+  draft: (workspaceRoots: string[], defaultDirectory?: string) => TargetInput,
+  value: string,
+  cursor: number,
+  cwd: string,
+) {
+  const start = value.lastIndexOf(",", cursor - 1) + 1
+  const leading = value.slice(start, cursor).match(/^\s*/)?.[0] ?? ""
+  const result = await services.complete(
+    draft(["/"]),
+    value.slice(start + leading.length),
+    cursor - start - leading.length,
+    cwd,
+  )
+  if (!result) return
+  return {
+    value: value.slice(0, start) + leading + result.value,
+    cursor: start + leading.length + result.cursor,
+    candidates: result.candidates,
   }
 }
 

@@ -2211,6 +2211,8 @@ export type GlobalSession = {
   projectID: string
   workspaceID?: string
   directory: string
+  target?: LocationTarget
+  lastKnownTargetName?: string
   path?: string
   parentID?: string
   summary?: {
@@ -2582,381 +2584,10 @@ export type ProviderUsageResult = {
   error?: "authentication" | "rate_limit" | "timeout" | "schema" | "network" | "unknown"
 }
 
-export type Session1 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type Session2 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
 export type NotFoundError = {
   name: "NotFoundError"
   data: {
     message: string
-  }
-}
-
-export type Session3 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type Session4 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type Session5 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type Session6 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type Session7 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
   }
 }
 
@@ -3012,112 +2643,6 @@ export type SessionBusyError = {
   _tag: "SessionBusyError"
   sessionID: string
   message: string
-}
-
-export type Session8 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
-}
-
-export type Session9 = {
-  id: string
-  slug: string
-  projectID: string
-  workspaceID?: string
-  directory: string
-  path?: string
-  parentID?: string
-  summary?: {
-    additions: number
-    deletions: number
-    files: number
-    diffs?: Array<SnapshotFileDiff>
-  }
-  cost?: number
-  tokens?: {
-    input: number
-    output: number
-    reasoning: number
-    cache: {
-      read: number
-      write: number
-    }
-  }
-  share?: {
-    url: string
-  }
-  title: string
-  agent?: string
-  model?: {
-    id: string
-    providerID: string
-    variant?: string
-  }
-  version: string
-  metadata?: {
-    [key: string]: unknown
-  }
-  time: {
-    created: number
-    updated: number
-    compacting?: number
-    archived?: number
-  }
-  permission?: PermissionRuleset
-  revert?: {
-    messageID: string
-    partID?: string
-    snapshot?: string
-    diff?: string
-  }
 }
 
 export type EventTuiPromptAppend = {
@@ -8082,6 +7607,7 @@ export type GlobalSyncCompleteResponse = GlobalSyncCompleteResponses[keyof Globa
 export type GlobalSyncReuseLegacyData = {
   body?: {
     deviceName: string
+    recoveryString?: string
     resetExisting?: boolean
   }
   path?: never
@@ -10661,7 +10187,7 @@ export type SessionListResponses = {
   /**
    * List of sessions
    */
-  200: Array<Session1>
+  200: Array<Session>
 }
 
 export type SessionListResponse = SessionListResponses[keyof SessionListResponses]
@@ -10703,7 +10229,7 @@ export type SessionCreateResponses = {
   /**
    * Successfully created session
    */
-  200: Session3
+  200: Session
 }
 
 export type SessionCreateResponse = SessionCreateResponses[keyof SessionCreateResponses]
@@ -10801,7 +10327,7 @@ export type SessionGetResponses = {
   /**
    * Get session
    */
-  200: Session2
+  200: Session
 }
 
 export type SessionGetResponse = SessionGetResponses[keyof SessionGetResponses]
@@ -10844,7 +10370,7 @@ export type SessionUpdateResponses = {
   /**
    * Successfully updated session
    */
-  200: Session4
+  200: Session
 }
 
 export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
@@ -10878,7 +10404,7 @@ export type SessionChildrenResponses = {
   /**
    * List of children
    */
-  200: Array<Session1>
+  200: Array<Session>
 }
 
 export type SessionChildrenResponse = SessionChildrenResponses[keyof SessionChildrenResponses]
@@ -11147,7 +10673,7 @@ export type SessionForkResponses = {
   /**
    * 200
    */
-  200: Session5
+  200: Session
 }
 
 export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
@@ -11253,7 +10779,7 @@ export type SessionUnshareResponses = {
   /**
    * Successfully unshared session
    */
-  200: Session7
+  200: Session
 }
 
 export type SessionUnshareResponse = SessionUnshareResponses[keyof SessionUnshareResponses]
@@ -11291,7 +10817,7 @@ export type SessionShareResponses = {
   /**
    * Successfully shared session
    */
-  200: Session6
+  200: Session
 }
 
 export type SessionShareResponse = SessionShareResponses[keyof SessionShareResponses]
@@ -11570,7 +11096,7 @@ export type SessionRevertResponses = {
   /**
    * Updated session
    */
-  200: Session8
+  200: Session
 }
 
 export type SessionRevertResponse = SessionRevertResponses[keyof SessionRevertResponses]
@@ -11608,7 +11134,7 @@ export type SessionUnrevertResponses = {
   /**
    * Updated session
    */
-  200: Session9
+  200: Session
 }
 
 export type SessionUnrevertResponse = SessionUnrevertResponses[keyof SessionUnrevertResponses]
@@ -12511,6 +12037,7 @@ export type V2LocationGetData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/location"
@@ -12545,6 +12072,7 @@ export type V2AgentListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/agent"
@@ -13284,6 +12812,7 @@ export type V2ModelListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/model"
@@ -13325,6 +12854,7 @@ export type V2ProviderListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/provider"
@@ -13368,6 +12898,7 @@ export type V2ProviderGetData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/provider/{providerID}"
@@ -13413,6 +12944,7 @@ export type V2IntegrationListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/integration"
@@ -13452,6 +12984,7 @@ export type V2IntegrationGetData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/integration/{integrationID}"
@@ -13494,6 +13027,7 @@ export type V2IntegrationConnectKeyData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/integration/{integrationID}/connect/key"
@@ -13536,6 +13070,7 @@ export type V2IntegrationConnectOauthData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/integration/{integrationID}/connect/oauth"
@@ -13576,6 +13111,7 @@ export type V2IntegrationAttemptCancelData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/integration/attempt/{attemptID}"
@@ -13613,6 +13149,7 @@ export type V2IntegrationAttemptStatusData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/integration/attempt/{attemptID}"
@@ -13655,6 +13192,7 @@ export type V2IntegrationAttemptCompleteData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/integration/attempt/{attemptID}/complete"
@@ -13693,6 +13231,7 @@ export type V2CredentialRemoveData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/credential/{credentialID}"
@@ -13731,6 +13270,7 @@ export type V2CredentialUpdateData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/credential/{credentialID}"
@@ -13765,6 +13305,7 @@ export type V2PermissionRequestListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/permission/request"
@@ -14032,6 +13573,7 @@ export type V2FsReadData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/fs/read/*"
@@ -14066,6 +13608,7 @@ export type V2FsListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
     path?: string
   }
@@ -14104,6 +13647,7 @@ export type V2FsFindData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
     query: string
     type?: "file" | "directory"
@@ -14144,6 +13688,7 @@ export type V2CommandListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/command"
@@ -14181,6 +13726,7 @@ export type V2SkillListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/skill"
@@ -14247,6 +13793,7 @@ export type V2PtyListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/pty"
@@ -14292,6 +13839,7 @@ export type V2PtyCreateData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/pty"
@@ -14331,6 +13879,7 @@ export type V2PtyRemoveData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/pty/{ptyID}"
@@ -14371,6 +13920,7 @@ export type V2PtyGetData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/pty/{ptyID}"
@@ -14420,6 +13970,7 @@ export type V2PtyUpdateData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/pty/{ptyID}"
@@ -14463,6 +14014,7 @@ export type V2PtyConnectTokenData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/pty/{ptyID}/connect-token"
@@ -14553,6 +14105,7 @@ export type V2QuestionRequestListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/question/request"
@@ -14699,6 +14252,7 @@ export type V2ReferenceListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/reference"
@@ -14741,6 +14295,7 @@ export type V2ProjectCopyRemoveData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/experimental/project/{projectID}/copy"
@@ -14777,6 +14332,7 @@ export type V2ProjectCopyCreateData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/experimental/project/{projectID}/copy"
@@ -14809,6 +14365,7 @@ export type V2ProjectCopyRefreshData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/experimental/project/{projectID}/copy/refresh"
@@ -15218,6 +14775,151 @@ export type V2SessionLocationRebindResponses = {
 }
 
 export type V2SessionLocationRebindResponse = V2SessionLocationRebindResponses[keyof V2SessionLocationRebindResponses]
+
+export type V2TargetWizardInspectData = {
+  body: {
+    input: {
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+  }
+  path?: never
+  query?: never
+  url: "/api/target/wizard/inspect"
+}
+
+export type V2TargetWizardInspectErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetWizardInspectError = V2TargetWizardInspectErrors[keyof V2TargetWizardInspectErrors]
+
+export type V2TargetWizardInspectResponses = {
+  /**
+   * Success
+   */
+  200: {
+    home: string
+  }
+}
+
+export type V2TargetWizardInspectResponse = V2TargetWizardInspectResponses[keyof V2TargetWizardInspectResponses]
+
+export type V2TargetWizardCompleteData = {
+  body: {
+    input: {
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+    value: string
+    cursor: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    cwd: string
+  }
+  path?: never
+  query?: never
+  url: "/api/target/wizard/complete"
+}
+
+export type V2TargetWizardCompleteErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetWizardCompleteError = V2TargetWizardCompleteErrors[keyof V2TargetWizardCompleteErrors]
+
+export type V2TargetWizardCompleteResponses = {
+  /**
+   * Success
+   */
+  200: {
+    value: string
+    cursor: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    candidates: Array<string>
+  }
+}
+
+export type V2TargetWizardCompleteResponse = V2TargetWizardCompleteResponses[keyof V2TargetWizardCompleteResponses]
 
 export type V2TargetRemoveData = {
   body: {
@@ -15858,6 +15560,7 @@ export type V2EnvironmentListData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/environment"
@@ -15909,6 +15612,7 @@ export type V2EnvironmentReloadData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/environment/reload"
@@ -15962,6 +15666,7 @@ export type V2EnvironmentRevealData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/environment/reveal"
@@ -16004,6 +15709,7 @@ export type V2EnvironmentInitData = {
     location?: {
       directory?: string
       workspace?: string
+      target?: string
     }
   }
   url: "/api/environment/init"

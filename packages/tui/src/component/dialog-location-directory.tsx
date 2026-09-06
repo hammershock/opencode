@@ -3,7 +3,6 @@ import { createResource, createSignal } from "solid-js"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { useSDK } from "../context/sdk"
 import type { HomeSessionTarget } from "../routes/home/session-destination"
-import type { LocationRef } from "@opencode-ai/sdk/v2"
 
 type Selection = { type: "use" | "directory"; directory: string }
 
@@ -14,26 +13,26 @@ export function DialogLocationDirectory(props: {
 }) {
   const sdk = useSDK()
   const [current, setCurrent] = createSignal(props.initial)
-  const [directory] = createResource(
-    current,
-    async (current) => {
-      const target =
-        props.target.type === "local"
-          ? ({ type: "local" } as const)
-          : ({ type: "rexd", targetID: props.target.targetID } as const)
-      const location: LocationRef = { target, directory: current }
-      // The server already accepts LocationRef. This compatibility cast can be
-      // removed once the location-routing SDK generation lands on this branch.
-      const result = await sdk.client.v2.fs.list(
-        { location: location as { directory: string }, path: "." },
-        { throwOnError: true },
-      )
-      return {
-        current,
-        entries: result.data.data.filter((item) => item.type === "directory"),
-      }
-    },
-  )
+  const [directory] = createResource(current, async (current) => {
+    const target =
+      props.target.type === "local"
+        ? ({ type: "local" } as const)
+        : ({ type: "rexd", targetID: props.target.targetID } as const)
+    const result = await sdk.client.v2.fs.list(
+      {
+        location: {
+          directory: current,
+          ...(target.type === "rexd" ? { target: target.targetID } : {}),
+        },
+        path: ".",
+      },
+      { throwOnError: true },
+    )
+    return {
+      current,
+      entries: result.data.data.filter((item) => item.type === "directory"),
+    }
+  })
   const options = (): DialogSelectOption<Selection>[] => {
     const current = directory()?.current ?? props.initial
     const parent = path.posix.dirname(current)

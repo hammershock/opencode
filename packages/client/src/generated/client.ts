@@ -120,6 +120,10 @@ import type {
   TargetsBindPortableOutput,
   TargetsRebindSessionInput,
   TargetsRebindSessionOutput,
+  TargetsInspectInput,
+  TargetsInspectOutput,
+  TargetsCompleteInput,
+  TargetsCompleteOutput,
   TargetsCreateInput,
   TargetsCreateOutput,
   TargetsUpdateInput,
@@ -1068,6 +1072,30 @@ export function make(options: ClientOptions) {
             method: "POST",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/location/rebind`,
             body: { expectedRevision: input["expectedRevision"], destination: input["destination"] },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      inspect: (input: TargetsInspectInput, requestOptions?: RequestOptions) =>
+        request<TargetsInspectOutput>(
+          {
+            method: "POST",
+            path: `/api/target/wizard/inspect`,
+            body: { input: input["input"] },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      complete: (input: TargetsCompleteInput, requestOptions?: RequestOptions) =>
+        request<TargetsCompleteOutput>(
+          {
+            method: "POST",
+            path: `/api/target/wizard/complete`,
+            body: { input: input["input"], value: input["value"], cursor: input["cursor"], cwd: input["cwd"] },
             successStatus: 200,
             declaredStatuses: [409, 403, 400, 404, 500, 401],
             empty: false,

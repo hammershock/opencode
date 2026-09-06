@@ -187,12 +187,26 @@ describe("TargetRegistry", () => {
           calls.push(`prepare:${target.name}`)
           return { status: "ready", stages: ["ssh", "environment", "prepare", "handshake"] }
         },
+        inspect: async (target) => {
+          calls.push(`inspect:${target.name}`)
+          return { home: "/home/remote" }
+        },
+        complete: async (target, input) => {
+          calls.push(`complete:${target.name}:${input.value}`)
+          return { value: "/home/remote/", cursor: 13, candidates: ["/home/remote/"] }
+        },
       },
     })
     const created = await registry.create(manual("gpu"), (await registry.load()).revision)
     expect(await registry.testConnection(created.target.id)).toMatchObject({ status: "ready" })
     expect(await registry.prepare(created.target.id)).toMatchObject({ status: "ready" })
-    expect(calls).toEqual(["test:gpu", "prepare:gpu"])
+    expect(await registry.inspect(manual("draft"))).toEqual({ home: "/home/remote" })
+    expect(await registry.complete(manual("draft"), { value: "/ho", cursor: 3, cwd: "/" })).toEqual({
+      value: "/home/remote/",
+      cursor: 13,
+      candidates: ["/home/remote/"],
+    })
+    expect(calls).toEqual(["test:gpu", "prepare:gpu", "inspect:draft", "complete:draft:/ho"])
   })
 
   test("previews and explicitly imports legacy config without changing the source", async () => {
@@ -256,10 +270,8 @@ describe("TargetWizard", () => {
     )
     expect(reviewed.step).toBe("review")
     expect(reviewed.draft.id).toBe(id)
-    expect(TargetWizard.input(reviewed)).toBeUndefined()
-    const confirmed = TargetWizard.confirmUnverified(reviewed)
-    expect(confirmed.draft.saveDisposition).toBe("unverified-confirmed")
-    expect(TargetWizard.input(confirmed)?.name).toBe("gpu")
+    expect(TargetWizard.input(reviewed)?.name).toBe("gpu")
+    expect(TargetWizard.confirmUnverified(reviewed)).toBe(reviewed)
   })
 
   test("edit retains target identity", () => {

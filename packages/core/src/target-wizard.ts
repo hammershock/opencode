@@ -57,9 +57,6 @@ export function update(state: State, patch: Partial<Omit<Draft, "id" | "mode">>)
   const draft = {
     ...state.draft,
     ...patch,
-    ...(patch.verification
-      ? { saveDisposition: patch.verification.status === "ready" ? ("verified" as const) : undefined }
-      : {}),
   }
   return {
     ...state,
@@ -71,12 +68,7 @@ export function update(state: State, patch: Partial<Omit<Draft, "id" | "mode">>)
 }
 
 export function confirmUnverified(state: State): State {
-  if (!state.draft.verification || state.draft.verification.status === "ready") return state
-  return {
-    ...state,
-    draft: { ...state.draft, saveDisposition: "unverified-confirmed" },
-    warning: "This target will be saved as unverified and must pass full validation before creating a Session.",
-  }
+  return state
 }
 
 export function next(state: State): State {
@@ -92,13 +84,7 @@ export function previous(state: State): State {
 }
 
 export function input(state: State): TargetRegistry.Input | undefined {
-  if (
-    !state.draft.name ||
-    !state.draft.connection ||
-    !state.draft.workspaceRoots.length ||
-    !state.draft.saveDisposition
-  )
-    return
+  if (!state.draft.name || !state.draft.connection || !state.draft.workspaceRoots.length) return
   return {
     name: state.draft.name,
     transport: "ssh",

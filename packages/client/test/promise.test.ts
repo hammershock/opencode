@@ -61,12 +61,17 @@ test("environment methods preserve the public HTTP boundary", async () => {
     },
   })
 
-  await client.environment.list({ location: { directory: "/work/project" } })
+  await client.environment.list({
+    location: { directory: "/work/project", target: "a20c4f65-7ad8-47ae-bc91-7f2b9476108d" },
+  })
   await client.environment.reload({ location: { directory: "/work/project" } })
   await client.environment.reveal({ location: { directory: "/work/project" }, confirmed: true })
 
   expect(requests.map((item) => [item.init?.method, item.url])).toEqual([
-    ["GET", "http://localhost:3000/api/environment?location%5Bdirectory%5D=%2Fwork%2Fproject"],
+    [
+      "GET",
+      "http://localhost:3000/api/environment?location%5Bdirectory%5D=%2Fwork%2Fproject&location%5Btarget%5D=a20c4f65-7ad8-47ae-bc91-7f2b9476108d",
+    ],
     ["POST", "http://localhost:3000/api/environment/reload?location%5Bdirectory%5D=%2Fwork%2Fproject"],
     ["POST", "http://localhost:3000/api/environment/reveal?location%5Bdirectory%5D=%2Fwork%2Fproject"],
   ])

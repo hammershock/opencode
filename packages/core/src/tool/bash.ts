@@ -57,8 +57,7 @@ const modelOutput = (output: Output) => {
   return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command exited with code ${output.exit}.`
 }
 
-const isTimeout = (error: AppProcessError) =>
-  error.cause instanceof Error && error.cause.message === "Timed out"
+const isTimeout = (error: AppProcessError) => error.cause instanceof Error && error.cause.message === "Timed out"
 
 /**
  * Minimal V2 core shell boundary. Keep parity debt visible without pulling the
@@ -165,6 +164,7 @@ const layer = Layer.effectDiscard(
                   env: yield* environment.environment(),
                   timeout: Duration.millis(timeout),
                   maxOutputBytes: MAX_CAPTURE_BYTES,
+                  sessionID: context.sessionID,
                 })
                 .pipe(
                   Effect.catchTag("AppProcessError", (error) =>

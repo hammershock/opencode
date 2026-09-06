@@ -40,6 +40,7 @@ import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 import { Pty } from "./pty"
 import { PermissionV2 } from "./permission"
 import { QuestionV2 } from "./question"
+import { SessionActivity } from "./session/activity"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -207,6 +208,7 @@ const layer = Layer.effect(
     const locations = yield* LocationServiceMap.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const locationMutation = yield* Semaphore.make(1)
+    const activity = yield* SessionActivity.Service
     const locationBlockers = (sessionID: SessionSchema.ID, ref: Location.Ref) =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -218,6 +220,7 @@ const layer = Layer.effect(
           if ((yield* pty.list()).some((item) => item.status === "running")) blockers.push("terminal_pty")
           if ((yield* permissions.forSession(sessionID)).length) blockers.push("permission")
           if ((yield* questions.list()).some((item) => item.sessionID === sessionID)) blockers.push("question")
+          blockers.push(...(yield* activity.blockers(sessionID)))
           return blockers
         }),
       )
@@ -569,5 +572,6 @@ export const node = makeGlobalNode({
     SessionStore.node,
     LocationServiceMap.node,
     SessionProjector.node,
+    SessionActivity.node,
   ],
 })

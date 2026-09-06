@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Fiber } from "effect"
+import { Deferred, Effect, Fiber, Layer } from "effect"
 import { UserShellRuntime, type Provider } from "@/session/user-shell-runtime"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
+import { SessionSchema } from "@opencode-ai/core/session/schema"
 
 const location = { target: "local", directory: "/workspace" }
 
@@ -13,7 +15,9 @@ function provider(input?: { finalCwd?: string; valid?: boolean }): Provider {
 }
 
 function runtime<A, E>(effect: Effect.Effect<A, E, UserShellRuntime.Service>) {
-  return Effect.runPromise(effect.pipe(Effect.provide(UserShellRuntime.layer)))
+  return Effect.runPromise(
+    effect.pipe(Effect.provide(UserShellRuntime.layer.pipe(Layer.provide(SessionActivity.layer)))),
+  )
 }
 
 describe("UserShellRuntime", () => {
@@ -118,4 +122,35 @@ describe("UserShellRuntime", () => {
         expect(yield* Fiber.join(completion)).toMatchObject({ stale: true, candidates: [] })
       }),
     ))
+
+  test("reports execution as a User Shell rebind blocker", async () => {
+    const gate = Deferred.makeUnsafe<void>()
+    const started = Deferred.makeUnsafe<void>()
+    const blocking: Provider = {
+      ...provider(),
+      execute: () =>
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(gate)), Effect.as({ exitCode: 0 })),
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* UserShellRuntime.Service
+        const activity = yield* SessionActivity.Service
+        const execution = yield* service
+          .execute({
+            sessionID: "ses_one",
+            location,
+            command: "wait",
+            environment: {},
+            enabled: true,
+            provider: blocking,
+          })
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(started)
+        expect(yield* activity.blockers(SessionSchema.ID.make("ses_one"))).toEqual(["user_shell"])
+        yield* Deferred.succeed(gate, undefined)
+        yield* Fiber.join(execution)
+        expect(yield* activity.blockers(SessionSchema.ID.make("ses_one"))).toEqual([])
+      }).pipe(Effect.provide(UserShellRuntime.layer.pipe(Layer.provideMerge(SessionActivity.layer))), Effect.scoped),
+    )
+  })
 })

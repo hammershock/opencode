@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Effect, Exit, Layer } from "effect"
 import { sql } from "drizzle-orm"
 import path from "node:path"
+import { Database as BunDatabase } from "bun:sqlite"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SyncEventStore } from "@opencode-ai/core/sync/event-store"
@@ -36,6 +37,23 @@ async function run<A, E>(effect: Effect.Effect<A, E, SyncEventStore.Service | Sy
 }
 
 describe("SyncEventStore", () => {
+  test("migrates a v2 sync database to the durable apply journal", async () => {
+    await using tmp = await tmpdir()
+    const filename = path.join(tmp.path, "sync.db")
+    const raw = new BunDatabase(filename)
+    raw.run("CREATE TABLE sync_schema (version INTEGER PRIMARY KEY)")
+    raw.run("INSERT INTO sync_schema (version) VALUES (2)")
+    raw.close()
+    const database = SyncDatabase.layerFromPath(filename)
+    const version = await Effect.runPromise(
+      Effect.gen(function* () {
+        const { db } = yield* SyncDatabase.Service
+        return yield* db.get<{ version: number }>(sql`SELECT MAX(version) AS version FROM sync_schema`)
+      }).pipe(Effect.scoped, Effect.provide(database)),
+    )
+    expect(version).toEqual({ version: 3 })
+  })
+
   test("durably seals ordered outbox events into one immutable per-device generation", async () => {
     await run(
       Effect.gen(function* () {

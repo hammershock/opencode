@@ -324,6 +324,7 @@ RFC-0006 的 override 不是注册一个抢占同名 path 的新命令，而是�
 defineOverride({
   id: "fork.session.exit-to-home",
   target: verifiedUpstream.tui.appExit,
+  experimentalSetting: "commands.exitToHome",
   decorate: (next) => async (context, input) => {
     if (context.sessionID) return context.navigation.home()
     return next(context, input)
@@ -340,7 +341,11 @@ defineOverride({
 - 一个 upstream identity 没有被多个互斥 decorator 意外绑定；
 - manifest 与当前源码注册 catalog 同步，没有陈旧或无法解析的目标。
 
-目标缺失、metadata/contract 漂移或 manifest 陈旧时，构建直接失败，要求更新 baseline、fixture 和 RFC 审查；不能生成“运行时发现后禁用”的产物。生产运行时不进行 fingerprint/drift 决策，只处理 route、Session 和 feature flag 等正常 availability。外部来源的优先级仍由 upstream host resolver 决定。
+目标缺失、metadata/contract 漂移或 manifest 陈旧时，构建直接失败，要求更新 baseline、fixture 和 RFC 审查；不能把已知不兼容的 override 当作正常产物发布。生产运行时不重新判断 fingerprint/drift，只处理 route、Session、experimental setting 和注册生命周期等正常 availability。外部来源的优先级仍由 upstream host resolver 决定。
+
+所有 upstream override 都是实验性功能，并且必须具有设备本地、用户级、默认关闭的独立 setting。setting 关闭时不尝试安装 decorator，完整使用 upstream handler。setting 开启后，如果 decorator 因当前客户端生命周期、依赖不可用、注册冲突或其他运行时条件而无法安装或应用，resolver 必须保留原 upstream candidate，并发出包含 override identity、upstream identity 和失败原因的结构化 warning；不能让应用启动、命令解析或原命令执行失败，也不能留下半安装状态。warning 可以进入日志和实验功能面板的诊断状态，但不得写入 Session 或模型上下文。
+
+这里的运行时 fallback 不替代静态 verifier：静态检查负责阻止“源码已经与固定 upstream contract 不兼容”的构建；fallback 负责已通过构建的产物在具体设备和客户端中的温和退化。二者不得使用 silent catch 掩盖测试或 baseline drift。
 
 ### v1 capability 与配置边界
 
@@ -521,7 +526,7 @@ completed | cancelled | failed | unknown
 - 建立私有 `packages/command-kit`，只实现 definition、registry、解析、completion contract、outcome 和诊断。
 - 用纯单元测试覆盖 longest-match、alias、raw arguments、多行输入、duplicate rejection、取消和失败。
 - 建立 synthetic upstream resolver fixture，验证 upstream-first、not-found passthrough 和 shadowing 诊断。
-- 建立 synthetic override fixture 和静态 manifest verifier，验证 identity/fingerprint、fallback，以及 drift 导致 typecheck/build 失败。
+- 建立 synthetic override fixture 和静态 manifest verifier，验证 identity/fingerprint、实验开关、原子安装、运行时 warning fallback，以及 drift 导致 typecheck/build 失败。
 
 原型不得先加入真实 `/env`、`/target` 或同步业务。它的目标是验证 toolkit contract，而不是借原型提交未接受的功能实现。
 
@@ -557,7 +562,7 @@ completed | cancelled | failed | unknown
 5. 当前兼容矩阵中的上游命令来源均通过 upstream-first 兼容 fixture。
 6. 未适配本 fork 的代表性上游插件可以正常加载并保持原行为。
 7. 现有 `CommandV2`、`/api/command`、`session.command` 和生成 SDK 不发生未经版本化的行为变化。
-8. UI 可以显示生效命令的 provenance 以及 winner/shadowed candidate；override drift 由静态 verifier 在 typecheck/build/CI 阶段阻止。
+8. UI 可以显示生效命令的 provenance 以及 winner/shadowed candidate；override drift 由静态 verifier 在 typecheck/build/CI 阶段阻止，运行时安装失败则保留 upstream candidate 并显示 warning。
 9. capability 与实际 service 调用均可在测试中断言，配置只能收紧，不能扩大权限。
 10. `/target`、`/env`、`/sync`、`/permissions`、`/expand` 和 `/delete` 没有各自维护通用输入解析分支。
 

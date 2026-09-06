@@ -126,7 +126,7 @@ Server 提供的 custom command、MCP prompt 和 Skill 也可能出现在客户�
 
 ## Override 机制
 
-对上游内建命令的调整必须通过 RFC-0003 toolkit 的显式 override/decorator 机制实现，不直接修改通用 prompt dispatch，也不复制整段上游 handler。override 目标必须在 typecheck/build/CI 阶段完成静态验证，生产运行时不负责发现 contract drift。
+对上游内建命令的调整必须通过 RFC-0003 toolkit 的显式 override/decorator 机制实现，不直接修改通用 prompt dispatch，也不复制整段上游 handler。所有 override 都放入实验性功能分区，由设备本地、用户级、默认关闭的独立 setting 控制。override 目标必须在 typecheck/build/CI 阶段完成静态验证，生产运行时不负责发现 contract drift。
 
 每个 override 必须具有：
 
@@ -134,10 +134,13 @@ Server 提供的 custom command、MCP prompt 和 Skill 也可能出现在客户�
 - 被调整的 upstream command identity 和 baseline version；
 - 原 handler 的兼容 fallback 或可复用调用入口；
 - 明确的参数、客户端和 route 范围；
+- 独立的 experimental setting 和可诊断状态；
 - 行为差异测试；
 - upstream 同步时会让构建失败的静态 drift 检测。
 
 如果 upstream command identity 或 contract 发生变化，类型化 manifest/verifier 必须阻止构建并要求重新审查，不能生成运行时才进入 incompatible 状态的产物，也不能静默绑定到名称相同但语义已经变化的新命令。
+
+setting 关闭时使用完整 upstream 行为。setting 已开启但 override 在运行时无法原子安装或应用时，也必须保留 upstream handler，记录结构化 warning，并在实验功能面板标出该项“已启用但未生效”；不得导致启动失败、slash command 消失或执行到半 override 状态。该温和 fallback 只处理已通过静态验证后的运行时故障，不降低构建期 contract 检查的严格程度。
 
 ## 已确定的上游调整
 
@@ -229,6 +232,7 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 ## 默认兼容策略
 
 - 未列入“已接受调整”的上游内建命令保持 baseline 行为。
+- 每项已接受 override 都在实验功能面板拥有独立开关，默认关闭；关闭或运行时应用失败时保持完整 baseline 行为。
 - override 保留 upstream command 的公开名称、aliases 和可用条件，除非本 RFC 明确修改。
 - 外部 custom command 按 upstream 冲突优先级覆盖内建名称时，仍应覆盖 fork override。
 - 外部插件观察到的 hook 时机和 Session/模型行为保持兼容。
@@ -247,7 +251,8 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 5. 是否创建 Session parts 或调用 Agent；
 6. 外部同名 custom command 的覆盖行为；
 7. TUI 与 Web/Desktop 未声明范围内不受影响；
-8. upstream handler/schema drift 的静态构建失败测试。
+8. upstream handler/schema drift 的静态构建失败测试；
+9. 每项实验开关关闭时的 upstream passthrough，以及开启但 override 安装失败时的 warning fallback。
 
 不要在同一个实现提交中同时调整多个无关的上游命令。
 
@@ -263,12 +268,12 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 ## 验收条件
 
 1. 上游内建清单与固定 baseline 的源码注册结果一致。
-2. 每项已接受 override 都有明确的 upstream identity、差异规格和行为测试。
+2. 每项已接受 override 都有明确的 upstream identity、独立实验开关、差异规格和行为测试。
 3. 未调整命令继续由 RFC-0003 upstream adapter 提供，不发生隐式迁移。
 4. 外部 command、MCP、Skill 和插件的冲突及执行行为保持 upstream 兼容。
 5. fork 新增命令没有混入 upstream override 层。
 6. 同步 upstream 后，override identity、metadata 或 contract drift 会在 typecheck/build/CI 阶段失败，不依赖运行时 route 或手工触发命令。
-7. 实验性 `/exit` 默认关闭并可在 panel 切换；关闭时 `/exit`、`/quit`、`/q` 均保持 upstream 行为。
+7. 所有 override 默认关闭并可在实验功能 panel 分项切换；关闭或运行时应用失败时保留 upstream handler，后者产生可见 warning 而不导致应用或命令失败。
 8. `/rename <title>`、`/permissions`、`/expand`、`/collapse` 和 `/delete` 均由 toolkit 消费，不会成为 prompt、Session message 或 Agent 调用。
 9. `/sessions` 可以显示并搜索 local、Rexd 和同步 metadata 所描述的执行位置，unresolved Session 不会静默消失或改为 local。
 10. 实验性 Location 重绑定只暴露 RFC-0009 workflow；同步删除和 local-only 语义只消费 RFC-0010 domain event，不在 TUI command handler 中重复实现。

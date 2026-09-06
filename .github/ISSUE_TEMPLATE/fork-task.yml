@@ -70,7 +70,7 @@ body:
     id: verification
     attributes:
       label: Verification
-      description: List package-local tests, typechecks, manual checks, and UI evidence required.
+      description: List package-local tests, typechecks, applicable Mac/mywindows matrix rows, manual checks, and UI evidence required.
     validations:
       required: true
 

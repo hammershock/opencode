@@ -67,6 +67,14 @@ WSL 不能只依赖进程启动时的 `WSL_INTEROP`。实现沿用旧原型经�
 
 v1 不承诺原生 Linux Secret Service 或独立 Windows 客户端。
 
+### 旧 OpenCode 百度授权迁移
+
+如果旧 OpenCode 同步原型留下 `<OpenCode user config directory>/cloud-sync/legacy-config.json`，setup 可以读取其中非敏感的 provider 与旧 device ID，并只探测旧实现自己的安全存储记录：macOS Keychain 或 Windows PasswordVault 中 service/resource 为 `opencode-rexd-baidu`、account/user 为该 device ID 的 credential。不得借此扫描 CloudDrive、浏览器、百度客户端、`netdisk` CLI 或其他应用的登录态。
+
+检测到有效记录时，向导提供 `Reuse existing Baidu authorization`，在内存中读取并刷新验证后写入新 Sync service 的安全存储 identity；任何 secret 不显示、不写普通文件、不进入日志。迁移失败时保留旧 credential 并回到正常 OAuth setup，不产生半配置的新 namespace。
+
+该迁移只复用百度 AppKey/SecretKey 与 OAuth credential，不导入旧同步数据库、head、pack、tombstone、Session payload 或远端 namespace。旧原型曾出现删除后复活，因此旧同步状态必须视为不可信；新协议始终创建 RFC-0010 namespace 和加密索引。迁移成功也不自动删除旧安全存储记录，清理由单独的显式维护操作完成。
+
 ## Recovery key 与同步空间
 
 首次 setup 生成随机 256-bit root key 和随机 namespace ID。导出格式是带版本和 checksum 的 recovery string，同时包含 namespace ID 与 root key；只通过明确标为敏感的临时 dialog 展示或复制，不进入 Session、Shell history、日志或同步数据。
@@ -229,3 +237,4 @@ v1 的设备撤销是同步成员与 ack 语义，不是对已经持有 recovery
 10. portable label 未绑定时保持 unresolved；绑定后通过 RFC-0002 验证才能执行，连接详情从未上传。
 11. 同步失败、锁定或 disabled 时本地 Session 创建、执行和删除仍可用，outbox 保留可恢复状态。
 12. 所有命令使用 toolkit 和 Sync service，不在 TUI 中维护第二套协议或直接持有 credential。
+13. 旧 OpenCode 百度授权可以从其精确 Keychain/PasswordVault identity 一次性迁移；不会扫描外部登录态或导入任何旧同步状态，迁移失败不破坏旧 credential。

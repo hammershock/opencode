@@ -47,6 +47,7 @@ An implementation issue is **Ready** only when it contains:
 - compatibility and migration requirements;
 - acceptance checks, including failure behavior;
 - the minimum test and manual verification plan;
+- the applicable Mac and `mywindows` real-device scenarios from `docs/testing-workflow.md`;
 - known security, credential, remote-execution, sync, or data-loss risks;
 - whether generated API/SDK artifacts are expected.
 
@@ -206,6 +207,7 @@ A task is **Done** only when:
 - every acceptance check in the issue is satisfied;
 - relevant package-local tests and `bun typecheck` pass from the correct package directories;
 - compatibility/failure-path tests required by the RFC pass;
+- relevant real-device acceptance passes on both the Mac and `mywindows` under the exact built commit;
 - generated files were produced by repository scripts and are consistent;
 - UI changes include before/after screenshots or recordings;
 - no secrets, external login state, machine-specific paths or credentials entered the diff, fixtures or logs;
@@ -234,3 +236,5 @@ Upstream integration is its own task and worktree. It must not carry feature imp
 5. Does every active issue have a unique semantic branch and worktree?
 6. Are high-risk migrations, credentials, remote execution and deletion rules represented in acceptance tests?
 7. Can each task merge without enabling an incomplete feature, using an experimental setting where the RFC requires one?
+
+The detailed test ladder, evidence requirements, device matrix, and release gate are defined in [`testing-workflow.md`](testing-workflow.md).

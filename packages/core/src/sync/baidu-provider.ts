@@ -237,7 +237,7 @@ export function adapter(input: {
           await Promise.all(
             blocks.map(async (block, index) => {
               const body = new FormData()
-              body.set("file", new Blob([block.part]))
+              body.set("file", new Blob([Uint8Array.from(block.part)]))
               await json(
                 await request(
                   endpoint(UPLOAD_API, {

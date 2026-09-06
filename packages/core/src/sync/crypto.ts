@@ -143,7 +143,7 @@ export async function decrypt(
 export async function objectID(rootKey: Uint8Array, keyEpoch: number, plaintext: Uint8Array): Promise<string> {
   assertRootKey(rootKey)
   const key = await derive(rootKey, "object-id", keyEpoch, ["sign"])
-  return base64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, plaintext)))
+  return base64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, Uint8Array.from(plaintext))))
 }
 
 async function derive(
@@ -153,7 +153,7 @@ async function derive(
   usages: Array<"encrypt" | "decrypt" | "sign">,
 ) {
   if (!Number.isSafeInteger(keyEpoch) || keyEpoch < 1) throw new Error("Invalid key epoch")
-  const material = await crypto.subtle.importKey("raw", rootKey, "HKDF", false, ["deriveKey"])
+  const material = await crypto.subtle.importKey("raw", Uint8Array.from(rootKey), "HKDF", false, ["deriveKey"])
   const params = {
     name: "HKDF",
     hash: "SHA-256",

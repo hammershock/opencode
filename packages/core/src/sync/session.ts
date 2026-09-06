@@ -11,7 +11,7 @@ import { makeGlobalNode } from "../effect/app-node"
 type DurablePayload = {
   readonly id: string
   readonly type: string
-  readonly durable?: { readonly aggregateID: string; readonly seq: number }
+  readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
   readonly data: Record<string, unknown>
 }
 
@@ -32,8 +32,11 @@ export function capture(store: SyncEventStore.Interface, payload: DurablePayload
       id: payload.id,
       aggregateID: payload.durable.aggregateID,
       seq: payload.durable.seq,
-      type: payload.type,
-      data: payload.data as Record<string, any>,
+      type: EventV2.versionedType(payload.type, payload.durable.version),
+      // Runtime domain objects may retain optional keys with `undefined` even
+      // though the durable wire format is JSON. Normalize at the sync boundary
+      // so capture matches the bytes other devices can actually replay.
+      data: JSON.parse(JSON.stringify(payload.data)) as Record<string, any>,
     }),
     createdAt,
   )
@@ -65,7 +68,11 @@ export async function hydrate(
 export function projector(
   events: EventV2.Interface,
   sourceDeviceID?: SyncEvent.DeviceID,
-  onConflict?: (input: { sessionID: string; siblingID: string; sourceDeviceID: SyncEvent.DeviceID }) => Effect.Effect<void, unknown>,
+  onConflict?: (input: {
+    sessionID: string
+    siblingID: string
+    sourceDeviceID: SyncEvent.DeviceID
+  }) => Effect.Effect<void, unknown>,
   attachment?: Pick<SyncAttachment.Interface, "get">,
 ): SyncEvent.DurableProjector {
   const siblings = new Map<string, string>()

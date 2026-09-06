@@ -7,6 +7,8 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { SessionSync } from "@opencode-ai/core/sync/session"
+import { SyncEventStore } from "@opencode-ai/core/sync/event-store"
 import { Context, Effect, Layer, Option } from "effect"
 
 export class Service extends Context.Service<Service, EventV2.Interface>()("@opencode/EventV2Bridge") {}
@@ -15,13 +17,19 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    const sync = yield* SyncEventStore.Service
+
+    const publishCaptured: EventV2.Interface["publish"] = (definition, data, options) =>
+      events
+        .publish(definition, data, options)
+        .pipe(Effect.tap((event) => SessionSync.capture(sync, event as any).pipe(Effect.orDie)))
 
     const publish: EventV2.Interface["publish"] = (definition, data, options) =>
       Effect.gen(function* () {
-        if (options?.location) return yield* events.publish(definition, data, options)
+        if (options?.location) return yield* publishCaptured(definition, data, options)
         const location = Option.getOrUndefined(yield* Effect.serviceOption(Location.Service))
         if (location)
-          return yield* events.publish(definition, data, {
+          return yield* publishCaptured(definition, data, {
             ...options,
             location: new Location.Info({
               target: location.target,
@@ -32,9 +40,9 @@ const layer = Layer.effect(
             }),
           })
         const ctx = yield* InstanceRef
-        if (!ctx) return yield* events.publish(definition, data, options)
+        if (!ctx) return yield* publishCaptured(definition, data, options)
         const workspaceID = yield* WorkspaceRef
-        return yield* events.publish(definition, data, {
+        return yield* publishCaptured(definition, data, {
           ...options,
           location: new Location.Info({
             target: Location.LocalTarget.make({ type: "local" }),
@@ -79,6 +87,6 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [EventV2.node, SyncEventStore.node] })
 
 export * as EventV2Bridge from "./event-v2-bridge"

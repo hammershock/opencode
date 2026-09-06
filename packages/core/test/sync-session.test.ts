@@ -14,14 +14,24 @@ describe("SessionSync", () => {
     await Effect.runPromise(
       SessionSync.capture(
         store,
-        { id: "e1", type: "session.updated", durable: { aggregateID: "s1", seq: 2 }, data: { sessionID: "s1" } },
+        {
+          id: "e1",
+          type: "session.updated",
+          durable: { aggregateID: "s1", seq: 2, version: 1 },
+          data: { sessionID: "s1" },
+        },
         10,
       ),
     )
     await Effect.runPromise(
       SessionSync.capture(
         store,
-        { id: "e2", type: "session.deleted", durable: { aggregateID: "s1", seq: 3 }, data: { sessionID: "s1" } },
+        {
+          id: "e2",
+          type: "session.deleted",
+          durable: { aggregateID: "s1", seq: 3, version: 1 },
+          data: { sessionID: "s1" },
+        },
         11,
       ),
     )

@@ -84,6 +84,7 @@ export const GlobalPaths = {
   syncDevices: "/global/sync/devices",
   syncBindings: "/global/sync/bindings",
   syncRecovery: "/global/sync/recovery-key",
+  syncReset: "/global/sync/reset",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -165,6 +166,10 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.get("syncRecoveryExport", GlobalPaths.syncRecovery, {
         success: SyncControl.Recovery,
         error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.post("syncReset", GlobalPaths.syncReset, {
+        success: SyncSetup.SetupResult,
+        error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,

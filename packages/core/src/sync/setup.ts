@@ -8,6 +8,7 @@ import fs from "node:fs/promises"
 import { BaiduSyncProvider } from "./baidu-provider"
 import { SyncCrypto } from "./crypto"
 import { SyncSecureStore } from "./secure-store"
+import { SyncProvider } from "./provider"
 
 export const Config = Schema.Struct({
   version: Schema.Literal(1),
@@ -59,6 +60,7 @@ export interface Interface {
   readonly complete: (input: CompleteInput) => Effect.Effect<typeof SetupResult.Type, SetupError>
   readonly reuseLegacy: (input: ReuseLegacyInput) => Effect.Effect<typeof SetupResult.Type, SetupError>
   readonly setEnabled: (enabled: boolean) => Effect.Effect<Config, SetupError>
+  readonly reset: () => Effect.Effect<typeof SetupResult.Type, SetupError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncSetup") {}
@@ -272,7 +274,38 @@ export function make(input: {
     return next
   })
 
-  return Service.of({ config, inspectLegacy, begin, complete, reuseLegacy, setEnabled })
+  const reset = Effect.fn("SyncSetup.reset")(function* () {
+    const current = yield* config()
+    if (!current) return yield* new SetupError({ kind: "invalid" })
+    const credential = yield* Effect.tryPromise({
+      try: () => BaiduSyncProvider.readCredential(input.store, current.deviceID),
+      catch: () => new SetupError({ kind: "credential" }),
+    })
+    if (!credential) return yield* new SetupError({ kind: "credential" })
+    const provider = BaiduSyncProvider.adapter({
+      store: input.store,
+      deviceID: current.deviceID,
+      root: current.remoteRoot,
+      request: input.request,
+      now,
+    })
+    yield* Effect.tryPromise({
+      try: async () => {
+        const groups = await Promise.all(
+          ["devices", "segments", "chunks"].map((prefix) => SyncProvider.listAll(provider, prefix)),
+        )
+        const protocol = await provider.stat("protocol.json")
+        const objects = [...groups.flat(), ...(protocol ? [protocol] : [])]
+        if (!objects.length) return
+        const deleted = await provider.deleteBatch(objects)
+        if (deleted.some((item) => item.status === "conflict")) throw new Error("Remote sync reset conflicted")
+      },
+      catch: () => new SetupError({ kind: "remote" }),
+    })
+    return yield* finish({ credential, deviceName: current.deviceName, resetExisting: true })
+  })
+
+  return Service.of({ config, inspectLegacy, begin, complete, reuseLegacy, setEnabled, reset })
 }
 
 function ephemeral(credential: BaiduSyncProvider.Credential): SyncSecureStore.Store {

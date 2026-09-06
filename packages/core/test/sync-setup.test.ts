@@ -47,6 +47,11 @@ function baidu() {
         ),
       })
     }
+    if (method === "filemanager") {
+      const form = new URLSearchParams(init?.body as URLSearchParams)
+      for (const file of JSON.parse(form.get("filelist")!) as string[]) files.delete(file)
+      return Response.json({ errno: 0 })
+    }
     if (method === "precreate") {
       const form = new URLSearchParams(init?.body as URLSearchParams)
       parts.set(form.get("path")!, [])
@@ -229,5 +234,20 @@ describe("SyncSetup", () => {
     const setup = SyncSetup.make({ configDirectory, store: unavailable, legacyStore: unavailable })
     expect(await Effect.runPromise(setup.config())).toBeUndefined()
     expect(touched).toBe(0)
+  })
+
+  test("deletes the complete old namespace before activating a reset space", async () => {
+    const configDirectory = await temp()
+    const secure = store()
+    const remote = baidu()
+    const setup = SyncSetup.make({ configDirectory, store: secure, legacyStore: store(), request: remote.request })
+    const pending = await Effect.runPromise(setup.begin({ appKey: "app", secretKey: "secret", deviceName: "Mac" }))
+    const first = await Effect.runPromise(setup.complete({ attemptID: pending.attemptID, code: "code" }))
+    const previousProtocol = `${first.config.remoteRoot}/protocol.json`
+    expect(remote.files.has(previousProtocol)).toBe(true)
+    const reset = await Effect.runPromise(setup.reset())
+    expect(reset.config.namespaceID).not.toBe(first.config.namespaceID)
+    expect(remote.files.has(previousProtocol)).toBe(false)
+    expect(remote.files.has(`${reset.config.remoteRoot}/protocol.json`)).toBe(true)
   })
 })

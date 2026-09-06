@@ -671,7 +671,18 @@ export function Session() {
               "Permanently delete the old encrypted namespace and create a new one? This cannot be undone.",
             )
             if (!confirmed) return "cancelled"
-            return syncSetup()
+            try {
+              const result = await sdk.client.global.syncReset({ throwOnError: true })
+              await clipboard.write?.(result.data.recoveryString)
+              await DialogAlert.show(
+                dialog,
+                "New sensitive recovery key",
+                `${result.data.recoveryString}\n\nCopied to clipboard. Other devices must import this new key.`,
+              )
+              return "completed"
+            } catch {
+              return "failed"
+            }
           },
           openDevices: async () => {
             const result = await sdk.client.global.syncDevices({ throwOnError: true })

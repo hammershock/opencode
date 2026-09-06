@@ -171,7 +171,8 @@ export function adapter(input: {
       (auth) => listDirectory(auth, path.posix.dirname(remote), request, signal),
       signal,
     )
-    return listed.find((item) => item.remotePath === remote)?.info
+    const found = listed.find((item) => item.remotePath === remote)?.info
+    return found ? { ...found, path: object } : undefined
   }
 
   const download = async (object: string, version?: string, signal?: AbortSignal) => {

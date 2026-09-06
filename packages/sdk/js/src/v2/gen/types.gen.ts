@@ -8380,6 +8380,43 @@ export type GlobalSyncRecoveryExportResponses = {
 export type GlobalSyncRecoveryExportResponse =
   GlobalSyncRecoveryExportResponses[keyof GlobalSyncRecoveryExportResponses]
 
+export type GlobalSyncResetData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/reset"
+}
+
+export type GlobalSyncResetErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncResetError = GlobalSyncResetErrors[keyof GlobalSyncResetErrors]
+
+export type GlobalSyncResetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    config: {
+      version: 1
+      provider: "baidu"
+      namespaceID: string
+      deviceID: string
+      deviceName: string
+      enabled: boolean
+      intervalSeconds: number
+      remoteRoot: string
+    }
+    recoveryString: string
+  }
+}
+
+export type GlobalSyncResetResponse = GlobalSyncResetResponses[keyof GlobalSyncResetResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

@@ -994,6 +994,29 @@ export function Prompt(props: PromptProps) {
     if (workspace.creating() || move.creating()) return false
     if (auto()?.visible) return false
     if (!store.prompt.input) return false
+    const inputText = expandTrackedPastedText(
+      store.prompt.input,
+      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+        const partIndex = store.extmarkToPartIndex.get(extmark.id)
+        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
+        if (part?.type !== "text") return []
+        return [{ start: extmark.start, end: extmark.end, text: part.text }]
+      }),
+    )
+    const upstreamCommand =
+      inputText.startsWith("/") &&
+      sync.data.command.some((item) => item.name === inputText.split("\n")[0].split(" ")[0].slice(1))
+    // External server commands keep the upstream winner. Client-only verified
+    // overrides run before model resolution because they do not invoke an Agent.
+    if (store.mode !== "shell" && !upstreamCommand && props.onBuiltinSlash && (await props.onBuiltinSlash(inputText))) {
+      history.append({ ...store.prompt, mode: store.mode })
+      input.extmarks.clear()
+      setStore("prompt", { input: "", parts: [] })
+      setStore("extmarkToPartIndex", new Map())
+      input.clear()
+      props.onSubmit?.()
+      return true
+    }
     const agent = local.agent.current()
     if (!agent) return false
     const trimmed = store.prompt.input.trim()
@@ -1059,16 +1082,6 @@ export function Prompt(props: PromptProps) {
       sessionID = res.data.id
     }
 
-    const inputText = expandTrackedPastedText(
-      store.prompt.input,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const partIndex = store.extmarkToPartIndex.get(extmark.id)
-        const part = partIndex === undefined ? undefined : store.prompt.parts[partIndex]
-        if (part?.type !== "text") return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
-
     // Filter out text parts (pasted content) since they're now expanded inline
     const nonTextParts = store.prompt.parts.filter((part) => part.type !== "text")
 
@@ -1104,10 +1117,7 @@ export function Prompt(props: PromptProps) {
         command: inputText,
       })
       setStore("mode", "normal")
-    } else if (
-      inputText.startsWith("/") &&
-      sync.data.command.some((x) => x.name === inputText.split("\n")[0].split(" ")[0].slice(1))
-    ) {
+    } else if (upstreamCommand) {
       move.startSubmit()
       // Parse command from first line, preserve multi-line content in arguments
       const firstLineEnd = inputText.indexOf("\n")
@@ -1125,9 +1135,6 @@ export function Prompt(props: PromptProps) {
         variant,
         parts: nonTextParts.filter((x) => x.type === "file"),
       })
-    } else if (props.onBuiltinSlash && (await props.onBuiltinSlash(inputText))) {
-      // A verified client-host override consumed the input. External commands
-      // remain above this branch and therefore retain upstream precedence.
     } else {
       move.startSubmit()
       sdk.client.session

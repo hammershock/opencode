@@ -41,6 +41,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
       workspaceID: row.workspace_id ? WorkspaceV2.ID.make(row.workspace_id) : undefined,
       lastKnownTargetName: row.last_known_target_name ?? undefined,
     }),
+    locationRevision: row.location_revision,
     subpath: row.path ? RelativePath.make(row.path) : undefined,
     revert: row.revert ? { ...row.revert, messageID: SessionMessage.ID.make(row.revert.messageID) } : undefined,
     time: {

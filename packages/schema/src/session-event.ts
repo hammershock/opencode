@@ -84,6 +84,18 @@ export const Moved = Event.define({
 })
 export type Moved = typeof Moved.Type
 
+export const LocationRebound = Event.define({
+  type: "session.next.location.rebound",
+  ...options,
+  schema: {
+    ...Base,
+    previous: Location.Ref,
+    location: Location.Ref,
+    revision: NonNegativeInt,
+  },
+})
+export type LocationRebound = typeof LocationRebound.Type
+
 export const Prompted = Event.define({
   type: "session.next.prompted",
   ...options,

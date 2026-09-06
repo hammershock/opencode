@@ -1,11 +1,11 @@
 export * as Session from "./session"
 
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Agent } from "./agent"
 import { Location } from "./location"
 import { Model } from "./model"
 import { Project } from "./project"
-import { DateTimeUtcFromMillis, optional, RelativePath } from "./schema"
+import { DateTimeUtcFromMillis, NonNegativeInt, optional, RelativePath } from "./schema"
 import { SessionEvent } from "./session-event"
 import { SessionID } from "./session-id"
 import { Revert } from "./revert"
@@ -39,6 +39,10 @@ export const Info = Schema.Struct({
   }),
   title: Schema.String,
   location: Location.Ref,
+  locationRevision: NonNegativeInt.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(0)),
+    Schema.withConstructorDefault(Effect.succeed(0)),
+  ),
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })

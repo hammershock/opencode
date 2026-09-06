@@ -258,6 +258,21 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
       }),
     )
+    yield* events.project(SessionEvent.LocationRebound, (event) =>
+      db
+        .update(SessionTable)
+        .set({
+          directory: event.data.location.directory,
+          target: event.data.location.target,
+          last_known_target_name: event.data.location.lastKnownTargetName ?? null,
+          workspace_id: event.data.location.workspaceID ? WorkspaceV2.ID.make(event.data.location.workspaceID) : null,
+          location_revision: event.data.revision,
+          time_updated: DateTime.toEpochMillis(event.data.timestamp),
+        })
+        .where(and(eq(SessionTable.id, event.data.sessionID), eq(SessionTable.location_revision, event.data.revision - 1)))
+        .run()
+        .pipe(Effect.orDie),
+    )
     yield* events.project(SessionV1.Event.Deleted, (event) =>
       db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
     )

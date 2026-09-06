@@ -18,7 +18,7 @@ describe("SessionSync", () => {
           id: "e1",
           type: "session.updated",
           durable: { aggregateID: "s1", seq: 2, version: 1 },
-          data: { sessionID: "s1" },
+          data: { sessionID: "s1", omitted: undefined },
         },
         10,
       ),
@@ -35,7 +35,10 @@ describe("SessionSync", () => {
         11,
       ),
     )
-    expect(calls[0]).toMatchObject(["event", { id: "e1", aggregateID: "s1", seq: 2 }])
+    expect(calls[0]).toMatchObject([
+      "event",
+      { id: "e1", aggregateID: "s1", seq: 2, type: "session.updated.1", data: { sessionID: "s1" } },
+    ])
     expect(calls[1]).toMatchObject(["delete", { id: "e2", sessionID: "s1", deletedAt: 11 }])
   })
 

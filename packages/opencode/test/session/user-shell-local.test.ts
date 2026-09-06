@@ -87,4 +87,56 @@ describe("UserShellLocal", () => {
       expect(output.join("")).not.toBe("0")
     }),
   )
+
+  it(
+    "invokes bash programmable completion with the full line and cursor",
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fs.makeTempDirectoryScoped()
+      yield* fs.writeFileString(
+        path.join(root, ".bashrc"),
+        "_git_fixture() { [[ $COMP_LINE == 'git --fo tail' && $COMP_POINT == 8 ]] && COMPREPLY=('--format=json' '--force'); }\ncomplete -F _git_fixture git\n",
+      )
+      const local = UserShellLocal.provider("/bin/bash", fs, spawner)
+      const candidates = yield* local.complete({
+        cwd: root,
+        input: "git --fo tail",
+        cursor: 8,
+        environment: { HOME: root },
+      })
+      expect(candidates).toContainEqual({
+        value: "--format=json",
+        display: "--format=json",
+        replacement: { start: 4, end: 8 },
+        kind: "option",
+      })
+    }),
+  )
+
+  it(
+    "invokes zsh compdef completion without leaking helper state",
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fs.makeTempDirectoryScoped()
+      yield* fs.writeFileString(
+        path.join(root, ".zshrc"),
+        "autoload -Uz compinit; compinit -d $ZDOTDIR/.zcompdump\n_git_fixture() { compadd -- 'two words' '--verbose'; }\ncompdef _git_fixture git\n",
+      )
+      const local = UserShellLocal.provider("/bin/zsh", fs, spawner)
+      const candidates = yield* local.complete({
+        cwd: root,
+        input: "git 'two w' tail",
+        cursor: 10,
+        environment: { HOME: root, ZDOTDIR: root },
+      })
+      expect(candidates).toContainEqual({
+        value: "two\\ words",
+        display: "two words",
+        replacement: { start: 4, end: 11 },
+        kind: "argument",
+      })
+    }),
+  )
 })

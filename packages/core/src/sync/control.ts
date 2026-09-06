@@ -106,7 +106,7 @@ const layer = Layer.effect(
         rootKey,
         provider,
         store,
-        projector: SessionSync.projector(events),
+        projector: (deviceID) => SessionSync.projector(events, deviceID),
         metadata: () =>
           sessionDB
             .select()

@@ -50,7 +50,7 @@ export function make(input: {
   readonly rootKey: Uint8Array
   readonly provider: SyncProvider.Adapter
   readonly store: SyncEventStore.Interface
-  readonly projector: SyncEvent.DurableProjector
+  readonly projector: SyncEvent.DurableProjector | ((deviceID: SyncEvent.DeviceID) => SyncEvent.DurableProjector)
   readonly metadata: () => Effect.Effect<readonly Metadata[], unknown>
   readonly metadataProjector: MetadataProjector
   readonly acknowledged?: () => Effect.Effect<Readonly<Record<string, number>>, unknown>
@@ -66,6 +66,15 @@ export function make(input: {
   let pullFlight: Promise<void> | undefined
   let hydrateFlight: Promise<void> | undefined
   let indexedHeads: readonly Head[] = []
+  const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
+  const projector = (deviceID: SyncEvent.DeviceID) => {
+    if (typeof input.projector !== "function") return input.projector
+    const found = projectors.get(deviceID)
+    if (found) return found
+    const created = input.projector(deviceID)
+    projectors.set(deviceID, created)
+    return created
+  }
 
   const uploadOnce = async (signal?: AbortSignal) => {
     if (!status.enabled) return
@@ -189,7 +198,7 @@ export function make(input: {
             segmentContext(head.deviceID, generation, path),
             downloaded.bytes,
           )
-          await Effect.runPromise(input.store.applyDurable(segment, input.projector))
+          await Effect.runPromise(input.store.applyDurable(segment, projector(head.deviceID)))
           cursor = generation
         }
       }

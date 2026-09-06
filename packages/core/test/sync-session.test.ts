@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Stream } from "effect"
+import { EventV2 } from "@opencode-ai/core/event"
+import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SessionSync } from "@opencode-ai/core/sync/session"
 
 describe("SessionSync", () => {
@@ -50,5 +52,45 @@ describe("SessionSync", () => {
       { publish: true },
     ])
     expect(calls[1]).toEqual(["remove", "s1"])
+  })
+
+  test("materializes a deterministic sibling when a remote history diverges", async () => {
+    const calls: any[] = []
+    const events = {
+      replay: (event: any, options: any) => {
+        calls.push([event, options])
+        if (event.aggregateID === "s1" && event.seq === 1)
+          return Effect.die(
+            new EventV2.InvalidDurableEventError({
+              type: event.type,
+              message: "Replay diverged at aggregate s1 sequence 1",
+            }),
+          )
+        return Effect.void
+      },
+      durable: () =>
+        Stream.make({
+          id: EventV2.ID.create(),
+          type: "session.created",
+          durable: { aggregateID: "s1", seq: 0, version: 1 },
+          data: { id: "s1", sessionID: "s1" },
+        }),
+      remove: () => Effect.void,
+    } as any
+    const projector = SessionSync.projector(events, SyncEvent.DeviceID.make("remote"))
+    await Effect.runPromise(
+      projector.project({
+        id: EventV2.ID.create(),
+        aggregateID: "s1",
+        seq: 1,
+        type: "session.updated",
+        data: { sessionID: "s1", title: "remote" },
+      }),
+    )
+    const sibling = calls[1][0].aggregateID as string
+    expect(sibling).toMatch(/^s1-conflict-/)
+    expect(calls[1][0].data).toMatchObject({ id: sibling, sessionID: sibling })
+    expect(calls[2][0]).toMatchObject({ aggregateID: sibling, seq: 1, data: { sessionID: sibling } })
+    expect(calls[2][1]).toMatchObject({ ownerID: "remote", strictOwner: true })
   })
 })

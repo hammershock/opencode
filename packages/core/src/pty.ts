@@ -7,6 +7,7 @@ import { Pty } from "@opencode-ai/schema/pty"
 import { Config } from "./config"
 import { EventV2 } from "./event"
 import { Location } from "./location"
+import { LocationEnvironment } from "./location-environment"
 import { PtyID } from "./pty/schema"
 import { Shell } from "./shell"
 import { lazy } from "./util/lazy"
@@ -95,10 +96,19 @@ const layer = Layer.effect(
     const events = yield* EventV2.Service
     const location = yield* Location.Service
     const config = yield* Config.Service
+    const environment = yield* LocationEnvironment.Service
     const context = yield* Effect.context()
     const runFork = Effect.runForkWith(context)
     const sessions = new Map<PtyID, Active>()
     const exitOrder: PtyID[] = []
+
+    yield* environment.subscribe((generation) => {
+      sessions.forEach((session) => {
+        if (session.info.status !== "running" || session.info.environmentGeneration === generation) return
+        session.info.environmentStale = true
+        runFork(events.publish(Event.Updated, { info: session.info }))
+      })
+    })
 
     function notifyEnd(session: Active, event: { exitCode?: number }) {
       for (const subscriber of session.subscribers.values()) {
@@ -167,9 +177,9 @@ const layer = Layer.effect(
       const command = input.command || Shell.preferred(Config.latest(yield* config.entries(), "shell"))
       const args = Shell.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
+      const snapshot = yield* environment.snapshot()
       const env = {
-        ...process.env,
-        ...input.env,
+        ...(yield* environment.environment(input.env)),
         TERM: "xterm-256color",
         OPENCODE_TERMINAL: "1",
       } as Record<string, string>
@@ -189,6 +199,8 @@ const layer = Layer.effect(
         cwd,
         status: "running",
         pid: proc.pid,
+        environmentGeneration: snapshot.generation,
+        environmentStale: false,
       }
       const session: Active = {
         info,
@@ -315,4 +327,8 @@ const layer = Layer.effect(
 
 export const locationLayer = layer.pipe(Layer.provide(Config.locationLayer))
 
-export const node = makeLocationNode({ service: Service, layer, deps: [EventV2.node, Location.node, Config.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer,
+  deps: [EventV2.node, Location.node, LocationEnvironment.node, Config.node],
+})

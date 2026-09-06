@@ -28,6 +28,8 @@ export const Info = Schema.Struct({
   status: Schema.Literals(["running", "exited"]),
   pid: NonNegativeInt,
   exitCode: optional(NonNegativeInt),
+  environmentGeneration: optional(NonNegativeInt),
+  environmentStale: optional(Schema.Boolean),
 }).annotate({ identifier: "Pty" })
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 

@@ -43,6 +43,8 @@ export const Info = Schema.Struct({
     Schema.withDecodingDefaultKey(Effect.succeed(0)),
     Schema.withConstructorDefault(Effect.succeed(0)),
   ),
+  /** Synchronized logical target identity; never contains a device-local target ID or connection data. */
+  portableTargetLabel: Schema.String.pipe(optional),
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })

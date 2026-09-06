@@ -270,6 +270,7 @@ export type SessionsListOutput = {
       readonly lastKnownTargetName?: string
     }
     readonly locationRevision?: number
+    readonly portableTargetLabel?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -358,6 +359,7 @@ export type SessionsCreateOutput = {
       readonly lastKnownTargetName?: string
     }
     readonly locationRevision?: number
+    readonly portableTargetLabel?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -402,6 +404,7 @@ export type SessionsGetOutput = {
       readonly lastKnownTargetName?: string
     }
     readonly locationRevision?: number
+    readonly portableTargetLabel?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string

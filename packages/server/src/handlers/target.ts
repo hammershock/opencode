@@ -72,6 +72,9 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
           return SessionLocationRebinding.resolve({
             sessionID: session.id,
             location: session.location,
+            portable: session.portableTargetLabel
+              ? { label: session.portableTargetLabel, directory: session.location.directory }
+              : undefined,
             targets: snapshot.targets,
             bindings: bindingSnapshot.bindings,
             referencedSessions: async (reference) => {
@@ -80,7 +83,7 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
                 .filter((item) => {
                   if (reference.targetID)
                     return item.location.target.type === "rexd" && item.location.target.targetID === reference.targetID
-                  return item.location.lastKnownTargetName === reference.label
+                  return item.portableTargetLabel === reference.label
                 })
                 .map((item) => item.id)
             },
@@ -98,7 +101,7 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
         invoke(async () => {
           const all = await Effect.runPromise(sessions.list())
           const actual = all
-            .filter((item) => item.location.lastKnownTargetName === ctx.params.portableTargetLabel)
+            .filter((item) => item.portableTargetLabel === ctx.params.portableTargetLabel)
             .map((item) => item.id)
             .sort()
           const expected = [...new Set(ctx.payload.expectedSessionIDs)].sort()

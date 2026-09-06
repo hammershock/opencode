@@ -20,13 +20,15 @@ export async function forceRebindSession(input: {
   expectedRevision: number
 }) {
   const registry = await input.sdk.client.v2.target.list({ throwOnError: true })
-  type Destination = { type: "local" } | { type: "rexd"; targetID: string }
+  type Destination =
+    | { target: { type: "local" } }
+    | { target: { type: "rexd"; targetID: string }; lastKnownTargetName: string }
   const options: DialogSelectOption<Destination>[] = [
-    { title: "Local machine", value: { type: "local" }, category: "Targets" },
+    { title: "Local machine", value: { target: { type: "local" } }, category: "Targets" },
     ...registry.data.targets.map((item) => ({
       title: item.name,
       description: item.connection.host,
-      value: { type: "rexd" as const, targetID: item.id },
+      value: { target: { type: "rexd" as const, targetID: item.id }, lastKnownTargetName: item.name },
       category: "Targets",
     })),
   ]
@@ -53,7 +55,7 @@ export async function forceRebindSession(input: {
       sessionID: input.sessionID,
       sessionLocationRebindingRebindInput: {
         expectedRevision: input.expectedRevision,
-        destination: { target, directory: directory.trim() },
+        destination: { ...target, directory: directory.trim() },
       },
     },
     { throwOnError: true },

@@ -34,6 +34,7 @@ export const SessionTable = sqliteTable(
     directory: DatabasePath.directoryColumn().notNull(),
     target: text({ mode: "json" }).$type<Location.Target>(),
     last_known_target_name: text(),
+    portable_target_label: text(),
     location_revision: integer().notNull().default(0),
     path: DatabasePath.pathColumn(),
     title: text().notNull(),

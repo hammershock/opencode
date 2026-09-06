@@ -4462,6 +4462,7 @@ export type SessionV2Info = {
   title: string
   location: LocationRef
   locationRevision?: number
+  portableTargetLabel?: string
   subpath?: string
   revert?: RevertState
 }

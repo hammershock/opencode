@@ -188,6 +188,7 @@ export default {
           \`directory\` text NOT NULL,
           \`target\` text,
           \`last_known_target_name\` text,
+          \`portable_target_label\` text,
           \`location_revision\` integer DEFAULT 0 NOT NULL,
           \`path\` text,
           \`title\` text NOT NULL,

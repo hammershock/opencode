@@ -118,6 +118,10 @@ export function make(input: {
   )
 
   const begin = Effect.fn("SyncSetup.begin")(function* (setup: BeginInput) {
+    // Refuse before collecting/validating OAuth credentials.  `resetExisting`
+    // is the explicit confirmation boundary; finish() repeats the check to
+    // close the race with another OpenCode process writing config.json.
+    if ((yield* config()) && !setup.resetExisting) return yield* new SetupError({ kind: "invalid" })
     const appKey = setup.appKey.trim()
     const secretKey = setup.secretKey.trim()
     const deviceName = setup.deviceName.trim()
@@ -167,6 +171,7 @@ export function make(input: {
   })
 
   const reuseLegacy = Effect.fn("SyncSetup.reuseLegacy")(function* (setup: ReuseLegacyInput) {
+    if ((yield* config()) && !setup.resetExisting) return yield* new SetupError({ kind: "invalid" })
     const legacy = yield* inspectLegacy()
     if (!legacy.available || !legacy.deviceID) return yield* new SetupError({ kind: "credential" })
     const current = yield* Effect.tryPromise({

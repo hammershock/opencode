@@ -173,4 +173,59 @@ describe("SyncSetup", () => {
     expect(secure.values.size).toBe(0)
     await expect(fs.stat(path.join(configDirectory, "sync", "config.json"))).rejects.toMatchObject({ code: "ENOENT" })
   })
+
+  test("requires explicit reset confirmation before starting setup over an existing config", async () => {
+    const configDirectory = await temp()
+    await fs.mkdir(path.join(configDirectory, "sync"), { recursive: true })
+    await fs.writeFile(
+      path.join(configDirectory, "sync", "config.json"),
+      JSON.stringify({
+        version: 1,
+        provider: "baidu",
+        namespaceID: "existing-space",
+        deviceID: "existing-device",
+        deviceName: "Existing",
+        enabled: true,
+        intervalSeconds: 30,
+        remoteRoot: "/apps/opencode-sync/existing-space",
+      }),
+    )
+    const setup = SyncSetup.make({
+      configDirectory,
+      store: store(),
+      legacyStore: store(),
+      request: async () => {
+        throw new Error("OAuth must not begin")
+      },
+    })
+    await expect(
+      Effect.runPromise(setup.begin({ appKey: "app", secretKey: "secret", deviceName: "Replacement" })),
+    ).rejects.toMatchObject({ kind: "invalid" })
+    await expect(Effect.runPromise(setup.reuseLegacy({ deviceName: "Replacement" }))).rejects.toMatchObject({
+      kind: "invalid",
+    })
+  })
+
+  test("does not touch an unavailable secure store while merely reading disabled setup state", async () => {
+    const configDirectory = await temp()
+    let touched = 0
+    const unavailable: SyncSecureStore.Store = {
+      platform: "macos-keychain",
+      get: async () => {
+        touched++
+        throw new SyncSecureStore.SecureStoreUnavailableError("unavailable")
+      },
+      set: async () => {
+        touched++
+        throw new SyncSecureStore.SecureStoreUnavailableError("unavailable")
+      },
+      remove: async () => {
+        touched++
+        throw new SyncSecureStore.SecureStoreUnavailableError("unavailable")
+      },
+    }
+    const setup = SyncSetup.make({ configDirectory, store: unavailable, legacyStore: unavailable })
+    expect(await Effect.runPromise(setup.config())).toBeUndefined()
+    expect(touched).toBe(0)
+  })
 })

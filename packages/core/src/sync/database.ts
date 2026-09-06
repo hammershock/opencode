@@ -4,6 +4,9 @@ import { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { Context, Effect, Layer } from "effect"
 import { layer as sqliteLayer } from "#sqlite"
 import { sql } from "drizzle-orm"
+import { Global } from "../global"
+import { makeGlobalNode } from "../effect/app-node"
+import path from "node:path"
 
 const makeDatabase = EffectDrizzleSqlite.makeWithDefaults()
 type Shape = Effect.Success<typeof makeDatabase>
@@ -52,6 +55,12 @@ const layer = Layer.effect(
 export function layerFromPath(filename: string) {
   return layer.pipe(Layer.provide(sqliteLayer({ filename })))
 }
+
+const nodeLayer = Layer.unwrap(
+  Effect.map(Global.Service, (global) => layerFromPath(path.join(global.config, "sync", "sync.db"))),
+)
+
+export const node = makeGlobalNode({ service: Service, layer: nodeLayer, deps: [Global.node] })
 
 const schemaV1 = [
   sql`CREATE TABLE sync_event_outbox (

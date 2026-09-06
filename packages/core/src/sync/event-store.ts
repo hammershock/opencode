@@ -4,6 +4,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { sql } from "drizzle-orm"
 import { SyncDatabase } from "./database"
 import { SyncEvent } from "./event"
+import { makeGlobalNode } from "../effect/app-node"
 
 type DB = SyncDatabase.Interface["db"]
 export type Transaction = Parameters<Parameters<DB["transaction"]>[0]>[0]
@@ -468,6 +469,8 @@ export const layer = Layer.effect(
     }
   }).pipe(Effect.orDie),
 )
+
+export const node = makeGlobalNode({ service: Service, layer, deps: [SyncDatabase.node] })
 
 function encodeEvent(event: SyncEvent.Envelope) {
   return canonical(event)

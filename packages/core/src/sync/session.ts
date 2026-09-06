@@ -4,6 +4,8 @@ import { Effect, Layer, Stream } from "effect"
 import { EventV2 } from "../event"
 import { SyncEvent } from "./event"
 import { SyncEventStore } from "./event-store"
+import { Context } from "effect"
+import { makeGlobalNode } from "../effect/app-node"
 
 type DurablePayload = {
   readonly id: string
@@ -65,6 +67,14 @@ export const captureLayer = Layer.effectDiscard(
     )
   }),
 )
+
+export class Capture extends Context.Service<Capture, true>()("@opencode/SessionSyncCapture") {}
+const captureServiceLayer = Layer.provideMerge(Layer.succeed(Capture, true), captureLayer)
+export const node = makeGlobalNode({
+  service: Capture,
+  layer: captureServiceLayer,
+  deps: [EventV2.node, SyncEventStore.node],
+})
 
 function isSessionDeleted(payload: DurablePayload) {
   return payload.type === "session.deleted" || payload.type.startsWith("session.deleted@")

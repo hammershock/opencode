@@ -88,6 +88,8 @@ import {
   SESSION_RENAME_DIRECT_SETTING,
 } from "../../command-toolkit/session-rename"
 import { reportOverrideDiagnostic } from "../../command-toolkit/experimental-settings"
+import { createCommandHost } from "../../command-toolkit/host"
+import { environmentCommands, type EnvironmentCommandContext } from "../../command-toolkit/environment"
 
 addDefaultParsers(parsers.parsers)
 
@@ -202,7 +204,14 @@ export function Session() {
   const session = createMemo(() => sync.session.get(route.sessionID))
   const location = createMemo(() => {
     const current = session()
-    return current ? { directory: current.directory, workspaceID: current.workspaceID } : undefined
+    return current
+      ? {
+          directory: current.directory,
+          target: current.target,
+          workspaceID: current.workspaceID,
+          lastKnownTargetName: current.lastKnownTargetName,
+        }
+      : undefined
   })
 
   createEffect(() => {
@@ -451,6 +460,63 @@ export function Session() {
   }
 
   const local = useLocal()
+  const coreCommandHost = createMemo(() =>
+    createCommandHost<EnvironmentCommandContext>({
+      register: (registry) => environmentCommands.forEach((command) => registry.register(command)),
+      context: () => {
+        const current = location()
+        const queryLocation = current
+          ? ({ directory: current.directory, workspace: current.workspaceID, target: current.target } as {
+              directory: string
+              workspace?: string
+            })
+          : undefined
+        const metadata = async (kind: "list" | "reload") => {
+          const result = await sdk.client.v2.environment[kind]({ location: queryLocation }, { throwOnError: true })
+          return {
+            enabled: result.data.data.enabled,
+            generation: Number(result.data.data.generation),
+            variables: result.data.data.variables,
+          }
+        }
+        return {
+          source: "slash",
+          client: "tui",
+          sessionID: route.sessionID,
+          location: current,
+          abortSignal: new AbortController().signal,
+          confirm: async (request) => Boolean(await DialogConfirm.show(dialog, request.title, request.message)),
+          environment: {
+            list: () => metadata("list"),
+            reload: () => metadata("reload"),
+            ensureTemplate: async () => {
+              const result = await sdk.client.v2.environment.init({ location: queryLocation }, { throwOnError: true })
+              return result.data.data.status
+            },
+          },
+          presentEnvironment: async (snapshot) => {
+            const variables = snapshot.variables.map((item) => `${item.name} · ${item.origin}`).join("\n") || "No variables"
+            await DialogAlert.show(dialog, `Environment generation ${snapshot.generation}`, variables)
+          },
+          invokeAgent: async (prompt) => {
+            try {
+              await sdk.client.session.promptAsync(
+                { sessionID: route.sessionID, noReply: false, parts: [{ type: "text", text: prompt }] },
+                { throwOnError: true },
+              )
+              return "completed"
+            } catch {
+              return "failed"
+            }
+          },
+        }
+      },
+      upstream: () => undefined,
+      invalid: (message) => toast.show({ message, variant: "warning" }),
+      outcome: (message, status) =>
+        toast.show({ message, variant: status === "failed" ? "error" : status === "cancelled" ? "warning" : "success" }),
+    }),
+  )
 
   function enterChild(sessionID: string) {
     navigate({
@@ -1340,16 +1406,19 @@ export function Session() {
                       ref={bind}
                       disabled={disabled()}
                       onBuiltinSlash={async (input) => {
-                        if (!kv.get(SESSION_RENAME_DIRECT_SETTING, false)) return false
-                        const parsed = parseSessionRenameOverride(input)
-                        if (parsed.status === "not-match") return false
-                        if (parsed.status === "invalid") {
-                          toast.show({ message: parsed.message, variant: "warning" })
-                          return true
+                        if (kv.get(SESSION_RENAME_DIRECT_SETTING, false)) {
+                          const parsed = parseSessionRenameOverride(input)
+                          if (parsed.status === "invalid") {
+                            toast.show({ message: parsed.message, variant: "warning" })
+                            return true
+                          }
+                          if (parsed.status !== "not-match") {
+                            await renameOverride().execute(parsed.input)
+                            reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic())
+                            return true
+                          }
                         }
-                        await renameOverride().execute(parsed.input)
-                        reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic())
-                        return true
+                        return coreCommandHost()(input)
                       }}
                       onSubmit={() => {
                         toBottom()

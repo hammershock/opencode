@@ -172,6 +172,10 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     return await create(context)
   }
 
+  function getTarget() {
+    return homeDestination?.target()
+  }
+
   function startSubmit() {
     if (progress()) setProgress("Submitting prompt")
   }
@@ -196,6 +200,7 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
     creatingDots,
     finishSubmit,
     getDirectory,
+    getTarget,
     open,
     pending,
     pendingNew,

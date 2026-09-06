@@ -60,6 +60,8 @@ import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, u
 import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
+import { validateDestination } from "../../routes/home/target-workflow"
+import type { LocationRef } from "@opencode-ai/sdk/v2"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 
@@ -1095,9 +1097,34 @@ export function Prompt(props: PromptProps) {
       if (move.pending() && !directory) return false
       finishMoveProgress = Boolean(move.progress())
 
-      const res = await sdk.client.session.create({
-        directory,
-        workspace: workspaceID,
+      const target = move.getTarget()
+      if (!directory || !target) return false
+      let location: LocationRef
+      try {
+        location = await validateDestination({
+          target,
+          directory,
+          prepare: async (targetID) => {
+            const result = await sdk.client.v2.target.prepare({ targetID }, { throwOnError: true })
+            return result.data
+          },
+          validate: async (candidate) => {
+            // Remove this compatibility cast after the location-routing SDK is
+            // regenerated on the integration branch.
+            await sdk.client.v2.fs.list(
+              { location: candidate as { directory: string }, path: "." },
+              { throwOnError: true },
+            )
+          },
+        })
+        location.workspaceID = workspaceID
+      } catch (error) {
+        toast.show({ message: "The selected working directory is unavailable.", variant: "error" })
+        return false
+      }
+
+      const res = await sdk.client.v2.session.create({
+        location,
         agent: agent.name,
         model: {
           providerID: selectedModel.providerID,
@@ -1118,7 +1145,7 @@ export function Prompt(props: PromptProps) {
         return true
       }
 
-      sessionID = res.data.id
+      sessionID = res.data.data.id
     }
 
     // Filter out text parts (pasted content) since they're now expanded inline

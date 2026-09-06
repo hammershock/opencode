@@ -125,6 +125,8 @@ describe("SyncRuntime", () => {
     })
     await Effect.runPromise(downloader.pull())
     expect(projected[0]?.title).toBe("secret title")
+    expect(windows.applied).toEqual([])
+    await Effect.runPromise(downloader.hydrate())
     expect(windows.applied).toEqual([event])
     expect(downloader.status().lastPullAt).toBeNumber()
   })

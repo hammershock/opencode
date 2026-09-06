@@ -60,6 +60,8 @@ export function make(input: {
   let status: Status = { enabled: input.config.enabled, running: "idle" }
   let uploadFlight: Promise<void> | undefined
   let pullFlight: Promise<void> | undefined
+  let hydrateFlight: Promise<void> | undefined
+  let indexedHeads: readonly Head[] = []
 
   const uploadOnce = async (signal?: AbortSignal) => {
     if (!status.enabled) return
@@ -130,9 +132,31 @@ export function make(input: {
         )
       }
       const revoked = new Set(heads.flatMap((head) => head.revoked))
-      for (const head of heads.sort((a, b) => String(a.deviceID).localeCompare(String(b.deviceID)))) {
+      indexedHeads = heads
+        .filter((head) => !revoked.has(head.deviceID))
+        .sort((a, b) => String(a.deviceID).localeCompare(String(b.deviceID)))
+      for (const head of indexedHeads) {
         if (revoked.has(head.deviceID)) continue
         await Effect.runPromise(input.metadataProjector.apply(head.metadata))
+      }
+      status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }
+    } catch (cause) {
+      status = { ...status, running: "idle", lastError: diagnostic("pull", cause) }
+      throw cause
+    } finally {
+      await Effect.runPromise(input.store.release("pull", owner)).catch(() => undefined)
+    }
+  }
+
+  const hydrateOnce = async (signal?: AbortSignal) => {
+    if (!status.enabled) return
+    // Metadata indexing is intentionally a separate committed phase. Opening a
+    // metadata-only Session calls hydrate(); idle background work may do so too.
+    if (!indexedHeads.length) await coalesce("pull", signal)
+    const acquired = await Effect.runPromise(input.store.acquire("hydrate", owner, 60_000, now()))
+    if (!acquired) return
+    try {
+      for (const head of indexedHeads) {
         let cursor = await Effect.runPromise(input.store.cursor(head.deviceID))
         while (cursor < head.generation) {
           signal?.throwIfAborted()
@@ -152,12 +176,11 @@ export function make(input: {
           cursor = generation
         }
       }
-      status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }
     } catch (cause) {
-      status = { ...status, running: "idle", lastError: diagnostic("pull", cause) }
+      status = { ...status, lastError: diagnostic("pull", cause) }
       throw cause
     } finally {
-      await Effect.runPromise(input.store.release("pull", owner)).catch(() => undefined)
+      await Effect.runPromise(input.store.release("hydrate", owner)).catch(() => undefined)
     }
   }
 
@@ -171,10 +194,13 @@ export function make(input: {
     enable: (enabled: boolean) => void (status = { ...status, enabled }),
     upload: (signal?: AbortSignal) => Effect.tryPromise(() => coalesce("upload", signal)),
     pull: (signal?: AbortSignal) => Effect.tryPromise(() => coalesce("pull", signal)),
+    hydrate: (signal?: AbortSignal) =>
+      Effect.tryPromise(() => (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))),
     now: (signal?: AbortSignal) =>
       Effect.tryPromise(async () => {
         await coalesce("upload", signal)
         await coalesce("pull", signal)
+        await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
       }),
   }
 }

@@ -1,7 +1,7 @@
 ---
 id: 0002
 title: Rexd Remote Execution
-status: draft
+status: accepted
 authors:
   - hammershock
 created: 2026-09-06
@@ -88,6 +88,42 @@ TargetRef = local | rexd(targetID)
 `targetID` 是设备本地 target 配置中的稳定名称。target 配置保存连接方式、host、port、user、identity、SSH options、Rexd 启动方式以及可选的默认目录；凭据、SSH 配置和连接细节不写入 Session。
 
 target 名称一旦被 Session 引用即视为稳定标识。重命名必须保留旧名称的显式 alias 或执行可审计迁移，不能让历史 Session 静默指向另一个主机。
+
+### Target 配置文件
+
+target 使用 OpenCode 解析后的设备本地用户配置目录：默认是 XDG config 下的 `opencode` 目录（通常为 `~/.config/opencode`），并遵守 OpenCode 已支持的配置目录 override。canonical 文件为：
+
+```text
+<OpenCode user config directory>/targets.jsonc
+```
+
+target 不从项目级 `.opencode` 目录加载，避免仓库内容声明 SSH 连接或替换用户的远程执行位置。v1 由用户或未来的 target 管理 UI 编辑该文件；QuickStart 只读取、校验和选择 target，不承担完整配置管理。
+
+配置使用带版本的顶层 schema：
+
+```jsonc
+{
+  "version": 1,
+  "targets": {
+    "a100-2gpu": {
+      "transport": "ssh",
+      "host": "example-host",
+      "user": "hammer",
+      "port": 22,
+      "identityFile": "/path/to/key",
+      "sshOptions": [],
+      "defaultDirectory": "/home/hammer",
+    },
+  },
+}
+```
+
+- target map key 是 Session 保存的稳定名称；
+- v1 只接受 `ssh` transport；
+- `identityFile` 只保存本机路径引用，不复制私钥内容；
+- 未知字段、重复语义和非法类型产生带 JSON path 的配置诊断；
+- 文件缺失等价于没有配置远程 targets；文件损坏不影响 local Location，但 QuickStart 必须显示配置错误；
+- target 配置不属于 Session/cloud sync payload。未来如同步非敏感 target metadata，必须由同步 RFC 另行定义 allowlist。
 
 ### Location
 
@@ -199,7 +235,7 @@ OpenCode 通过 SSH stdio 使用 Rexd JSON-RPC，并以 `session.open` 返回的
 
 `http` capability 不是 SSH stdio profile 的要求。能力不满足时，QuickStart 显示缺失项并拒绝创建 Session。
 
-Rexd v1 没有稳定的文件监听方法。远程 Location 的 watcher 因此是可选能力：不得监听控制设备上的同名路径；没有远端原生 watcher 时，可以明确禁用，或由 Location adapter 使用有界、可取消且带退避的轮询。轮询不是 Rexd wire protocol 的一部分，也不能影响 Shell、文件和 Agent 工具的正确远程路由。
+Rexd v1 没有稳定的文件监听方法。v1 远程 Location 明确将 watcher 标记为 unavailable，不实现隐式轮询，也不得监听控制设备上的同名路径。依赖 watcher 的上层功能必须显式降级；未来增加远端原生 watcher 或 polling adapter 需要单独设计性能、取消和一致性边界。
 
 ### 方法映射
 
@@ -252,6 +288,8 @@ remote config dir/opencode/rexd/config.toml
 
 “尽力而为”表示实现应检测环境并自动完成安全、无特权的准备；不表示可以忽略校验、修改系统环境或在失败后本地回退。
 
+v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SSH 进入 Linux userspace 的 WSL `x86_64/arm64`。其他 OS/architecture 必须在下载前报告 unsupported platform；用户仍可通过显式 command 配置接入已经自行准备、且握手满足本 RFC 的兼容 Rexd，但 OpenCode 不承诺为该平台自动安装。
+
 ## 连接与 Session 生命周期
 
 持久的 OpenCode Session 与临时的 Rexd protocol session 相互独立：OpenCode Session 只保存 target 名称和 directory；Rexd `session_id`、SSH process 与 negotiated state 都是当前 OpenCode 进程的运行时资源，不写入数据库或同步数据。
@@ -294,14 +332,14 @@ remote config dir/opencode/rexd/config.toml
 ### 阶段二：Rexd provider
 
 - 实现 managed daemon prepare、SSH stdio、握手、capability/limit 校验和连接 lease。
-- 覆盖进程、文件、搜索和 PTY 的核心路径；远程 watcher 按本 RFC 显式禁用或有界降级。
+- 覆盖进程、文件、搜索和 PTY 的核心路径；远程 watcher 按本 RFC 显式标记 unavailable。
 - 对 local 与 Rexd provider 运行共同的 contract tests。
 
 ### 阶段三：统一执行入口
 
 - 用户 Shell 命令使用 Session Location。
 - Agent 工作区工具使用 Session Location。
-- 遵守 RFC-0001 已确定的用户/Agent Shell 隔离语义；持久 Shell 与补全遵守 RFC-0004。
+- 遵守 RFC-0001 已确定的用户/Agent Shell 隔离语义；User Shell runtime cwd 与补全遵守 RFC-0004。
 - 删除或禁止绕过 Location 的远程专用分支。
 
 ### 阶段四：QuickStart
@@ -331,3 +369,4 @@ remote config dir/opencode/rexd/config.toml
 7. target 缺失、认证失败、安装失败、握手失败、能力不足和 directory 失效均产生分阶段、可展示且经过脱敏的错误，不回退本地。
 8. local Location 与没有 target 的历史 Session 保持 upstream 行为。
 9. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。
+10. target 只从解析后的 OpenCode 用户配置目录加载；项目配置不能注入 target，连接详情不进入 Session 或同步 payload。

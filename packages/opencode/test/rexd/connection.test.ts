@@ -1,16 +1,36 @@
 import { describe, expect, test } from "bun:test"
 import { testRexdConnection } from "../../src/rexd/connection"
 import { RexdError } from "../../src/rexd/error"
-import type { RexdTarget, Transport } from "../../src/rexd/ssh"
+import { powershellRemoteCommand, type RexdTarget, type Transport } from "../../src/rexd/ssh"
 
 const target: RexdTarget = {
   id: "target-1",
   connection: { type: "ssh-config", host: "fixture" },
   workspaceRoots: ["/work"],
-  command: ["/custom/rexd", "--stdio"],
+  command: { program: "/custom/rexd", args: ["--stdio"] },
 }
 
 describe("Rexd connection test", () => {
+  test("quotes an explicit PowerShell bridge without a POSIX exec prefix", async () => {
+    const transport = new ScriptedTransport({})
+    let command = ""
+    await testRexdConnection(
+      {
+        ...target,
+        command: { program: "wsl.exe", args: ["-d", "Ubuntu", "-u", "user's name", "--", "rexd"] },
+      },
+      { clientVersion: "test" },
+      {
+        connect: (_target, value) => {
+          command = value
+          return transport
+        },
+        renderCommand: powershellRemoteCommand,
+      },
+    )
+    expect(command).toBe("& 'wsl.exe' '-d' 'Ubuntu' '-u' 'user''s name' '--' 'rexd'")
+  })
+
   test("validates the remote directory then gracefully closes the protocol and transport", async () => {
     const transport = new ScriptedTransport({ stat: { exists: true, type: "dir" } })
     const result = await testRexdConnection(

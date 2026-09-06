@@ -9,7 +9,7 @@ export type RexdTarget = {
   id: string
   connection: SshConnection
   workspaceRoots: readonly string[]
-  command?: readonly string[]
+  command?: { program: string; args: readonly string[] }
 }
 
 export type Transport = {
@@ -56,11 +56,48 @@ export async function runSshScript(connection: SshConnection, script: string, si
   return { stdout: output, stderr: detail }
 }
 
+export async function runSshInput(
+  connection: SshConnection,
+  command: string,
+  payload: Uint8Array,
+  signal?: AbortSignal,
+  sshBinary = "ssh",
+) {
+  if (signal?.aborted) throw cancelled(signal)
+  const child = spawn(sshBinary, sshArguments(connection, command), { stdio: ["pipe", "pipe", "pipe"] })
+  const stdout: Buffer[] = []
+  const stderr: Buffer[] = []
+  child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk))
+  child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
+  const abort = () => child.kill("SIGTERM")
+  signal?.addEventListener("abort", abort, { once: true })
+  child.stdin.end(payload)
+  const result = await new Promise<{ code: number | null; spawnError?: Error }>((resolve) => {
+    child.once("error", (spawnError) => resolve({ code: null, spawnError }))
+    child.once("close", (code) => resolve({ code }))
+  })
+  signal?.removeEventListener("abort", abort)
+  if (signal?.aborted) throw cancelled(signal)
+  const output = Buffer.concat(stdout).toString("utf8")
+  const detail = redactDiagnostic(Buffer.concat(stderr).toString("utf8"), connectionSecrets(connection))
+  if (result.spawnError) throw new RexdError("ssh", "Could not start SSH", true, "failed", result.spawnError.name)
+  if (result.code !== 0) throw classifySshFailure(result.code, detail)
+  return { stdout: output, stderr: detail }
+}
+
 export function connectSsh(connection: SshConnection, command: string, sshBinary = "ssh"): Transport {
   return new SshTransport(
     spawn(sshBinary, sshArguments(connection, command), { stdio: ["pipe", "pipe", "pipe"] }),
     connection,
   )
+}
+
+export function posixRemoteCommand(command: NonNullable<RexdTarget["command"]>) {
+  return `exec ${[command.program, ...command.args].map(posixQuote).join(" ")}`
+}
+
+export function powershellRemoteCommand(command: NonNullable<RexdTarget["command"]>) {
+  return `& ${[command.program, ...command.args].map(powershellQuote).join(" ")}`
 }
 
 export class SshTransport implements Transport {
@@ -152,4 +189,12 @@ function classifySshFailure(code: number | null, detail: string) {
     return new RexdError("ssh", "SSH host identity verification failed", false, "failed", detail)
   }
   return new RexdError("ssh", `SSH exited before Rexd started (${code ?? "unknown"})`, true, "failed", detail)
+}
+
+function posixQuote(value: string) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+function powershellQuote(value: string) {
+  return `'${value.replaceAll("'", "''")}'`
 }

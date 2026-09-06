@@ -66,6 +66,35 @@ describe("managed Rexd prepare", () => {
     expect(await syntax.exited, await new Response(syntax.stderr).text()).toBe(0)
   })
 
+  test("falls back to a control-device verified SSH upload when the target cannot reach GitHub", async () => {
+    let calls = 0
+    let uploaded: Uint8Array | undefined
+    let remoteCommand = ""
+    const payload = new Uint8Array([1, 2, 3])
+    const result = await prepareManagedRexd(target, undefined, {
+      run: async () => {
+        calls++
+        if (calls === 1) return { stdout: "Linux\nx86_64\n/home/hammer\n/data\n/config\nlinux\n", stderr: "" }
+        throw new RexdError("ssh", "bootstrap failed", true, "failed", "OPENCODE_REXD_PHASE=download failed")
+      },
+      download: async () => payload,
+      verify: (value, expected) => {
+        expect(value).toBe(payload)
+        expect(expected).toBe(REXD_ARTIFACTS["linux-amd64"].sha256)
+      },
+      upload: async (_connection, command, value) => {
+        remoteCommand = command
+        uploaded = value
+        return { stdout: "installed\n", stderr: "" }
+      },
+    })
+    expect(result.installed).toBe(true)
+    expect(uploaded).toBe(payload)
+    expect(remoteCommand).toStartWith("sh -c ")
+    expect(remoteCommand).toContain(REXD_ARTIFACTS["linux-amd64"].sha256)
+    expect(remoteCommand).not.toContain("sudo")
+  })
+
   test.each([
     ["download", true],
     ["checksum", false],
@@ -78,6 +107,9 @@ describe("managed Rexd prepare", () => {
           calls++
           if (calls === 1) return { stdout: "Linux\nx86_64\n/home/hammer\n/data\n/config\nlinux\n", stderr: "" }
           throw new RexdError("ssh", "bootstrap failed", true, "failed", `OPENCODE_REXD_PHASE=${phase} detail`)
+        },
+        download: async () => {
+          throw new RexdError("download", "control download failed", true)
         },
       }),
     ).rejects.toMatchObject({ phase, retryable })

@@ -2,7 +2,7 @@ import path from "node:path"
 import { RexdError } from "./error"
 import { prepareManagedRexd, managedRexdCommand, type PrepareDependencies, type PrepareResult } from "./prepare"
 import { RexdRpcClient, type RexdHandshake } from "./rpc"
-import { connectSsh, type RexdTarget, type Transport } from "./ssh"
+import { connectSsh, posixRemoteCommand, type RexdTarget, type Transport } from "./ssh"
 
 export type RexdLease = {
   client: RexdRpcClient
@@ -13,6 +13,7 @@ export type RexdLease = {
 
 export type ConnectionDependencies = PrepareDependencies & {
   connect?: (target: RexdTarget, command: string) => Transport
+  renderCommand?: (command: NonNullable<RexdTarget["command"]>) => string
 }
 
 export async function connectRexd(
@@ -21,7 +22,9 @@ export async function connectRexd(
   dependencies: ConnectionDependencies = {},
 ): Promise<RexdLease> {
   const prepared = target.command ? undefined : await prepareManagedRexd(target, options.signal, dependencies)
-  const command = target.command ? commandFromArgv(target.command) : managedRexdCommand(prepared!)
+  const command = target.command
+    ? (dependencies.renderCommand ?? posixRemoteCommand)(target.command)
+    : managedRexdCommand(prepared!)
   const transport = (dependencies.connect ?? ((value, remoteCommand) => connectSsh(value.connection, remoteCommand)))(
     target,
     command,
@@ -84,15 +87,6 @@ async function closeSession(client: RexdRpcClient, sessionID: string) {
 function withinRoot(directory: string, root: string) {
   const relative = path.posix.relative(path.posix.normalize(root), directory)
   return relative === "" || (!relative.startsWith("..") && !path.posix.isAbsolute(relative))
-}
-
-function commandFromArgv(argv: readonly string[]) {
-  if (!argv.length) throw new RexdError("launch", "Explicit Rexd command is empty", false)
-  return `exec ${argv.map(shellQuote).join(" ")}`
-}
-
-function shellQuote(value: string) {
-  return `'${value.replaceAll("'", `'"'"'`)}'`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

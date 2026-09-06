@@ -1,6 +1,6 @@
 import { artifactURL, REXD_ARTIFACTS, REXD_BASELINE_VERSION, type RexdPlatform } from "./manifest"
 import { RexdError } from "./error"
-import { runSshScript, type RexdTarget } from "./ssh"
+import { runSshInput, runSshScript, type RexdTarget } from "./ssh"
 
 export type RemotePlatform = {
   platform: RexdPlatform
@@ -18,6 +18,9 @@ export type PrepareResult = RemotePlatform & {
 
 export type PrepareDependencies = {
   run?: typeof runSshScript
+  upload?: typeof runSshInput
+  download?: (url: string, signal?: AbortSignal) => Promise<Uint8Array>
+  verify?: (payload: Uint8Array, expected: string) => void
 }
 
 export async function detectRemotePlatform(
@@ -73,15 +76,49 @@ export async function prepareManagedRexd(
       roots: target.workspaceRoots,
     }),
     signal,
-  ).catch((error) => {
-    if (error instanceof RexdError) throw classifyInstallError(error)
-    throw new RexdError("install", "Could not prepare managed Rexd", true)
-  })
+  )
+    .catch((error) => {
+      if (error instanceof RexdError) throw classifyInstallError(error)
+      throw new RexdError("install", "Could not prepare managed Rexd", true)
+    })
+    .catch(async (error) => {
+      if (!(error instanceof RexdError) || error.phase !== "download") throw error
+      const payload = await (dependencies.download ?? downloadArtifact)(artifactURL(remote.platform), signal)
+      ;(dependencies.verify ?? verifyArtifact)(payload, artifact.sha256)
+      return (dependencies.upload ?? runSshInput)(
+        target.connection,
+        `sh -c ${shellQuote(
+          uploadScript({
+            binary,
+            config,
+            artifact: artifact.name,
+            checksum: artifact.sha256,
+            roots: target.workspaceRoots,
+          }),
+        )}`,
+        payload,
+        signal,
+      ).catch((failure) => {
+        if (failure instanceof RexdError) throw classifyInstallError(failure)
+        throw new RexdError("install", "Could not upload managed Rexd", true)
+      })
+    })
   const status = result.stdout.trim()
   if (status !== "ready" && status !== "installed") {
     throw new RexdError("install", "Managed Rexd installer returned invalid status", false)
   }
   return { ...remote, installed: status === "installed", binary, config }
+}
+
+async function downloadArtifact(url: string, signal?: AbortSignal) {
+  const response = await fetch(url, { signal }).catch(() => undefined)
+  if (!response?.ok) throw new RexdError("download", "Could not download managed Rexd on the control device", true)
+  return new Uint8Array(await response.arrayBuffer())
+}
+
+function verifyArtifact(payload: Uint8Array, expected: string) {
+  const actual = new Bun.CryptoHasher("sha256").update(payload).digest("hex")
+  if (actual !== expected) throw new RexdError("checksum", "Managed Rexd checksum verification failed", false)
 }
 
 export function managedRexdCommand(result: Pick<PrepareResult, "binary" | "config">) {
@@ -97,6 +134,7 @@ function installScript(input: {
   roots: readonly string[]
 }) {
   const binaryDirectory = input.binary.slice(0, input.binary.lastIndexOf("/"))
+  const managedDirectory = binaryDirectory.slice(0, binaryDirectory.lastIndexOf("/"))
   const configDirectory = input.config.slice(0, input.config.lastIndexOf("/"))
   const rootConfig = input.roots.map((root) => `[[security.allowed_roots]]\npath = ${tomlString(root)}`).join("\n\n")
   const config = `[server]\nstdio = true\nhttp_listen = ""\nlog_level = "info"\n\n[limits]\ndefault_timeout_ms = 30000\nhard_timeout_ms = 300000\nmax_output_bytes = 1048576\nmax_file_read_bytes = 1048576\nmax_processes_per_session = 8\nmax_concurrent_sessions = 16\n\n[security]\nallow_shell = true\n\n${rootConfig}\n\n[audit]\nenabled = false\n`
@@ -106,22 +144,25 @@ config=${shellQuote(input.config)}
 marker="$binary.sha256"
 lock=${shellQuote(`${binaryDirectory}.lock`)}
 temporary=""
-cleanup() { [ -n "$temporary" ] && rm -rf "$temporary"; rmdir "$lock" 2>/dev/null || true; }
+owned=0
+cleanup() { [ -n "$temporary" ] && rm -rf "$temporary"; [ "$owned" -eq 1 ] && rmdir "$lock" 2>/dev/null || true; }
 trap cleanup EXIT HUP INT TERM
+mkdir -p ${shellQuote(managedDirectory)} ${shellQuote(configDirectory)}
 attempt=0
 while ! mkdir "$lock" 2>/dev/null; do
   attempt=$((attempt + 1))
   [ "$attempt" -lt 100 ] || { echo "OPENCODE_REXD_PHASE=install lock timeout" >&2; exit 71; }
   sleep 0.1
 done
-mkdir -p ${shellQuote(binaryDirectory)} ${shellQuote(configDirectory)}
+owned=1
+mkdir -p ${shellQuote(binaryDirectory)}
 installed=0
 if [ ! -x "$binary" ] || [ ! -f "$marker" ] || [ "$(cat "$marker")" != ${shellQuote(input.checksum)} ]; then
   command -v curl >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=download curl unavailable" >&2; exit 72; }
   command -v tar >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install tar unavailable" >&2; exit 73; }
   command -v sha256sum >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=checksum sha256sum unavailable" >&2; exit 74; }
   temporary="$(mktemp -d)"
-  curl -fsSL --proto '=https' --tlsv1.2 ${shellQuote(input.url)} -o "$temporary/${input.artifact}" || { echo "OPENCODE_REXD_PHASE=download failed" >&2; exit 75; }
+  curl -fsSL --connect-timeout 5 --max-time 30 --proto '=https' --tlsv1.2 ${shellQuote(input.url)} -o "$temporary/${input.artifact}" || { echo "OPENCODE_REXD_PHASE=download failed" >&2; exit 75; }
   actual="$(sha256sum "$temporary/${input.artifact}" | cut -d' ' -f1)"
   [ "$actual" = ${shellQuote(input.checksum)} ] || { echo "OPENCODE_REXD_PHASE=checksum mismatch" >&2; exit 76; }
   tar -xzf "$temporary/${input.artifact}" -C "$temporary" || { echo "OPENCODE_REXD_PHASE=install extract failed" >&2; exit 77; }
@@ -136,8 +177,59 @@ cat >"$config.next" <<'OPENCODE_REXD_CONFIG'
 ${config}OPENCODE_REXD_CONFIG
 chmod 0600 "$config.next"
 mv "$config.next" "$config"
-"$binary" --version >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install binary invalid" >&2; exit 78; }
+"$binary" -h >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install binary invalid" >&2; exit 78; }
 [ "$installed" -eq 1 ] && printf 'installed\n' || printf 'ready\n'
+`
+}
+
+function uploadScript(input: {
+  binary: string
+  config: string
+  artifact: string
+  checksum: string
+  roots: readonly string[]
+}) {
+  const binaryDirectory = input.binary.slice(0, input.binary.lastIndexOf("/"))
+  const managedDirectory = binaryDirectory.slice(0, binaryDirectory.lastIndexOf("/"))
+  const configDirectory = input.config.slice(0, input.config.lastIndexOf("/"))
+  const rootConfig = input.roots.map((root) => `[[security.allowed_roots]]\npath = ${tomlString(root)}`).join("\n\n")
+  const config = `[server]\nstdio = true\nhttp_listen = ""\nlog_level = "info"\n\n[limits]\ndefault_timeout_ms = 30000\nhard_timeout_ms = 300000\nmax_output_bytes = 1048576\nmax_file_read_bytes = 1048576\nmax_processes_per_session = 8\nmax_concurrent_sessions = 16\n\n[security]\nallow_shell = true\n\n${rootConfig}\n\n[audit]\nenabled = false\n`
+  return `set -eu
+binary=${shellQuote(input.binary)}
+config=${shellQuote(input.config)}
+marker="$binary.sha256"
+lock=${shellQuote(`${binaryDirectory}.lock`)}
+temporary=""
+owned=0
+cleanup() { [ -n "$temporary" ] && rm -rf "$temporary"; [ "$owned" -eq 1 ] && rmdir "$lock" 2>/dev/null || true; }
+trap cleanup EXIT HUP INT TERM
+mkdir -p ${shellQuote(managedDirectory)} ${shellQuote(configDirectory)}
+attempt=0
+while ! mkdir "$lock" 2>/dev/null; do
+  attempt=$((attempt + 1))
+  [ "$attempt" -lt 100 ] || { echo "OPENCODE_REXD_PHASE=install lock timeout" >&2; exit 71; }
+  sleep 0.1
+done
+owned=1
+temporary="$(mktemp -d)"
+cat >"$temporary/${input.artifact}"
+command -v tar >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install tar unavailable" >&2; exit 73; }
+command -v sha256sum >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=checksum sha256sum unavailable" >&2; exit 74; }
+actual="$(sha256sum "$temporary/${input.artifact}" | cut -d' ' -f1)"
+[ "$actual" = ${shellQuote(input.checksum)} ] || { echo "OPENCODE_REXD_PHASE=checksum mismatch" >&2; exit 76; }
+tar -xzf "$temporary/${input.artifact}" -C "$temporary" || { echo "OPENCODE_REXD_PHASE=install extract failed" >&2; exit 77; }
+mkdir -p ${shellQuote(binaryDirectory)}
+install -m 0755 "$temporary/${input.artifact.slice(0, -".tar.gz".length)}" "$temporary/rexd.next"
+mv "$temporary/rexd.next" "$binary"
+printf '%s' ${shellQuote(input.checksum)} >"$temporary/marker.next"
+chmod 0600 "$temporary/marker.next"
+mv "$temporary/marker.next" "$marker"
+cat >"$config.next" <<'OPENCODE_REXD_CONFIG'
+${config}OPENCODE_REXD_CONFIG
+chmod 0600 "$config.next"
+mv "$config.next" "$config"
+"$binary" -h >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install binary invalid" >&2; exit 78; }
+printf 'installed\n'
 `
 }
 

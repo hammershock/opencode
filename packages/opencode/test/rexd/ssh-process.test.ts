@@ -13,7 +13,7 @@ test("SSH script cancellation terminates and reaps the child process", async () 
     `#!/bin/sh
 touch '${ready}'
 trap "touch '${closed}'; exit 0" TERM INT
-while :; do sleep 1; done
+while :; do :; done
 `,
   )
   await Bun.spawn(["chmod", "0700", executable]).exited

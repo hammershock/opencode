@@ -42,6 +42,19 @@ describe("Rexd handshake", () => {
     await client.close()
   })
 
+  test("limits each NDJSON frame rather than the combined transport chunk", async () => {
+    const transport = new FakeTransport()
+    const client = new RexdRpcClient(transport, 100)
+    const methods: string[] = []
+    client.onNotification((method) => methods.push(method))
+    const frame = JSON.stringify({ jsonrpc: "2.0", method: "exec.stdout", params: {} }) + "\n"
+    expect(Buffer.byteLength(frame.repeat(3))).toBeGreaterThan(100)
+    transport.data(frame.repeat(3))
+    expect(methods).toEqual(["exec.stdout", "exec.stdout", "exec.stdout"])
+    expect(transport.closed).toBe(false)
+    await client.close()
+  })
+
   test("cancellation settles and removes a request without retry", async () => {
     const transport = new FakeTransport()
     const client = new RexdRpcClient(transport)

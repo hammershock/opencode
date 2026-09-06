@@ -3,14 +3,10 @@ import { REXD_BASELINE_VERSION } from "./manifest"
 import type { Transport } from "./ssh"
 
 const REQUIRED_CAPABILITIES = ["exec", "fs", "events", "pty"] as const
-const REQUIRED_LIMITS = [
-  "default_timeout_ms",
-  "hard_timeout_ms",
-  "max_output_bytes",
-  "max_file_read_bytes",
-  "max_processes_per_session",
-  "max_concurrent_sessions",
-] as const
+// rexd/1 session.open exposes these two enforceable request ceilings. The
+// remaining daemon limits are version-pinned server behavior, not negotiated
+// fields in the baseline wire protocol.
+const REQUIRED_LIMITS = ["default_timeout_ms", "max_output_bytes"] as const
 
 export type RexdHandshake = {
   sessionID: string
@@ -124,12 +120,15 @@ export class RexdRpcClient {
 
   #data(chunk: string) {
     this.#buffer += chunk
-    if (Buffer.byteLength(this.#buffer, "utf8") > this.maxLineBytes) {
+    const lines = this.#buffer.split("\n")
+    this.#buffer = lines.pop() ?? ""
+    if (
+      Buffer.byteLength(this.#buffer, "utf8") > this.maxLineBytes ||
+      lines.some((line) => Buffer.byteLength(line, "utf8") > this.maxLineBytes)
+    ) {
       void this.close(new RexdError("transport", "Rexd frame exceeded the safety limit", false, "unknown"))
       return
     }
-    const lines = this.#buffer.split("\n")
-    this.#buffer = lines.pop() ?? ""
     lines.filter(Boolean).forEach((line) => this.#line(line))
   }
 

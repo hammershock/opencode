@@ -53,3 +53,13 @@ export interface Projector<Transaction> {
   /** Removes both metadata projections and hydrated Session content. */
   readonly delete: (transaction: Transaction, tombstone: Tombstone) => Effect.Effect<void, unknown>
 }
+
+/**
+ * Cross-database projection contract. Implementations must be idempotent by
+ * operation ID because a crash can occur after projection and before cursor
+ * commit, causing the durable apply journal to replay the operation.
+ */
+export interface DurableProjector {
+  readonly project: (event: Envelope) => Effect.Effect<void, unknown>
+  readonly delete: (tombstone: Tombstone) => Effect.Effect<void, unknown>
+}

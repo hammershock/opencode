@@ -201,6 +201,40 @@ describe("SyncEventStore", () => {
     )
   })
 
+  test("recovers a cross-database projection crash before advancing its cursor", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const projected = new Set<string>()
+        const attempts = new Map<string, number>()
+        let fail = true
+        const projector: SyncEvent.DurableProjector = {
+          project: (item) =>
+            Effect.gen(function* () {
+              // Models EventV2's durable event-ID idempotency in the Session DB.
+              attempts.set(item.id, (attempts.get(item.id) ?? 0) + 1)
+              projected.add(item.id)
+              if (item.id === "two" && fail) return yield* Effect.fail("simulated process crash")
+            }),
+          delete: () => Effect.void,
+        }
+        const remoteSegment = segment(1, [event("one", 0), event("two", 1)])
+        const crashed = yield* store.applyDurable(remoteSegment, projector).pipe(Effect.exit)
+        expect(Exit.isFailure(crashed)).toBe(true)
+        expect(yield* store.cursor(remote)).toBe(0)
+        expect(yield* store.pendingApply()).toEqual([remoteSegment])
+        expect([...projected].sort()).toEqual(["one", "two"])
+
+        fail = false
+        yield* store.applyDurable(remoteSegment, projector)
+        expect(yield* store.cursor(remote)).toBe(1)
+        expect(yield* store.pendingApply()).toEqual([])
+        expect([...projected].sort()).toEqual(["one", "two"])
+        expect(Object.fromEntries(attempts)).toEqual({ one: 2, two: 2 })
+      }),
+    )
+  })
+
   test("coordinates a renewable cross-process lease by owner and expiry", async () => {
     await run(
       Effect.gen(function* () {

@@ -302,7 +302,7 @@ completed | cancelled | failed | unknown
 
 ```text
 upstream host resolver
-  -> accepted upstream override decorator（如果目标 identity/fingerprint 匹配）
+  -> 构建期已验证的 accepted upstream override decorator
   -> fork Core registry longest-match
   -> normal prompt submission
 ```
@@ -318,16 +318,12 @@ Core registry 内：
 
 ### Upstream override decorator
 
-RFC-0006 的 override 不是注册一个抢占同名 path 的新命令，而是显式装饰 host 已解析出的 upstream identity：
+RFC-0006 的 override 不是注册一个抢占同名 path 的新命令，而是显式装饰在构建期验证过的 upstream identity：
 
 ```ts
 defineOverride({
   id: "fork.session.exit-to-home",
-  target: {
-    host: "tui",
-    id: "app.exit",
-    fingerprint: "...",
-  },
+  target: verifiedUpstream.tui.appExit,
   decorate: (next) => async (context, input) => {
     if (context.sessionID) return context.navigation.home()
     return next(context, input)
@@ -335,7 +331,16 @@ defineOverride({
 })
 ```
 
-`fingerprint` 由目标 command 的稳定 metadata 和 contract fixture 产生。目标缺失或 fingerprint 不匹配时，override 被禁用并报告 drift；不得按 slash 名称猜测并继续执行。外部来源的优先级仍由 upstream host resolver 决定。
+`verifiedUpstream` 是仓库构建步骤从固定 upstream baseline 的 command catalog、稳定 metadata 和 contract fixture 生成的类型化 manifest。override 源码只能引用 manifest 中的导出，不能手写 host/id 字符串或在运行时按 slash 名称查找目标。
+
+静态 verifier 是 typecheck/build/CI 的强制前置步骤，必须检查：
+
+- 目标 identity、host、path、aliases、availability contract 和 handler input boundary 仍与 baseline 一致；
+- contract fingerprint 与已审查 fixture 一致；
+- 一个 upstream identity 没有被多个互斥 decorator 意外绑定；
+- manifest 与当前源码注册 catalog 同步，没有陈旧或无法解析的目标。
+
+目标缺失、metadata/contract 漂移或 manifest 陈旧时，构建直接失败，要求更新 baseline、fixture 和 RFC 审查；不能生成“运行时发现后禁用”的产物。生产运行时不进行 fingerprint/drift 决策，只处理 route、Session 和 feature flag 等正常 availability。外部来源的优先级仍由 upstream host resolver 决定。
 
 ### v1 capability 与配置边界
 
@@ -516,7 +521,7 @@ completed | cancelled | failed | unknown
 - 建立私有 `packages/command-kit`，只实现 definition、registry、解析、completion contract、outcome 和诊断。
 - 用纯单元测试覆盖 longest-match、alias、raw arguments、多行输入、duplicate rejection、取消和失败。
 - 建立 synthetic upstream resolver fixture，验证 upstream-first、not-found passthrough 和 shadowing 诊断。
-- 建立 synthetic override fixture，验证 identity/fingerprint、fallback 和 drift disable。
+- 建立 synthetic override fixture 和静态 manifest verifier，验证 identity/fingerprint、fallback，以及 drift 导致 typecheck/build 失败。
 
 原型不得先加入真实 `/env`、`/target` 或同步业务。它的目标是验证 toolkit contract，而不是借原型提交未接受的功能实现。
 
@@ -552,7 +557,7 @@ completed | cancelled | failed | unknown
 5. 当前兼容矩阵中的上游命令来源均通过 upstream-first 兼容 fixture。
 6. 未适配本 fork 的代表性上游插件可以正常加载并保持原行为。
 7. 现有 `CommandV2`、`/api/command`、`session.command` 和生成 SDK 不发生未经版本化的行为变化。
-8. UI 可以显示生效命令的 provenance，并诊断 winner、shadowed candidate 和 override drift。
+8. UI 可以显示生效命令的 provenance 以及 winner/shadowed candidate；override drift 由静态 verifier 在 typecheck/build/CI 阶段阻止。
 9. capability 与实际 service 调用均可在测试中断言，配置只能收紧，不能扩大权限。
 10. `/target`、`/env`、`/sync`、`/permissions`、`/expand` 和 `/delete` 没有各自维护通用输入解析分支。
 

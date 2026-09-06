@@ -126,7 +126,7 @@ Server 提供的 custom command、MCP prompt 和 Skill 也可能出现在客户�
 
 ## Override 机制
 
-对上游内建命令的调整必须通过 RFC-0003 toolkit 的显式 override/decorator 机制实现，不直接修改通用 prompt dispatch，也不复制整段上游 handler。
+对上游内建命令的调整必须通过 RFC-0003 toolkit 的显式 override/decorator 机制实现，不直接修改通用 prompt dispatch，也不复制整段上游 handler。override 目标必须在 typecheck/build/CI 阶段完成静态验证，生产运行时不负责发现 contract drift。
 
 每个 override 必须具有：
 
@@ -135,9 +135,9 @@ Server 提供的 custom command、MCP prompt 和 Skill 也可能出现在客户�
 - 原 handler 的兼容 fallback 或可复用调用入口；
 - 明确的参数、客户端和 route 范围；
 - 行为差异测试；
-- upstream 同步时的 drift 检测。
+- upstream 同步时会让构建失败的静态 drift 检测。
 
-如果 upstream command identity 或 contract 发生变化，override 必须显式进入 incompatible 状态并要求重新审查，不能静默绑定到名称相同但语义已经变化的新命令。
+如果 upstream command identity 或 contract 发生变化，类型化 manifest/verifier 必须阻止构建并要求重新审查，不能生成运行时才进入 incompatible 状态的产物，也不能静默绑定到名称相同但语义已经变化的新命令。
 
 ## 已确定的上游调整
 
@@ -247,7 +247,7 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 5. 是否创建 Session parts 或调用 Agent；
 6. 外部同名 custom command 的覆盖行为；
 7. TUI 与 Web/Desktop 未声明范围内不受影响；
-8. upstream handler/schema drift 检测。
+8. upstream handler/schema drift 的静态构建失败测试。
 
 不要在同一个实现提交中同时调整多个无关的上游命令。
 
@@ -267,7 +267,7 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 3. 未调整命令继续由 RFC-0003 upstream adapter 提供，不发生隐式迁移。
 4. 外部 command、MCP、Skill 和插件的冲突及执行行为保持 upstream 兼容。
 5. fork 新增命令没有混入 upstream override 层。
-6. 同步 upstream 后可以通过测试或诊断明确发现 override drift。
+6. 同步 upstream 后，override identity、metadata 或 contract drift 会在 typecheck/build/CI 阶段失败，不依赖运行时 route 或手工触发命令。
 7. 实验性 `/exit` 默认关闭并可在 panel 切换；关闭时 `/exit`、`/quit`、`/q` 均保持 upstream 行为。
 8. `/rename <title>`、`/permissions`、`/expand`、`/collapse` 和 `/delete` 均由 toolkit 消费，不会成为 prompt、Session message 或 Agent 调用。
 9. `/sessions` 可以显示并搜索 local、Rexd 和同步 metadata 所描述的执行位置，unresolved Session 不会静默消失或改为 local。

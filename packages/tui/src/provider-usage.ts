@@ -14,7 +14,7 @@ export type Result = {
 }
 
 export async function load(
-  sdk: { url: string; directory?: string; fetch: typeof fetch },
+  sdk: { url: string; directory?: string; fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> },
   providerID: string,
   refresh = false,
 ) {
@@ -26,13 +26,23 @@ export async function load(
   return (await response.json()) as Result
 }
 
-export function summary(result: Result | undefined) {
+export function summary(result: Result | undefined, selected?: string[]) {
   if (!result?.snapshot || (result.status !== "available" && result.status !== "stale")) return
-  const meter = result.snapshot.meters.toSorted((a, b) => a.order - b.order)[0]
-  if (!meter || meter.remaining === undefined) return
-  const value =
-    meter.limit === 100 && meter.unit === "percentage"
-      ? `${Math.round(meter.remaining)}% left`
-      : `${meter.remaining} ${meter.unit}`
+  const values = result.snapshot.meters
+    .toSorted((a, b) => {
+      if (!selected) return a.order - b.order
+      return selected.indexOf(a.id) - selected.indexOf(b.id)
+    })
+    .filter((meter) => selected === undefined || selected.includes(meter.id))
+    .flatMap((meter) => {
+      if (meter.remaining === undefined) return []
+      return [
+        meter.limit === 100 && meter.unit === "percentage"
+          ? `${Math.round(meter.remaining)}% left`
+          : `${meter.remaining} ${meter.unit}`,
+      ]
+    })
+  if (!values.length) return
+  const value = values.join(" · ")
   return result.status === "stale" ? `${value} (stale)` : value
 }

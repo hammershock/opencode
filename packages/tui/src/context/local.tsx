@@ -153,12 +153,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           modelID: string
         }[]
         variant: Record<string, string | undefined>
+        usage: Record<string, string[]>
       }>({
         ready: false,
         model: {},
         recent: [],
         favorite: [],
         variant: {},
+        usage: {},
       })
 
       const filePath = path.join(paths.state, "model.json")
@@ -176,6 +178,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           recent: modelStore.recent,
           favorite: modelStore.favorite,
           variant: modelStore.variant,
+          usage: modelStore.usage,
         })
       }
 
@@ -187,6 +190,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (Array.isArray(value.favorite)) setModelStore("favorite", value.favorite)
           if (typeof value.variant === "object" && value.variant !== null)
             setModelStore("variant", value.variant as Record<string, string | undefined>)
+          if (typeof value.usage === "object" && value.usage !== null)
+            setModelStore("usage", value.usage as Record<string, string[]>)
         })
         .catch(() => {})
         .finally(() => {
@@ -358,6 +363,19 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             )
             save()
           })
+        },
+        usage: {
+          selected(providerID: string, available: string[]) {
+            const saved = modelStore.usage[providerID]
+            return saved === undefined ? available : saved.filter((id) => available.includes(id))
+          },
+          saved(providerID: string) {
+            return modelStore.usage[providerID]
+          },
+          set(providerID: string, ids: string[]) {
+            setModelStore("usage", providerID, ids)
+            save()
+          },
         },
         variant: {
           selected() {

@@ -10,6 +10,22 @@ describe("provider usage presentation", () => {
     expect(summary({ status: "available", snapshot })).toBe("72% left")
     expect(summary({ status: "stale", snapshot })).toBe("72% left (stale)")
     expect(summary({ status: "error" })).toBeUndefined()
+    expect(
+      summary(
+        {
+          status: "available",
+          snapshot: {
+            meters: [
+              ...snapshot.meters,
+              { id: "requests", label: "Requests", remaining: 9, unit: "requests", order: 1 },
+            ],
+            fetchedAt: 1,
+          },
+        },
+        ["requests", "quota"],
+      ),
+    ).toBe("9 requests · 72% left")
+    expect(summary({ status: "available", snapshot }, [])).toBeUndefined()
   })
 
   test("supports refresh and treats endpoint failure as display-only", async () => {

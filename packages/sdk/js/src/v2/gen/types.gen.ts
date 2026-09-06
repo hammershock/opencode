@@ -2549,6 +2549,35 @@ export type ProviderAuthError1 = {
   }
 }
 
+export type ProviderUsageMeter = {
+  id: string
+  label: string
+  kind: "balance" | "quota" | "rate_limit" | "credits" | "custom"
+  used?: number
+  remaining?: number
+  limit?: number
+  unit: string
+  resetsAt?: number
+  order: number
+}
+
+export type ProviderUsageSnapshot = {
+  providerID: string
+  accountID?: string
+  scopeID?: string
+  fetchedAt: number
+  expiresAt?: number
+  source: "official_api" | "response_headers" | "experimental_private"
+  meters: Array<ProviderUsageMeter>
+}
+
+export type ProviderUsageResult = {
+  providerID: string
+  status: "available" | "unsupported" | "unauthenticated" | "error" | "stale"
+  snapshot?: ProviderUsageSnapshot
+  error?: "authentication" | "rate_limit" | "timeout" | "schema" | "network" | "unknown"
+}
+
 export type Session1 = {
   id: string
   slug: string
@@ -9942,6 +9971,37 @@ export type ProviderOauthCallbackResponses = {
 }
 
 export type ProviderOauthCallbackResponse = ProviderOauthCallbackResponses[keyof ProviderOauthCallbackResponses]
+
+export type ProviderUsageData = {
+  body?: never
+  path: {
+    providerID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    refresh?: "true"
+  }
+  url: "/provider/{providerID}/usage"
+}
+
+export type ProviderUsageErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderUsageError = ProviderUsageErrors[keyof ProviderUsageErrors]
+
+export type ProviderUsageResponses = {
+  /**
+   * Provider usage snapshot
+   */
+  200: ProviderUsageResult
+}
+
+export type ProviderUsageResponse = ProviderUsageResponses[keyof ProviderUsageResponses]
 
 export type SessionListData = {
   body?: never

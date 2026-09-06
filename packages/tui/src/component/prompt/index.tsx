@@ -289,6 +289,22 @@ export function Prompt(props: PromptProps) {
   })
 
   const [providerUsage, setProviderUsage] = createSignal<ProviderUsageResult>()
+  const providerUsageText = createMemo(() => {
+    const result = providerUsage()
+    const providerID = props.sessionID
+      ? sync.data.message[props.sessionID]?.findLast(
+          (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
+        )?.providerID
+      : undefined
+    if (!result?.snapshot || !providerID) return
+    return providerUsageSummary(
+      result,
+      local.model.usage.selected(
+        providerID,
+        result.snapshot.meters.map((meter) => meter.id),
+      ),
+    )
+  })
   createEffect(
     on(
       () => {
@@ -1734,9 +1750,7 @@ export function Prompt(props: PromptProps) {
                     <Match when={usage()}>
                       {(item) => (
                         <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost, providerUsageSummary(providerUsage())]
-                            .filter(Boolean)
-                            .join(" · ")}
+                          {[item().context, item().cost, providerUsageText()].filter(Boolean).join(" · ")}
                         </text>
                       )}
                     </Match>

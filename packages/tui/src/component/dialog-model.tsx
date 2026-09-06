@@ -8,7 +8,7 @@ import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
-import { load, summary, type Result } from "../provider-usage"
+import { load, summary, type Meter, type Result } from "../provider-usage"
 import { useSDK } from "../context/sdk"
 
 export function DialogModel(props: { providerID?: string }) {
@@ -61,7 +61,11 @@ export function DialogModel(props: { providerID?: string }) {
       })
     }
 
-    const favoriteOptions = toOptions(favorites, "Favorites")
+    const favoriteOptions = favorites.flatMap((item) => {
+      const provider = sync.data.provider.find((provider) => provider.id === item.providerID)
+      if (!provider) return []
+      return toOptions([item], `Favorites · ${provider.name}`)
+    })
     const recentOptions = toOptions(
       recents.filter(
         (item) => !favorites.some((fav) => fav.providerID === item.providerID && fav.modelID === item.modelID),
@@ -91,8 +95,13 @@ export function DialogModel(props: { providerID?: string }) {
             category: connected() ? provider.name : undefined,
             disabled: provider.id === "opencode" && model.includes("-nano"),
             footer:
-              summary(usage()[provider.id]) ??
-              (info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined),
+              summary(
+                usage()[provider.id],
+                local.model.usage.selected(
+                  provider.id,
+                  usage()[provider.id]?.snapshot?.meters.map((meter) => meter.id) ?? [],
+                ),
+              ) ?? (info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined),
             onSelect() {
               onSelect(provider.id, model)
             },
@@ -172,6 +181,17 @@ export function DialogModel(props: { providerID?: string }) {
       options={options()}
       actions={[
         {
+          command: "model.dialog.usage.configure",
+          title: "Configure footer usage",
+          hidden: !connected(),
+          onTrigger: (option) => {
+            const providerID = (option.value as { providerID: string }).providerID
+            const meters = usage()[providerID]?.snapshot?.meters
+            if (!meters?.length) return
+            dialog.replace(() => <DialogProviderUsage providerID={providerID} meters={meters} />)
+          },
+        },
+        {
           command: "model.dialog.usage.refresh",
           title: "Refresh provider usage",
           hidden: !connected(),
@@ -203,6 +223,56 @@ export function DialogModel(props: { providerID?: string }) {
       skipFilter={true}
       title={title()}
       current={local.model.current()}
+    />
+  )
+}
+
+function DialogProviderUsage(props: { providerID: string; meters: Meter[] }) {
+  const local = useLocal()
+  const available = () => props.meters.map((meter) => meter.id)
+  const selected = () => local.model.usage.selected(props.providerID, available())
+  const order = () => local.model.usage.saved(props.providerID) ?? available()
+  const options = () =>
+    props.meters
+      .toSorted((a, b) => {
+        const left = order().indexOf(a.id)
+        const right = order().indexOf(b.id)
+        if (left === -1 && right === -1) return a.order - b.order
+        if (left === -1) return 1
+        if (right === -1) return -1
+        return left - right
+      })
+      .map((meter) => ({
+        title: meter.label,
+        value: meter.id,
+        description: selected().includes(meter.id) ? "Shown" : "Hidden",
+        onSelect: () => toggle(meter.id),
+      }))
+
+  function toggle(id: string) {
+    const saved = local.model.usage.saved(props.providerID) ?? available()
+    local.model.usage.set(props.providerID, saved.includes(id) ? saved.filter((item) => item !== id) : [...saved, id])
+  }
+
+  function move(id: string, direction: -1 | 1) {
+    const saved = [...(local.model.usage.saved(props.providerID) ?? available())]
+    const index = saved.indexOf(id)
+    if (index === -1) return
+    const next = Math.max(0, Math.min(saved.length - 1, index + direction))
+    saved.splice(index, 1)
+    saved.splice(next, 0, id)
+    local.model.usage.set(props.providerID, saved)
+  }
+
+  return (
+    <DialogSelect
+      title="Footer usage"
+      options={options()}
+      actions={[
+        { command: "usage.toggle", title: "Show / hide", onTrigger: (option) => toggle(option.value as string) },
+        { command: "usage.move.up", title: "Move up", onTrigger: (option) => move(option.value as string, -1) },
+        { command: "usage.move.down", title: "Move down", onTrigger: (option) => move(option.value as string, 1) },
+      ]}
     />
   )
 }

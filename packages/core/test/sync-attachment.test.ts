@@ -61,4 +61,58 @@ describe("SyncAttachment", () => {
     expect((await service.collect({ liveObjectIDs: new Set(), allActiveDevicesAcknowledged: true })).deleted).toBe(2)
     expect(remote.files.size).toBe(0)
   })
+
+  test("externalizes real Session file parts and tool output, then restores them before replay", async () => {
+    const remote = provider()
+    const service = SyncAttachment.make({
+      rootKey: SyncCrypto.createSpace().rootKey,
+      namespaceID: "space",
+      provider: remote.adapter,
+    })
+    const original = {
+      sessionID: "session-1",
+      part: {
+        type: "tool",
+        state: {
+          status: "completed",
+          output: "x".repeat(128 * 1024),
+          attachments: [
+            {
+              type: "file",
+              mime: "image/png",
+              url: "data:image/png;base64,aGVsbG8=",
+            },
+          ],
+        },
+      },
+    }
+    const encoded = await SyncAttachment.externalize(original, service)
+    expect(JSON.stringify(encoded)).not.toContain("aGVsbG8=")
+    expect(JSON.stringify(encoded)).not.toContain('"output":"' + "x".repeat(100))
+    expect(SyncAttachment.references(encoded).size).toBe(2)
+    expect(await SyncAttachment.hydrate(encoded, service)).toEqual(original)
+  })
+
+  test("does not treat workspace paths or ordinary URLs as sync attachments", async () => {
+    const calls: string[] = []
+    const value = await SyncAttachment.externalize(
+      {
+        url: "file:///private/project/image.png",
+        remote: "https://example.com/image.png",
+        output: "short output",
+      },
+      {
+        put: async (bytes) => {
+          calls.push(new TextDecoder().decode(bytes))
+          return "object"
+        },
+      },
+    )
+    expect(value).toEqual({
+      url: "file:///private/project/image.png",
+      remote: "https://example.com/image.png",
+      output: "short output",
+    })
+    expect(calls).toEqual([])
+  })
 })

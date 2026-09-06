@@ -187,10 +187,13 @@ export function make(input: {
       try: () => JSON.parse(current) as BaiduSyncProvider.Credential,
       catch: () => new SetupError({ kind: "credential" }),
     })
-    const credential = yield* Effect.tryPromise({
-      try: () => BaiduSyncProvider.refreshCredential({ credential: parsed, request: input.request, now }),
-      catch: () => new SetupError({ kind: "oauth" }),
-    })
+    const credential =
+      parsed.expiresAt > now() + 60_000
+        ? parsed
+        : yield* Effect.tryPromise({
+            try: () => BaiduSyncProvider.refreshCredential({ credential: parsed, request: input.request, now }),
+            catch: () => new SetupError({ kind: "oauth" }),
+          })
     return yield* finish({
       credential,
       deviceName: setup.deviceName.trim(),

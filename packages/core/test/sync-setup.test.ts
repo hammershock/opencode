@@ -159,6 +159,39 @@ describe("SyncSetup", () => {
     expect(legacy.values.has("unrelated")).toBe(true)
   })
 
+  test("reuses a still-valid legacy access token without forcing OAuth refresh", async () => {
+    const configDirectory = await temp()
+    await fs.mkdir(path.join(configDirectory, "cloud-sync"), { recursive: true })
+    await fs.writeFile(
+      path.join(configDirectory, "cloud-sync", "legacy-config.json"),
+      JSON.stringify({ provider: "baidu", deviceID: "old-device" }),
+    )
+    const legacy = store()
+    legacy.values.set(
+      "old-device",
+      JSON.stringify({
+        appKey: "app",
+        secretKey: "secret",
+        accessToken: "valid",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 3_600_000,
+      }),
+    )
+    const provider = baidu()
+    const setup = SyncSetup.make({
+      configDirectory,
+      store: store(),
+      legacyStore: legacy,
+      request: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        if (url.hostname === "openapi.baidu.com") throw new Error("refresh must not be called")
+        return provider.request(input, init)
+      },
+    })
+
+    await expect(Effect.runPromise(setup.reuseLegacy({ deviceName: "Migrated" }))).resolves.toBeDefined()
+  })
+
   test("does not leave local half configuration after remote initialization failure", async () => {
     const configDirectory = await temp()
     const secure = store()

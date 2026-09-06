@@ -137,6 +137,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncAuthorize", (ctx) => badSetup(syncSetup.begin(ctx.payload)))
       .handle("syncComplete", (ctx) => badSetup(syncSetup.complete(ctx.payload)))
       .handle("syncReuseLegacy", (ctx) => badSetup(syncSetup.reuseLegacy(ctx.payload)))
+      .handle("syncEnabled", (ctx) => badSetup(syncSetup.setEnabled(ctx.payload.enabled)))
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
   }),

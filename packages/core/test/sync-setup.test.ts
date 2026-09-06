@@ -97,6 +97,8 @@ describe("SyncSetup", () => {
     expect(raw).not.toContain("access")
     expect(secure.values.has(`space:${result.config.namespaceID}:root`)).toBe(true)
     expect(secure.values.has(`baidu:${result.config.deviceID}`)).toBe(true)
+    expect((await Effect.runPromise(setup.setEnabled(false))).enabled).toBe(false)
+    expect((await Effect.runPromise(setup.config()))?.enabled).toBe(false)
     await expect(
       Effect.runPromise(setup.complete({ attemptID: begin.attemptID, code: "again" })),
     ).rejects.toMatchObject({ kind: "expired" })

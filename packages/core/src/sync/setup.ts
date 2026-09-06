@@ -46,6 +46,7 @@ export const ReuseLegacyInput = Schema.Struct({
 })
 export type ReuseLegacyInput = typeof ReuseLegacyInput.Type
 export const SetupResult = Schema.Struct({ config: Config, recoveryString: Schema.String })
+export const EnabledInput = Schema.Struct({ enabled: Schema.Boolean })
 
 export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetupError", {
   kind: Schema.Literals(["invalid", "credential", "oauth", "remote", "storage", "expired"]),
@@ -57,6 +58,7 @@ export interface Interface {
   readonly begin: (input: BeginInput) => Effect.Effect<typeof BeginResult.Type, SetupError>
   readonly complete: (input: CompleteInput) => Effect.Effect<typeof SetupResult.Type, SetupError>
   readonly reuseLegacy: (input: ReuseLegacyInput) => Effect.Effect<typeof SetupResult.Type, SetupError>
+  readonly setEnabled: (enabled: boolean) => Effect.Effect<Config, SetupError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncSetup") {}
@@ -259,7 +261,18 @@ export function make(input: {
     return { config: next, recoveryString }
   })
 
-  return Service.of({ config, inspectLegacy, begin, complete, reuseLegacy })
+  const setEnabled = Effect.fn("SyncSetup.setEnabled")(function* (enabled: boolean) {
+    const current = yield* config()
+    if (!current) return yield* new SetupError({ kind: "invalid" })
+    const next = { ...current, enabled }
+    yield* Effect.tryPromise({
+      try: () => atomicJson(filename, next),
+      catch: () => new SetupError({ kind: "storage" }),
+    })
+    return next
+  })
+
+  return Service.of({ config, inspectLegacy, begin, complete, reuseLegacy, setEnabled })
 }
 
 function ephemeral(credential: BaiduSyncProvider.Credential): SyncSecureStore.Store {

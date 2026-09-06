@@ -76,6 +76,7 @@ export const GlobalPaths = {
   syncAuthorize: "/global/sync/setup/authorize",
   syncComplete: "/global/sync/setup/complete",
   syncReuseLegacy: "/global/sync/setup/reuse-legacy",
+  syncEnabled: "/global/sync/enabled",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -125,6 +126,11 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.post("syncReuseLegacy", GlobalPaths.syncReuseLegacy, {
         payload: SyncSetup.ReuseLegacyInput,
         success: SyncSetup.SetupResult,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.patch("syncEnabled", GlobalPaths.syncEnabled, {
+        payload: SyncSetup.EnabledInput,
+        success: SyncSetup.Config,
         error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {

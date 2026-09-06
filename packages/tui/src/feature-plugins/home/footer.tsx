@@ -10,6 +10,7 @@ import { useSDK } from "../../context/sdk"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { DialogLocationDirectory } from "../../component/dialog-location-directory"
+import { DialogPrompt } from "../../ui/dialog-prompt"
 import type { TargetDefinition } from "../../component/target-wizard"
 import { TargetHealth, useTargetManager } from "../../component/target-manager"
 
@@ -59,18 +60,35 @@ function Directory(props: { api: TuiPluginApi }) {
       try {
         const result = await sdk.client.v2.target.prepare({ targetID: target.id }, { throwOnError: true })
         if (result.data.status !== "ready") throw new Error(`${result.data.stage}: ${result.data.message}`)
+        const input = {
+          name: target.name,
+          connection: target.connection,
+          workspaceRoots: target.workspaceRoots,
+          transport: target.transport,
+          ...(target.defaultDirectory ? { defaultDirectory: target.defaultDirectory } : {}),
+          ...(target.command ? { command: target.command } : {}),
+        }
+        const inspected = await sdk.client.v2.target.wizard.inspect({ input }, { throwOnError: true })
+        const starting = inspected.data.home
+        const directory = await DialogPrompt.show(dialog, `${target.name} working directory`, {
+          value: starting,
+          placeholder: starting,
+          description: () => (
+            <text>Absolute remote directory used by the new Session. Press Tab to complete paths.</text>
+          ),
+          complete: async (value, cursor) => {
+            const completed = await sdk.client.v2.target.wizard.complete(
+              { input, value, cursor, cwd: starting },
+              { throwOnError: true },
+            )
+            return { ...completed.data, cursor: Number(completed.data.cursor) }
+          },
+        })
+        if (!directory?.trim()) return
         const selected = { type: "rexd" as const, targetID: target.id, name: target.name }
-        dialog.replace(() => (
-          <DialogLocationDirectory
-            target={selected}
-            initial={target.defaultDirectory ?? target.workspaceRoots[0] ?? "/"}
-            onSelect={(directory) => {
-              destination?.setTarget(selected)
-              destination?.setDestination({ type: "directory", directory, subdirectory: false })
-              dialog.clear()
-            }}
-          />
-        ))
+        destination?.setTarget(selected)
+        destination?.setDestination({ type: "directory", directory: directory.trim(), subdirectory: false })
+        dialog.clear()
       } catch (error) {
         toast.show({ title: "Target unavailable", message: errorMessage(error), variant: "error" })
       }
@@ -78,6 +96,7 @@ function Directory(props: { api: TuiPluginApi }) {
   }
 
   const openTargets = () => {
+    void targetManager.refreshHealth()
     dialog.replace(() => (
       <DialogSelect
         title="Execution target"

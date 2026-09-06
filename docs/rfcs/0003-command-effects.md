@@ -1,78 +1,349 @@
 ---
 id: 0003
-title: Command Effects and Context Policy
+title: Slash Command Governance and Compatibility
 status: draft
 authors:
   - hammershock
 created: 2026-09-06
 updated: 2026-09-06
 implemented-by: []
-depends-on: []
+depends-on:
+  - 0001
 supersedes: []
 superseded-by: []
 ---
 
-# RFC-0003：命令效果与上下文策略
+# RFC-0003：Slash Command 治理与兼容框架
 
 ## 摘要
 
-规范 OpenCode 内建及自定义 slash command 的行为声明，明确区分命令执行的 action、是否写入 Session、是否投影到模型上下文，以及是否调用 Agent。
+为 OpenCode 建立统一的 slash command 管理与执行框架，替代在 prompt 组件中按字符串硬编码复杂命令的做法。框架统一命令身份、分层路径、参数解析、来源、发现、冲突、配置、权限声明和执行契约，但不要求 UI action、Core operation、Agent prompt 和复合 workflow 使用同一种底层 handler。
 
-本 RFC 目前只记录需要解决的问题和初步术语，不在讨论完成前确定最终 Schema。
+新框架必须全面兼容对应上游 OpenCode 版本中已有的命令来源和公开插件接口。未经显式迁移的外部 command、MCP prompt、Skill 和插件命令保持上游行为，不因本 fork 的内部规范化而改变是否写入 Session、是否进入模型上下文或是否调用 Agent。
+
+## 必须满足的约束
+
+1. 旧归档中把 `/env`、`/target`、`/cd`、`/sync` 等命令直接写入 prompt 提交函数的方式不得复用。
+2. 新增命令必须通过统一 registry 注册，不允许修改通用输入组件来识别某个具体命令。
+3. 一个命令可以编排多个有条件的步骤，不能被压缩成单一 `kind` 或几项可任意组合的布尔属性。
+4. 对应上游版本支持的所有命令来源、调用入口、公开类型和默认冲突语义必须保持兼容。
+5. Fork 扩展采用增量、可探测、可版本化的 API；外部插件不采用扩展时继续走兼容适配器。
+6. 模型调用、Session 写入和上下文投影由 workflow 实际调用的受控服务决定，不能由用户在配置中任意改写。
+7. 框架必须显示并保留命令 provenance，不能把外部内容伪装成 Core 内建命令。
 
 ## 动机
 
-OpenCode 中的“命令”目前包含不同性质的入口：
+OpenCode 当前把多种机制都呈现为 `/name`：
 
-- `/help`、`/terminal` 等客户端控制命令；
-- `/init` 和 custom command 等 prompt command；
-- 未来的 `/env list`、`/env reload`、`/env init` 等混合命令组。
+- TUI/Web/Desktop 的客户端 command，通常直接执行 UI callback；
+- `/init` 和配置文件中的 custom command，展开模板后调用 Agent；
+- MCP prompts；
+- 可作为 slash command 使用的 Skills；
+- TUI 插件通过公开 API 注册的 command；
+- 插件对 command 或执行前 parts 的 transform/hook。
 
-只用“slash command”无法说明一个命令是否创建消息、是否进入模型上下文或是否触发 Agent。新增命令时如果依赖调用路径的隐式行为，会使回放、审计和多客户端实现不一致。
+它们共享输入语法，但不是同一种执行机制，也不具有相同信任边界。统一框架的目的不是抹平差异，而是让维护者能够用同一套规则发现、审查、配置和调用它们。
 
-## 初步效果维度
+旧归档中的 `/env init` 进一步说明命令可能是复合 workflow：
 
-下面是待验证的概念模型，而不是最终字段名：
+```text
+解析 Location
+  -> .env 不存在时创建模板
+  -> 构造并提交 Agent prompt
+  -> 等待 Agent 完成
+  -> 成功后 reload environment
+```
 
-1. `action`：命令实际请求系统做什么，例如切换 UI、刷新 runtime state、执行 operation 或提交 prompt；
-2. `conversationRecord`：是否产生持久化、可回放的 Session part；
-3. `modelProjection`：哪些记录会进入当前或后续 Agent 的模型上下文；
-4. `agentInvocation`：是否立即调用 Agent 或 subagent。
+其中只有 Agent prompt 步骤进入 Session 和模型上下文。把 `entersSession`、`entersContext` 或 `invokesModel` 作为整个命令的可编辑属性，会错误描述这种流程。
 
-此前使用的 `runtimeEffect` 指“只发生在当前客户端或运行时中的动作”，例如打开 Terminal panel 或刷新环境快照。这个词过于宽泛，本 RFC 暂时改用 `action`，后续结合现有 command registry 再确定精确类型。
+## 设计原则
 
-## 当前基线
+### 1. 统一管理平面，不强制统一执行位置
 
-| 入口                      | Action          | 写入 Session | 进入后续 Agent 上下文 | 立即调用 Agent |
-| ------------------------- | --------------- | ------------ | --------------------- | -------------- |
-| `/help`、`/terminal`      | UI control      | 否           | 否                    | 否             |
-| `!command`                | Shell execute   | 是           | 是，包含命令及结果    | 否             |
-| `/init`                   | Prompt submit   | 是           | 是                    | 是             |
-| custom prompt command     | Prompt submit   | 是           | 是                    | 是或 subagent  |
-| Terminal panel 输入与输出 | PTY interaction | 否           | 否                    | 否             |
+框架分成两层：
 
-`!command` 不是 slash command，但它是检验 Session 记录与模型投影边界的重要对照，因此保留在表中。
+- definition plane：统一描述身份、路径、参数、来源、展示、兼容模式、声明能力和 executor placement；
+- execution plane：由受信任的 handler 使用 Core services 编排实际 workflow。
 
-## 初步原则
+客户端 UI action 可以保留客户端 handler；涉及 Location、Session 或持久状态的 operation 应进入共享 Core/Server service；Agent prompt 通过 Session prompt service 提交。统一 registry 不意味着把这些代码塞进同一进程或同一种回调。
 
-- 是否写入 Session 与是否调用 Agent 必须分开表达。
-- 进入模型上下文的数据原则上应有可审计、可回放的 Session 记录。
-- secret-bearing runtime state 不得因为命令实现方便而自动投影到模型上下文。
-- 效果策略由命令定义声明，不建议提供允许用户任意重分类所有命令的全局开关。
-- 同一个命令在不同客户端上的核心记录和上下文语义必须一致；纯 UI action 可以由客户端分别实现。
+### 2. 效果属于步骤，不属于命令标签
 
-## 待确认问题
+框架不提供以下可自由组合的命令级开关：
 
-1. 这些效果应由静态 command metadata、不同 command 类型，还是 handler 返回值表达？
-2. `modelProjection` 是否需要独立于 Session part 类型配置，还是只允许由 part 类型决定？
-3. 不调用 Agent 的 operation result 应使用哪种 Session part 表达？
-4. 自定义 command 可以声明哪些效果，哪些效果只允许内建命令使用？
-5. subagent command 的父 Session 应记录模板、展开结果、subtask 引用还是它们的组合？
-6. 权限检查发生在 command 展开前还是具体 action 执行前？
+```text
+entersSession
+entersContext
+invokesModel
+```
+
+handler 通过受控服务产生效果：
+
+- 调用 Session prompt service 时，由该服务创建可回放的 Session parts、构造模型上下文并调用 Agent；
+- 调用 environment、target、sync 等 domain service 时，由对应服务执行查询或变更；
+- 调用 UI service 时，只影响当前客户端；
+- 如果 operation 需要审计记录，应写入对应 domain event，不能伪装成用户 prompt。
+
+声明的 capabilities 表示 workflow 可能使用的权限上界，服务调用才是实际发生的效果。capability 用于发现、确认和授权，不是 workflow DSL。
+
+### 3. 复合 workflow 使用普通代码编排
+
+第一阶段不设计声明式 workflow 语言。Core 内建命令使用普通 TypeScript handler，并通过窄接口访问服务：
+
+```ts
+defineCommand({
+  id: "core.environment.init",
+  path: ["env", "init"],
+  capabilities: ["workspace.write", "agent.invoke", "environment.reload"],
+  execute: (context, input) => environmentInitWorkflow(context, input),
+})
+```
+
+以上是目标接口示意，不是现有 OpenCode API，也不要求最终实现采用相同命名。业务 workflow 必须位于可单独测试的 feature/domain 模块；command handler 只负责解析、确认、调用和呈现结果。
+
+### 4. 属性附着于可执行叶子命令
+
+命令使用 token path 表达层级，并采用 longest-match 解析：
+
+```text
+/env             # group/help 或独立叶子
+/env status      # 独立叶子
+/env reload      # 独立叶子
+/env init        # 独立叶子
+```
+
+能力、handler 和兼容策略属于 `/env init` 等叶子，而不是笼统属于 `/env` group。上游单段命令作为长度为一的 path 适配，不改变其输入形式。
+
+## 核心模型
+
+下面是概念模型，公共 Schema 应在实现阶段以独立 PR 确认：
+
+```ts
+interface CommandDefinition {
+  id: string
+  path: readonly string[]
+  aliases?: readonly (readonly string[])[]
+  title: string
+  description?: string
+  provenance: CommandProvenance
+  arguments?: CommandArgumentSchema
+  placement: "client" | "server"
+  capabilities: readonly CommandCapability[]
+  compatibility?: CommandCompatibility
+  execute: CommandHandler
+}
+```
+
+关键语义：
+
+- `id` 是稳定身份，不因用户修改 alias 而变化；
+- `path` 是用户输入路径；
+- `provenance` 记录来源和外部 provider/plugin 标识；
+- `placement` 说明 handler 在哪里运行，不代表它只能调用本地资源；
+- `capabilities` 是可能使用的权限上界；
+- `execute` 可以包含条件分支、等待 Agent 和成功后的收尾步骤。
+
+## 来源与信任边界
+
+建议使用下列 provenance，而不是只有一个 `trusted` 布尔值：
+
+```text
+core
+user-config
+project-config
+mcp(serverID)
+skill(location)
+plugin(pluginID, version)
+legacy-plugin(pluginID, version)
+```
+
+### Core 命令
+
+本仓库实现并经过代码审查，允许注册 UI、Core operation、Agent prompt 和复合 workflow。仍必须遵守权限、Session 和 secret handling 规则。
+
+### 配置、MCP prompt 与 Skill
+
+这些来源提供 prompt 内容，不获得任意 Core handler 权限。其内容可能不可信，但 Agent 后续工具调用仍经过正常权限系统。UI 应显示来源。
+
+### 外部插件
+
+外部插件在安装和启用前不受信任；当前 OpenCode 插件不是安全沙箱，启用后其代码实际上拥有插件 API 及宿主进程允许的能力。因此：
+
+- 必须由用户显式安装和启用；
+- 命令显示插件来源；
+- command framework 不授予插件超出原公开 API 的额外权限；
+- 外部插件不能仅靠 command metadata 绕过工具或 Core operation 权限；
+- 对真正不可信插件的沙箱和 capability isolation 需要单独 RFC。
+
+Slash command 本身不是新的信任边界；它只暴露已经被加载的来源所拥有的行为。
+
+## 上游兼容层
+
+### 兼容来源
+
+至少为以下来源提供 adapter：
+
+1. 上游内建客户端 command；
+2. JSON/JSONC `command` 配置；
+3. `.opencode/commands/*.md` 及上游支持的 command 目录；
+4. MCP prompt；
+5. Skill slash command；
+6. legacy TUI `api.command.register`；
+7. V2 keymap/TUI command registration；
+8. legacy `command.execute.before` hook；
+9. V2 command transform。
+
+### 行为保持
+
+兼容 adapter 必须遵守：
+
+- prompt template、参数替换、`agent`、`model`、`subtask` 和 lazy MCP resolution 保持原义；
+- legacy UI callback 仍在原 placement 执行；
+- plugin hook 的调用时机和可修改数据保持原义；
+- 上游允许的同名 custom command 覆盖规则继续生效；
+- 现有 `command.list`、`session.command` 和 TUI plugin API 不增加必填字段；
+- 旧客户端看不到新能力时仍能使用它原本支持的命令；
+- adapter 不根据猜测改变命令是否调用模型或写入 Session。
+
+无法可靠声明 capabilities 的 legacy plugin command 标记为 `legacy-opaque`。它保持上游执行行为，并在 UI 中显示来源；不能伪造一份不完整的精细权限声明。
+
+### 公共 API 演进
+
+新能力不得通过破坏性修改现有 generated SDK 类型实现。优先顺序是：
+
+1. 内部 registry 和 adapter；
+2. 新增可选字段且旧客户端会安全忽略时，扩展现有 Schema；
+3. 否则新增版本化 endpoint/capability negotiation；
+4. 经过弃用周期后才能移除 legacy adapter。
+
+Fork-aware 插件可以 feature-detect 新 command API；普通上游插件不需要识别本 fork。
+
+## 用户可配置边界
+
+用户可以对任意来源的命令配置表现和更严格的限制：
+
+- enable/disable；
+- hidden/visible；
+- alias 和 keybind；
+- 展示顺序或 category；
+- 增加确认要求；
+- 收紧允许的 capabilities。
+
+用户可以编辑自己拥有的 prompt command 的 template、agent、model 和 subtask 配置。对于外部来源，默认不原地改写其 workflow 语义；需要改变时应创建本地 wrapper/replacement，并清楚显示 shadowing 关系。
+
+`legacy-opaque` command 无法安全地做细粒度 capability 收紧，只允许 disable、隐藏或增加整体确认；如果用户策略拒绝其不透明能力，命令整体不可用。
+
+用户不能通过覆盖配置：
+
+- 让模型调用不留下必需的 Session 记录；
+- 把任意 UI callback 输出自动注入模型上下文；
+- 跳过 handler 或插件要求的确认；
+- 扩大插件 capabilities；
+- 把 prompt command 静默变成 Core operation，或反向转换；
+- 绕过现有 permission system。
+
+如果用户策略禁止 workflow 必需的 capability，命令应在产生部分副作用前报告不可用；不能只跳过中间步骤后继续执行一个语义残缺的流程。
+
+## 冲突与覆盖
+
+命令使用稳定 `id` 区分身份，使用 `path` 参与用户输入解析。registry 必须保留所有候选及 provenance，不能在加载时静默丢弃被覆盖定义。
+
+兼容模式下，同名覆盖顺序与对应上游版本一致。新框架额外要求：
+
+- 命令面板显示最终生效来源；
+- 可以检查被 shadow 的定义；
+- alias 冲突不能静默改变高风险 operation；
+- 多段 path 使用 longest-match，避免 `/env` 抢占 `/env init`；
+- 不使用开发者姓名作为 namespace；插件身份使用其稳定 package/plugin ID。
+
+## 错误、取消与收尾
+
+所有新式 handler 返回统一 outcome：
+
+```text
+completed | cancelled | failed | unknown
+```
+
+复合 workflow 必须定义：
+
+- 哪些 preflight 在副作用前完成；
+- 用户取消时是否已经发生修改；
+- Agent 失败或被中断后是否运行 finalize；
+- operation 是否可以安全重试；
+- 结果未知时是否禁止自动重复；
+- secret 是否可能进入错误或诊断信息。
+
+以 `/env init` 为例，模板创建、Agent 编辑和 reload 的精确失败语义由 RFC-0005 决定；command framework 只提供可表达、可等待和可测试这些阶段的基础契约。
+
+## 维护规范
+
+新增或修改 slash command 的 PR 必须回答：
+
+1. 稳定 `id`、用户 path、aliases 和 provenance 是什么？
+2. 是叶子命令还是 group？参数如何解析和补全？
+3. handler placement 在 client 还是 server？为什么？
+4. 业务逻辑位于哪个可复用 domain/feature service？
+5. 可能使用哪些 capabilities？哪些步骤有副作用？
+6. 哪一步可能调用 Agent、写入 Session 或影响模型上下文？
+7. 确认、权限、取消、失败、重试和收尾语义是什么？
+8. TUI、Web/Desktop、CLI 和 SDK 中哪些入口支持它？
+9. 是否改变上游公开接口或 legacy 行为？兼容测试在哪里？
+10. 是否包含 secret-bearing 输入或输出？如何避免泄漏？
+
+命令特有业务逻辑不得放入通用 autocomplete、prompt submit 或 command palette 组件。
+
+## 实现阶段
+
+### 阶段一：兼容性基线
+
+- 为所有上游命令来源建立 fixture 和行为快照。
+- 固定 command list、执行、冲突、hook、Session part 和 Agent 调用的现有语义。
+- 记录公开 SDK/plugin API 的兼容矩阵。
+
+### 阶段二：内部 registry
+
+- 引入稳定 identity、path、provenance、placement 和 capability 上界。
+- 用 adapter 投影现有命令，不修改外部行为。
+- 提供 longest-match 解析、来源检查和 shadowing 诊断。
+
+### 阶段三：Core workflow API
+
+- 提供窄的 command context 和统一 outcome。
+- 将业务操作下沉到可复用 domain services。
+- 首先迁移一个低风险 query，再迁移复合 `/env init`；每次迁移保持用户可见行为或明确记录变化。
+
+### 阶段四：可选扩展 API
+
+- 仅在内部 API 稳定后向插件公开。
+- 使用 feature detection 和版本化能力。
+- legacy adapter 在完整弃用周期内保留。
+
+## 验收条件
+
+1. 通用 prompt/UI 组件中不再包含 fork-specific 命令字符串分支。
+2. `/env init` 等复合命令可以通过可测试 workflow 表达条件步骤和 finalize。
+3. 上游所有既有命令来源均通过兼容 fixture。
+4. 未适配本 fork 的代表性上游插件可以正常加载并保持原行为。
+5. 现有 command API 和生成 SDK 不发生未经版本化的破坏性变化。
+6. UI 可以显示生效命令的 provenance，并诊断 shadowing。
+7. 用户只能配置表现和收紧策略，不能制造违反 Session、上下文或权限不变量的组合。
+8. 新增命令遵守维护清单，业务逻辑可脱离 UI 单独测试。
 
 ## 非目标
 
-- 定义持久 User Shell；
-- 定义 `.env` 文件加载；
-- 允许命令绕过现有权限系统；
-- 让用户任意隐藏已经进入模型上下文的数据。
+- 在第一阶段设计声明式 workflow DSL；
+- 让所有命令在同一进程执行；
+- 沙箱化任意第三方插件；
+- 允许用户任意重写外部插件 handler；
+- 在本 RFC 中定义 `/env`、Rexd 或同步功能的业务规则；
+- 立即移除上游 legacy command/plugin API。
+
+## 待实现验证
+
+以下内容由实现原型验证，不改变本 RFC 的兼容原则：
+
+1. 内部 registry 最适合位于 Core、Server 还是共享 package；
+2. client/server handler 的发现结果如何合并且保持确定顺序；
+3. capability token 是静态审查信息，还是同时用于 runtime service gating；
+4. 新命令详情通过扩展 endpoint 还是新的版本化 endpoint 暴露；
+5. 对 legacy plugin command 可以安全推断到什么程度，哪些必须保持 opaque。

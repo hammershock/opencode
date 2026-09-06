@@ -45,6 +45,18 @@ Command toolkit 的直接使用者是：
 - 上游来源 adapter；
 - 面向 Core command 和下游 fork 的测试 harness。
 
+## 已确认的 Core 消费者
+
+以下 command family 必须使用本 toolkit 注册和实现，不得各自在输入组件中增加解析分支：
+
+- RFC-0002 的 `/target`；
+- RFC-0005 的 `/env`；
+- 后续同步 RFC 的 `/sync`。
+
+各功能 RFC 负责定义自己的业务流程、权限、失败和验收语义；RFC-0003 只提供共同基础设施和维护约束。其他新 Core command 默认也应使用 toolkit，除非其 RFC 明确说明无法使用的技术原因。
+
+对应 upstream 版本原生支持的 slash command 与外部生态命令先通过 adapter 保持原实现和行为，不要求为了形式统一而立即重写。以后如果迁移某个上游原生命令到完整 toolkit API，必须有行为等价测试，并保持公开接口与插件观察到的生命周期不变。
+
 ## 必须满足的约束
 
 1. 旧归档中把 `/env`、`/target`、`/cd`、`/sync` 等命令直接写入 prompt 提交函数的方式不得复用。
@@ -362,6 +374,7 @@ completed | cancelled | failed | unknown
 6. UI 可以显示生效命令的 provenance，并诊断 shadowing。
 7. 用户只能配置表现和收紧策略，不能制造违反 Session、上下文或权限不变量的组合。
 8. 新增命令遵守维护清单，业务逻辑可脱离 UI 单独测试。
+9. `/target`、`/env` 和 `/sync` 没有在通用输入组件中维护各自的命令解析分支。
 
 ## 非目标
 

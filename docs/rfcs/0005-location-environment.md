@@ -58,7 +58,7 @@ Location 基础环境
 
 ## `/env` 命令草案
 
-这些命令的记录和上下文策略必须遵守 RFC-0003，具体 handler 设计尚未确定。
+这些命令必须使用 RFC-0003 的 Core command toolkit 注册和编排，不得在 prompt submit 或 autocomplete 组件中自行解析。记录和上下文效果由 workflow 调用的服务产生，具体 handler 与失败语义尚未确定。
 
 - `/env list`：候选语义是显示开关、generation、来源与变量名，默认不显示值；不进入 Session 或模型上下文。
 - `/env reload`：候选语义是重建 snapshot；不进入 Session 或模型上下文。
@@ -84,6 +84,14 @@ Location 基础环境
 6. `/env list` 是否永远只显示变量名，还是允许二次确认后临时 reveal？
 7. `/env init` 的 Agent prompt、模板和已有文件合并策略是什么？
 8. 哪些非 Shell Agent 工具或 language server 也应继承该环境？
+
+## Command toolkit 约束
+
+- `/env` 是 command group，`list`、`reload`、`init` 是分别注册的叶子命令。
+- 参数、帮助和补全使用 toolkit 接口，不维护第二套解析器。
+- environment 查询、模板创建、Agent prompt 和 reload 逻辑位于可复用 services/workflow，不放入 UI handler。
+- 对外部生态中同名命令的冲突、shadowing 和兼容行为遵守 RFC-0003。
+- TUI 与 Web/Desktop 应复用相同的 Core workflow，仅分别呈现 dialog、confirmation 和结果。
 
 ## 非目标
 

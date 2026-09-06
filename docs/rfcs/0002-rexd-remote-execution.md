@@ -9,6 +9,7 @@ updated: 2026-09-06
 implemented-by: []
 depends-on:
   - 0001
+  - 0003
 supersedes: []
 superseded-by: []
 ---
@@ -39,6 +40,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
    - 所选 target 上的工作目录。
 5. OpenCode 的启动目录只可作为本地目录的初始建议，不再是新会话不可选择的隐式工作位置。
 6. 本地执行继续使用同一套 Location 接口，未启用远程 target 时保持现有行为。
+7. `/target` command family 使用 RFC-0003 的 Core command toolkit 注册和执行，不在 TUI prompt 组件中硬编码解析。
 
 ## 非目标
 
@@ -216,6 +218,13 @@ gpu-server · /data/project
 - 选择或补全所选 target 上的目录。
 - 在验证 Location 后原子地创建 Session 并提交 prompt。
 
+### 阶段五：Target command family
+
+- 通过 RFC-0003 toolkit 注册 `/target` group 及其叶子命令。
+- 复用 QuickStart 和 Location provider 已使用的 target 查询、验证与选择 services。
+- TUI、Web/Desktop 或其他客户端只负责呈现交互，不持有独立 target 业务逻辑。
+- 在本 RFC 接受前确定具体子命令集合；不从旧归档直接复制字符串分支实现。
+
 ## 验收条件
 
 以下条件全部满足后，本 RFC 才能标记为 `implemented`：
@@ -230,6 +239,7 @@ gpu-server · /data/project
 8. target 或目录验证失败时，不创建 Session，QuickStart prompt 不丢失。
 9. local Session 的现有相关测试保持通过。
 10. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。
+11. `/target` 通过 RFC-0003 toolkit 工作，且通用 prompt/autocomplete 组件中没有 target-specific dispatch。
 
 ## 实现约束
 

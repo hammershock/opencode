@@ -65,6 +65,7 @@ import { PtyTicket } from "@opencode-ai/core/pty/ticket"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
+import { SyncControl } from "@opencode-ai/core/sync/control"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -146,7 +147,7 @@ const serverHttpApiAuthLayer = serverAuthorizationLayer.pipe(Layer.provide(Serve
 const workspaceRoutingLive = workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal))
 const rootApiRoutes = HttpApiBuilder.layer(RootHttpApi).pipe(
   Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
-  Layer.provide(AppNodeBuilderV1.build(SyncSetup.node)),
+  Layer.provide(AppNodeBuilderV1.build(LayerNode.group([SyncSetup.node, SyncControl.node]))),
   Layer.provide(schemaErrorLayer),
   Layer.provide(httpApiAuthLayer),
 )
@@ -233,6 +234,7 @@ const app = LayerNode.group([
   Provider.node,
   ProviderUsage.node,
   SyncSetup.node,
+  SyncControl.node,
   ProviderAuth.node,
   Agent.node,
   Skill.node,

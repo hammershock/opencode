@@ -92,10 +92,14 @@ import type {
   GlobalSyncCompleteResponses,
   GlobalSyncEnabledErrors,
   GlobalSyncEnabledResponses,
+  GlobalSyncNowErrors,
+  GlobalSyncNowResponses,
   GlobalSyncReuseLegacyErrors,
   GlobalSyncReuseLegacyResponses,
   GlobalSyncSetupErrors,
   GlobalSyncSetupResponses,
+  GlobalSyncStatusErrors,
+  GlobalSyncStatusResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1516,6 +1520,20 @@ export class Global extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  public syncStatus<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalSyncStatusResponses, GlobalSyncStatusErrors, ThrowOnError>({
+      url: "/global/sync/status",
+      ...options,
+    })
+  }
+
+  public syncNow<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<GlobalSyncNowResponses, GlobalSyncNowErrors, ThrowOnError>({
+      url: "/global/sync/now",
+      ...options,
     })
   }
 

@@ -9,6 +9,7 @@ import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "e
 import semver from "semver"
 import { described } from "./metadata"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
+import { SyncControl } from "@opencode-ai/core/sync/control"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -77,6 +78,8 @@ export const GlobalPaths = {
   syncComplete: "/global/sync/setup/complete",
   syncReuseLegacy: "/global/sync/setup/reuse-legacy",
   syncEnabled: "/global/sync/enabled",
+  syncStatus: "/global/sync/status",
+  syncNow: "/global/sync/now",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -132,6 +135,14 @@ export const GlobalApi = HttpApi.make("global").add(
         payload: SyncSetup.EnabledInput,
         success: SyncSetup.Config,
         error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.get("syncStatus", GlobalPaths.syncStatus, {
+        success: SyncControl.Status,
+        error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.post("syncNow", GlobalPaths.syncNow, {
+        success: Schema.Boolean,
+        error: HttpApiError.ServiceUnavailable,
       }),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,

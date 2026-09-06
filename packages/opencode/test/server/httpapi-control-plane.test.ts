@@ -18,6 +18,7 @@ import { authorizationLayer } from "../../src/server/routes/instance/httpapi/mid
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
+import { SyncControl } from "@opencode-ai/core/sync/control"
 
 const input = MoveSession.Input.make({
   sessionID: SessionV2.ID.make("ses_move"),
@@ -43,6 +44,14 @@ const apiLayer = HttpRouter.serve(
     Layer.mock(SyncSetup.Service)({
       config: () => Effect.succeed(undefined),
       inspectLegacy: () => Effect.succeed({ available: false }),
+    }),
+  ),
+  Layer.provide(
+    Layer.mock(SyncControl.Service)({
+      status: () =>
+        Effect.succeed(
+          SyncControl.Status.make({ configured: false, enabled: false, locked: false, outbox: 0, cursors: {} }),
+        ),
     }),
   ),
   Layer.provide(Layer.mock(Installation.Service)({})),

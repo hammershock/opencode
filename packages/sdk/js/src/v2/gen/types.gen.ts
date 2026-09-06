@@ -8155,6 +8155,77 @@ export type GlobalSyncEnabledResponses = {
 
 export type GlobalSyncEnabledResponse = GlobalSyncEnabledResponses[keyof GlobalSyncEnabledResponses]
 
+export type GlobalSyncStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/status"
+}
+
+export type GlobalSyncStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncStatusError = GlobalSyncStatusErrors[keyof GlobalSyncStatusErrors]
+
+export type GlobalSyncStatusResponses = {
+  /**
+   * Success
+   */
+  200: {
+    configured: boolean
+    enabled: boolean
+    locked: boolean
+    provider?: string
+    namespaceID?: string
+    deviceID?: string
+    outbox: number
+    cursors: {
+      [key: string]: number
+    }
+    lastSuccessAt?: number
+    error?: string
+  }
+}
+
+export type GlobalSyncStatusResponse = GlobalSyncStatusResponses[keyof GlobalSyncStatusResponses]
+
+export type GlobalSyncNowData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/now"
+}
+
+export type GlobalSyncNowErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncNowError = GlobalSyncNowErrors[keyof GlobalSyncNowErrors]
+
+export type GlobalSyncNowResponses = {
+  /**
+   * Success
+   */
+  200: boolean
+}
+
+export type GlobalSyncNowResponse = GlobalSyncNowResponses[keyof GlobalSyncNowResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

@@ -42,7 +42,7 @@ export type Status = {
 }
 
 export interface MetadataProjector {
-  readonly apply: (metadata: readonly Metadata[]) => Effect.Effect<void, unknown>
+  readonly apply: (metadata: readonly Metadata[], deviceID: SyncEvent.DeviceID) => Effect.Effect<void, unknown>
 }
 
 export function make(input: {
@@ -154,7 +154,7 @@ export function make(input: {
       for (const head of indexedHeads) {
         if (revoked.has(head.deviceID)) continue
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
-        await Effect.runPromise(input.metadataProjector.apply(head.metadata))
+        await Effect.runPromise(input.metadataProjector.apply(head.metadata, head.deviceID))
       }
       status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }
     } catch (cause) {

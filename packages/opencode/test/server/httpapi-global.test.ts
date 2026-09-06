@@ -17,6 +17,7 @@ import { authorizationLayer } from "../../src/server/routes/instance/httpapi/mid
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
 import { testEffect } from "../lib/effect"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
+import { SyncControl } from "@opencode-ai/core/sync/control"
 
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(RootHttpApi).pipe(
@@ -39,6 +40,14 @@ const apiLayer = HttpRouter.serve(
     }),
   ),
   Layer.provide(
+    Layer.mock(SyncControl.Service)({
+      status: () =>
+        Effect.succeed(
+          SyncControl.Status.make({ configured: false, enabled: false, locked: false, outbox: 0, cursors: {} }),
+        ),
+    }),
+  ),
+  Layer.provide(
     Layer.mock(Installation.Service)({
       method: () => Effect.succeed("npm"),
       latest: () => Effect.succeed("9.9.9"),
@@ -50,6 +59,20 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("reports redacted sync control status", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(GlobalPaths.syncStatus).pipe(HttpClient.execute)
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toEqual({
+        configured: false,
+        enabled: false,
+        locked: false,
+        outbox: 0,
+        cursors: {},
+      })
+    }),
+  )
+
   it.live("upgrades to the requested version", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.upgrade).pipe(

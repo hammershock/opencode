@@ -14,6 +14,7 @@ import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { HttpApiError } from "effect/unstable/httpapi"
+import { SyncControl } from "@opencode-ai/core/sync/control"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -65,6 +66,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const installation = yield* Installation.Service
     const bridge = yield* EffectBridge.make()
     const syncSetup = yield* SyncSetup.Service
+    const syncControl = yield* SyncControl.Service
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
       return { healthy: true as const, version: InstallationVersion }
@@ -137,7 +139,22 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncAuthorize", (ctx) => badSetup(syncSetup.begin(ctx.payload)))
       .handle("syncComplete", (ctx) => badSetup(syncSetup.complete(ctx.payload)))
       .handle("syncReuseLegacy", (ctx) => badSetup(syncSetup.reuseLegacy(ctx.payload)))
-      .handle("syncEnabled", (ctx) => badSetup(syncSetup.setEnabled(ctx.payload.enabled)))
+      .handle("syncEnabled", (ctx) =>
+        syncControl.enable(ctx.payload.enabled).pipe(
+          Effect.andThen(syncSetup.config()),
+          Effect.flatMap((config) => (config ? Effect.succeed(config) : Effect.fail(new HttpApiError.BadRequest({})))),
+          Effect.mapError(() => new HttpApiError.BadRequest({})),
+        ),
+      )
+      .handle("syncStatus", () =>
+        syncControl.status().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+      )
+      .handle("syncNow", () =>
+        syncControl.now().pipe(
+          Effect.as(true),
+          Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
+        ),
+      )
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
   }),

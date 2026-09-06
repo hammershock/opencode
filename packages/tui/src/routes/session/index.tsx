@@ -629,18 +629,11 @@ export function Session() {
           openSyncSetup: syncSetup,
           sync: {
             status: async () => {
-              const result = await sdk.client.global.syncSetup({ throwOnError: true })
-              return {
-                enabled: result.data.config?.enabled ?? false,
-                provider: result.data.config?.provider,
-                namespaceID: result.data.config?.namespaceID,
-                deviceID: result.data.config?.deviceID,
-                cursors: {},
-                outbox: 0,
-              }
+              const result = await sdk.client.global.syncStatus({ throwOnError: true })
+              return result.data
             },
             now: async () => {
-              throw new Error("Sync runtime is not initialized")
+              await sdk.client.global.syncNow({ throwOnError: true })
             },
             enable: async (enabled) => {
               await sdk.client.global.syncEnabled({ enabled }, { throwOnError: true })

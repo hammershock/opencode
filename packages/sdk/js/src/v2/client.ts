@@ -15,7 +15,7 @@ function pick(value: string | null, fallback?: string, encode?: (value: string) 
   return value
 }
 
-function rewrite(request: Request, values: { directory?: string; workspace?: string }) {
+function rewrite(request: Request, values: { directory?: string; workspace?: string; target?: string }) {
   if (request.method !== "GET" && request.method !== "HEAD") return request
 
   const url = new URL(request.url)
@@ -24,10 +24,11 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
   for (const [name, key] of [
     ["x-opencode-directory", "directory"],
     ["x-opencode-workspace", "workspace"],
+    ["x-opencode-target", "target"],
   ] as const) {
     const value = pick(
       request.headers.get(name),
-      key === "directory" ? values.directory : values.workspace,
+      key === "directory" ? values.directory : key === "workspace" ? values.workspace : values.target,
       key === "directory" ? encodeURIComponent : undefined,
     )
     if (!value) continue
@@ -44,10 +45,13 @@ function rewrite(request: Request, values: { directory?: string; workspace?: str
   const next = new Request(url, request)
   next.headers.delete("x-opencode-directory")
   next.headers.delete("x-opencode-workspace")
+  next.headers.delete("x-opencode-target")
   return next
 }
 
-export function createOpencodeClient(config?: Config & { directory?: string; experimental_workspaceID?: string }) {
+export function createOpencodeClient(
+  config?: Config & { directory?: string; experimental_workspaceID?: string; experimental_targetID?: string },
+) {
   if (!config?.fetch) {
     const customFetch: any = (req: any) => {
       // @ts-ignore
@@ -74,11 +78,16 @@ export function createOpencodeClient(config?: Config & { directory?: string; exp
     }
   }
 
+  if (config?.experimental_targetID) {
+    config.headers = { ...config.headers, "x-opencode-target": config.experimental_targetID }
+  }
+
   const client = createClient(config)
   client.interceptors.request.use((request) =>
     rewrite(request, {
       directory: config?.directory,
       workspace: config?.experimental_workspaceID,
+      target: config?.experimental_targetID,
     }),
   )
   client.interceptors.response.use((response) => {

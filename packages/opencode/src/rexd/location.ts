@@ -4,6 +4,8 @@ import { FileSystemSearch } from "@opencode-ai/core/filesystem/search"
 import { Location } from "@opencode-ai/core/location"
 import { LocationMutation } from "@opencode-ai/core/location-mutation"
 import { LocationProcess } from "@opencode-ai/core/location-process"
+import { LocationEnvironment } from "@opencode-ai/core/location-environment"
+import { LocationFormatter } from "@opencode-ai/core/location-formatter"
 import { locationServices, type LocationProvider } from "@opencode-ai/core/location-services"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Node } from "@opencode-ai/core/effect/app-node"
@@ -16,6 +18,8 @@ import { rexdProcessNode } from "./location-process"
 import { rexdReadNode } from "./location-read"
 import { rexdPtyNode } from "./location-pty"
 import { rexdLocationNode, rexdSessionNode } from "./location-session"
+import { rexdEnvironmentSourceNode } from "./location-environment"
+import { rexdFormatterNode } from "./location-formatter"
 
 export const rexdLocationProvider: LocationProvider = {
   target: "rexd",
@@ -24,8 +28,11 @@ export const rexdLocationProvider: LocationProvider = {
     const session = rexdSessionNode(ref)
     const filesystem = rexdFilesystemNodes(session, ref.target.targetID, ref.directory)
     const mutation = rexdMutationNodes(session, ref.target.targetID, ref.directory)
+    const environment = rexdEnvironmentSourceNode(session, ref.target.targetID)
     const selected = replacements.concat([
-      [Location.node, rexdLocationNode(ref)],
+      [Location.node, rexdLocationNode(ref, session)],
+      [LocationEnvironment.sourceDefaultNode, environment],
+      [LocationFormatter.node, rexdFormatterNode(session)],
       [FileSystemSearch.node, filesystem[0]],
       [FileSystem.node, filesystem[1]],
       [LocationProcess.node, rexdProcessNode(session)],

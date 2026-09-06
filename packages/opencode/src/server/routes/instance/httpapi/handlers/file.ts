@@ -1,10 +1,9 @@
 import * as InstanceState from "@/effect/instance-state"
 import { FileSystem } from "@opencode-ai/core/filesystem"
-import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
-import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Location } from "@opencode-ai/core/location"
-import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
+import { RelativePath } from "@opencode-ai/core/schema"
 import { Effect, Layer, Option } from "effect"
 import ignore from "ignore"
 import path from "path"
@@ -13,21 +12,17 @@ import { InstanceHttpApi } from "../api"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
   Effect.gen(function* () {
-    const ripgrep = yield* Ripgrep.Service
     const locations = yield* LocationServiceMap.Service
 
     const filesystem = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-      return yield* effect.pipe(
-        Effect.provide(
-          locations.get(Location.Ref.make({ directory: AbsolutePath.make((yield* InstanceState.context).directory) })),
-        ),
-      )
+      const active = yield* Location.Service
+      return yield* effect.pipe(Effect.provide(locations.get(Location.Ref.make(active))))
     })
 
     const findText = Effect.fn("FileHttpApi.findText")(function* (ctx: { query: { pattern: string } }) {
-      return (yield* ripgrep
-        .grep({ cwd: (yield* InstanceState.context).directory, pattern: ctx.query.pattern, limit: 10 })
-        .pipe(Effect.orDie)).map((match) => ({
+      return (yield* filesystem(
+        FileSystem.Service.use((fs) => fs.grep(new FileSystem.GrepInput({ pattern: ctx.query.pattern, limit: 10 }))),
+      )).map((match) => ({
         path: { text: match.entry.path },
         lines: { text: match.text },
         line_number: match.line,
@@ -94,34 +89,22 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
     })
 
     const content = Effect.fn("FileHttpApi.content")(function* (ctx: { query: { path: string } }) {
-      const directory = (yield* InstanceState.context).directory
-      const file = path.resolve(directory, ctx.query.path)
-      if (!FSUtil.contains(directory, file)) return yield* Effect.die(new Error("Path escapes the location"))
-      if (!(yield* FSUtil.Service.use((fs) => fs.existsSafe(file)))) return { type: "text" as const, content: "" }
-      return yield* filesystem(
+      const item = yield* filesystem(
         FileSystem.Service.use((fs) => fs.read({ path: RelativePath.make(ctx.query.path) })),
-      ).pipe(
-        Effect.flatMap((item) =>
-          Effect.gen(function* () {
-            const text = item.content.includes(0)
-              ? Option.none<string>()
-              : yield* Effect.sync(() => new TextDecoder("utf-8", { fatal: true }).decode(item.content)).pipe(
-                  Effect.option,
-                )
-            return { item, text }
-          }),
-        ),
-        Effect.map(({ item, text }) =>
-          Option.isSome(text)
-            ? { type: "text" as const, content: text.value.trim() }
-            : {
-                type: "binary" as const,
-                content: Buffer.from(item.content).toString("base64"),
-                encoding: "base64" as const,
-                mimeType: item.mime,
-              },
-        ),
-      )
+      ).pipe(Effect.option)
+      if (Option.isNone(item)) return { type: "text" as const, content: "" }
+      const text = item.value.content.includes(0)
+        ? Option.none<string>()
+        : yield* Effect.sync(() => new TextDecoder("utf-8", { fatal: true }).decode(item.value.content)).pipe(
+            Effect.option,
+          )
+      if (Option.isSome(text)) return { type: "text" as const, content: text.value.trim() }
+      return {
+        type: "binary" as const,
+        content: Buffer.from(item.value.content).toString("base64"),
+        encoding: "base64" as const,
+        mimeType: item.value.mime,
+      }
     })
 
     const status = Effect.fn("FileHttpApi.status")(function* () {
@@ -136,4 +119,4 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("content", content)
       .handle("status", status)
   }),
-).pipe(Layer.provide(locationServiceMapLayer))
+)

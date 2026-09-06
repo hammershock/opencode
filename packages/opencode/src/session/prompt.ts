@@ -58,6 +58,7 @@ import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
 import { UserShellRuntime } from "./user-shell-runtime"
 import { UserShellLocal } from "./user-shell-local"
+import { UserShellLocation } from "./user-shell-location"
 import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -151,6 +152,16 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const locations = yield* LocationServiceMap.Service
     const { db } = database
+    const sessionLocation = Effect.fn("SessionPrompt.sessionLocation")(function* (sessionID: SessionID) {
+      const row = yield* db
+        .select({ target: SessionTable.target, directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (!row) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
+      return Location.Ref.make({ target: row.target ?? { type: "local" }, directory: AbsolutePath.make(row.directory) })
+    })
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -532,7 +543,11 @@ const layer = Layer.effect(
           const cfg = yield* config.get()
           const sh = Shell.preferred(cfg.shell)
           const continuity = cfg.experimental?.user_shell_cwd === true
-          const location = { target: "local", directory: cwd }
+          const locationRef = yield* sessionLocation(input.sessionID)
+          const location = {
+            target: locationRef.target.type === "rexd" ? locationRef.target.targetID : "local",
+            directory: locationRef.directory,
+          }
           const executionCwd = yield* userShell.current({ sessionID: input.sessionID, location, enabled: continuity })
           let output = ""
           let aborted = false
@@ -570,7 +585,7 @@ const layer = Layer.effect(
               )
               const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
                 service.environment({ ...shellEnv.env, TERM: "dumb" }),
-              ).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(cwd) }))))
+              ).pipe(Effect.provide(locations.get(locationRef)))
               const append = (chunk: string) =>
                 Effect.gen(function* () {
                   output += chunk
@@ -579,28 +594,20 @@ const layer = Layer.effect(
                     yield* sessions.updatePart(part)
                   }
                 })
-              if (continuity) {
-                const local = UserShellLocal.provider(sh, fsys, spawner)
-                const result = yield* userShell.execute({
-                  sessionID: input.sessionID,
-                  location,
-                  command: input.command,
-                  environment,
-                  enabled: true,
-                  provider: local,
-                  onOutput: append,
-                })
-                return result.exitCode
-              }
-              const cmd = ChildProcess.make(sh, Shell.args(sh, input.command, cwd), {
-                cwd,
-                env: environment,
-                stdin: "ignore",
-                forceKillAfter: "3 seconds",
+              const selected =
+                locationRef.target.type === "local"
+                  ? UserShellLocal.provider(sh, fsys, spawner)
+                  : yield* UserShellLocation.provider.pipe(Effect.provide(locations.get(locationRef)))
+              const result = yield* userShell.execute({
+                sessionID: input.sessionID,
+                location,
+                command: input.command,
+                environment,
+                enabled: continuity,
+                provider: selected,
+                onOutput: append,
               })
-              const handle = yield* spawner.spawn(cmd)
-              yield* Stream.runForEach(Stream.decodeText(handle.all), append)
-              return yield* handle.exitCode
+              return result.exitCode
             }).pipe(Effect.scoped, Effect.orDie),
           ).pipe(Effect.exit)
 
@@ -863,7 +870,9 @@ const layer = Layer.effect(
                   let start = parseInt(range.start)
                   let end = range.end ? parseInt(range.end) : undefined
                   if (start === end) {
-                    const symbols = yield* lsp.documentSymbol(filePathURI).pipe(Effect.catch(() => Effect.succeed([])))
+                    const symbols = yield* lsp
+                      .documentSymbol(filePathURI, input.sessionID)
+                      .pipe(Effect.catch(() => Effect.succeed([])))
                     for (const symbol of symbols) {
                       let r: LSP.Range | undefined
                       if ("range" in symbol) r = symbol.range
@@ -1381,17 +1390,24 @@ const layer = Layer.effect(
     })
 
     const completeShell = Effect.fn("SessionPrompt.completeShell")(function* (input: ShellCompletionInput) {
-      const ctx = yield* InstanceState.context
       yield* sessions.get(input.sessionID)
       const cfg = yield* config.get()
       const sh = Shell.preferred(cfg.shell)
       const enabled = cfg.experimental?.user_shell_cwd === true
-      const location = { target: "local", directory: ctx.directory }
+      const locationRef = yield* sessionLocation(input.sessionID)
+      const location = {
+        target: locationRef.target.type === "rexd" ? locationRef.target.targetID : "local",
+        directory: locationRef.directory,
+      }
       const cwd = yield* userShell.current({ sessionID: input.sessionID, location, enabled })
       const shellEnv = yield* plugin.trigger("shell.env", { cwd, sessionID: input.sessionID }, { env: {} })
       const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
         service.environment(shellEnv.env),
-      ).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
+      ).pipe(Effect.provide(locations.get(locationRef)))
+      const selected =
+        locationRef.target.type === "local"
+          ? UserShellLocal.provider(sh, fsys, spawner)
+          : yield* UserShellLocation.provider.pipe(Effect.provide(locations.get(locationRef)))
       return yield* userShell.complete({
         sessionID: input.sessionID,
         location,
@@ -1399,7 +1415,7 @@ const layer = Layer.effect(
         cursor: input.cursor,
         environment,
         enabled,
-        provider: UserShellLocal.provider(sh, fsys, spawner),
+        provider: selected,
       })
     })
 

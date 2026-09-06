@@ -27,7 +27,16 @@ export function rexdProcessNode(session: ReturnType<typeof import("./location-se
         return LocationProcess.Service.of({
           runShell: (command, options) =>
             Effect.tryPromise({
-              try: () => run(lease, command, options),
+              try: () =>
+                runRexdProcess(lease, {
+                  command,
+                  shell: true,
+                  cwd: options.cwd,
+                  env: options.env,
+                  timeout: options.timeout,
+                  maxOutputBytes: options.maxOutputBytes,
+                  signal: options.signal,
+                }),
               catch: (cause) => new AppProcess.AppProcessError({ command, cause }),
             }),
         })
@@ -37,14 +46,15 @@ export function rexdProcessNode(session: ReturnType<typeof import("./location-se
   })
 }
 
-async function run(
+export async function runRexdProcess(
   lease: import("./connection").RexdLease,
-  command: string,
-  options: LocationProcess.RunOptions,
+  options: Omit<LocationProcess.RunOptions, "shell"> &
+    ({ readonly command: string; readonly shell: true } | { readonly argv: readonly string[]; readonly shell: false }),
 ): Promise<AppProcess.RunResult> {
-  const output: Uint8Array[] = []
-  let bytes = 0
-  let truncated = false
+  const chunks = { stdout: [] as Uint8Array[], stderr: [] as Uint8Array[], output: [] as Uint8Array[] }
+  const bytes = { stdout: 0, stderr: 0, output: 0 }
+  const truncated = { stdout: false, stderr: false, output: false }
+  const description = options.shell ? options.command : options.argv.join(" ")
   let processID: string | undefined
   let resolveExit = (_value: typeof Exited.Type) => undefined as void
   let rejectExit = (_cause: Error) => undefined as void
@@ -62,10 +72,9 @@ async function run(
     const decoded = Schema.decodeUnknownResult(Output)(params)
     if (Result.isFailure(decoded) || decoded.success.process_id !== processID) return
     const chunk = Buffer.from(decoded.success.data, decoded.success.encoding ?? "utf8")
-    const remaining = options.maxOutputBytes - bytes
-    if (remaining > 0) output.push(chunk.slice(0, remaining))
-    bytes += chunk.length
-    truncated ||= chunk.length > remaining
+    const stream = method === "exec.stdout" ? "stdout" : "stderr"
+    append(stream, chunk)
+    append("output", chunk)
   }
   const pending: Array<[string, unknown]> = []
   const remove = lease.client.onNotification((method, params) => {
@@ -77,8 +86,8 @@ async function run(
       "exec.start",
       {
         session_id: lease.handshake.sessionID,
-        command,
-        shell: true,
+        ...(options.shell ? { command: options.command } : { argv: options.argv }),
+        shell: options.shell,
         login: false,
         cwd: options.cwd,
         env: options.env,
@@ -107,15 +116,21 @@ async function run(
       remove()
       options.signal?.removeEventListener("abort", abort)
     })
-  const combined = Buffer.concat(output)
   return {
-    command,
+    command: description,
     exitCode: terminal.exit_code ?? -1,
-    output: combined,
-    stdout: combined,
-    stderr: Buffer.alloc(0),
-    outputTruncated: truncated,
-    stdoutTruncated: truncated,
-    stderrTruncated: false,
+    output: Buffer.concat(chunks.output),
+    stdout: Buffer.concat(chunks.stdout),
+    stderr: Buffer.concat(chunks.stderr),
+    outputTruncated: truncated.output,
+    stdoutTruncated: truncated.stdout,
+    stderrTruncated: truncated.stderr,
+  }
+
+  function append(stream: keyof typeof chunks, chunk: Uint8Array) {
+    const remaining = options.maxOutputBytes - bytes[stream]
+    if (remaining > 0) chunks[stream].push(chunk.slice(0, remaining))
+    bytes[stream] += chunk.length
+    truncated[stream] ||= chunk.length > remaining
   }
 }

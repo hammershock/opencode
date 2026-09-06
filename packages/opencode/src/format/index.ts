@@ -1,8 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect, Layer, Context, Schema } from "effect"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
-import { ChildProcess } from "effect/unstable/process"
-import { AppProcess } from "@opencode-ai/core/process"
+import { LocationFormatter } from "@opencode-ai/core/location-formatter"
 import { InstanceState } from "@/effect/instance-state"
 import path from "path"
 import { mergeDeep } from "remeda"
@@ -14,6 +13,10 @@ import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionID } from "@/session/schema"
+import { eq } from "drizzle-orm"
 
 export const Status = Schema.Struct({
   name: Schema.String,
@@ -25,7 +28,7 @@ export type Status = Schema.Schema.Type<typeof Status>
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<Status[]>
-  readonly file: (filepath: string) => Effect.Effect<boolean>
+  readonly file: (filepath: string, sessionID?: SessionID) => Effect.Effect<boolean>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Format") {}
@@ -36,13 +39,12 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
-    const appProcess = yield* AppProcess.Service
+    const { db } = yield* Database.Service
     const flags = yield* RuntimeFlags.Service
     const locations = yield* LocationServiceMap.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("Format.state")(function* (ctx) {
-        const locationLayer = locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))
         const commands: Record<string, string[] | false> = {}
         const formatters: Record<string, Formatter.Info> = {}
 
@@ -76,10 +78,18 @@ const layer = Layer.effect(
             .map((x) => ({ item: x.item, cmd: x.cmd }))
         }
 
-        function formatFile(filepath: string) {
+        function formatFile(filepath: string, ref: Location.Ref) {
           return Effect.gen(function* () {
+            const locationLayer = locations.get(ref)
             yield* Effect.logInfo("formatting", { file: filepath })
-            const formatters = yield* Effect.promise(() => getFormatter(path.extname(filepath)))
+            const formatters =
+              ref.target.type === "rexd"
+                ? Object.entries(typeof cfg.formatter === "object" ? cfg.formatter : {}).flatMap(([name, item]) =>
+                    item.command && item.extensions?.includes(path.extname(filepath))
+                      ? [{ item: { name, environment: item.environment ?? {} }, cmd: item.command }]
+                      : [],
+                  )
+                : yield* Effect.promise(() => getFormatter(path.extname(filepath)))
 
             if (!formatters.length) return false
 
@@ -90,16 +100,15 @@ const layer = Layer.effect(
               const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
                 service.environment(item.environment),
               ).pipe(Effect.provide(locationLayer))
-              const result = yield* appProcess
-                .run(
-                  ChildProcess.make(replaced[0]!, replaced.slice(1), {
-                    cwd: dir,
-                    env: environment,
-                    stdin: "ignore",
-                    stdout: "ignore",
-                    stderr: "ignore",
-                  }),
-                )
+              const result = yield* Effect.gen(function* () {
+                const formatter = yield* LocationFormatter.Service
+                return yield* formatter.run({
+                  argv: replaced as [string, ...string[]],
+                  cwd: dir,
+                  env: environment,
+                })
+              })
+                .pipe(Effect.provide(locationLayer))
                 .pipe(
                   Effect.catch((error) =>
                     Effect.logError("failed to format file", {
@@ -111,7 +120,7 @@ const layer = Layer.effect(
                     }).pipe(Effect.as(undefined)),
                   ),
                 )
-              if (result && result.exitCode !== 0) {
+              if (result !== undefined && result !== 0) {
                 yield* Effect.logError("failed", {
                   command: cmd,
                   ...item.environment,
@@ -193,9 +202,21 @@ const layer = Layer.effect(
       return result
     })
 
-    const file = Effect.fn("Format.file")(function* (filepath: string) {
+    const file = Effect.fn("Format.file")(function* (filepath: string, sessionID?: SessionID) {
       const { formatFile } = yield* InstanceState.get(state)
-      return yield* formatFile(filepath)
+      const row = sessionID
+        ? yield* db
+            .select({ target: SessionTable.target, directory: SessionTable.directory })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get()
+            .pipe(Effect.orDie)
+        : undefined
+      const ref = Location.Ref.make({
+        target: row?.target ?? { type: "local" },
+        directory: AbsolutePath.make(row?.directory ?? (yield* InstanceState.directory)),
+      })
+      return yield* formatFile(filepath, ref)
     })
 
     return Service.of({ init, status, file })
@@ -205,7 +226,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, AppProcess.node, RuntimeFlags.node, LocationServiceMap.node],
+  deps: [Config.node, Database.node, RuntimeFlags.node, LocationServiceMap.node],
 })
 
 export * as Format from "."

@@ -9,6 +9,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { Instruction } from "../session/instruction"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
+import type { SessionID } from "@/session/schema"
 
 const DEFAULT_READ_LIMIT = 2000
 const MAX_LINE_LENGTH = 2000
@@ -114,9 +115,9 @@ export const ReadTool = Tool.define<
       ).pipe(Effect.map((items: string[]) => items.sort((a, b) => a.localeCompare(b))))
     })
 
-    const warm = Effect.fn("ReadTool.warm")(function* (filepath: string) {
+    const warm = Effect.fn("ReadTool.warm")(function* (filepath: string, sessionID: SessionID) {
       // LSP warm-up is optional; do not let a background defect fail an otherwise successful read.
-      yield* lsp.touchFile(filepath).pipe(Effect.ignoreCause, Effect.forkIn(scope))
+      yield* lsp.touchFile(filepath, undefined, sessionID).pipe(Effect.ignoreCause, Effect.forkIn(scope))
     })
 
     const readSample = Effect.fn("ReadTool.readSample")(function* (
@@ -350,7 +351,7 @@ export const ReadTool = Tool.define<
       }
       output += "\n</content>"
 
-      yield* warm(filepath)
+      yield* warm(filepath, ctx.sessionID)
 
       if (loaded.length > 0) {
         output += `\n\n<system-reminder>\n${loaded.map((item) => item.content).join("\n\n")}\n</system-reminder>`

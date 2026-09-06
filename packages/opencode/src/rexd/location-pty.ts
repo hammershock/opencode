@@ -1,6 +1,7 @@
 import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
+import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Pty } from "@opencode-ai/core/pty"
 import { PtyID } from "@opencode-ai/core/pty/schema"
 import { Effect, Layer, Result, Schema } from "effect"
@@ -33,6 +34,7 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
       Effect.gen(function* () {
         const lease = yield* RexdLocationSession
         const location = yield* Location.Service
+        const environment = yield* LocationEnvironment.Service
         const events = yield* EventV2.Service
         const sessions = new Map<PtyID, Session>()
         const notify = lease.client.onNotification((method, params) => {
@@ -87,6 +89,7 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
         const create = Effect.fn("RexdPty.create")(function* (input: Pty.CreateInput) {
           const id = PtyID.ascending()
           const command = input.command ?? "/bin/sh"
+          const env = yield* environment.environment(input.env)
           const opened = yield* Effect.promise(() =>
             lease.client.request(
               "pty.open",
@@ -94,7 +97,7 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
                 session_id: lease.handshake.sessionID,
                 argv: [command, ...(input.args ?? [])],
                 cwd: input.cwd ?? location.directory,
-                env: input.env,
+                env,
                 cols: 120,
                 rows: 32,
               },
@@ -180,7 +183,7 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
         })
       }),
     ),
-    deps: [session, Location.node, EventV2.node],
+    deps: [session, Location.node, LocationEnvironment.node, EventV2.node],
   })
 }
 

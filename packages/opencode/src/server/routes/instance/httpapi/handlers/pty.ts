@@ -6,7 +6,7 @@ import { Pty } from "@opencode-ai/core/pty"
 import { PtyProtocol } from "@opencode-ai/core/pty/protocol"
 import { PtyID } from "@opencode-ai/core/pty/schema"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
-import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
+import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Shell } from "@opencode-ai/core/shell"
@@ -32,7 +32,12 @@ function validOrigin(request: HttpServerRequest.HttpServerRequest, opts: CorsOpt
 const ticketScope = Effect.gen(function* () {
   const instance = yield* InstanceRef
   const workspaceID = yield* WorkspaceRef
-  return { directory: instance?.directory, workspaceID }
+  const location = yield* Effect.serviceOption(Location.Service)
+  return {
+    directory: instance?.directory,
+    workspaceID,
+    target: Option.isSome(location) ? location.value.target : undefined,
+  }
 })
 
 // Legacy surface compatibility: before exited-session retention, sessions vanished the moment
@@ -50,11 +55,8 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
     yield* Effect.addFinalizer(() => Effect.sync(unregister))
 
     const pty = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-      return yield* effect.pipe(
-        Effect.provide(
-          locations.get(Location.Ref.make({ directory: AbsolutePath.make((yield* InstanceState.context).directory) })),
-        ),
-      )
+      const active = yield* Location.Service
+      return yield* effect.pipe(Effect.provide(locations.get(Location.Ref.make(active))))
     })
 
     const shells = Effect.fn("PtyHttpApi.shells")(function* () {
@@ -158,7 +160,7 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
       .handle("remove", remove)
       .handle("connectToken", connectToken)
   }),
-).pipe(Layer.provide(locationServiceMapLayer))
+)
 
 export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-connect", (handlers) =>
   Effect.gen(function* () {
@@ -171,11 +173,8 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
     yield* Effect.addFinalizer(() => Effect.sync(unregister))
 
     const pty = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-      return yield* effect.pipe(
-        Effect.provide(
-          locations.get(Location.Ref.make({ directory: AbsolutePath.make((yield* InstanceState.context).directory) })),
-        ),
-      )
+      const active = yield* Location.Service
+      return yield* effect.pipe(Effect.provide(locations.get(Location.Ref.make(active))))
     })
 
     return handlers.handleRaw(
@@ -270,4 +269,4 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
       }),
     )
   }),
-).pipe(Layer.provide(locationServiceMapLayer))
+)

@@ -18,6 +18,10 @@ import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionID } from "@/session/schema"
+import { eq } from "drizzle-orm"
 
 export const Event = LspEvent
 
@@ -124,18 +128,18 @@ interface State {
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<Status[]>
-  readonly hasClients: (file: string) => Effect.Effect<boolean>
-  readonly touchFile: (input: string, diagnostics?: "document" | "full") => Effect.Effect<void>
-  readonly diagnostics: () => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
-  readonly hover: (input: LocInput) => Effect.Effect<any>
-  readonly definition: (input: LocInput) => Effect.Effect<any[]>
-  readonly references: (input: LocInput) => Effect.Effect<any[]>
-  readonly implementation: (input: LocInput) => Effect.Effect<any[]>
-  readonly documentSymbol: (uri: string) => Effect.Effect<(DocumentSymbol | Symbol)[]>
-  readonly workspaceSymbol: (query: string) => Effect.Effect<Symbol[]>
-  readonly prepareCallHierarchy: (input: LocInput) => Effect.Effect<any[]>
-  readonly incomingCalls: (input: LocInput) => Effect.Effect<any[]>
-  readonly outgoingCalls: (input: LocInput) => Effect.Effect<any[]>
+  readonly hasClients: (file: string, sessionID?: SessionID) => Effect.Effect<boolean>
+  readonly touchFile: (input: string, diagnostics?: "document" | "full", sessionID?: SessionID) => Effect.Effect<void>
+  readonly diagnostics: (sessionID?: SessionID) => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
+  readonly hover: (input: LocInput, sessionID?: SessionID) => Effect.Effect<any>
+  readonly definition: (input: LocInput, sessionID?: SessionID) => Effect.Effect<any[]>
+  readonly references: (input: LocInput, sessionID?: SessionID) => Effect.Effect<any[]>
+  readonly implementation: (input: LocInput, sessionID?: SessionID) => Effect.Effect<any[]>
+  readonly documentSymbol: (uri: string, sessionID?: SessionID) => Effect.Effect<(DocumentSymbol | Symbol)[]>
+  readonly workspaceSymbol: (query: string, sessionID?: SessionID) => Effect.Effect<Symbol[]>
+  readonly prepareCallHierarchy: (input: LocInput, sessionID?: SessionID) => Effect.Effect<any[]>
+  readonly incomingCalls: (input: LocInput, sessionID?: SessionID) => Effect.Effect<any[]>
+  readonly outgoingCalls: (input: LocInput, sessionID?: SessionID) => Effect.Effect<any[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/LSP") {}
@@ -147,6 +151,17 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const events = yield* EventV2Bridge.Service
     const locations = yield* LocationServiceMap.Service
+    const { db } = yield* Database.Service
+    const remote = Effect.fn("LSP.remoteUnavailable")(function* (sessionID?: SessionID) {
+      if (!sessionID) return false
+      const row = yield* db
+        .select({ target: SessionTable.target })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      return row?.target?.type === "rexd"
+    })
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("LSP.state")(function* (ctx) {
@@ -338,7 +353,8 @@ const layer = Layer.effect(
       return result
     })
 
-    const hasClients = Effect.fn("LSP.hasClients")(function* (file: string) {
+    const hasClients = Effect.fn("LSP.hasClients")(function* (file: string, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return false
       const ctx = yield* InstanceState.context
       const s = yield* InstanceState.get(state)
       return yield* Effect.promise(async () => {
@@ -354,7 +370,15 @@ const layer = Layer.effect(
       })
     })
 
-    const touchFile = Effect.fn("LSP.touchFile")(function* (input: string, diagnostics?: "document" | "full") {
+    const touchFile = Effect.fn("LSP.touchFile")(function* (
+      input: string,
+      diagnostics?: "document" | "full",
+      sessionID?: SessionID,
+    ) {
+      if (yield* remote(sessionID)) {
+        yield* Effect.logWarning("remote LSP unavailable: rexd/1 has no process stdin capability", { sessionID })
+        return
+      }
       yield* Effect.logInfo("touching file", { file: input })
       const clients = yield* getClients(input)
       yield* Effect.promise(() =>
@@ -374,7 +398,8 @@ const layer = Layer.effect(
       )
     })
 
-    const diagnostics = Effect.fn("LSP.diagnostics")(function* () {
+    const diagnostics = Effect.fn("LSP.diagnostics")(function* (sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return {}
       const results: Record<string, LSPClient.Diagnostic[]> = {}
       const all = yield* runAll(async (client) => client.diagnostics)
       for (const result of all) {
@@ -387,7 +412,8 @@ const layer = Layer.effect(
       return results
     })
 
-    const hover = Effect.fn("LSP.hover")(function* (input: LocInput) {
+    const hover = Effect.fn("LSP.hover")(function* (input: LocInput, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return null
       return yield* run(input.file, (client) =>
         client.connection
           .sendRequest("textDocument/hover", {
@@ -398,7 +424,8 @@ const layer = Layer.effect(
       )
     })
 
-    const definition = Effect.fn("LSP.definition")(function* (input: LocInput) {
+    const definition = Effect.fn("LSP.definition")(function* (input: LocInput, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return []
       const results = yield* run(input.file, (client) =>
         client.connection
           .sendRequest("textDocument/definition", {
@@ -410,7 +437,8 @@ const layer = Layer.effect(
       return results.flat().filter(Boolean)
     })
 
-    const references = Effect.fn("LSP.references")(function* (input: LocInput) {
+    const references = Effect.fn("LSP.references")(function* (input: LocInput, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return []
       const results = yield* run(input.file, (client) =>
         client.connection
           .sendRequest("textDocument/references", {
@@ -423,7 +451,8 @@ const layer = Layer.effect(
       return results.flat().filter(Boolean)
     })
 
-    const implementation = Effect.fn("LSP.implementation")(function* (input: LocInput) {
+    const implementation = Effect.fn("LSP.implementation")(function* (input: LocInput, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return []
       const results = yield* run(input.file, (client) =>
         client.connection
           .sendRequest("textDocument/implementation", {
@@ -435,7 +464,8 @@ const layer = Layer.effect(
       return results.flat().filter(Boolean)
     })
 
-    const documentSymbol = Effect.fn("LSP.documentSymbol")(function* (uri: string) {
+    const documentSymbol = Effect.fn("LSP.documentSymbol")(function* (uri: string, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return []
       const file = fileURLToPath(uri)
       const results = yield* run(file, (client) =>
         client.connection.sendRequest("textDocument/documentSymbol", { textDocument: { uri } }).catch(() => []),
@@ -443,7 +473,8 @@ const layer = Layer.effect(
       return (results.flat() as (DocumentSymbol | Symbol)[]).filter(Boolean)
     })
 
-    const workspaceSymbol = Effect.fn("LSP.workspaceSymbol")(function* (query: string) {
+    const workspaceSymbol = Effect.fn("LSP.workspaceSymbol")(function* (query: string, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return []
       const results = yield* runAll((client) =>
         client.connection
           .sendRequest<Symbol[]>("workspace/symbol", { query })
@@ -453,7 +484,11 @@ const layer = Layer.effect(
       return results.flat()
     })
 
-    const prepareCallHierarchy = Effect.fn("LSP.prepareCallHierarchy")(function* (input: LocInput) {
+    const prepareCallHierarchy = Effect.fn("LSP.prepareCallHierarchy")(function* (
+      input: LocInput,
+      sessionID?: SessionID,
+    ) {
+      if (yield* remote(sessionID)) return []
       const results = yield* run(input.file, (client) =>
         client.connection
           .sendRequest("textDocument/prepareCallHierarchy", {
@@ -482,11 +517,13 @@ const layer = Layer.effect(
       return results.flat().filter(Boolean)
     })
 
-    const incomingCalls = Effect.fn("LSP.incomingCalls")(function* (input: LocInput) {
+    const incomingCalls = Effect.fn("LSP.incomingCalls")(function* (input: LocInput, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return []
       return yield* callHierarchyRequest(input, "callHierarchy/incomingCalls")
     })
 
-    const outgoingCalls = Effect.fn("LSP.outgoingCalls")(function* (input: LocInput) {
+    const outgoingCalls = Effect.fn("LSP.outgoingCalls")(function* (input: LocInput, sessionID?: SessionID) {
+      if (yield* remote(sessionID)) return []
       return yield* callHierarchyRequest(input, "callHierarchy/outgoingCalls")
     })
 
@@ -514,7 +551,7 @@ export * as Diagnostic from "./diagnostic"
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, RuntimeFlags.node, FSUtil.node, EventV2Bridge.node, LocationServiceMap.node],
+  deps: [Config.node, RuntimeFlags.node, FSUtil.node, EventV2Bridge.node, LocationServiceMap.node, Database.node],
 })
 
 export * as LSP from "./lsp"

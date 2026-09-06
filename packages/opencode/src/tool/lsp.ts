@@ -74,31 +74,31 @@ export const LspTool = Tool.define(
           const exists = yield* fs.existsSafe(file)
           if (!exists) throw new Error(`File not found: ${file}`)
 
-          const available = yield* lsp.hasClients(file)
+          const available = yield* lsp.hasClients(file, ctx.sessionID)
           if (!available) throw new Error("No LSP server available for this file type.")
 
-          yield* lsp.touchFile(file, "document")
+          yield* lsp.touchFile(file, "document", ctx.sessionID)
 
           const result: unknown[] = yield* (() => {
             switch (args.operation) {
               case "goToDefinition":
-                return lsp.definition(position)
+                return lsp.definition(position, ctx.sessionID)
               case "findReferences":
-                return lsp.references(position)
+                return lsp.references(position, ctx.sessionID)
               case "hover":
-                return lsp.hover(position)
+                return lsp.hover(position, ctx.sessionID)
               case "documentSymbol":
-                return lsp.documentSymbol(uri)
+                return lsp.documentSymbol(uri, ctx.sessionID)
               case "workspaceSymbol":
-                return lsp.workspaceSymbol(args.query ?? "")
+                return lsp.workspaceSymbol(args.query ?? "", ctx.sessionID)
               case "goToImplementation":
-                return lsp.implementation(position)
+                return lsp.implementation(position, ctx.sessionID)
               case "prepareCallHierarchy":
-                return lsp.prepareCallHierarchy(position)
+                return lsp.prepareCallHierarchy(position, ctx.sessionID)
               case "incomingCalls":
-                return lsp.incomingCalls(position)
+                return lsp.incomingCalls(position, ctx.sessionID)
               case "outgoingCalls":
-                return lsp.outgoingCalls(position)
+                return lsp.outgoingCalls(position, ctx.sessionID)
             }
           })()
 

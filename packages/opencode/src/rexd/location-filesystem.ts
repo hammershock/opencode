@@ -8,6 +8,7 @@ import { Effect, Layer } from "effect"
 import fuzzysort from "fuzzysort"
 import { RexdFiles } from "./location-files"
 import { RexdLocationSession } from "./location-session"
+import { runRexdProcess } from "./location-process"
 
 export function rexdFilesystemNodes(
   session: ReturnType<typeof import("./location-session").rexdSessionNode>,
@@ -24,6 +25,7 @@ export function rexdFilesystemNodes(
             type: item.type === "dir" ? "directory" : "file",
           })
         : undefined
+    const lease = yield* RexdLocationSession
     const search = FileSystemSearch.Service.of({
       find: (input) =>
         Effect.promise(async () => {
@@ -37,7 +39,7 @@ export function rexdFilesystemNodes(
             FileSystem.Entry.make({ path: relative(files.resolve(item, directory)), type: "file" }),
           ),
         ),
-      grep: (input) => remoteGrep(files, directory, input),
+      grep: (input) => remoteGrep(files, lease, directory, input),
     })
     return {
       search,
@@ -72,31 +74,61 @@ export function rexdFilesystemNodes(
   ] as const
 }
 
-function remoteGrep(files: RexdFiles, directory: string, input: FileSystem.GrepInput) {
+export function remoteGrep(
+  files: RexdFiles,
+  lease: import("./connection").RexdLease,
+  directory: string,
+  input: FileSystem.GrepInput,
+) {
   return Effect.promise(async () => {
     const root = files.resolve(input.path ?? ".", directory)
-    const entries = await files.list(root, directory, true)
-    const matches: FileSystem.Match[] = []
-    for (const item of entries) {
-      if (item.type !== "file") continue
-      if (input.include && !new Bun.Glob(input.include).match(item.path)) continue
-      const content = Buffer.from((await files.read(item.path, directory)).content).toString("utf8")
-      content.split("\n").forEach((text, index) => {
-        if (!text.includes(input.pattern) || matches.length >= (input.limit ?? Number.MAX_SAFE_INTEGER)) return
-        matches.push(
+    const stat = await files.stat(root, directory)
+    const cwd = stat.type === "file" ? path.posix.dirname(root) : root
+    const target = stat.type === "file" ? path.posix.basename(root) : "."
+    // rexd/1 has no structured grep method. Keep this compatibility adapter
+    // provider-private and use an explicit argv; never download the tree to the controller.
+    const result = await runRexdProcess(lease, {
+      argv: [
+        "grep",
+        "-R",
+        "-n",
+        "-H",
+        "-I",
+        "-Z",
+        "--exclude-dir=.git",
+        ...(input.include ? [`--include=${input.include}`] : []),
+        "--",
+        input.pattern,
+        target,
+      ],
+      shell: false,
+      cwd,
+      timeout: "2 minutes",
+      maxOutputBytes: 8 * 1024 * 1024,
+    })
+    if (result.exitCode !== 0 && result.exitCode !== 1)
+      throw new Error(result.stderr.toString("utf8") || `Remote grep exited with ${result.exitCode}`)
+    return result.stdout
+      .toString("utf8")
+      .split("\n")
+      .flatMap((line) => {
+        const separator = line.indexOf("\0")
+        if (separator === -1) return []
+        const match = line.slice(separator + 1).match(/^(\d+):(.*)$/)
+        if (!match) return []
+        return [
           FileSystem.Match.make({
             entry: FileSystem.Entry.make({
-              path: RelativePath.make(path.posix.relative(directory, item.path)),
+              path: RelativePath.make(path.posix.relative(directory, files.resolve(line.slice(0, separator), cwd))),
               type: "file",
             }),
-            line: index + 1,
+            line: Number(match[1]),
             offset: 0,
-            text: text.slice(0, 2_000),
+            text: match[2]!.slice(0, 2_000),
             submatches: [],
           }),
-        )
+        ]
       })
-    }
-    return matches
+      .slice(0, input.limit ?? Number.MAX_SAFE_INTEGER)
   })
 }

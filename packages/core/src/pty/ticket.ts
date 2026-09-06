@@ -3,6 +3,7 @@ export * as PtyTicket from "./ticket"
 import { WorkspaceV2 } from "../workspace"
 import { PtyTicket } from "@opencode-ai/schema/pty-ticket"
 import { PtyID } from "./schema"
+import { Location } from "../location"
 import { Cache, Context, Duration, Effect, Layer } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
 
@@ -15,6 +16,7 @@ export type Scope = {
   readonly ptyID: PtyID
   readonly directory?: string
   readonly workspaceID?: WorkspaceV2.ID
+  readonly target?: Location.Target
 }
 
 export interface Interface {
@@ -26,7 +28,10 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Pt
 
 function matches(record: Scope, input: Scope) {
   return (
-    record.ptyID === input.ptyID && record.directory === input.directory && record.workspaceID === input.workspaceID
+    record.ptyID === input.ptyID &&
+    record.directory === input.directory &&
+    record.workspaceID === input.workspaceID &&
+    JSON.stringify(record.target) === JSON.stringify(input.target)
   )
 }
 

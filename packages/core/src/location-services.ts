@@ -16,6 +16,7 @@ import { Location } from "./location"
 import { LocationMutation } from "./location-mutation"
 import { LocationEnvironment } from "./location-environment"
 import { LocationProcess } from "./location-process"
+import { LocationFormatter } from "./location-formatter"
 import { LocationServiceMap } from "./location-service-map"
 import { PermissionV2 } from "./permission"
 import { PluginV2 } from "./plugin"
@@ -65,6 +66,7 @@ export const locationServices = LayerNode.group([
   LocationMutation.node,
   LocationEnvironment.node,
   LocationProcess.node,
+  LocationFormatter.node,
   FileMutation.node,
   PermissionV2.node,
   ToolOutputStore.node,

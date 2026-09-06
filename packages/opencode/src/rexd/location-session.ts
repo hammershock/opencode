@@ -6,6 +6,7 @@ import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Context, Effect, Layer } from "effect"
+import path from "node:path"
 import { connectRexd, type RexdLease } from "./connection"
 
 export class RexdLocationSession extends Context.Service<RexdLocationSession, RexdLease>()(
@@ -36,23 +37,36 @@ export function rexdSessionNode(ref: Location.Ref) {
   })
 }
 
-export function rexdLocationNode(ref: Location.Ref) {
+export function rexdLocationNode(ref: Location.Ref, session: ReturnType<typeof rexdSessionNode>) {
   if (ref.target.type !== "rexd") throw new Error("Rexd provider received a local Location")
+  const targetID = ref.target.targetID
   return makeLocationNode({
     service: Location.Service,
-    layer: Layer.succeed(
+    layer: Layer.effect(
       Location.Service,
-      Location.Service.of({
-        target: ref.target,
-        directory: ref.directory,
-        workspaceID: ref.workspaceID,
-        lastKnownTargetName: ref.lastKnownTargetName,
-        project: {
-          id: Project.ID.make(Hash.fast(`rexd:${ref.target.targetID}:${ref.directory}`)),
-          directory: AbsolutePath.make(ref.directory),
-        },
+      Effect.gen(function* () {
+        const lease = yield* RexdLocationSession
+        const project =
+          lease.handshake.workspaceRoots
+            .filter((root) => within(root, ref.directory))
+            .sort((left, right) => right.length - left.length)[0] ?? ref.directory
+        return Location.Service.of({
+          target: ref.target,
+          directory: ref.directory,
+          workspaceID: ref.workspaceID,
+          lastKnownTargetName: ref.lastKnownTargetName,
+          project: {
+            id: Project.ID.make(Hash.fast(`rexd:${targetID}:${project}`)),
+            directory: AbsolutePath.make(project),
+          },
+        })
       }),
     ),
-    deps: [],
+    deps: [session],
   })
+}
+
+function within(root: string, value: string) {
+  const relative = path.posix.relative(path.posix.normalize(root), path.posix.normalize(value))
+  return relative === "" || (!relative.startsWith("..") && !path.posix.isAbsolute(relative))
 }

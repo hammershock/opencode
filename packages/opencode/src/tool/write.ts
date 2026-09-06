@@ -62,7 +62,7 @@ export const WriteTool = Tool.define(
           })
 
           yield* fs.writeWithDirs(filepath, Bom.join(contentNew, desiredBom))
-          if (yield* format.file(filepath)) {
+          if (yield* format.file(filepath, ctx.sessionID)) {
             yield* Bom.syncFile(fs, filepath, desiredBom)
           }
           yield* events.publish(FileSystem.Event.Edited, { file: filepath })
@@ -72,8 +72,8 @@ export const WriteTool = Tool.define(
           })
 
           let output = "Wrote file successfully."
-          yield* lsp.touchFile(filepath, "document")
-          const diagnostics = yield* lsp.diagnostics()
+          yield* lsp.touchFile(filepath, "document", ctx.sessionID)
+          const diagnostics = yield* lsp.diagnostics(ctx.sessionID)
           const normalizedFilepath = FSUtil.normalizePath(filepath)
           let projectDiagnosticsCount = 0
           for (const [file, issues] of Object.entries(diagnostics)) {

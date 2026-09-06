@@ -1073,24 +1073,15 @@ export function createPromptState(input: PromptInput): PromptState {
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
     enabled: input.prompt() && shell() && !visible(),
-    bindings: [
+    commands: [
       {
-        key: "escape",
-        desc: "Exit shell mode",
-        group: "Prompt",
-        cmd: () => setShellMode(false),
-      },
-      {
-        key: "backspace",
-        desc: "Exit shell mode",
-        group: "Prompt",
-        cmd() {
-          if (!area || area.isDestroyed) return false
-          if (area.cursorOffset !== 0) return false
-          setShellMode(false)
-        },
+        name: "prompt.shell.exit",
+        title: "Exit shell mode",
+        category: "Prompt",
+        run: () => setShellMode(false),
       },
     ],
+    bindings: input.tuiConfig.keybinds.get("prompt.shell.exit"),
   }))
 
   useBindings(() => ({

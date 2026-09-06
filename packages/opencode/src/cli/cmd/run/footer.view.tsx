@@ -54,7 +54,7 @@ import type {
   RunTuiConfig,
 } from "./types"
 import type { RunTheme } from "./theme"
-import { modelInfo } from "./variant.shared"
+import { modelInfo, moveVariant } from "./variant.shared"
 
 registerOpencodeSpinner()
 
@@ -228,6 +228,15 @@ export function RunFooterView(props: RunFooterViewProps) {
     (keymap: OpenTuiKeymap) =>
       formatKeyBindings(
         keymap.getCommandBindings({ visibility: "registered", commands: ["variant.cycle"] }).get("variant.cycle"),
+        props.tuiConfig,
+      ) ?? "",
+  )
+  const shellExitShortcut = useKeymapSelector(
+    (keymap: OpenTuiKeymap) =>
+      formatKeySequence(
+        keymap
+          .getCommandBindings({ visibility: "registered", commands: ["prompt.shell.exit"] })
+          .get("prompt.shell.exit")?.[0]?.sequence,
         props.tuiConfig,
       ) ?? "",
   )
@@ -480,7 +489,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     }
 
     if (shell()) {
-      return { key: "esc", label: "normal" }
+      return { key: shellExitShortcut(), label: "normal" }
     }
 
     if (command()) {
@@ -517,6 +526,36 @@ export function RunFooterView(props: RunFooterViewProps) {
     bindings: [
       ...props.tuiConfig.keybinds.get("command.palette.show"),
       ...props.tuiConfig.keybinds.get("variant.cycle"),
+    ],
+  }))
+
+  useBindings(() => ({
+    mode: OPENCODE_BASE_MODE,
+    enabled: active().type === "prompt" && route().type === "composer" && !composer.visible() && !composer.shell(),
+    priority: 1,
+    commands: [
+      {
+        name: "variant.increase",
+        title: "Increase model variant",
+        category: "Model",
+        run: () => {
+          if (props.variants().length === 0) return props.onStatus("no variants available")
+          props.onVariantSelect(moveVariant(props.currentVariant(), props.variants(), 1))
+        },
+      },
+      {
+        name: "variant.decrease",
+        title: "Decrease model variant",
+        category: "Model",
+        run: () => {
+          if (props.variants().length === 0) return props.onStatus("no variants available")
+          props.onVariantSelect(moveVariant(props.currentVariant(), props.variants(), -1))
+        },
+      },
+    ],
+    bindings: [
+      ...props.tuiConfig.keybinds.get("variant.increase"),
+      ...props.tuiConfig.keybinds.get("variant.decrease"),
     ],
   }))
 

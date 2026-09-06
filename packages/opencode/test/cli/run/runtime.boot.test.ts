@@ -63,6 +63,9 @@ function config(input?: {
   bindings?: Partial<{
     commandList: string[]
     variantCycle: string[]
+    variantIncrease: string[]
+    variantDecrease: string[]
+    shellExit: string[]
     interrupt: string[]
     historyPrevious: string[]
     historyNext: string[]
@@ -79,6 +82,9 @@ function config(input?: {
       ...(input?.leader && { leader: input.leader }),
       ...(bind?.commandList && { command_list: bind.commandList }),
       ...(bind?.variantCycle && { variant_cycle: bind.variantCycle }),
+      ...(bind?.variantIncrease && { variant_increase: bind.variantIncrease }),
+      ...(bind?.variantDecrease && { variant_decrease: bind.variantDecrease }),
+      ...(bind?.shellExit && { prompt_shell_exit: bind.shellExit }),
       ...(bind?.interrupt && { session_interrupt: bind.interrupt }),
       ...(bind?.historyPrevious && { history_previous: bind.historyPrevious }),
       ...(bind?.historyNext && { history_next: bind.historyNext }),
@@ -101,6 +107,9 @@ describe("run runtime boot", () => {
         bindings: {
           commandList: ["ctrl+p"],
           variantCycle: ["ctrl+t", "alt+t"],
+          variantIncrease: ["alt+up"],
+          variantDecrease: ["alt+down"],
+          shellExit: ["ctrl+escape"],
           interrupt: ["ctrl+c"],
           historyPrevious: ["k"],
           historyNext: ["j"],
@@ -117,6 +126,9 @@ describe("run runtime boot", () => {
     expect(result.leader_timeout).toBe(2000)
     expect(result.keybinds.get("command.palette.show")?.[0]?.key).toBe("ctrl+p")
     expect(result.keybinds.get("variant.cycle").map((item) => item.key)).toEqual(["ctrl+t", "alt+t"])
+    expect(result.keybinds.get("variant.increase")?.[0]?.key).toBe("alt+up")
+    expect(result.keybinds.get("variant.decrease")?.[0]?.key).toBe("alt+down")
+    expect(result.keybinds.get("prompt.shell.exit")?.[0]?.key).toBe("ctrl+escape")
     expect(result.keybinds.get("session.interrupt")?.[0]?.key).toBe("ctrl+c")
     expect(result.keybinds.get("prompt.history.previous")?.[0]?.key).toBe("k")
     expect(result.keybinds.get("prompt.history.next")?.[0]?.key).toBe("j")
@@ -135,6 +147,9 @@ describe("run runtime boot", () => {
     expect(result.diff_style).toBe("auto")
     expect(result.keybinds.get("command.palette.show")?.[0]?.key).toBe("ctrl+p")
     expect(result.keybinds.get("variant.cycle")?.[0]?.key).toBe("ctrl+t")
+    expect(result.keybinds.get("variant.increase")?.[0]?.key).toBe("shift+up")
+    expect(result.keybinds.get("variant.decrease")?.[0]?.key).toBe("shift+down")
+    expect(result.keybinds.get("prompt.shell.exit")?.[0]?.key).toBe("escape")
     expect(result.keybinds.get("session.interrupt")?.[0]?.key).toBe("escape")
     expect(result.keybinds.get("prompt.history.previous")?.[0]?.key).toBe("up")
     expect(result.keybinds.get("prompt.history.next")?.[0]?.key).toBe("down")

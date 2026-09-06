@@ -166,6 +166,7 @@ export function Prompt(props: PromptProps) {
   const keymap = useOpencodeKeymap()
   const agentShortcut = useCommandShortcut("agent.cycle")
   const paletteShortcut = useCommandShortcut("command.palette.show")
+  const shellExitShortcut = useCommandShortcut("prompt.shell.exit")
   const renderer = useRenderer()
   const exit = useExit()
   const dimensions = useTerminalDimensions()
@@ -843,19 +844,53 @@ export function Prompt(props: PromptProps) {
   useBindings(() => {
     return {
       target: inputTarget,
-      enabled: inputTarget() !== undefined && store.mode === "shell",
-      bindings: [{ key: "escape", desc: "Exit shell mode", group: "Prompt", cmd: () => setStore("mode", "normal") }],
+      enabled: inputTarget() !== undefined && store.mode === "shell" && !auto()?.visible,
+      commands: [
+        {
+          name: "prompt.shell.exit",
+          title: "Exit shell mode",
+          category: "Prompt",
+          run: () => setStore("mode", "normal"),
+        },
+      ],
+      bindings: tuiConfig.keybinds.get("prompt.shell.exit"),
     }
   })
 
   useBindings(() => {
     return {
       target: inputTarget,
-      enabled: (() => {
-        cursorVersion()
-        return inputTarget() !== undefined && store.mode === "shell" && input?.visualCursor.offset === 0
-      })(),
-      bindings: [{ key: "backspace", desc: "Exit shell mode", group: "Prompt", cmd: () => setStore("mode", "normal") }],
+      enabled: inputTarget() !== undefined && !props.disabled && store.mode === "normal" && !auto()?.visible,
+      priority: 1,
+      commands: [
+        {
+          name: "variant.increase",
+          title: "Increase model variant",
+          category: "Agent",
+          run: () => {
+            if (local.model.variant.move(1)) return
+            toast.show({
+              title: "No variants available",
+              message: "The current model does not support variants.",
+              variant: "info",
+            })
+          },
+        },
+        {
+          name: "variant.decrease",
+          title: "Decrease model variant",
+          category: "Agent",
+          run: () => {
+            if (local.model.variant.move(-1)) return
+            toast.show({
+              title: "No variants available",
+              message: "The current model does not support variants.",
+              variant: "info",
+            })
+          },
+        },
+      ],
+      bindings: [...tuiConfig.keybinds.get("variant.increase"), ...tuiConfig.keybinds.get("variant.decrease")],
     }
   })
 
@@ -1681,7 +1716,7 @@ export function Prompt(props: PromptProps) {
                 </Match>
                 <Match when={store.mode === "shell"}>
                   <text fg={theme.text}>
-                    esc <span style={{ fg: theme.textMuted }}>exit shell mode</span>
+                    {shellExitShortcut()} <span style={{ fg: theme.textMuted }}>exit shell mode</span>
                   </text>
                 </Match>
               </Switch>

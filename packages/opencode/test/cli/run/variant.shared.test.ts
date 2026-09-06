@@ -8,6 +8,7 @@ import { Global } from "@opencode-ai/core/global"
 import {
   createVariantRuntime,
   cycleVariant,
+  moveVariant,
   formatModelLabel,
   pickVariant,
   resolveVariant,
@@ -139,6 +140,18 @@ describe("run variant shared", () => {
     expect(cycleVariant("low", ["low", "high"])).toBe("high")
     expect(cycleVariant("high", ["low", "high"])).toBeUndefined()
     expect(cycleVariant(undefined, [])).toBeUndefined()
+  })
+
+  test("moves through declared variants without wrapping", () => {
+    const variants = ["minimal", "low", "high"]
+    expect(moveVariant(undefined, variants, 1)).toBe("minimal")
+    expect(moveVariant(undefined, variants, -1)).toBeUndefined()
+    expect(moveVariant("minimal", variants, -1)).toBe("minimal")
+    expect(moveVariant("minimal", variants, 1)).toBe("low")
+    expect(moveVariant("high", variants, 1)).toBe("high")
+    expect(moveVariant("missing", variants, 1)).toBe("minimal")
+    expect(moveVariant("missing", variants, -1)).toBeUndefined()
+    expect(moveVariant("high", [], -1)).toBeUndefined()
   })
 
   test("formats model labels", () => {

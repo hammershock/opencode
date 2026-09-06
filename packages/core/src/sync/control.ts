@@ -20,6 +20,7 @@ import { SyncDevice } from "./device"
 import { SyncScheduler } from "./scheduler"
 import { SyncDatabase } from "./database"
 import { NonNegativeInt } from "../schema"
+import { SyncCrypto } from "./crypto"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -43,6 +44,7 @@ export const BindingUpdate = Schema.Struct({
   label: Schema.NonEmptyString,
   targetID: Schema.optional(Schema.NonEmptyString),
 })
+export const Recovery = Schema.Struct({ recoveryString: Schema.NonEmptyString })
 
 export class ControlError extends Schema.TaggedErrorClass<ControlError>()("SyncControlError", {
   kind: Schema.Literals(["unconfigured", "locked", "provider", "storage"]),
@@ -55,6 +57,7 @@ export interface Interface {
   readonly devices: () => Effect.Effect<SyncDevice.State, ControlError>
   readonly updateDevice: (input: typeof DeviceUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
   readonly updateBinding: (input: typeof BindingUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
+  readonly exportKey: () => Effect.Effect<typeof Recovery.Type, ControlError>
 }
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncControl") {}
 
@@ -217,7 +220,28 @@ const layer = Layer.effect(
       })
       return yield* deviceState()
     })
-    return { status, now, enable, devices: deviceState, updateDevice, updateBinding }
+    const exportKey = Effect.fn("SyncControl.exportKey")(function* () {
+      const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      const secure = yield* Effect.tryPromise({
+        try: () => SyncSecureStore.detect(),
+        catch: () => new ControlError({ kind: "locked" }),
+      })
+      const encoded = yield* Effect.tryPromise({
+        try: () => secure.get(`space:${config.namespaceID}:root`),
+        catch: () => new ControlError({ kind: "locked" }),
+      })
+      if (!encoded) return yield* new ControlError({ kind: "locked" })
+      return {
+        recoveryString: yield* Effect.promise(() =>
+          SyncCrypto.exportRecoveryString({
+            namespaceID: config.namespaceID,
+            rootKey: new Uint8Array(Buffer.from(encoded, "base64url")),
+          }),
+        ),
+      }
+    })
+    return { status, now, enable, devices: deviceState, updateDevice, updateBinding, exportKey }
   }),
 )
 

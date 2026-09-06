@@ -517,7 +517,7 @@ export function Session() {
             variables: result.data.data.variables,
           }
         }
-        const syncSetup = async () => {
+        const syncSetup = async (presetRecovery?: string) => {
           try {
             const state = await sdk.client.global.syncSetup({ throwOnError: true })
             const resetExisting = state.data.config
@@ -540,9 +540,11 @@ export function Session() {
               value: process.platform === "darwin" ? "Mac" : "WSL",
             })
             if (!deviceName?.trim()) return "cancelled" as const
-            const recoveryString = await DialogPrompt.show(dialog, "Recovery key (optional)", {
-              description: () => <text>Leave empty to create a new encrypted sync space.</text>,
-            })
+            const recoveryString =
+              presetRecovery ??
+              (await DialogPrompt.show(dialog, "Recovery key (optional)", {
+                description: () => <text>Leave empty to create a new encrypted sync space.</text>,
+              }))
             if (recoveryString === null) return "cancelled" as const
             const pending = await sdk.client.global.syncAuthorize(
               {
@@ -640,10 +642,11 @@ export function Session() {
               await sdk.client.global.syncEnabled({ enabled }, { throwOnError: true })
             },
             exportKey: async () => {
-              throw new Error("Recovery export is available only through secure sync control")
+              const result = await sdk.client.global.syncRecoveryExport({ throwOnError: true })
+              return result.data.recoveryString
             },
-            importKey: async () => {
-              throw new Error("Use /sync setup to import a recovery key")
+            importKey: async (recovery) => {
+              if ((await syncSetup(recovery)) !== "completed") throw new Error("Recovery key import was not completed")
             },
           },
           presentSyncStatus: async (status) => {
@@ -672,25 +675,24 @@ export function Session() {
           },
           openDevices: async () => {
             const result = await sdk.client.global.syncDevices({ throwOnError: true })
-            const choice = await new Promise<{ kind: "device"; id: string } | undefined>(
-              (resolve) =>
-                dialog.replace(
-                  () => (
-                    <DialogSelect
-                      title="Sync devices"
-                      options={[
-                        ...result.data.devices.map((device) => ({
-                          title: `${device.name}${device.revoked ? " (revoked)" : ""}`,
-                          description: device.id,
-                          value: { kind: "device" as const, id: device.id },
-                        })),
-                        { title: "Bind portable target label", value: { kind: "device" as const, id: "" } },
-                      ]}
-                      onSelect={(option) => resolve(option.value)}
-                    />
-                  ),
-                  () => resolve(undefined),
+            const choice = await new Promise<{ kind: "device"; id: string } | undefined>((resolve) =>
+              dialog.replace(
+                () => (
+                  <DialogSelect
+                    title="Sync devices"
+                    options={[
+                      ...result.data.devices.map((device) => ({
+                        title: `${device.name}${device.revoked ? " (revoked)" : ""}`,
+                        description: device.id,
+                        value: { kind: "device" as const, id: device.id },
+                      })),
+                      { title: "Bind portable target label", value: { kind: "device" as const, id: "" } },
+                    ]}
+                    onSelect={(option) => resolve(option.value)}
+                  />
                 ),
+                () => resolve(undefined),
+              ),
             )
             if (!choice) return "cancelled"
             if (!choice.id) {

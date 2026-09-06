@@ -8348,6 +8348,38 @@ export type GlobalSyncBindingUpdateResponses = {
 
 export type GlobalSyncBindingUpdateResponse = GlobalSyncBindingUpdateResponses[keyof GlobalSyncBindingUpdateResponses]
 
+export type GlobalSyncRecoveryExportData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/recovery-key"
+}
+
+export type GlobalSyncRecoveryExportErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncRecoveryExportError = GlobalSyncRecoveryExportErrors[keyof GlobalSyncRecoveryExportErrors]
+
+export type GlobalSyncRecoveryExportResponses = {
+  /**
+   * Success
+   */
+  200: {
+    recoveryString: string
+  }
+}
+
+export type GlobalSyncRecoveryExportResponse =
+  GlobalSyncRecoveryExportResponses[keyof GlobalSyncRecoveryExportResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

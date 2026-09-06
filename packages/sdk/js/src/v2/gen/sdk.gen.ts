@@ -100,6 +100,8 @@ import type {
   GlobalSyncEnabledResponses,
   GlobalSyncNowErrors,
   GlobalSyncNowResponses,
+  GlobalSyncRecoveryExportErrors,
+  GlobalSyncRecoveryExportResponses,
   GlobalSyncReuseLegacyErrors,
   GlobalSyncReuseLegacyResponses,
   GlobalSyncSetupErrors,
@@ -1618,6 +1620,14 @@ export class Global extends HeyApiClient {
         ...params.headers,
       },
     })
+  }
+
+  public syncRecoveryExport<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalSyncRecoveryExportResponses,
+      GlobalSyncRecoveryExportErrors,
+      ThrowOnError
+    >({ url: "/global/sync/recovery-key", ...options })
   }
 
   /**

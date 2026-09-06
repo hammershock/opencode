@@ -93,4 +93,35 @@ describe("SessionSync", () => {
     expect(calls[2][0]).toMatchObject({ aggregateID: sibling, seq: 1, data: { sessionID: sibling } })
     expect(calls[2][1]).toMatchObject({ ownerID: "remote", strictOwner: true })
   })
+
+  test("replays attachment-backed Session parts only after restoring their data URL", async () => {
+    const blobs = new Map<string, Uint8Array>()
+    const attachment = {
+      put: async (value: Uint8Array) => {
+        blobs.set("image", value)
+        return "image"
+      },
+      get: async (id: string) => blobs.get(id)!,
+    }
+    const wire = await SessionSync.externalize(
+      {
+        id: "evt_00000000000000000000000001",
+        aggregateID: "s1",
+        seq: 0,
+        type: "session.part.updated",
+        data: { part: { type: "file", url: "data:image/png;base64,aGVsbG8=" } },
+      },
+      attachment,
+    )
+    expect(JSON.stringify(wire)).not.toContain("aGVsbG8=")
+    const calls: any[] = []
+    const projector = SessionSync.projector(
+      { replay: (event: unknown) => Effect.sync(() => void calls.push(event)), remove: () => Effect.void } as any,
+      undefined,
+      undefined,
+      attachment,
+    )
+    await Effect.runPromise(projector.project(wire))
+    expect(calls[0].data.part.url).toBe("data:image/png;base64,aGVsbG8=")
+  })
 })

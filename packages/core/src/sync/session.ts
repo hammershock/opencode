@@ -2,6 +2,7 @@ export * as SessionSync from "./session"
 
 import { Cause, Effect, Layer, Stream } from "effect"
 import { EventV2 } from "../event"
+import { SyncAttachment } from "./attachment"
 import { SyncEvent } from "./event"
 import { SyncEventStore } from "./event-store"
 import { Context } from "effect"
@@ -38,19 +39,43 @@ export function capture(store: SyncEventStore.Interface, payload: DurablePayload
   )
 }
 
+/** Converts an event to the compact attachment-aware wire representation. */
+export async function externalize(
+  event: SyncEvent.Envelope,
+  attachment: Pick<SyncAttachment.Interface, "put">,
+): Promise<SyncEvent.Envelope> {
+  return SyncEvent.Envelope.make({
+    ...event,
+    data: (await SyncAttachment.externalize(event.data, attachment)) as Record<string, any>,
+  })
+}
+
+/** Restores attachment references before an event reaches the Session projector. */
+export async function hydrate(
+  event: SyncEvent.Envelope,
+  attachment: Pick<SyncAttachment.Interface, "get">,
+): Promise<SyncEvent.Envelope> {
+  return SyncEvent.Envelope.make({
+    ...event,
+    data: (await SyncAttachment.hydrate(event.data, attachment)) as Record<string, any>,
+  })
+}
+
 /** Adapter used by SyncRuntime hydration to replay through normal projectors. */
 export function projector(
   events: EventV2.Interface,
   sourceDeviceID?: SyncEvent.DeviceID,
   onConflict?: (input: { sessionID: string; siblingID: string; sourceDeviceID: SyncEvent.DeviceID }) => Effect.Effect<void, unknown>,
+  attachment?: Pick<SyncAttachment.Interface, "get">,
 ): SyncEvent.DurableProjector {
   const siblings = new Map<string, string>()
   return {
     project: (event) =>
       Effect.gen(function* () {
-        const existing = siblings.get(event.aggregateID)
-        if (existing) return yield* replayAs(events, event, existing, sourceDeviceID)
-        const replay = events.replay(serialized(event), {
+        const hydrated = attachment ? yield* Effect.tryPromise(() => hydrate(event, attachment)) : event
+        const existing = siblings.get(hydrated.aggregateID)
+        if (existing) return yield* replayAs(events, hydrated, existing, sourceDeviceID)
+        const replay = events.replay(serialized(hydrated), {
           publish: true,
           ...(sourceDeviceID ? { ownerID: sourceDeviceID, strictOwner: true } : {}),
         })
@@ -63,15 +88,15 @@ export function projector(
           !["Replay diverged", "Replay owner mismatch"].some((message) => failure.message.includes(message))
         )
           return yield* Effect.failCause(exit.cause)
-        const sibling = yield* Effect.promise(() => siblingID(event.aggregateID, sourceDeviceID))
-        siblings.set(event.aggregateID, sibling)
+        const sibling = yield* Effect.promise(() => siblingID(hydrated.aggregateID, sourceDeviceID))
+        siblings.set(hydrated.aggregateID, sibling)
         if (onConflict)
-          yield* onConflict({ sessionID: event.aggregateID, siblingID: sibling, sourceDeviceID }).pipe(Effect.orDie)
-        const prefix = yield* events.durable({ aggregateID: event.aggregateID }).pipe(
+          yield* onConflict({ sessionID: hydrated.aggregateID, siblingID: sibling, sourceDeviceID }).pipe(Effect.orDie)
+        const prefix = yield* events.durable({ aggregateID: hydrated.aggregateID }).pipe(
           // Durable aggregate sequences are contiguous and zero based. Taking
           // exactly `seq` items snapshots the common prefix without subscribing
           // forever to the live tail.
-          Stream.take(event.seq),
+          Stream.take(hydrated.seq),
           Stream.runCollect,
         )
         for (const item of prefix) {
@@ -82,12 +107,12 @@ export function projector(
               aggregateID: sibling,
               seq: item.durable.seq,
               type: item.type,
-              data: replaceSessionID(item.data as Record<string, unknown>, event.aggregateID, sibling),
+              data: replaceSessionID(item.data as Record<string, unknown>, hydrated.aggregateID, sibling),
             },
             { publish: true, ownerID: sourceDeviceID, strictOwner: true },
           )
         }
-        yield* replayAs(events, event, sibling, sourceDeviceID)
+        yield* replayAs(events, hydrated, sibling, sourceDeviceID)
       }),
     delete: (tombstone) => events.remove(tombstone.sessionID),
   }

@@ -65,6 +65,7 @@ export type PromptProps = {
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
+  onBuiltinSlash?: (input: string) => Promise<boolean>
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
   right?: JSX.Element
@@ -1124,6 +1125,9 @@ export function Prompt(props: PromptProps) {
         variant,
         parts: nonTextParts.filter((x) => x.type === "file"),
       })
+    } else if (props.onBuiltinSlash && (await props.onBuiltinSlash(inputText))) {
+      // A verified client-host override consumed the input. External commands
+      // remain above this branch and therefore retain upstream precedence.
     } else {
       move.startSubmit()
       sdk.client.session

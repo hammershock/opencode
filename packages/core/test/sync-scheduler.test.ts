@@ -30,4 +30,27 @@ describe("SyncScheduler", () => {
     await first
     expect(timers.at(-1)?.delay).toBe(30_000)
   })
+
+  test("backs off failed work and stop cancels the scheduled retry", async () => {
+    const timers: { callback: () => void; delay: number }[] = []
+    const cleared: unknown[] = []
+    const scheduler = SyncScheduler.make({
+      run: async () => {
+        throw new Error("offline")
+      },
+      random: () => 0.5,
+      setTimer: (callback, delay) => {
+        timers.push({ callback, delay })
+        return timers.length as any
+      },
+      clearTimer: (timer) => void cleared.push(timer),
+    })
+    scheduler.start()
+    await expect(scheduler.trigger()).rejects.toThrow("offline")
+    expect(scheduler.status()).toMatchObject({ failures: 1, nextDelay: 1_000 })
+    expect(timers.at(-1)?.delay).toBe(1_000)
+    scheduler.stop()
+    expect(cleared.length).toBeGreaterThan(0)
+    expect(scheduler.status().enabled).toBe(false)
+  })
 })

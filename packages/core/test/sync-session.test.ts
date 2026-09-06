@@ -35,18 +35,15 @@ describe("SessionSync", () => {
     } as any
     const projector = SessionSync.projector(events)
     await Effect.runPromise(
-      projector.project(
-        {} as any,
-        {
-          id: "evt_00000000000000000000000000",
-          aggregateID: "s1",
-          seq: 0,
-          type: "session.created",
-          data: {},
-        },
-      ),
+      projector.project({
+        id: "evt_00000000000000000000000000",
+        aggregateID: "s1",
+        seq: 0,
+        type: "session.created",
+        data: {},
+      }),
     )
-    await Effect.runPromise(projector.delete({} as any, { id: "d1", sessionID: "s1", deletedAt: 1 }))
+    await Effect.runPromise(projector.delete({ id: "d1", sessionID: "s1", deletedAt: 1 }))
     expect(calls[0]).toMatchObject([
       "replay",
       { id: "evt_00000000000000000000000000", aggregateID: "s1", seq: 0 },

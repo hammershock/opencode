@@ -39,9 +39,9 @@ export function capture(store: SyncEventStore.Interface, payload: DurablePayload
 }
 
 /** Adapter used by SyncRuntime hydration to replay through normal projectors. */
-export function projector(events: EventV2.Interface): SyncEvent.Projector<SyncEventStore.Transaction> {
+export function projector(events: EventV2.Interface): SyncEvent.DurableProjector {
   return {
-    project: (_transaction, event) =>
+    project: (event) =>
       events.replay(
         {
           id: EventV2.ID.make(event.id),
@@ -52,7 +52,7 @@ export function projector(events: EventV2.Interface): SyncEvent.Projector<SyncEv
         },
         { publish: true },
       ),
-    delete: (_transaction, tombstone) => events.remove(tombstone.sessionID),
+    delete: (tombstone) => events.remove(tombstone.sessionID),
   }
 }
 

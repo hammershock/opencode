@@ -67,6 +67,12 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope) {
         for (const operation of segment.operations) if (operation.kind === "event") applied.push(operation.event)
         cursors.set(segment.deviceID, segment.generation)
       }),
+    applyDurable: (segment: SyncEvent.Segment) =>
+      Effect.sync(() => {
+        for (const operation of segment.operations) if (operation.kind === "event") applied.push(operation.event)
+        cursors.set(segment.deviceID, segment.generation)
+      }),
+    pendingApply: () => Effect.succeed([]),
     acquire: () => Effect.succeed(true),
     renew: () => Effect.succeed(true),
     release: () => Effect.void,

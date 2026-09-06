@@ -50,7 +50,7 @@ export function make(input: {
   readonly rootKey: Uint8Array
   readonly provider: SyncProvider.Adapter
   readonly store: SyncEventStore.Interface
-  readonly projector: SyncEvent.Projector<SyncEventStore.Transaction>
+  readonly projector: SyncEvent.DurableProjector
   readonly metadata: () => Effect.Effect<readonly Metadata[], unknown>
   readonly metadataProjector: MetadataProjector
   readonly acknowledged?: () => Effect.Effect<Readonly<Record<string, number>>, unknown>
@@ -189,7 +189,7 @@ export function make(input: {
             segmentContext(head.deviceID, generation, path),
             downloaded.bytes,
           )
-          await Effect.runPromise(input.store.apply(segment, input.projector))
+          await Effect.runPromise(input.store.applyDurable(segment, input.projector))
           cursor = generation
         }
       }

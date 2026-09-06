@@ -46,4 +46,18 @@ describe("SyncSecureStore", () => {
       SyncSecureStore.SecureStoreUnavailableError,
     )
   })
+
+  test.skipIf(process.env.OPENCODE_REAL_SECURE_STORE !== "1")(
+    "round trips a disposable record through the host secure store",
+    async () => {
+      const store = await SyncSecureStore.detect()
+      const account = `acceptance-${crypto.randomUUID()}`
+      try {
+        await store.set(account, "nonsecret-acceptance")
+        expect(await store.get(account)).toBe("nonsecret-acceptance")
+      } finally {
+        await store.remove(account)
+      }
+    },
+  )
 })

@@ -89,7 +89,7 @@ TargetRef = local | rexd(targetID)
 
 `targetID` 是创建 target 时生成的设备本地 UUID，一经创建不可修改。target 配置另有设备内唯一、可修改的显示名称，并保存连接方式、Rexd 启动方式、workspace roots 和默认目录；凭据、SSH 配置和连接细节不写入 Session。
 
-Session 只引用不可变 `targetID`，因此重命名显示名称不需要迁移历史 Session。修改一个既有 ID 的连接配置必须视为更新同一个执行位置并留下可诊断的配置变更，不能复用该 ID 创建语义无关的新 target。
+Session 以不可变 `targetID` 作为设备本地解析 identity，因此重命名显示名称不需要迁移历史 Session。Location metadata 可以保留非敏感的 `lastKnownTargetName` 作为 target 被移除后的恢复提示，但它不是 identity，不能用于自动匹配或连接。修改一个既有 ID 的连接配置必须视为更新同一个执行位置并留下可诊断的配置变更，不能复用该 ID 创建语义无关的新 target。
 
 ### Target 配置文件
 
@@ -171,10 +171,11 @@ LocationRef {
   target
   directory
   workspaceID?
+  lastKnownTargetName?
 }
 ```
 
-其中 `directory` 是在对应 target 上验证并规范化后的绝对路径。它表示 Session Location directory，不等同于 RFC-0004 中 User Shell 自己维护的可变 `$PWD`。相同的目录字符串位于不同 target 时，是两个不同的 Location。
+其中 `directory` 是在对应 target 上验证并规范化后的绝对路径。它表示 Session Location directory，不等同于 RFC-0004 中 User Shell 自己维护的可变 `$PWD`。相同的目录字符串位于不同 target 时，是两个不同的 Location。`lastKnownTargetName` 只用于显示和恢复向导，不含连接详情，也不改变 `targetID` 的解析规则。
 
 为了兼容已有本地 Session，缺少 target 的历史 Location 按 `local` 解释。新代码不得依靠进程当前目录推断一个已经创建的 Session 的执行位置。
 
@@ -364,7 +365,7 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 
 - 没有显式 target 的历史 Session 视为 local。
 - 恢复远程 Session 时，当前设备找不到对应 target ID、连接失败或历史 directory 不再有效，Session 保持 unresolved 并展示具体原因；不得静默改为 local、默认 target 或默认目录。
-- unresolved Session 仍可只读打开并查看完整对话、工具结果和 metadata，但必须禁用 prompt 提交、User Shell、Agent 工具、Terminal、文件操作及其他依赖 Location 的执行入口。用户可以通过 RFC-0009 的实验性 `/sessions` 强制重绑定 workflow 选择新的 target 与 directory；只有重绑定事务成功后才能恢复写入和执行。
+- unresolved Session 仍可只读打开并查看完整对话、工具结果和 metadata，但必须禁用 prompt 提交、User Shell、Agent 工具、Terminal、文件操作及其他依赖 Location 的执行入口。RFC-0009 的恢复向导可以补建原 target 配置、建立 portable label binding，或在实验开关开启时重绑定到另一 Location；只有解析与完整 Location 验证成功后才能恢复写入和执行。
 - 选择 local 时，现有 Shell、文件、PTY 和 Agent 工具行为保持不变。
 - 公共 Schema 或 HttpApi 发生变化后，必须通过仓库生成脚本更新 Client/SDK，不得直接编辑 generated 文件。
 - 旧实现的 `~/.config/rexd/targets.json` 不是新的 active 配置源。新文件不存在而旧文件存在时，QuickStart/target manager 应提供一次显式导入：为每个合法旧 target 生成 UUID，展示 alias/manual 转换结果和字段诊断，再写入 canonical `targets.jsonc`；不得静默删除或修改旧文件，也不得长期合并两个来源。
@@ -428,4 +429,4 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 10. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。
 11. target 只从解析后的 OpenCode 用户配置目录加载；项目配置不能注入完整 target，连接详情不进入 Session 或同步 payload。
 12. 旧 `~/.config/rexd/targets.json` 可以经用户确认导入 canonical 文件，导入不会修改旧文件，也不会把两个文件长期作为并列配置源。
-13. target 被移除或无法解析时，Session 可以只读打开；所有 Location-dependent 操作保持禁用，且只有 RFC-0009 重绑定成功后恢复。
+13. target 被移除或无法解析时，Session 可以只读打开；所有 Location-dependent 操作保持禁用，并可通过 RFC-0009 补建原配置、建立 portable binding 或实验性 rebind 恢复。

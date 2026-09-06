@@ -1,0 +1,174 @@
+import { describe, expect, test } from "bun:test"
+import { Effect, Exit, Layer } from "effect"
+import { sql } from "drizzle-orm"
+import path from "node:path"
+import { SyncDatabase } from "@opencode-ai/core/sync/database"
+import { SyncEvent } from "@opencode-ai/core/sync/event"
+import { SyncEventStore } from "@opencode-ai/core/sync/event-store"
+import { tmpdir } from "./fixture/tmpdir"
+
+const device = SyncEvent.DeviceID.make("device-a")
+const remote = SyncEvent.DeviceID.make("device-b")
+const event = (id: string, seq: number): SyncEvent.Envelope => ({
+  id,
+  aggregateID: "session-a",
+  seq,
+  type: "session.test@1",
+  data: { text: id },
+})
+
+const segment = (generation: number, events: SyncEvent.Envelope[]) =>
+  SyncEvent.Segment.make({
+    version: 1,
+    id: SyncEvent.SegmentID.make(`${remote}:${generation}`),
+    deviceID: remote,
+    generation,
+    createdAt: 10,
+    operations: events.map((item) => ({ kind: "event" as const, event: item })),
+  })
+
+async function run<A, E>(effect: Effect.Effect<A, E, SyncEventStore.Service | SyncDatabase.Service>) {
+  await using tmp = await tmpdir()
+  const database = SyncDatabase.layerFromPath(path.join(tmp.path, "sync.db"))
+  return await Effect.runPromise(
+    effect.pipe(Effect.scoped, Effect.provide(Layer.provideMerge(SyncEventStore.layer, database))),
+  )
+}
+
+describe("SyncEventStore", () => {
+  test("durably seals ordered outbox events into one immutable per-device generation", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        yield* store.enqueue(event("later", 1), 20)
+        yield* store.enqueue(event("first", 0), 10)
+        yield* store.enqueue(event("first", 0), 10)
+
+        expect((yield* store.pending(10)).map((item) => item.id)).toEqual(["first", "later"])
+        const sealed = yield* store.seal(device, 10, 30)
+        expect(sealed).toMatchObject({ generation: 1, deviceID: device })
+        expect(sealed?.operations.map((item) => item.event.id)).toEqual(["first", "later"])
+        expect(yield* store.seal(device, 10, 40)).toEqual(sealed)
+        expect(yield* store.head(device)).toBe(0)
+        const database = (yield* SyncDatabase.Service).db
+        const mutation = yield* database
+          .run(sql`UPDATE sync_event_segment SET payload = ${"changed"} WHERE id = ${sealed!.id}`)
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(mutation)).toBe(true)
+
+        yield* store.acknowledge(sealed!.id)
+        expect(yield* store.head(device)).toBe(1)
+        expect(yield* store.pending(10)).toEqual([])
+        expect(yield* store.seal(device, 10)).toBeUndefined()
+      }),
+    )
+  })
+
+  test("keeps outbox rows when segment acknowledgement does not commit", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        yield* store.enqueue(event("one", 0))
+        const sealed = yield* store.seal(device, 10)
+        expect(sealed).toBeDefined()
+        expect(yield* store.seal(device, 10)).toEqual(sealed)
+      }),
+    )
+  })
+
+  test("makes concurrent outbox retries idempotent and rejects divergent payloads", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        yield* Effect.all(
+          Array.from({ length: 12 }, () => store.enqueue(event("same", 0))),
+          {
+            concurrency: "unbounded",
+          },
+        )
+        expect(yield* store.pending(20)).toEqual([event("same", 0)])
+        const divergent = yield* store.enqueue({ ...event("same", 0), data: { text: "different" } }).pipe(Effect.exit)
+        expect(Exit.isFailure(divergent)).toBe(true)
+        expect(yield* store.pending(20)).toEqual([event("same", 0)])
+      }),
+    )
+  })
+
+  test("advances a remote cursor only after every projection commits", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const database = (yield* SyncDatabase.Service).db
+        yield* database.run(sql`CREATE TABLE projection_probe (event_id TEXT PRIMARY KEY)`)
+        const failure = yield* store
+          .apply(segment(1, [event("one", 0), event("two", 1)]), {
+            project: (tx, item) =>
+              item.id === "two"
+                ? Effect.fail("projection failed")
+                : tx.run(sql`INSERT INTO projection_probe (event_id) VALUES (${item.id})`).pipe(Effect.asVoid),
+          })
+          .pipe(Effect.exit)
+
+        expect(Exit.isFailure(failure)).toBe(true)
+        expect(yield* store.cursor(remote)).toBe(0)
+        expect(yield* database.all(sql`SELECT * FROM projection_probe`)).toEqual([])
+
+        yield* store.apply(segment(1, [event("one", 0), event("two", 1)]), {
+          project: (tx, item) =>
+            tx.run(sql`INSERT INTO projection_probe (event_id) VALUES (${item.id})`).pipe(Effect.asVoid),
+        })
+        expect(yield* store.cursor(remote)).toBe(1)
+        expect(yield* database.all(sql`SELECT event_id FROM projection_probe ORDER BY event_id`)).toEqual([
+          { event_id: "one" },
+          { event_id: "two" },
+        ])
+      }),
+    )
+  })
+
+  test("makes replay idempotent and rejects a divergent reused event id", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const database = (yield* SyncDatabase.Service).db
+        yield* database.run(sql`CREATE TABLE projection_count (value INTEGER NOT NULL)`)
+        yield* database.run(sql`INSERT INTO projection_count (value) VALUES (0)`)
+        const projector = {
+          project: (tx: SyncEventStore.Transaction) =>
+            tx.run(sql`UPDATE projection_count SET value = value + 1`).pipe(Effect.asVoid),
+        }
+        yield* store.apply(segment(1, [event("one", 0)]), projector)
+        yield* store.apply(segment(1, [event("one", 0)]), projector)
+        expect(yield* database.get(sql`SELECT value FROM projection_count`)).toEqual({ value: 1 })
+
+        const incomplete = yield* store.apply(segment(1, []), projector).pipe(Effect.exit)
+        expect(Exit.isFailure(incomplete)).toBe(true)
+        expect(yield* store.cursor(remote)).toBe(1)
+
+        const exit = yield* store
+          .apply(segment(1, [{ ...event("one", 0), data: { text: "changed" } }]), projector)
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(yield* store.cursor(remote)).toBe(1)
+      }),
+    )
+  })
+
+  test("coordinates a renewable cross-process lease by owner and expiry", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        expect(yield* store.acquire("pull", "process-a", 100, 1_000)).toBe(true)
+        expect(yield* store.acquire("pull", "process-b", 100, 1_050)).toBe(false)
+        expect(yield* store.renew("pull", "process-b", 100, 1_050)).toBe(false)
+        expect(yield* store.renew("pull", "process-a", 100, 1_050)).toBe(true)
+        expect(yield* store.acquire("pull", "process-b", 100, 1_120)).toBe(false)
+        expect(yield* store.acquire("pull", "process-b", 100, 1_151)).toBe(true)
+        yield* store.release("pull", "process-a")
+        expect(yield* store.acquire("pull", "process-c", 100, 1_160)).toBe(false)
+        yield* store.release("pull", "process-b")
+        expect(yield* store.acquire("pull", "process-c", 100, 1_160)).toBe(true)
+      }),
+    )
+  })
+})

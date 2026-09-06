@@ -95,6 +95,8 @@ import { targetCommand, TARGET_MANAGER_SETTING, type TargetCommandContext } from
 import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
 import { useTargetManager } from "../../component/target-manager"
 import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
+import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
+import { DialogPrompt } from "../../ui/dialog-prompt"
 
 addDefaultParsers(parsers.parsers)
 
@@ -489,11 +491,14 @@ export function Session() {
   const local = useLocal()
   const targetManager = useTargetManager()
   const coreCommandHost = createMemo(() =>
-    createCommandHost<EnvironmentCommandContext & TargetCommandContext & SessionControlCommandContext>({
+    createCommandHost<
+      EnvironmentCommandContext & TargetCommandContext & SessionControlCommandContext & SyncCommandContext
+    >({
       register: (registry) => {
         environmentCommands.forEach((command) => registry.register(command))
         registry.register(targetCommand)
         sessionControlCommands.forEach((command) => registry.register(command))
+        syncCommands.forEach((command) => registry.register(command))
       },
       context: () => {
         const current = location()
@@ -509,6 +514,66 @@ export function Session() {
             enabled: result.data.data.enabled,
             generation: Number(result.data.data.generation),
             variables: result.data.data.variables,
+          }
+        }
+        const syncSetup = async () => {
+          try {
+            const state = await sdk.client.global.syncSetup({ throwOnError: true })
+            const resetExisting = state.data.config
+              ? await DialogConfirm.show(
+                  dialog,
+                  "Replace sync setup?",
+                  "This device already has a sync configuration. Continue only if you intend to replace it.",
+                )
+              : false
+            if (state.data.config && !resetExisting) return "cancelled" as const
+            const appKey = await DialogPrompt.show(dialog, "Baidu AppKey")
+            if (!appKey?.trim()) return "cancelled" as const
+            const secretKey = await DialogPrompt.show(dialog, "Baidu SecretKey", {
+              description: () => (
+                <text>This value stays in memory and is written only to the system secure store.</text>
+              ),
+            })
+            if (!secretKey?.trim()) return "cancelled" as const
+            const deviceName = await DialogPrompt.show(dialog, "Device name", {
+              value: process.platform === "darwin" ? "Mac" : "WSL",
+            })
+            if (!deviceName?.trim()) return "cancelled" as const
+            const recoveryString = await DialogPrompt.show(dialog, "Recovery key (optional)", {
+              description: () => <text>Leave empty to create a new encrypted sync space.</text>,
+            })
+            if (recoveryString === null) return "cancelled" as const
+            const pending = await sdk.client.global.syncAuthorize(
+              {
+                appKey: appKey.trim(),
+                secretKey: secretKey.trim(),
+                deviceName: deviceName.trim(),
+                ...(recoveryString.trim() ? { recoveryString: recoveryString.trim() } : {}),
+                resetExisting,
+              },
+              { throwOnError: true },
+            )
+            await clipboard.write?.(pending.data.authorizationURL)
+            await DialogAlert.show(
+              dialog,
+              "Authorize Baidu Netdisk",
+              `Authorization URL copied to clipboard:\n${pending.data.authorizationURL}`,
+            )
+            const code = await DialogPrompt.show(dialog, "Baidu authorization code")
+            if (!code?.trim()) return "cancelled" as const
+            const completed = await sdk.client.global.syncComplete(
+              { attemptID: pending.data.attemptID, code: code.trim() },
+              { throwOnError: true },
+            )
+            await clipboard.write?.(completed.data.recoveryString)
+            await DialogAlert.show(
+              dialog,
+              "Sensitive recovery key",
+              `${completed.data.recoveryString}\n\nCopied to clipboard. Store it safely; it cannot be recovered later.`,
+            )
+            return "completed" as const
+          } catch {
+            return "failed" as const
           }
         }
         return {
@@ -560,6 +625,66 @@ export function Session() {
             } catch {
               return "failed"
             }
+          },
+          openSyncSetup: syncSetup,
+          sync: {
+            status: async () => {
+              const result = await sdk.client.global.syncSetup({ throwOnError: true })
+              return {
+                enabled: result.data.config?.enabled ?? false,
+                provider: result.data.config?.provider,
+                namespaceID: result.data.config?.namespaceID,
+                deviceID: result.data.config?.deviceID,
+                cursors: {},
+                outbox: 0,
+              }
+            },
+            now: async () => {
+              throw new Error("Sync runtime is not initialized")
+            },
+            enable: async (enabled) => {
+              await sdk.client.global.syncEnabled({ enabled }, { throwOnError: true })
+            },
+            exportKey: async () => {
+              throw new Error("Recovery export is available only through secure sync control")
+            },
+            importKey: async () => {
+              throw new Error("Use /sync setup to import a recovery key")
+            },
+          },
+          presentSyncStatus: async (status) => {
+            await DialogAlert.show(
+              dialog,
+              "Cloud sync status",
+              status.namespaceID
+                ? `${status.enabled ? "Enabled" : "Disabled"} · ${status.provider}\nDevice ${status.deviceID}\nOutbox ${status.outbox}`
+                : "Cloud sync is not configured",
+            )
+          },
+          presentSensitiveRecoveryKey: async (key) => {
+            await clipboard.write?.(key)
+            await DialogAlert.show(dialog, "Sensitive recovery key", `${key}\n\nCopied to clipboard.`)
+          },
+          promptSensitiveRecoveryKey: () =>
+            DialogPrompt.show(dialog, "Recovery key").then((value) => value ?? undefined),
+          confirmAndResetSync: async () => {
+            const confirmed = await DialogConfirm.show(
+              dialog,
+              "Reset sync space",
+              "Permanently delete the old encrypted namespace and create a new one? This cannot be undone.",
+            )
+            if (!confirmed) return "cancelled"
+            return syncSetup()
+          },
+          openDevices: async () => {
+            const result = await sdk.client.global.syncSetup({ throwOnError: true })
+            const config = result.data.config
+            await DialogAlert.show(
+              dialog,
+              "Sync devices",
+              config ? `${config.deviceName} · ${config.deviceID}` : "Cloud sync is not configured",
+            )
+            return "completed"
           },
         }
       },

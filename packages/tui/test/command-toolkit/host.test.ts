@@ -56,11 +56,41 @@ describe("TUI command toolkit host", () => {
           }),
         ),
       context: () => context,
-      upstream: () => ({ id: "upstream.test", path: ["test"], provenance: { type: "upstream", host: "tui", identity: "test" } }),
+      upstream: () => ({
+        id: "upstream.test",
+        path: ["test"],
+        provenance: { type: "upstream", host: "tui", identity: "test" },
+      }),
       invalid: () => undefined,
       outcome: () => undefined,
     })
     expect(await host("/test")).toBe(false)
     expect(ran).toBe(false)
+  })
+
+  test("turns command service failures into host feedback", async () => {
+    const outcomes: string[] = []
+    const host = createCommandHost({
+      register: (registry) =>
+        registry.register(
+          defineCommand({
+            id: "fork.test.fail",
+            path: ["fail"],
+            title: "fail",
+            provenance: { type: "core", feature: "test" },
+            capabilities: [],
+            parse: () => ({ status: "parsed", input: undefined }),
+            execute: async () => {
+              throw new Error("service unavailable")
+            },
+          }),
+        ),
+      context: () => context,
+      upstream: () => undefined,
+      invalid: () => undefined,
+      outcome: (message, status) => outcomes.push(`${status}:${message}`),
+    })
+    expect(await host("/fail")).toBe(true)
+    expect(outcomes).toEqual(["failed:service unavailable"])
   })
 })

@@ -86,6 +86,16 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalSyncAuthorizeErrors,
+  GlobalSyncAuthorizeResponses,
+  GlobalSyncCompleteErrors,
+  GlobalSyncCompleteResponses,
+  GlobalSyncEnabledErrors,
+  GlobalSyncEnabledResponses,
+  GlobalSyncReuseLegacyErrors,
+  GlobalSyncReuseLegacyResponses,
+  GlobalSyncSetupErrors,
+  GlobalSyncSetupResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1376,6 +1386,136 @@ export class Global extends HeyApiClient {
     return (options?.client ?? this.client).sse.get<GlobalEventResponses, GlobalEventErrors, ThrowOnError>({
       url: "/global/event",
       ...options,
+    })
+  }
+
+  public syncSetup<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalSyncSetupResponses, GlobalSyncSetupErrors, ThrowOnError>({
+      url: "/global/sync/setup",
+      ...options,
+    })
+  }
+
+  public syncAuthorize<ThrowOnError extends boolean = false>(
+    parameters?: {
+      appKey?: string
+      secretKey?: string
+      deviceName?: string
+      recoveryString?: string
+      redirectURI?: string
+      resetExisting?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "appKey" },
+            { in: "body", key: "secretKey" },
+            { in: "body", key: "deviceName" },
+            { in: "body", key: "recoveryString" },
+            { in: "body", key: "redirectURI" },
+            { in: "body", key: "resetExisting" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalSyncAuthorizeResponses, GlobalSyncAuthorizeErrors, ThrowOnError>(
+      {
+        url: "/global/sync/setup/authorize",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  public syncComplete<ThrowOnError extends boolean = false>(
+    parameters?: {
+      attemptID?: string
+      code?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "attemptID" },
+            { in: "body", key: "code" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalSyncCompleteResponses, GlobalSyncCompleteErrors, ThrowOnError>({
+      url: "/global/sync/setup/complete",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncReuseLegacy<ThrowOnError extends boolean = false>(
+    parameters?: {
+      deviceName?: string
+      resetExisting?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "deviceName" },
+            { in: "body", key: "resetExisting" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      GlobalSyncReuseLegacyResponses,
+      GlobalSyncReuseLegacyErrors,
+      ThrowOnError
+    >({
+      url: "/global/sync/setup/reuse-legacy",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncEnabled<ThrowOnError extends boolean = false>(
+    parameters?: {
+      enabled?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "enabled" }] }])
+    return (options?.client ?? this.client).patch<GlobalSyncEnabledResponses, GlobalSyncEnabledErrors, ThrowOnError>({
+      url: "/global/sync/enabled",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -6901,6 +7041,7 @@ export class Pty2 extends HeyApiClient {
       ptyID: string
       "location[directory]"?: string
       "location[workspace]"?: string
+      "location[target]"?: string
       cursor?: string
       ticket?: string
     },
@@ -6914,6 +7055,7 @@ export class Pty2 extends HeyApiClient {
             { in: "path", key: "ptyID" },
             { in: "query", key: "location[directory]" },
             { in: "query", key: "location[workspace]" },
+            { in: "query", key: "location[target]" },
             { in: "query", key: "cursor" },
             { in: "query", key: "ticket" },
           ],

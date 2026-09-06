@@ -2038,6 +2038,10 @@ export type Config = {
   }
 }
 
+export type EffectHttpApiErrorServiceUnavailable = {
+  _tag: "ServiceUnavailable"
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -7954,6 +7958,202 @@ export type GlobalConfigUpdateResponses = {
 }
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
+
+export type GlobalSyncSetupData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/setup"
+}
+
+export type GlobalSyncSetupErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncSetupError = GlobalSyncSetupErrors[keyof GlobalSyncSetupErrors]
+
+export type GlobalSyncSetupResponses = {
+  /**
+   * Success
+   */
+  200: {
+    config?: {
+      version: 1
+      provider: "baidu"
+      namespaceID: string
+      deviceID: string
+      deviceName: string
+      enabled: boolean
+      intervalSeconds: number
+      remoteRoot: string
+    }
+    legacy: {
+      available: boolean
+      unavailable?: boolean
+      deviceID?: string
+    }
+  }
+}
+
+export type GlobalSyncSetupResponse = GlobalSyncSetupResponses[keyof GlobalSyncSetupResponses]
+
+export type GlobalSyncAuthorizeData = {
+  body?: {
+    appKey: string
+    secretKey: string
+    deviceName: string
+    recoveryString?: string
+    redirectURI?: string
+    resetExisting?: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/setup/authorize"
+}
+
+export type GlobalSyncAuthorizeErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncAuthorizeError = GlobalSyncAuthorizeErrors[keyof GlobalSyncAuthorizeErrors]
+
+export type GlobalSyncAuthorizeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    attemptID: string
+    authorizationURL: string
+  }
+}
+
+export type GlobalSyncAuthorizeResponse = GlobalSyncAuthorizeResponses[keyof GlobalSyncAuthorizeResponses]
+
+export type GlobalSyncCompleteData = {
+  body?: {
+    attemptID: string
+    code: string
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/setup/complete"
+}
+
+export type GlobalSyncCompleteErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncCompleteError = GlobalSyncCompleteErrors[keyof GlobalSyncCompleteErrors]
+
+export type GlobalSyncCompleteResponses = {
+  /**
+   * Success
+   */
+  200: {
+    config: {
+      version: 1
+      provider: "baidu"
+      namespaceID: string
+      deviceID: string
+      deviceName: string
+      enabled: boolean
+      intervalSeconds: number
+      remoteRoot: string
+    }
+    recoveryString: string
+  }
+}
+
+export type GlobalSyncCompleteResponse = GlobalSyncCompleteResponses[keyof GlobalSyncCompleteResponses]
+
+export type GlobalSyncReuseLegacyData = {
+  body?: {
+    deviceName: string
+    resetExisting?: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/setup/reuse-legacy"
+}
+
+export type GlobalSyncReuseLegacyErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncReuseLegacyError = GlobalSyncReuseLegacyErrors[keyof GlobalSyncReuseLegacyErrors]
+
+export type GlobalSyncReuseLegacyResponses = {
+  /**
+   * Success
+   */
+  200: {
+    config: {
+      version: 1
+      provider: "baidu"
+      namespaceID: string
+      deviceID: string
+      deviceName: string
+      enabled: boolean
+      intervalSeconds: number
+      remoteRoot: string
+    }
+    recoveryString: string
+  }
+}
+
+export type GlobalSyncReuseLegacyResponse = GlobalSyncReuseLegacyResponses[keyof GlobalSyncReuseLegacyResponses]
+
+export type GlobalSyncEnabledData = {
+  body?: {
+    enabled: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/enabled"
+}
+
+export type GlobalSyncEnabledErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncEnabledError = GlobalSyncEnabledErrors[keyof GlobalSyncEnabledErrors]
+
+export type GlobalSyncEnabledResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 1
+    provider: "baidu"
+    namespaceID: string
+    deviceID: string
+    deviceName: string
+    enabled: boolean
+    intervalSeconds: number
+    remoteRoot: string
+  }
+}
+
+export type GlobalSyncEnabledResponse = GlobalSyncEnabledResponses[keyof GlobalSyncEnabledResponses]
 
 export type GlobalDisposeData = {
   body?: never
@@ -13973,6 +14173,7 @@ export type V2PtyConnectData = {
   query?: {
     "location[directory]"?: string
     "location[workspace]"?: string
+    "location[target]"?: string
     cursor?: string
     ticket?: string
   }

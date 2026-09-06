@@ -184,6 +184,7 @@ export type FooterPromptRoute =
   | { type: "skill" }
   | { type: "model" }
   | { type: "variant" }
+  | { type: "experimental" }
 
 export type FooterSubagentTab = {
   sessionID: string

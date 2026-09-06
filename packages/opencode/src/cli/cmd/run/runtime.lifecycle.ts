@@ -54,6 +54,18 @@ type FooterLabels = {
 export type LifecycleInput = {
   directory: string
   findFiles: (query: string) => Promise<string[]>
+  completeShell: (input: { input: string; cursor: number }) => Promise<{
+    stale: boolean
+    candidates: Array<{
+      value: string
+      display: string
+      replacement: { start: number; end: number }
+      kind: string
+      description?: string
+    }>
+  }>
+  getUserShellCwd: () => Promise<boolean>
+  setUserShellCwd: (enabled: boolean) => Promise<void>
   agents: RunAgent[]
   resources: RunResource[]
   sessionID: string
@@ -232,6 +244,9 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
     const footer = new RunFooter(renderer, {
       directory: input.directory,
       findFiles: input.findFiles,
+      completeShell: input.completeShell,
+      getUserShellCwd: input.getUserShellCwd,
+      setUserShellCwd: input.setUserShellCwd,
       agents: input.agents,
       resources: input.resources,
       sessionID: input.getSessionID ?? (() => input.sessionID),

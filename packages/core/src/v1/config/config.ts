@@ -179,6 +179,9 @@ export const Info = Schema.Struct({
       continue_loop_on_deny: Schema.optional(Schema.Boolean).annotate({
         description: "Continue the agent loop when a tool call is denied",
       }),
+      user_shell_cwd: Schema.optional(Schema.Boolean).annotate({
+        description: "Keep User Shell cwd in memory for the current runtime (default: false)",
+      }),
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),

@@ -209,6 +209,8 @@ import type {
   SessionRevertResponses,
   SessionShareErrors,
   SessionShareResponses,
+  SessionShellCompletionErrors,
+  SessionShellCompletionResponses,
   SessionShellErrors,
   SessionShellResponses,
   SessionStatusErrors,
@@ -4243,6 +4245,51 @@ export class Session2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<SessionShellResponses, SessionShellErrors, ThrowOnError>({
       url: "/session/{sessionID}/shell",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Complete shell input
+   *
+   * Return structured completion candidates for User Shell input without changing the session.
+   */
+  public shellCompletion<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      input?: string
+      cursor?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "input" },
+            { in: "body", key: "cursor" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionShellCompletionResponses,
+      SessionShellCompletionErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/shell/completion",
       ...options,
       ...params,
       headers: {

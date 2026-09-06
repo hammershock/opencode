@@ -232,6 +232,44 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         .files({ query, directory: ctx.directory })
         .then((x) => x.data ?? [])
         .catch(() => []),
+    completeShell: async (request) => {
+      await ensureSession()
+      if (!state.sessionID) return { stale: false, candidates: [] }
+      const result = await ctx.sdk.session.shellCompletion({
+        sessionID: state.sessionID,
+        directory: ctx.directory,
+        input: request.input,
+        cursor: request.cursor,
+      })
+      if (!result.data) return { stale: false, candidates: [] }
+      return {
+        stale: result.data.stale,
+        candidates: result.data.candidates.map((candidate) => ({
+          ...candidate,
+          replacement: {
+            start: Number(candidate.replacement.start),
+            end: Number(candidate.replacement.end),
+          },
+        })),
+      }
+    },
+    getUserShellCwd: async () => {
+      const result = await ctx.sdk.config.get()
+      return result.data?.experimental?.user_shell_cwd === true
+    },
+    setUserShellCwd: async (enabled) => {
+      const result = await ctx.sdk.config.get({}, { throwOnError: true })
+      if (!result.data) throw new Error("global config unavailable")
+      await ctx.sdk.config.update(
+        {
+          config: {
+            ...result.data,
+            experimental: { ...result.data.experimental, user_shell_cwd: enabled },
+          },
+        },
+        { throwOnError: true },
+      )
+    },
     agents: [],
     resources: [],
     sessionID: state.sessionID,

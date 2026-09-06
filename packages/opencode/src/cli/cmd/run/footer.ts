@@ -33,7 +33,7 @@ import { OpencodeKeymapProvider } from "@opencode-ai/tui/keymap"
 import { RUN_COMMAND_PANEL_ROWS, RUN_SUBAGENT_PANEL_ROWS } from "./footer.command"
 import { SUBAGENT_INSPECTOR_ROWS } from "./footer.subagent"
 import { PROMPT_MAX_ROWS, TEXTAREA_MIN_ROWS } from "./footer.prompt"
-import { RunFooterView } from "./footer.view"
+import { RunFooterView, type RunFooterViewProps } from "./footer.view"
 import { RunScrollbackStream } from "./scrollback.surface"
 import { RUN_THEME_FALLBACK, resolveRunTheme, type RunTheme } from "./theme"
 import { modelInfo } from "./variant.shared"
@@ -70,6 +70,9 @@ type CycleResult = {
 type RunFooterOptions = {
   directory: string
   findFiles: (query: string) => Promise<string[]>
+  completeShell: RunFooterViewProps["completeShell"]
+  getUserShellCwd: () => Promise<boolean>
+  setUserShellCwd: (enabled: boolean) => Promise<void>
   agents: RunAgent[]
   resources: RunResource[]
   commands?: RunCommand[]
@@ -310,6 +313,9 @@ export class RunFooter implements FooterApi {
               subagent: footer.subagent,
               queuedPrompts: footer.queuedPrompts,
               findFiles: options.findFiles,
+              completeShell: options.completeShell,
+              getUserShellCwd: options.getUserShellCwd,
+              setUserShellCwd: options.setUserShellCwd,
               agents: footer.agents,
               resources: footer.resources,
               commands: footer.commands,

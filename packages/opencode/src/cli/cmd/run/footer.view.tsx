@@ -9,12 +9,13 @@
 // The view itself is stateless except for derived memos.
 /** @jsxImportSource @opentui/solid */
 import { useTerminalDimensions } from "@opentui/solid"
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 import { registerOpencodeSpinner } from "@opencode-ai/tui/component/register-spinner"
 import { createColors, createFrames } from "@opencode-ai/tui/ui/spinner"
 import {
   RUN_SUBAGENT_PANEL_ROWS,
   RunCommandMenuBody,
+  RunExperimentalMenuBody,
   RunModelSelectBody,
   RunQueuedPromptSelectBody,
   RunSkillSelectBody,
@@ -72,9 +73,21 @@ const EMPTY_BORDER = {
   rightT: "",
 }
 
-type RunFooterViewProps = {
+export type RunFooterViewProps = {
   directory: string
   findFiles: (query: string) => Promise<string[]>
+  completeShell?: (input: { input: string; cursor: number }) => Promise<{
+    stale: boolean
+    candidates: Array<{
+      value: string
+      display: string
+      replacement: { start: number; end: number }
+      kind: string
+      description?: string
+    }>
+  }>
+  getUserShellCwd?: () => Promise<boolean>
+  setUserShellCwd?: (enabled: boolean) => Promise<void>
   agents: () => RunAgent[]
   resources: () => RunResource[]
   commands: () => RunCommand[] | undefined
@@ -131,6 +144,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     )
   })
   const [route, setRoute] = createSignal<FooterPromptRoute>({ type: "composer" })
+  const [userShellCwd, setUserShellCwd] = createSignal(false)
   const [subagentMenuRows, setSubagentMenuRows] = createSignal(RUN_SUBAGENT_PANEL_ROWS)
   const queuedPrompts = createMemo(() => props.queuedPrompts?.() ?? [])
   const skills = createMemo(() => (props.commands() ?? []).filter((item) => item.source === "skill"))
@@ -142,6 +156,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   const skilling = createMemo(() => active().type === "prompt" && route().type === "skill")
   const modeling = createMemo(() => active().type === "prompt" && route().type === "model")
   const varianting = createMemo(() => active().type === "prompt" && route().type === "variant")
+  const experimenting = createMemo(() => active().type === "prompt" && route().type === "experimental")
   const panel = createMemo(
     () =>
       active().type === "permission" ||
@@ -151,7 +166,8 @@ export function RunFooterView(props: RunFooterViewProps) {
       commanding() ||
       skilling() ||
       modeling() ||
-      varianting(),
+      varianting() ||
+      experimenting(),
   )
   const selected = createMemo(() => {
     const current = route()
@@ -320,6 +336,27 @@ export function RunFooterView(props: RunFooterViewProps) {
     props.onSubagentSelect?.(undefined)
   }
 
+  const openExperimental = () => {
+    setRoute({ type: "experimental" })
+    props.onSubagentSelect?.(undefined)
+  }
+
+  onMount(() => {
+    void props
+      .getUserShellCwd?.()
+      ?.then(setUserShellCwd)
+      .catch(() => props.onStatus("failed to load experimental settings"))
+  })
+
+  const toggleUserShellCwd = () => {
+    const next = !userShellCwd()
+    setUserShellCwd(next)
+    void props.setUserShellCwd?.(next).catch(() => {
+      setUserShellCwd(!next)
+      props.onStatus("failed to update experimental setting")
+    })
+  }
+
   const openSubagentMenu = () => {
     if (tabs().length === 0) {
       return
@@ -368,6 +405,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   const composer = createPromptState({
     directory: props.directory,
     findFiles: props.findFiles,
+    completeShell: props.completeShell ?? (async () => ({ stale: false, candidates: [] })),
     agents: props.agents,
     resources: props.resources,
     commands: props.commands,
@@ -643,6 +681,7 @@ export function RunFooterView(props: RunFooterViewProps) {
       current.type !== "skill" &&
       current.type !== "model" &&
       current.type !== "variant" &&
+      current.type !== "experimental" &&
       current.type !== "queued-menu" &&
       current.type !== "subagent-menu"
     ) {
@@ -759,6 +798,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                             onSubagent={openSubagentMenu}
                             onQueued={openQueuedMenu}
                             onVariant={openVariant}
+                            onExperimental={openExperimental}
                             onVariantCycle={() => {
                               props.onCycle()
                               closePanel()
@@ -772,6 +812,14 @@ export function RunFooterView(props: RunFooterViewProps) {
                               closePanel()
                             }}
                             onExit={props.onExit}
+                          />
+                        </Match>
+                        <Match when={experimenting()}>
+                          <RunExperimentalMenuBody
+                            theme={theme}
+                            userShellCwd={userShellCwd}
+                            onToggleUserShellCwd={toggleUserShellCwd}
+                            onClose={closePanel}
                           />
                         </Match>
                         <Match when={skilling()}>

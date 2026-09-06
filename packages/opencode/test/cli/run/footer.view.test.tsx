@@ -10,6 +10,7 @@ import {
   RUN_COMMAND_PANEL_ROWS,
   RUN_SUBAGENT_PANEL_ROWS,
   RunCommandMenuBody,
+  RunExperimentalMenuBody,
   RunModelSelectBody,
   RunQueuedPromptSelectBody,
   RunSkillSelectBody,
@@ -422,6 +423,40 @@ test("direct command panel renders grouped command palette", async () => {
   }
 })
 
+test("experimental panel toggles User Shell cwd continuity", async () => {
+  const [enabled, setEnabled] = createSignal(false)
+  let toggles = 0
+  const app = await testRender(
+    () => (
+      <box width={100} height={RUN_COMMAND_PANEL_ROWS}>
+        <RunExperimentalMenuBody
+          theme={() => RUN_THEME_FALLBACK.footer}
+          userShellCwd={enabled}
+          onToggleUserShellCwd={() => {
+            toggles++
+            setEnabled(!enabled())
+          }}
+          onClose={() => {}}
+        />
+      </box>
+    ),
+    { width: 100, height: RUN_COMMAND_PANEL_ROWS },
+  )
+
+  try {
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("Experimental features")
+    expect(app.captureCharFrame()).toContain("CWD continuity")
+    expect(app.captureCharFrame()).toContain("off")
+    app.mockInput.pressEnter()
+    await app.renderOnce()
+    expect(toggles).toBe(1)
+    expect(app.captureCharFrame()).toContain("on")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("direct skill panel renders searchable skill list", async () => {
   const [commands] = createSignal<RunCommand[] | undefined>([
     command({ name: "review", description: "Review code" }),
@@ -779,7 +814,7 @@ test("direct footer keeps leader variant binding inactive when leader is disable
   }
 })
 
-test("direct footer submits slash autocomplete selections without dispatching shell completions", async () => {
+test("direct footer keeps slash autocomplete separate from User Shell completion", async () => {
   const submits: RunPrompt[] = []
   const app = await renderFooter({
     commands: [command({ name: "review", description: "Review code" })],
@@ -834,8 +869,9 @@ test("direct footer submits slash autocomplete selections without dispatching sh
       { text: "/review branch", parts: [], command: { name: "review", arguments: "branch" } },
       { text: "/new ", parts: [] },
       { text: "/new ", parts: [] },
+      { text: "/rev", parts: [], mode: "shell" },
     ])
-    expect(app.captureCharFrame()).toContain("/review")
+    expect(app.captureCharFrame()).toContain("SHELL")
   } finally {
     app.cleanup()
   }

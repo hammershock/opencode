@@ -33,14 +33,14 @@ function extract(messages: SessionV1.WithParts[]) {
 
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
-  readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
-  readonly system: () => Effect.Effect<string[], FSUtil.Error>
-  readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
+  readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error, FSUtil.Service>
+  readonly system: () => Effect.Effect<string[], FSUtil.Error, FSUtil.Service>
+  readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error, FSUtil.Service>
   readonly resolve: (
     messages: SessionV1.WithParts[],
     filepath: string,
     messageID: MessageID,
-  ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
+  ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error, FSUtil.Service>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Instruction") {}
@@ -53,7 +53,7 @@ const layer: Layer.Layer<
   Service,
   Effect.gen(function* () {
     const cfg = yield* Config.Service
-    const fs = yield* FSUtil.Service
+    const localFs = yield* FSUtil.Service
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
     const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
@@ -77,6 +77,7 @@ const layer: Layer.Layer<
     )
 
     const relative = Effect.fnUntraced(function* (instruction: string) {
+      const fs = yield* FSUtil.Service
       const ctx = yield* InstanceState.context
       if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
         return yield* fs
@@ -89,6 +90,7 @@ const layer: Layer.Layer<
     })
 
     const read = Effect.fnUntraced(function* (filepath: string) {
+      const fs = filepath.startsWith(global.config + path.sep) ? localFs : yield* FSUtil.Service
       return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
     })
 
@@ -108,12 +110,13 @@ const layer: Layer.Layer<
     })
 
     const systemPaths = Effect.fn("Instruction.systemPaths")(function* () {
+      const fs = yield* FSUtil.Service
       const config = yield* cfg.get()
       const ctx = yield* InstanceState.context
       const paths = new Set<string>()
 
       for (const file of globalFiles) {
-        if (yield* fs.existsSafe(file)) {
+        if (yield* localFs.existsSafe(file)) {
           paths.add(path.resolve(file))
           break
         }
@@ -169,6 +172,7 @@ const layer: Layer.Layer<
     })
 
     const find = Effect.fn("Instruction.find")(function* (dir: string) {
+      const fs = yield* FSUtil.Service
       for (const file of instructionFiles) {
         const filepath = path.resolve(path.join(dir, file))
         if (yield* fs.existsSafe(filepath)) return filepath

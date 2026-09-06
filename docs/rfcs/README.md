@@ -10,6 +10,8 @@ RFC（Request for Comments）用于记录本 fork 中影响多个模块或核心
 | [0004](0004-user-shell-session.md)          | User Shell Session           | Draft    |
 | [0005](0005-location-environment.md)        | Location Environment Loading | Draft    |
 | [0006](0006-builtin-command-adjustments.md) | Built-in Command Adjustments | Draft    |
+| [0007](0007-provider-usage.md)              | Provider Usage Surfaces      | Draft    |
+| [0008](0008-tui-input-interactions.md)      | TUI Input Interactions       | Draft    |
 
 ## 状态
 

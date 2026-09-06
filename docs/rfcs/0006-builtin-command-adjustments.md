@@ -139,19 +139,21 @@ Server 提供的 custom command、MCP prompt 和 Skill 也可能出现在客户�
 
 如果 upstream command identity 或 contract 发生变化，override 必须显式进入 incompatible 状态并要求重新审查，不能静默绑定到名称相同但语义已经变化的新命令。
 
-## 从旧归档恢复的调整候选
+## 已确定的上游调整
 
-以下内容来自旧归档实现。它们是本 RFC 的待确认规格，不代表应直接复制旧代码。
+以下内容吸收旧归档中的产品需求，但不复制其 prompt 字符串特判、云同步耦合或 toggle alias 等实现。
 
 ### `/exit`：Session 内返回 QuickStart
 
 Upstream baseline：TUI 中 `/exit`、`/quit`、`/q` 直接退出应用。
 
-候选调整：
+目标行为：
 
-- 当前 route 是 Session 时，slash command 返回 QuickStart/home，不终止 OpenCode；
-- 当前已经位于 home 时，slash command 退出 OpenCode；
-- `/quit` 和 `/q` 与 `/exit` 保持一致；
+- 该调整由设备本地、用户级的 experimental setting 控制，并在实验功能面板提供 checkbox；默认关闭；
+- 开关关闭时，`/exit` 完整保持 upstream 行为；
+- 开关开启且当前 route 是 Session 时，`/exit` 返回 QuickStart/home，不终止 OpenCode；
+- 开关开启但当前已经位于 home 时，`/exit` 仍退出 OpenCode；
+- `/quit` 和 `/q` 始终保留 upstream 的退出应用语义，作为明确的退出入口；
 - 专用“立即退出应用”keybind/command 保持 upstream 行为，不被 route-sensitive slash override 替换；
 - 该操作不写入 Session、不进入模型上下文、不调用 Agent。
 
@@ -161,68 +163,66 @@ Upstream baseline：TUI 中 `/exit`、`/quit`、`/q` 直接退出应用。
 
 Upstream baseline：TUI `/rename` 打开重命名 dialog。
 
-候选调整：
+目标行为：
 
 - `/rename` 不带参数时保持原 dialog；
 - `/rename <title>` 将参数剩余部分作为完整标题直接更新；
-- 只裁剪标题首尾空白，保留内部空格和 Unicode；
+- title 只允许单行；裁剪首尾空白，保留内部空格和 Unicode；空标题退回 rename dialog；
 - 没有当前 Session 时不执行，并显示明确提示；
 - 不写入对话、不进入模型上下文、不调用 Agent；
+- 更新必须直接调用与 rename dialog 相同的 Session rename domain API，而不是调用 `session.command`、构造 prompt 或复制更新逻辑；
 - 同步功能通过 Session rename domain event 观察变化，command 本身不直接依赖百度网盘实现。
+
+当前 upstream baseline 的 `/rename` 已直接打开 rename dialog；本 fork 的 patch 重点是让带参数形式也由客户端命令层消费，避免因参数匹配失败落入 prompt/custom-command 路径。
 
 ### `/sessions`：显示并搜索执行位置
 
 Upstream baseline：打开 Session 列表并进行选择。
 
-候选调整：
+目标行为：
 
 - 保留原选择、固定、排序和快捷键行为；
-- 为存在相关 metadata 的 Session 显示 `device · target · cwd`；
-- 搜索覆盖标题、device、target 和 cwd；
+- 始终显示 Session Location；local Session 显示规范化 directory，远程 Session 显示 `target · directory`；
+- 同步 metadata 可用时额外显示 device，不可用时不显示虚假占位；
+- 搜索覆盖标题、target、directory，以及存在时的 device；
+- target 在当前设备未配置或 Location 无法恢复时，保留该 Session 并显示 unresolved/unavailable 状态，不从列表隐藏；
 - 未配置 Rexd 或同步时退化为 upstream 信息，不显示虚假占位；
 - 云端 Session 的发现、只读打开和 ownership 规则由后续同步 RFC 定义；
 - `/sessions` 只调用可复用 Session query service，不直接实现云端下载或冲突处理。
 
-### `/models`：增加 provider 使用量信息
+### `/models` 与 provider usage
 
-Upstream baseline：打开模型选择 dialog，并展示收藏和 provider 分组。
-
-候选调整：
-
-- 收藏模型按 provider 分组；
-- provider 标题旁显示能够可靠查询到的余额或订阅剩余额度；
-- dialog 打开时并发查询已连接 provider，并使用短时缓存；
-- 提供显式刷新 action 绕过缓存；
-- 不支持可靠查询的 provider 不显示推测值；
-- 查询失败不阻止模型选择，也不把认证信息写入 Session 或模型上下文。
-
-Provider usage API、缓存、安全和 provider-specific adapter 需要单独设计；本 RFC 只规定 `/models` 的用户可见行为。
+`/models` 保持 upstream 的模型选择语义。Provider 使用量查询、可扩展 adapter、缓存，以及 `/models` 面板和 Session footer 的展示统一由 RFC-0007 规定。本 RFC 不再为 `/models` 定义不完整的 provider-specific 行为。
 
 ### `/variants` 及 variant 操作
 
 Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循环 variant 的 keybind command。
 
-旧归档还增加了提高/降低 reasoning effort 的 keybind，并为特定模型提供默认 effort 基线。这不完全是 slash override，但会改变 `/variants` 所呈现状态，因此记录为关联候选：
-
-- `/variants` 仍只展示 provider/model 明确支持的值；
-- increase/decrease 按 provider 声明的有序 variants 移动，不猜测不存在的 effort；
-- 模型专用默认值必须来自统一 model metadata/config，不能在 TUI command 中硬编码 model ID；
-- 是否保留这一调整需要在本 RFC 接受前确认。
+本 fork 不调整 `/variants` 的 slash command 语义：它继续打开当前模型的 variant 选择器，只展示 provider/model 明确支持的值。reasoning effort 的快捷调整、默认 keybinding 和 Shell mode 退出键属于 TUI 输入交互，由 RFC-0008 规定，不能在 `/variants` override 中硬编码模型或按键。
 
 ## 本仓库新增的基础 Core command
 
 以下 command family 不是当前 upstream baseline 的内建命令，因此不属于 override。它们与 `/target`、`/env`、`/sync` 一样，是本仓库计划提供的基础 Core command：
 
-| Command family         | 从旧归档恢复的基础职责                       |
-| ---------------------- | -------------------------------------------- |
-| `/target`、`/cd`       | 选择执行 target 和工作目录                   |
-| `/env`                 | 管理 location environment                    |
-| `/sync`、`/devices`    | 管理跨设备同步和设备                         |
-| `/permissions`         | 在按规则询问与自动批准等权限交互策略之间切换 |
-| `/expand`、`/collapse` | 展开或收起截断的命令输出                     |
-| `/delete`              | 二次确认后删除当前 Session                   |
+| Command family         | 从旧归档恢复的基础职责                                          |
+| ---------------------- | --------------------------------------------------------------- |
+| `/target`              | 实验性的运行中 Location 操作；不参与 RFC-0002 QuickStart 主流程 |
+| `/env`                 | 管理 location environment                                       |
+| `/sync`、`/devices`    | 管理跨设备同步和设备                                            |
+| `/permissions`         | 打开现有权限模式选择面板                                        |
+| `/expand`、`/collapse` | 显式展开或收起当前 Session 视图中的截断命令输出                 |
+| `/delete`              | 二次确认后删除当前 Session                                      |
 
-这些命令必须通过 RFC-0003 toolkit 注册和实现，并分别由对应功能 RFC 规定完整业务语义。列入此处不表示接受旧归档的耦合方式：例如 `/delete` 不直接实现同步墓碑，`/permissions` 不在 prompt submit 中切换本地状态，`/expand` 也不应依赖命令字符串特判。不能为了复用旧逻辑而把它们登记为 upstream built-in adjustment。
+这些命令必须通过 RFC-0003 toolkit 注册，复用客户端已有的 domain action，并遵循以下边界：
+
+- `/permissions` 打开与现有 panel 相同的模式选择器，在“按配置规则询问”和“自动批准未被显式拒绝的请求”之间选择。command 不维护第二份 permission 状态，其生效范围和持久性与 panel 完全相同。
+- `/expand` 将当前 Session route 的命令输出全局展开 override 明确设为 on；`/collapse` 明确设为 off。二者不是同一个 toggle command 的 aliases，重复执行必须幂等。
+- output expansion 只属于当前客户端进程中当前 Session view 的运行时展示状态；不写入用户配置、Session、同步数据或模型上下文，route/view 销毁后可以重置。逐条点击产生的局部展开状态仍由原组件维护。
+- `/delete` 只针对当前 Session，展示包含 Session title 的二次确认；取消不产生副作用。确认后调用统一 Session delete domain API，成功后返回 home 并刷新 Session 列表。
+- `/delete` 不直接写同步墓碑或调用云存储。同步层只能通过正式 Session deletion event/domain change 响应删除。
+- 所有命令都不创建 Session message、不触发模型调用，也不能在 prompt submit 中按字符串特判。
+
+`/target`、`/env` 和 `/sync` 的业务语义仍分别由对应 RFC 定义；本节只确认它们属于 toolkit Core command，而非 upstream override。
 
 ## 默认兼容策略
 
@@ -251,14 +251,12 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 
 测试应从 registry 的结构化 metadata 生成 baseline snapshot；不要另写一份只验证命令名称的手工列表。RFC 中的清单用于设计审查，snapshot 用于在同步 upstream 时发现实际注册表变化。
 
-## 待确认问题
+## 客户端范围
 
-1. 是否接受 `/exit` 的 route-sensitive slash 行为，同时保留立即退出 keybind？
-2. `/rename <title>` 是否只接受单行标题，还是保留完整多行参数？
-3. `/sessions` 的跨设备发现是否完全由未来同步 RFC 提供，本 RFC 只消费 metadata？
-4. 是否仍需要 `/models` provider usage 功能，哪些 provider 属于首批可靠支持范围？
-5. reasoning effort increase/decrease 是否纳入本 RFC，还是进入单独的模型交互 RFC？
-6. 上述调整哪些需要 Web/Desktop parity，哪些明确只属于 TUI？
+- RFC-0006 v1 只调整 TUI；Web/Desktop 保持 upstream 行为。
+- `/rename <title>` 和 Session Location query 应沉到可跨客户端复用的 domain API，但不因此要求 Web/Desktop 暴露相同 slash command。
+- `/sessions` 只消费 RFC-0002 和未来同步 RFC 提供的 metadata，不拥有远程连接或同步逻辑。
+- `/permissions`、`/expand`、`/collapse` 和实验性 `/exit` 都是 TUI client-host effects。
 
 ## 验收条件
 
@@ -268,3 +266,6 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 4. 外部 command、MCP、Skill 和插件的冲突及执行行为保持 upstream 兼容。
 5. fork 新增命令没有混入 upstream override 层。
 6. 同步 upstream 后可以通过测试或诊断明确发现 override drift。
+7. 实验性 `/exit` 默认关闭并可在 panel 切换；关闭时 `/exit`、`/quit`、`/q` 均保持 upstream 行为。
+8. `/rename <title>`、`/permissions`、`/expand`、`/collapse` 和 `/delete` 均由 toolkit 消费，不会成为 prompt、Session message 或 Agent 调用。
+9. `/sessions` 可以显示并搜索 local、Rexd 和同步 metadata 所描述的执行位置，unresolved Session 不会静默消失或改为 local。

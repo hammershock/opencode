@@ -43,6 +43,7 @@ export const CompleteInput = Schema.Struct({ attemptID: Schema.String, code: Sch
 export type CompleteInput = typeof CompleteInput.Type
 export const ReuseLegacyInput = Schema.Struct({
   deviceName: Schema.NonEmptyString,
+  recoveryString: Schema.optional(Schema.String),
   resetExisting: Schema.optional(Schema.Boolean),
 })
 export type ReuseLegacyInput = typeof ReuseLegacyInput.Type
@@ -194,10 +195,16 @@ export function make(input: {
             try: () => BaiduSyncProvider.refreshCredential({ credential: parsed, request: input.request, now }),
             catch: () => new SetupError({ kind: "oauth" }),
           })
+    const space = setup.recoveryString
+      ? yield* Effect.tryPromise({
+          try: () => SyncCrypto.importRecoveryString(setup.recoveryString!),
+          catch: () => new SetupError({ kind: "invalid" }),
+        })
+      : undefined
     return yield* finish({
       credential,
       deviceName: setup.deviceName.trim(),
-      space: undefined,
+      space,
       resetExisting: setup.resetExisting,
     })
   })

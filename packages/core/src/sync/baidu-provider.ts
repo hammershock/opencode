@@ -170,7 +170,10 @@ export function adapter(input: {
       "stat",
       (auth) => listDirectory(auth, path.posix.dirname(remote), request, signal),
       signal,
-    )
+    ).catch((cause) => {
+      if (cause instanceof SyncProvider.ProviderError && cause.kind === "not-found") return []
+      throw cause
+    })
     const found = listed.find((item) => item.remotePath === remote)?.info
     return found ? { ...found, path: object } : undefined
   }

@@ -52,6 +52,15 @@ export class ProviderNotFoundError extends Schema.TaggedErrorClass<ProviderNotFo
   { httpApiStatus: 404 },
 ) {}
 
+export class TargetNotFoundError extends Schema.TaggedErrorClass<TargetNotFoundError>()(
+  "TargetNotFoundError",
+  {
+    targetID: Schema.String,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
 export class SessionNotFoundError extends Schema.TaggedErrorClass<SessionNotFoundError>()(
   "SessionNotFoundError",
   {

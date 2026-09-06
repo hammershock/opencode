@@ -112,6 +112,22 @@ import type {
   ProjectCopiesRemoveOutput,
   ProjectCopiesRefreshInput,
   ProjectCopiesRefreshOutput,
+  TargetsListOutput,
+  TargetsCreateInput,
+  TargetsCreateOutput,
+  TargetsUpdateInput,
+  TargetsUpdateOutput,
+  TargetsRemoveInput,
+  TargetsRemoveOutput,
+  TargetsRestoreInput,
+  TargetsRestoreOutput,
+  TargetsTestConnectionInput,
+  TargetsTestConnectionOutput,
+  TargetsPrepareInput,
+  TargetsPrepareOutput,
+  TargetsPreviewLegacyImportOutput,
+  TargetsImportLegacyInput,
+  TargetsImportLegacyOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -983,6 +999,110 @@ export function make(options: ClientOptions) {
             successStatus: 204,
             declaredStatuses: [400, 401],
             empty: true,
+          },
+          requestOptions,
+        ),
+    },
+    targets: {
+      list: (requestOptions?: RequestOptions) =>
+        request<TargetsListOutput>(
+          { method: "GET", path: `/api/target`, successStatus: 200, declaredStatuses: [500, 401, 400], empty: false },
+          requestOptions,
+        ),
+      create: (input: TargetsCreateInput, requestOptions?: RequestOptions) =>
+        request<TargetsCreateOutput>(
+          {
+            method: "POST",
+            path: `/api/target`,
+            body: { input: input["input"], expectedRevision: input["expectedRevision"] },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      update: (input: TargetsUpdateInput, requestOptions?: RequestOptions) =>
+        request<TargetsUpdateOutput>(
+          {
+            method: "PUT",
+            path: `/api/target/${encodeURIComponent(input.targetID)}`,
+            body: { input: input["input"], expectedRevision: input["expectedRevision"] },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      remove: (input: TargetsRemoveInput, requestOptions?: RequestOptions) =>
+        request<TargetsRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/target/${encodeURIComponent(input.targetID)}`,
+            body: { expectedRevision: input["expectedRevision"] },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      restore: (input: TargetsRestoreInput, requestOptions?: RequestOptions) =>
+        request<TargetsRestoreOutput>(
+          {
+            method: "POST",
+            path: `/api/target/${encodeURIComponent(input.targetID)}/restore`,
+            body: {
+              input: input["input"],
+              referencedSessionIDs: input["referencedSessionIDs"],
+              expectedRevision: input["expectedRevision"],
+            },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      testConnection: (input: TargetsTestConnectionInput, requestOptions?: RequestOptions) =>
+        request<TargetsTestConnectionOutput>(
+          {
+            method: "POST",
+            path: `/api/target/${encodeURIComponent(input.targetID)}/test`,
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      prepare: (input: TargetsPrepareInput, requestOptions?: RequestOptions) =>
+        request<TargetsPrepareOutput>(
+          {
+            method: "POST",
+            path: `/api/target/${encodeURIComponent(input.targetID)}/prepare`,
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      previewLegacyImport: (requestOptions?: RequestOptions) =>
+        request<TargetsPreviewLegacyImportOutput>(
+          {
+            method: "GET",
+            path: `/api/target/legacy/import`,
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      importLegacy: (input: TargetsImportLegacyInput, requestOptions?: RequestOptions) =>
+        request<TargetsImportLegacyOutput>(
+          {
+            method: "POST",
+            path: `/api/target/legacy/import`,
+            body: { sourceRevision: input["sourceRevision"], expectedRevision: input["expectedRevision"] },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
           },
           requestOptions,
         ),

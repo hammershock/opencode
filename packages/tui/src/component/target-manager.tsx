@@ -15,12 +15,47 @@ export function useTargetManager() {
     const result = await sdk.client.v2.target.list({ throwOnError: true })
     return result.data
   })
+  const [health, healthControls] = createResource(
+    () => targets()?.targets.map((target) => target.id),
+    async (ids) =>
+      Object.fromEntries(
+        await Promise.all(
+          ids.map(async (targetID) => {
+            const result = await sdk.client.v2.target.test({ targetID }, { throwOnError: true }).catch(() => undefined)
+            return [targetID, result?.data] as const
+          }),
+        ),
+      ),
+  )
+
+  const status = (targetID: string) => {
+    if (health.loading) return "◐ checking"
+    const result = health()?.[targetID]
+    if (!result) return "● unavailable"
+    return result.status === "ready" ? "● ready" : `● ${result.status}`
+  }
+
+  const detail = (targetID: string) => {
+    const result = health()?.[targetID]
+    return result && result.status !== "ready" ? `${result.stage}: ${result.message}` : undefined
+  }
 
   const save = (current?: TargetDefinition) => {
     void (async () => {
       const snapshot = targets()
       if (!snapshot) return
-      const input = await targetWizard(dialog, current)
+      const input = await targetWizard(dialog, current, {
+        inspect: (input) =>
+          sdk.client.v2.target.wizard
+            .inspect({ input }, { throwOnError: true })
+            .then((result) => result.data)
+            .catch(() => undefined),
+        complete: (input, value, cursor, cwd) =>
+          sdk.client.v2.target.wizard
+            .complete({ input, value, cursor, cwd }, { throwOnError: true })
+            .then((result) => ({ ...result.data, cursor: Number(result.data.cursor) }))
+            .catch(() => undefined),
+      })
       if (!input) return
       try {
         const result = current
@@ -63,7 +98,8 @@ export function useTargetManager() {
               .then((result) =>
                 toast.show({
                   title: target.name,
-                  message: result.data.status === "ready" ? "Target ready" : `${result.data.stage}: ${result.data.message}`,
+                  message:
+                    result.data.status === "ready" ? "Target ready" : `${result.data.stage}: ${result.data.message}`,
                   variant: result.data.status === "ready" ? "success" : "warning",
                 }),
               )
@@ -100,6 +136,7 @@ export function useTargetManager() {
           ...(targets()?.targets ?? []).map((target) => ({
             title: target.name,
             description: target.connection.host,
+            details: [status(target.id), detail(target.id)].filter((item): item is string => Boolean(item)),
             value: target as TargetDefinition,
             category: "Configured targets",
           })),
@@ -109,5 +146,15 @@ export function useTargetManager() {
     ))
   }
 
-  return { targets, refetch: controls.refetch, open }
+  return {
+    targets,
+    health,
+    status,
+    detail,
+    refetch: async () => {
+      await controls.refetch()
+      await healthControls.refetch()
+    },
+    open,
+  }
 }

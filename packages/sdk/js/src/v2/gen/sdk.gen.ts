@@ -452,6 +452,10 @@ import type {
   V2TargetTestResponses,
   V2TargetUpdateErrors,
   V2TargetUpdateResponses,
+  V2TargetWizardCompleteErrors,
+  V2TargetWizardCompleteResponses,
+  V2TargetWizardInspectErrors,
+  V2TargetWizardInspectResponses,
   VcsApplyErrors,
   VcsApplyResponses,
   VcsDiffErrors,
@@ -1487,6 +1491,7 @@ export class Global extends HeyApiClient {
   public syncReuseLegacy<ThrowOnError extends boolean = false>(
     parameters?: {
       deviceName?: string
+      recoveryString?: string
       resetExisting?: boolean
     },
     options?: Options<never, ThrowOnError>,
@@ -1497,6 +1502,7 @@ export class Global extends HeyApiClient {
         {
           args: [
             { in: "body", key: "deviceName" },
+            { in: "body", key: "recoveryString" },
             { in: "body", key: "resetExisting" },
           ],
         },
@@ -5452,6 +5458,7 @@ export class Location extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -5476,6 +5483,7 @@ export class Agent extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6290,6 +6298,7 @@ export class Model extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6314,6 +6323,7 @@ export class Provider2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6337,6 +6347,7 @@ export class Provider2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6372,6 +6383,7 @@ export class Connect extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       key?: string
       label?: string
@@ -6418,6 +6430,7 @@ export class Connect extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       methodID?: string
       inputs?: {
@@ -6470,6 +6483,7 @@ export class Attempt extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6507,6 +6521,7 @@ export class Attempt extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6544,6 +6559,7 @@ export class Attempt extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       code?: string
     },
@@ -6589,6 +6605,7 @@ export class Integration extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6612,6 +6629,7 @@ export class Integration extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6657,6 +6675,7 @@ export class Credential extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6692,6 +6711,7 @@ export class Credential extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       label?: string
     },
@@ -6733,6 +6753,7 @@ export class Request extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6821,6 +6842,7 @@ export class Fs extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6843,6 +6865,7 @@ export class Fs extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       path?: string
     },
@@ -6876,6 +6899,7 @@ export class Fs extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       query: string
       type?: "file" | "directory"
@@ -6915,6 +6939,7 @@ export class Command2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6939,6 +6964,7 @@ export class Skill extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6977,6 +7003,7 @@ export class Pty2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -6999,6 +7026,7 @@ export class Pty2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       command?: string
       args?: Array<string>
@@ -7048,6 +7076,7 @@ export class Pty2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7081,6 +7110,7 @@ export class Pty2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7114,6 +7144,7 @@ export class Pty2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       title?: string
       size?: {
@@ -7159,6 +7190,7 @@ export class Pty2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7231,6 +7263,7 @@ export class Request2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7266,6 +7299,7 @@ export class Reference extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7286,6 +7320,7 @@ export class ProjectCopy2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       directory?: string
       force?: boolean
@@ -7327,6 +7362,7 @@ export class ProjectCopy2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       strategy?: string
       directory?: string
@@ -7368,6 +7404,7 @@ export class ProjectCopy2 extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7391,6 +7428,117 @@ export class ProjectCopy2 extends HeyApiClient {
       url: "/experimental/project/{projectID}/copy/refresh",
       ...options,
       ...params,
+    })
+  }
+}
+
+export class Wizard extends HeyApiClient {
+  /**
+   * Inspect a target draft
+   */
+  public inspect<ThrowOnError extends boolean = false>(
+    parameters?: {
+      input?: {
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "input" }] }])
+    return (options?.client ?? this.client).post<
+      V2TargetWizardInspectResponses,
+      V2TargetWizardInspectErrors,
+      ThrowOnError
+    >({
+      url: "/api/target/wizard/inspect",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Complete a remote directory
+   */
+  public complete<ThrowOnError extends boolean = false>(
+    parameters?: {
+      input?: {
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }
+      value?: string
+      cursor?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      cwd?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "input" },
+            { in: "body", key: "value" },
+            { in: "body", key: "cursor" },
+            { in: "body", key: "cwd" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2TargetWizardCompleteResponses,
+      V2TargetWizardCompleteErrors,
+      ThrowOnError
+    >({
+      url: "/api/target/wizard/complete",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 }
@@ -7691,6 +7839,11 @@ export class Target extends HeyApiClient {
     })
   }
 
+  private _wizard?: Wizard
+  get wizard(): Wizard {
+    return (this._wizard ??= new Wizard({ client: this.client }))
+  }
+
   private _legacy?: Legacy
   get legacy(): Legacy {
     return (this._legacy ??= new Legacy({ client: this.client }))
@@ -7817,6 +7970,7 @@ export class Environment extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7839,6 +7993,7 @@ export class Environment extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7863,6 +8018,7 @@ export class Environment extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
       confirmed?: true
     },
@@ -7903,6 +8059,7 @@ export class Environment extends HeyApiClient {
       location?: {
         directory?: string
         workspace?: string
+        target?: string
       }
     },
     options?: Options<never, ThrowOnError>,

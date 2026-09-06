@@ -71,6 +71,13 @@ export const ProbeResult = Schema.Union([
   }),
 ])
 
+export const WizardInspection = Schema.Struct({ home: Schema.String })
+export const PathCompletion = Schema.Struct({
+  value: Schema.String,
+  cursor: Schema.Number,
+  candidates: Schema.Array(Schema.String),
+})
+
 export const ImportPreview = Schema.Struct({
   source: Schema.String,
   sourceRevision: Schema.String,

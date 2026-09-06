@@ -73,6 +73,11 @@ export type ImportPreview = {
 export interface ConnectionProbe {
   readonly test: (target: Definition) => Promise<ProbeResult>
   readonly prepare: (target: Definition) => Promise<ProbeResult>
+  readonly inspect?: (target: Input) => Promise<{ readonly home: string }>
+  readonly complete?: (
+    target: Input,
+    input: { readonly value: string; readonly cursor: number; readonly cwd: string },
+  ) => Promise<{ readonly value: string; readonly cursor: number; readonly candidates: readonly string[] }>
 }
 
 /** Supplied by RFC-0009 Session recovery. A non-empty caller array alone never authorizes ID reuse. */
@@ -125,6 +130,11 @@ export interface Interface {
   ) => Promise<{ target: Definition; snapshot: Snapshot }>
   readonly testConnection: (targetID: Location.TargetID) => Promise<ProbeResult>
   readonly prepare: (targetID: Location.TargetID) => Promise<ProbeResult>
+  readonly inspect: (input: Input) => Promise<{ readonly home: string }>
+  readonly complete: (
+    target: Input,
+    input: { readonly value: string; readonly cursor: number; readonly cwd: string },
+  ) => Promise<{ readonly value: string; readonly cursor: number; readonly candidates: readonly string[] }>
   /** Reads the legacy file only after an explicit UI/user action. It is never an active config source. */
   readonly previewLegacyImport: () => Promise<ImportPreview>
   readonly importLegacy: (
@@ -235,6 +245,14 @@ export function make(options: {
       if (!options.probe)
         return { status: "unavailable", stage: "prepare", message: "Rexd transport is not registered" }
       return options.probe.prepare(target)
+    },
+    async inspect(input) {
+      if (!options.probe?.inspect) throw new Error("Rexd transport is not registered")
+      return options.probe.inspect(input)
+    },
+    async complete(target, input) {
+      if (!options.probe?.complete) throw new Error("Rexd transport is not registered")
+      return options.probe.complete(target, input)
     },
     async previewLegacyImport() {
       const text = await fs.readFile(legacyFile, "utf8").catch((error: NodeJS.ErrnoException) => {

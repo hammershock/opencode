@@ -1109,10 +1109,14 @@ export function Prompt(props: PromptProps) {
             return result.data
           },
           validate: async (candidate) => {
-            // Remove this compatibility cast after the location-routing SDK is
-            // regenerated on the integration branch.
             await sdk.client.v2.fs.list(
-              { location: candidate as { directory: string }, path: "." },
+              {
+                location: {
+                  directory: candidate.directory,
+                  ...(candidate.target.type === "rexd" ? { target: candidate.target.targetID } : {}),
+                },
+                path: ".",
+              },
               { throwOnError: true },
             )
           },

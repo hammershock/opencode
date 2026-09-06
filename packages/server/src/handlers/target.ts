@@ -43,6 +43,16 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
     const sessions = yield* SessionV2.Service
     return handlers
       .handle("target.list", () => read(target.load))
+      .handle("target.wizard.inspect", (ctx) => invoke(() => target.inspect(ctx.payload.input)))
+      .handle("target.wizard.complete", (ctx) =>
+        invoke(() =>
+          target.complete(ctx.payload.input, {
+            value: ctx.payload.value,
+            cursor: ctx.payload.cursor,
+            cwd: ctx.payload.cwd,
+          }),
+        ),
+      )
       .handle("target.create", (ctx) => invoke(() => target.create(ctx.payload.input, ctx.payload.expectedRevision)))
       .handle("target.update", (ctx) =>
         invoke(() => target.update(ctx.params.targetID, ctx.payload.input, ctx.payload.expectedRevision)),

@@ -57,6 +57,29 @@ export const TargetGroup = HttpApiGroup.make("server.target")
     ),
   )
   .add(
+    HttpApiEndpoint.post("target.wizard.inspect", "/api/target/wizard/inspect", {
+      payload: Schema.Struct({ input: Target.Input }),
+      success: Target.WizardInspection,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.target.wizard.inspect", summary: "Inspect a target draft" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("target.wizard.complete", "/api/target/wizard/complete", {
+      payload: Schema.Struct({
+        input: Target.Input,
+        value: Schema.String,
+        cursor: Schema.Number,
+        cwd: Schema.String,
+      }),
+      success: Target.PathCompletion,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.target.wizard.complete", summary: "Complete a remote directory" }),
+    ),
+  )
+  .add(
     HttpApiEndpoint.post("target.create", "/api/target", {
       payload: mutation,
       success: Target.MutationResult,

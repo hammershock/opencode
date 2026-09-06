@@ -13,6 +13,17 @@ export type DialogPromptProps = {
   value?: string
   busy?: boolean
   busyText?: string
+  complete?: (
+    value: string,
+    cursor: number,
+  ) => Promise<
+    | {
+        value: string
+        cursor: number
+        candidates: string[]
+      }
+    | undefined
+  >
   onConfirm?: (value: string) => void
   onCancel?: () => void
 }
@@ -23,11 +34,27 @@ export function DialogPrompt(props: DialogPromptProps) {
   const tuiConfig = useTuiConfig()
   const submitShortcut = useCommandShortcut("dialog.prompt.submit")
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
+  const [completing, setCompleting] = createSignal(false)
+  const [candidates, setCandidates] = createSignal<string[]>([])
   let textarea: TextareaRenderable
+  let completedValue: string | undefined
 
   function confirm() {
     if (props.busy) return
     props.onConfirm?.(textarea.plainText)
+  }
+
+  async function complete() {
+    if (!props.complete || completing()) return
+    setCompleting(true)
+    const result = await props.complete(textarea.plainText, textarea.cursorOffset).finally(() => setCompleting(false))
+    if (!result) return setCandidates([])
+    if (result.value !== textarea.plainText) {
+      completedValue = result.value
+      textarea.setText(result.value)
+      textarea.cursorOffset = result.cursor
+    }
+    setCandidates(result.candidates)
   }
 
   useBindings(() => ({
@@ -43,11 +70,14 @@ export function DialogPrompt(props: DialogPromptProps) {
         run: confirm,
       },
     ],
-    bindings: tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+    bindings: [
+      ...tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
+      ...(props.complete ? [{ key: "tab", desc: "Complete path", group: "Dialog", cmd: complete }] : []),
+    ],
   }))
 
   onMount(() => {
-    dialog.setSize("medium")
+    dialog.setSize(props.complete ? "large" : "medium")
     setTimeout(() => {
       if (!textarea || textarea.isDestroyed) return
       if (props.busy) return
@@ -97,9 +127,25 @@ export function DialogPrompt(props: DialogPromptProps) {
           focusedTextColor={props.busy ? theme.textMuted : theme.text}
           cursorColor={props.busy ? theme.backgroundElement : theme.text}
           cursorStyle={tuiConfig.cursor}
+          onContentChange={() => {
+            if (completedValue === textarea.plainText) {
+              completedValue = undefined
+              return
+            }
+            completedValue = undefined
+            setCandidates([])
+          }}
         />
         <Show when={props.busy}>
           <Spinner color={theme.textMuted}>{props.busyText ?? "Working…"}</Spinner>
+        </Show>
+        <Show when={completing()}>
+          <Spinner color={theme.textMuted}>Reading directories…</Spinner>
+        </Show>
+        <Show when={candidates().length > 0}>
+          <text fg={theme.textMuted} wrapMode="word">
+            {candidates().slice(0, 12).join("\n")}
+          </text>
         </Show>
       </box>
       <box paddingBottom={1} gap={1} flexDirection="row">
@@ -107,6 +153,11 @@ export function DialogPrompt(props: DialogPromptProps) {
           <Show when={submitShortcut()}>
             <text fg={theme.text}>
               {submitShortcut()} <span style={{ fg: theme.textMuted }}>submit</span>
+            </text>
+          </Show>
+          <Show when={props.complete}>
+            <text fg={theme.text}>
+              tab <span style={{ fg: theme.textMuted }}>complete</span>
             </text>
           </Show>
         </Show>

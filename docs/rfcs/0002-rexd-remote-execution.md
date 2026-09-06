@@ -363,7 +363,8 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 ## 兼容性
 
 - 没有显式 target 的历史 Session 视为 local。
-- 恢复远程 Session 时，当前设备找不到对应 target ID、连接失败或历史 directory 不再有效，Session 保持 unresolved 并展示错误；不得静默改为 local、默认 target 或默认目录。
+- 恢复远程 Session 时，当前设备找不到对应 target ID、连接失败或历史 directory 不再有效，Session 保持 unresolved 并展示具体原因；不得静默改为 local、默认 target 或默认目录。
+- unresolved Session 仍可只读打开并查看完整对话、工具结果和 metadata，但必须禁用 prompt 提交、User Shell、Agent 工具、Terminal、文件操作及其他依赖 Location 的执行入口。用户可以通过 RFC-0009 的实验性 `/sessions` 强制重绑定 workflow 选择新的 target 与 directory；只有重绑定事务成功后才能恢复写入和执行。
 - 选择 local 时，现有 Shell、文件、PTY 和 Agent 工具行为保持不变。
 - 公共 Schema 或 HttpApi 发生变化后，必须通过仓库生成脚本更新 Client/SDK，不得直接编辑 generated 文件。
 - 旧实现的 `~/.config/rexd/targets.json` 不是新的 active 配置源。新文件不存在而旧文件存在时，QuickStart/target manager 应提供一次显式导入：为每个合法旧 target 生成 UUID，展示 alias/manual 转换结果和字段诊断，再写入 canonical `targets.jsonc`；不得静默删除或修改旧文件，也不得长期合并两个来源。
@@ -427,3 +428,4 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 10. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。
 11. target 只从解析后的 OpenCode 用户配置目录加载；项目配置不能注入完整 target，连接详情不进入 Session 或同步 payload。
 12. 旧 `~/.config/rexd/targets.json` 可以经用户确认导入 canonical 文件，导入不会修改旧文件，也不会把两个文件长期作为并列配置源。
+13. target 被移除或无法解析时，Session 可以只读打开；所有 Location-dependent 操作保持禁用，且只有 RFC-0009 重绑定成功后恢复。

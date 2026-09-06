@@ -48,6 +48,7 @@
     "./component/register-spinner": "./src/component/register-spinner.ts"
   },
   "dependencies": {
+    "@opencode-ai/command-kit": "workspace:*",
     "@opencode-ai/core": "workspace:*",
     "@opencode-ai/plugin": "workspace:*",
     "@opencode-ai/sdk": "workspace:*",

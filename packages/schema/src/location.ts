@@ -36,7 +36,7 @@ export const Ref = Schema.Struct({
 }).annotate({ identifier: "Location.Ref" })
 
 export class Info extends Schema.Class<Info>("Location.Info")({
-  target: optional(Target),
+  target: Target,
   directory: AbsolutePath,
   workspaceID: optional(WorkspaceID),
   lastKnownTargetName: optional(Schema.String),

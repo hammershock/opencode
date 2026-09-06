@@ -81,28 +81,31 @@ export async function runRexdProcess(
     if (!processID) return void pending.push([method, params])
     receive(method, params)
   })
-  const started = Schema.decodeUnknownSync(Started)(
-    await lease.client.request(
-      "exec.start",
-      {
-        session_id: lease.handshake.sessionID,
-        ...(options.shell ? { command: options.command } : { argv: options.argv }),
-        shell: options.shell,
-        login: false,
-        cwd: options.cwd,
-        env: options.env,
-        timeout_ms: Duration.toMillis(options.timeout),
-        max_output_bytes: options.maxOutputBytes,
-      },
-      { timeoutMs: 20_000, signal: options.signal, sideEffect: true },
-    ),
-  )
-  processID = started.process_id
-  pending.forEach(([method, params]) => receive(method, params))
+  const removeClose = lease.client.onClose((error) => rejectExit(error))
   const abort = () => rejectExit(options.signal?.reason instanceof Error ? options.signal.reason : new Error("Aborted"))
-  options.signal?.addEventListener("abort", abort, { once: true })
-  const terminal = await exited
-    .catch(async (cause) => {
+  try {
+    const started = Schema.decodeUnknownSync(Started)(
+      await lease.client.request(
+        "exec.start",
+        {
+          session_id: lease.handshake.sessionID,
+          ...(options.shell ? { command: options.command } : { argv: options.argv }),
+          shell: options.shell,
+          login: false,
+          cwd: options.cwd,
+          env: options.env,
+          timeout_ms: Duration.toMillis(options.timeout),
+          max_output_bytes: options.maxOutputBytes,
+        },
+        { timeoutMs: 20_000, signal: options.signal, sideEffect: true },
+      ),
+    )
+    processID = started.process_id
+    pending.forEach(([method, params]) => receive(method, params))
+    pending.length = 0
+    if (options.signal?.aborted) abort()
+    else options.signal?.addEventListener("abort", abort, { once: true })
+    const terminal = await exited.catch(async (cause) => {
       await lease.client
         .request(
           "exec.kill",
@@ -112,19 +115,20 @@ export async function runRexdProcess(
         .catch(() => undefined)
       throw cause
     })
-    .finally(() => {
-      remove()
-      options.signal?.removeEventListener("abort", abort)
-    })
-  return {
-    command: description,
-    exitCode: terminal.exit_code ?? -1,
-    output: Buffer.concat(chunks.output),
-    stdout: Buffer.concat(chunks.stdout),
-    stderr: Buffer.concat(chunks.stderr),
-    outputTruncated: truncated.output,
-    stdoutTruncated: truncated.stdout,
-    stderrTruncated: truncated.stderr,
+    return {
+      command: description,
+      exitCode: terminal.exit_code ?? -1,
+      output: Buffer.concat(chunks.output),
+      stdout: Buffer.concat(chunks.stdout),
+      stderr: Buffer.concat(chunks.stderr),
+      outputTruncated: truncated.output,
+      stdoutTruncated: truncated.stdout,
+      stderrTruncated: truncated.stderr,
+    }
+  } finally {
+    remove()
+    removeClose()
+    options.signal?.removeEventListener("abort", abort)
   }
 
   function append(stream: keyof typeof chunks, chunk: Uint8Array) {

@@ -141,6 +141,7 @@ const lsp = Layer.succeed(
   LSP.Service.of({
     init: () => Effect.void,
     status: () => Effect.succeed([]),
+    remoteUnavailable: () => Effect.succeed(false),
     hasClients: () => Effect.succeed(false),
     touchFile: () => Effect.void,
     diagnostics: () => Effect.succeed({}),
@@ -214,6 +215,7 @@ function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; proces
     [LSP.node, lsp],
     [MCP.node, makeMcp(input?.mcpInstructions)],
     [RuntimeFlags.node, runtimeFlags],
+    [LocationServiceMap.node, locationServiceMapLayer],
   ] as const
   if (input?.processor === "blocking") {
     return LayerNode.compile(promptRoot, [...replacements, [SessionProcessor.node, blockingProcessor]])
@@ -228,6 +230,7 @@ function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processo
     [LSP.node, lsp],
     [MCP.node, makeMcp(input?.mcpInstructions)],
     [RuntimeFlags.node, runtimeFlags],
+    [LocationServiceMap.node, locationServiceMapLayer],
   ] as const
   if (input?.processor === "blocking") {
     return LayerNode.compile(root, [...replacements, [SessionProcessor.node, blockingProcessor]])

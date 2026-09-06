@@ -31,6 +31,7 @@ import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
 
 const mcp = Layer.succeed(
   MCP.Service,
@@ -62,6 +63,7 @@ const lsp = Layer.succeed(
   LSP.Service.of({
     init: () => Effect.void,
     status: () => Effect.succeed([]),
+    remoteUnavailable: () => Effect.succeed(false),
     hasClients: () => Effect.succeed(false),
     touchFile: () => Effect.void,
     diagnostics: () => Effect.succeed({}),
@@ -91,6 +93,7 @@ const it = testEffect(
     [MCP.node, mcp],
     [LSP.node, lsp],
     [RuntimeFlags.node, RuntimeFlags.layer({ experimentalEventSystem: true })],
+    [LocationServiceMap.node, locationServiceMapLayer],
   ]),
 )
 

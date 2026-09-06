@@ -15,6 +15,7 @@ type Notify = (method: string, params: unknown) => void
 
 function processLease(handler?: (method: string, params: Record<string, unknown>, emit: Notify) => unknown) {
   let notify: Notify = () => undefined
+  let close: (error: Error) => void = () => undefined
   const calls: Array<{ method: string; params: Record<string, unknown> }> = []
   const lease = {
     handshake: { sessionID: "remote-session", workspaceRoots: ["/workspace"] },
@@ -23,6 +24,12 @@ function processLease(handler?: (method: string, params: Record<string, unknown>
         notify = listener
         return () => {
           notify = () => undefined
+        }
+      },
+      onClose(listener: (error: Error) => void) {
+        close = listener
+        return () => {
+          close = () => undefined
         }
       },
       async request(method: string, params: Record<string, unknown>) {
@@ -41,7 +48,7 @@ function processLease(handler?: (method: string, params: Record<string, unknown>
       },
     },
   } as unknown as RexdLease
-  return { lease, calls }
+  return { lease, calls, disconnect: (error = new Error("ssh disconnected")) => close(error) }
 }
 
 describe("Rexd Location routing contract", () => {
@@ -81,6 +88,56 @@ describe("Rexd Location routing contract", () => {
     expect(await Bun.file(marker).exists()).toBe(false)
   })
 
+  test("transport loss after process start fails the operation without retry", async () => {
+    const { lease, calls, disconnect } = processLease((method) => {
+      if (method === "exec.start") return { process_id: "running" }
+      if (method === "exec.kill") return { ok: true }
+      return undefined
+    })
+    const running = runRexdProcess(lease, {
+      command: "touch remote-only",
+      shell: true,
+      cwd: "/workspace",
+      timeout: "10 seconds",
+      maxOutputBytes: 1024,
+    })
+    await Promise.resolve()
+    disconnect()
+    await expect(running).rejects.toThrow("ssh disconnected")
+    expect(calls.filter((call) => call.method === "exec.start")).toHaveLength(1)
+  })
+
+  test("failed process start releases all listeners", async () => {
+    let notifications = 0
+    let closes = 0
+    const lease = {
+      handshake: { sessionID: "remote-session", workspaceRoots: ["/workspace"] },
+      client: {
+        onNotification() {
+          notifications++
+          return () => notifications--
+        },
+        onClose() {
+          closes++
+          return () => closes--
+        },
+        async request() {
+          throw new Error("start rejected")
+        },
+      },
+    } as unknown as RexdLease
+    await expect(
+      runRexdProcess(lease, {
+        command: "false",
+        shell: true,
+        cwd: "/workspace",
+        timeout: "10 seconds",
+        maxOutputBytes: 1024,
+      }),
+    ).rejects.toThrow("start rejected")
+    expect({ notifications, closes }).toEqual({ notifications: 0, closes: 0 })
+  })
+
   test("cancelled process is killed remotely and releases its notification listener", async () => {
     let removed = false
     let notify: Notify = () => undefined
@@ -93,6 +150,9 @@ describe("Rexd Location routing contract", () => {
           return () => {
             removed = true
           }
+        },
+        onClose() {
+          return () => undefined
         },
         async request(method: string) {
           calls.push(method)

@@ -71,11 +71,13 @@ export const LspTool = Tool.define(
                 : `${relPath}:${args.line}:${args.character}`
           const title = detail ? `${args.operation} ${detail}` : args.operation
 
-          const exists = yield* fs.existsSafe(file)
-          if (!exists) throw new Error(`File not found: ${file}`)
-
+          if (yield* lsp.remoteUnavailable(ctx.sessionID))
+            throw new Error("Remote LSP unavailable: rexd/1 does not support streaming process stdin.")
           const available = yield* lsp.hasClients(file, ctx.sessionID)
           if (!available) throw new Error("No LSP server available for this file type.")
+
+          const exists = yield* fs.existsSafe(file)
+          if (!exists) throw new Error(`File not found: ${file}`)
 
           yield* lsp.touchFile(file, "document", ctx.sessionID)
 

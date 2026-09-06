@@ -28,6 +28,7 @@ type Pending = {
 export class RexdRpcClient {
   readonly #pending = new Map<number, Pending>()
   readonly #notifications = new Set<(method: string, params: unknown) => void>()
+  readonly #closeListeners = new Set<(error: RexdError) => void>()
   readonly #removeData: () => void
   readonly #removeClose: () => void
   #buffer = ""
@@ -108,12 +109,19 @@ export class RexdRpcClient {
     return () => this.#notifications.delete(listener)
   }
 
+  onClose(listener: (error: RexdError) => void) {
+    this.#closeListeners.add(listener)
+    return () => this.#closeListeners.delete(listener)
+  }
+
   async close(reason = new RexdError("transport", "Rexd connection closed", true)) {
     if (this.#closed) return
     this.#closed = true
     this.#removeData()
     this.#removeClose()
     ;[...this.#pending.keys()].forEach((id) => this.#settle(id, reason))
+    this.#closeListeners.forEach((listener) => listener(reason))
+    this.#closeListeners.clear()
     this.#notifications.clear()
     await this.transport.close()
   }

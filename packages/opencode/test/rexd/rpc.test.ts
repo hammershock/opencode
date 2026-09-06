@@ -85,6 +85,17 @@ describe("Rexd handshake", () => {
     expect(transport.writes).toHaveLength(1)
     await client.close()
   })
+
+  test("notifies runtime operations when the transport closes", async () => {
+    const transport = new FakeTransport()
+    const client = new RexdRpcClient(transport)
+    const failures: RexdError[] = []
+    client.onClose((error) => failures.push(error))
+    const failure = new RexdError("transport", "lost", true, "unknown")
+    transport.fail(failure)
+    await Promise.resolve()
+    expect(failures).toEqual([failure])
+  })
 })
 
 class FakeTransport implements Transport {

@@ -71,9 +71,18 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
           found.subscribers.clear()
           Effect.runFork(events.publish(Pty.Event.Exited, { id: found.info.id, exitCode: decoded.success.exit_code }))
         })
+        const closed = lease.client.onClose(() => {
+          sessions.forEach((item) => {
+            if (item.info.status !== "running") return
+            item.info.status = "exited"
+            item.subscribers.forEach((subscriber) => subscriber.onEnd({}))
+            item.subscribers.clear()
+          })
+        })
         yield* Effect.addFinalizer(() =>
           Effect.promise(async () => {
             notify()
+            closed()
             await Promise.all(
               [...sessions.values()]
                 .filter((item) => item.info.status === "running")

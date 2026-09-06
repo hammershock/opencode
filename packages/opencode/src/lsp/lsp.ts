@@ -128,6 +128,7 @@ interface State {
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly status: () => Effect.Effect<Status[]>
+  readonly remoteUnavailable: (sessionID?: SessionID) => Effect.Effect<boolean>
   readonly hasClients: (file: string, sessionID?: SessionID) => Effect.Effect<boolean>
   readonly touchFile: (input: string, diagnostics?: "document" | "full", sessionID?: SessionID) => Effect.Effect<void>
   readonly diagnostics: (sessionID?: SessionID) => Effect.Effect<Record<string, LSPClient.Diagnostic[]>>
@@ -530,6 +531,7 @@ const layer = Layer.effect(
     return Service.of({
       init,
       status,
+      remoteUnavailable: remote,
       hasClients,
       touchFile,
       diagnostics,

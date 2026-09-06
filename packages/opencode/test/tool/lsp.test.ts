@@ -37,6 +37,7 @@ const lsp = Layer.succeed(
   LSP.Service.of({
     init: () => Effect.void,
     status: () => Effect.succeed([]),
+    remoteUnavailable: () => Effect.succeed(false),
     hasClients: () => Effect.succeed(true),
     touchFile: () => Effect.void,
     diagnostics: () => Effect.succeed({}),

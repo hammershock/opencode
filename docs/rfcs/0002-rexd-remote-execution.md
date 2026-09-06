@@ -43,6 +43,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 5. OpenCode 的启动目录只可作为本地目录的初始建议，不再是新会话不可选择的隐式工作位置。
 6. 本地执行继续使用同一套 Location 接口，未启用远程 target 时保持现有行为。
 7. QuickStart 直接调用结构化 target domain API，不要求用户通过 `/target` 创建新会话。
+8. 用户可以从 QuickStart 的 target picker 进入向导，新增、编辑、测试和移除设备本地 target，无需手写配置文件。
 
 ## 非目标
 
@@ -55,7 +56,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 - 自动调度、负载均衡或多节点容错；
 - 容器编排；
 - Rexd 插件兼容层；
-- QuickStart 之外的完整 target 管理界面；
+- 独立于 QuickStart 流程的跨客户端 target 管理中心；
 - 任意版本升级、后台自动更新或管理用户自行安装的 Rexd daemon；
 - Web App 和 Desktop 的远程 target 选择界面。
 - Shell 持久化、补全、环境继承或 `.env` 加载语义。
@@ -65,13 +66,14 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 
 1. 用户启动 OpenCode，进入 TUI QuickStart 页面。
 2. QuickStart 显示当前选择的 target 和工作目录。
-3. 用户可以选择 `local` 或一个已配置的 Rexd target。
-4. 用户在所选 target 上选择工作目录：
+3. 用户可以选择 `local` 或一个已配置的 Rexd target；picker 同时提供 `Add target...` 和 `Manage targets...` 入口。
+4. 新增或编辑 target 时，QuickStart 打开配置向导。向导收集稳定名称、SSH 连接方式和远端工作位置，允许测试连接后保存；暂时无法连接时，用户也可以明确选择保存为尚未验证的配置。
+5. 用户在所选 target 上选择工作目录：
    - local 目录从本机文件系统选择；
    - Rexd 目录通过该 target 查询，不使用本机文件系统结果。
-5. 用户提交第一条 prompt。
-6. OpenCode 先验证 target 可连接且目录存在，再用该 Location 创建会话并提交 prompt。
-7. 此后该会话中的用户 Shell 命令和 Agent 工作区工具都在同一 Location 执行，但不共享同一个 Shell 进程或可变状态。
+6. 用户提交第一条 prompt。
+7. OpenCode 先验证 target 可连接且目录存在，再用该 Location 创建会话并提交 prompt。
+8. 此后该会话中的用户 Shell 命令和 Agent 工作区工具都在同一 Location 执行，但不共享同一个 Shell 进程或可变状态。
 
 如果 target 连接或目录验证失败，QuickStart 保留用户尚未提交的 prompt 和选择，不创建会话，也不回退到本地执行。
 
@@ -91,13 +93,15 @@ target 名称一旦被 Session 引用即视为稳定标识。重命名必须保�
 
 ### Target 配置文件
 
-target 使用 OpenCode 解析后的设备本地用户配置目录：默认是 XDG config 下的 `opencode` 目录（通常为 `~/.config/opencode`），并遵守 OpenCode 已支持的配置目录 override。canonical 文件为：
+target 定义由 OpenCode 而非 Rexd 拥有，使用 OpenCode 解析后的设备本地用户配置目录。该目录默认是 XDG config 下的 `opencode` 目录（通常为 `~/.config/opencode`），并遵守 OpenCode 已支持的配置目录 override。canonical 文件为：
 
 ```text
 <OpenCode user config directory>/targets.jsonc
 ```
 
-target 不从项目级 `.opencode` 目录加载，避免仓库内容声明 SSH 连接或替换用户的远程执行位置。v1 由用户或未来的 target 管理 UI 编辑该文件；QuickStart 只读取、校验和选择 target，不承担完整配置管理。
+这是设备级全局配置，而不是项目配置。完整 target 定义不得从项目级 `.opencode` 或项目 `opencode.json(c)` 加载，避免仓库内容声明 SSH 主机、认证路径、任意 SSH 参数或远端命令，也避免把设备专属连接信息提交到 Git。未来若需要项目级默认位置，只能由单独规范定义一个非敏感的 target 名称和目录提示；提示不得创建 target、覆盖全局连接定义、绕过用户确认或触发自动连接。
+
+之所以不继续使用旧实现的 `~/.config/rexd/targets.json`，是因为该 registry 表达的是 OpenCode 的执行位置、QuickStart 选择和 Session 恢复关系，而不是 Rexd daemon 自身的配置。将独立的 `targets.jsonc` 放在 OpenCode 全局配置目录中，也使 UI 可以原子更新 target，而不必重写并破坏用户主 `opencode.jsonc` 中的注释和其他设置。
 
 配置使用带版本的顶层 schema：
 
@@ -113,6 +117,7 @@ target 不从项目级 `.opencode` 目录加载，避免仓库内容声明 SSH �
       "identityFile": "/path/to/key",
       "sshOptions": [],
       "defaultDirectory": "/home/hammer",
+      "workspaceRoots": ["/home/hammer/workspace"],
     },
   },
 }
@@ -121,9 +126,33 @@ target 不从项目级 `.opencode` 目录加载，避免仓库内容声明 SSH �
 - target map key 是 Session 保存的稳定名称；
 - v1 只接受 `ssh` transport；
 - `identityFile` 只保存本机路径引用，不复制私钥内容；
+- `workspaceRoots` 用于准备 OpenCode 管理的 Rexd 配置，并仍须由握手返回值确认；它不能伪造服务端允许范围；
 - 未知字段、重复语义和非法类型产生带 JSON path 的配置诊断；
 - 文件缺失等价于没有配置远程 targets；文件损坏不影响 local Location，但 QuickStart 必须显示配置错误；
 - target 配置不属于 Session/cloud sync payload。未来如同步非敏感 target metadata，必须由同步 RFC 另行定义 allowlist。
+
+### Target 管理与配置向导
+
+归档中的 `remote-opencode-dev` 曾实现 `/target add` 向导，依次收集 alias、SSH host、user、默认远端目录、workspace roots 和 Rexd command，并直接由 TUI 写入 `~/.config/rexd/targets.json`。本 RFC 保留其“可以在 UI 中完成配置”的产品能力，但不继承 TUI 直接访问文件、要求用户填写 managed daemon command 或让 Rexd 拥有 OpenCode target registry 的实现边界。
+
+QuickStart target picker 必须提供：
+
+- `Add target...`：创建配置草稿并进入分步向导；
+- `Manage targets...`：查看状态，并执行编辑、测试连接、重命名和移除；
+- 空 target 列表中的直接创建入口。
+
+v1 向导至少支持：
+
+1. 设置稳定的 target 名称；
+2. 选择已有 SSH Config host alias，或手动填写 host、user、port 和可选 identity file；
+3. 设置一个或多个远端 workspace roots，以及可选默认工作目录；
+4. 展示即将使用的主机身份校验策略，不自动接受未知 host key；
+5. 测试 SSH、环境检测、managed daemon 准备和 Rexd 握手，并按阶段展示经过脱敏的错误；
+6. 保存已验证配置，或经用户明确确认后保存为 `unverified`，留待选择或创建 Session 时重新验证。
+
+managed daemon 的命令和安装路径由本 RFC 的 prepare 流程派生，不作为普通向导必填项。为兼容自行准备的 Rexd，高级配置可以提供显式 command，但必须标明它绕过自动安装且仍受完整握手和 capability 校验。
+
+TUI 不直接读写 `targets.jsonc`，也不自行执行 SSH。Core/Server 提供结构化的 target registry CRUD、校验、连接测试和 prepare API，所有客户端复用同一实现。配置写入必须做到原子替换、并发冲突检测，并尽量保留 JSONC 注释、未知的兼容字段和未修改 target；文件权限不得扩大。重命名已被 Session 引用的 target 时，必须遵守稳定 ID 规则；移除 target 只使相关 Session 进入 unresolved，不删除 Session。
 
 ### Location
 
@@ -211,6 +240,16 @@ gpu-server · /data/project
 ```
 
 以上步骤在 Session 创建前失败时，不产生半创建的 Session。
+
+### 6. Target registry 是 Core domain
+
+target registry 的读取、诊断、修改、连接测试与 managed daemon prepare 属于 Core/Server domain。QuickStart、未来 Desktop/Web 客户端以及可信的内建命令只调用结构化 API，不分别解释配置格式。API 必须区分以下状态：
+
+```text
+configured -> unverified | ready | unavailable | invalid
+```
+
+`unverified` 只表示配置已经保存但尚未成功验证，不允许跳过 Session 创建前的连接、握手和目录校验。配置文件中的缓存状态不能成为 target 可用性的事实来源。
 
 ## 失败语义
 
@@ -319,7 +358,9 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 - 恢复远程 Session 时，当前设备找不到同名 target、连接失败或历史 directory 不再有效，Session 保持 unresolved 并展示错误；不得静默改为 local、默认 target 或默认目录。
 - 选择 local 时，现有 Shell、文件、PTY 和 Agent 工具行为保持不变。
 - 公共 Schema 或 HttpApi 发生变化后，必须通过仓库生成脚本更新 Client/SDK，不得直接编辑 generated 文件。
-- 本 RFC 不保证旧归档分支中的 Rexd 数据或 TUI 状态可以直接迁移。
+- 旧实现的 `~/.config/rexd/targets.json` 不是新的 active 配置源。新文件不存在而旧文件存在时，QuickStart/target manager 应提供一次显式导入：展示将导入的 target 和字段诊断，转换后写入 canonical `targets.jsonc`；不得静默删除或修改旧文件，也不得长期合并两个来源。
+- 旧配置中的显式 Rexd command、workspace roots 和其他可表达字段应尽量导入；不能安全转换的字段必须逐项报告，由用户确认或修正。
+- 旧归档分支中的 per-Session TUI 状态不保证迁移；只有 target registry 提供上述导入路径。
 
 ## 实现阶段
 
@@ -342,7 +383,13 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 - 遵守 RFC-0001 已确定的用户/Agent Shell 隔离语义；User Shell runtime cwd 与补全遵守 RFC-0004。
 - 删除或禁止绕过 Location 的远程专用分支。
 
-### 阶段四：QuickStart
+### 阶段四：Target registry 与向导
+
+- 在 Core/Server 实现全局 target registry 的 schema、JSONC 诊断、原子 CRUD、连接测试与 prepare API。
+- 在 QuickStart target picker 中实现新增和管理入口，以及 SSH Config/manual 两种向导路径。
+- 实现旧 `~/.config/rexd/targets.json` 的显式一次性导入流程。
+
+### 阶段五：QuickStart Location
 
 - 选择 local 或已配置 Rexd target。
 - 选择或补全所选 target 上的目录。
@@ -361,12 +408,14 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 以下条件全部满足后，本 RFC 才能标记为 `implemented`：
 
 1. QuickStart 可以选择 local 或已配置 target，并完成远端目录补全、验证和原子 Session 创建；整个流程不依赖 `/target`，失败时保留尚未提交的 prompt。
-2. Session 持久数据只包含稳定 target 名称和规范化 directory，连接配置与运行时 Rexd session 不进入 Session 或同步数据。
-3. managed daemon 的支持平台安装、已安装复用、并发准备、checksum 失败和 unsupported platform 均有测试。
-4. 握手强制检查 protocol、server version、`exec`、`fs`、`events`、`pty`、limits 和 workspace roots。
-5. User Shell、Agent process、read/write/edit/patch/list/glob/search 与 Terminal PTY 均通过同一个远程 Location；测试证明没有访问控制设备的同名路径。
-6. graceful close、transport crash、超时、中断、OpenCode 退出和重新连接均有 lifecycle 测试；副作用不明的操作不会透明重试。
-7. target 缺失、认证失败、安装失败、握手失败、能力不足和 directory 失效均产生分阶段、可展示且经过脱敏的错误，不回退本地。
-8. local Location 与没有 target 的历史 Session 保持 upstream 行为。
-9. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。
-10. target 只从解析后的 OpenCode 用户配置目录加载；项目配置不能注入 target，连接详情不进入 Session 或同步 payload。
+2. QuickStart 可以通过 Core/Server API 新增、编辑、测试、重命名和移除 target；TUI 不直接读写配置或执行 SSH，保存未验证配置需要明确确认。
+3. Session 持久数据只包含稳定 target 名称和规范化 directory，连接配置与运行时 Rexd session 不进入 Session 或同步数据。
+4. managed daemon 的支持平台安装、已安装复用、并发准备、checksum 失败和 unsupported platform 均有测试。
+5. 握手强制检查 protocol、server version、`exec`、`fs`、`events`、`pty`、limits 和 workspace roots。
+6. User Shell、Agent process、read/write/edit/patch/list/glob/search 与 Terminal PTY 均通过同一个远程 Location；测试证明没有访问控制设备的同名路径。
+7. graceful close、transport crash、超时、中断、OpenCode 退出和重新连接均有 lifecycle 测试；副作用不明的操作不会透明重试。
+8. target 缺失、认证失败、安装失败、握手失败、能力不足和 directory 失效均产生分阶段、可展示且经过脱敏的错误，不回退本地。
+9. local Location 与没有 target 的历史 Session 保持 upstream 行为。
+10. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。
+11. target 只从解析后的 OpenCode 用户配置目录加载；项目配置不能注入完整 target，连接详情不进入 Session 或同步 payload。
+12. 旧 `~/.config/rexd/targets.json` 可以经用户确认导入 canonical 文件，导入不会修改旧文件，也不会把两个文件长期作为并列配置源。

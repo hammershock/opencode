@@ -3440,6 +3440,12 @@ export type ProjectCopyError = {
   }
 }
 
+export type TargetNotFoundError = {
+  _tag: "TargetNotFoundError"
+  targetID: string
+  message: string
+}
+
 export type EffectHttpApiErrorForbidden = {
   _tag: "Forbidden"
 }
@@ -4356,7 +4362,7 @@ export type WorkspaceEventConnectionStatus = {
 }
 
 export type LocationInfo = {
-  target?: LocationTarget
+  target: LocationTarget
   directory: string
   workspaceID?: string
   lastKnownTargetName?: string
@@ -14132,6 +14138,834 @@ export type V2ProjectCopyRefreshResponses = {
 }
 
 export type V2ProjectCopyRefreshResponse = V2ProjectCopyRefreshResponses[keyof V2ProjectCopyRefreshResponses]
+
+export type V2TargetListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/target"
+}
+
+export type V2TargetListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetListError = V2TargetListErrors[keyof V2TargetListErrors]
+
+export type V2TargetListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    path: string
+    revision: string
+    targets: Array<{
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }>
+    diagnostics: Array<{
+      severity: "error" | "warning"
+      path: string
+      message: string
+      offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+    valid: boolean
+  }
+}
+
+export type V2TargetListResponse = V2TargetListResponses[keyof V2TargetListResponses]
+
+export type V2TargetCreateData = {
+  body: {
+    input: {
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+    expectedRevision: string
+  }
+  path?: never
+  query?: never
+  url: "/api/target"
+}
+
+export type V2TargetCreateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetCreateError = V2TargetCreateErrors[keyof V2TargetCreateErrors]
+
+export type V2TargetCreateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    target: {
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+    snapshot: {
+      path: string
+      revision: string
+      targets: Array<{
+        id: string
+        status: "unverified"
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }>
+      diagnostics: Array<{
+        severity: "error" | "warning"
+        path: string
+        message: string
+        offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }>
+      valid: boolean
+    }
+  }
+}
+
+export type V2TargetCreateResponse = V2TargetCreateResponses[keyof V2TargetCreateResponses]
+
+export type V2TargetRemoveData = {
+  body: {
+    expectedRevision: string
+  }
+  path: {
+    targetID: string
+  }
+  query?: never
+  url: "/api/target/{targetID}"
+}
+
+export type V2TargetRemoveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetRemoveError = V2TargetRemoveErrors[keyof V2TargetRemoveErrors]
+
+export type V2TargetRemoveResponses = {
+  /**
+   * Success
+   */
+  200: {
+    path: string
+    revision: string
+    targets: Array<{
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }>
+    diagnostics: Array<{
+      severity: "error" | "warning"
+      path: string
+      message: string
+      offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+    valid: boolean
+  }
+}
+
+export type V2TargetRemoveResponse = V2TargetRemoveResponses[keyof V2TargetRemoveResponses]
+
+export type V2TargetUpdateData = {
+  body: {
+    input: {
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+    expectedRevision: string
+  }
+  path: {
+    targetID: string
+  }
+  query?: never
+  url: "/api/target/{targetID}"
+}
+
+export type V2TargetUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetUpdateError = V2TargetUpdateErrors[keyof V2TargetUpdateErrors]
+
+export type V2TargetUpdateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    target: {
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+    snapshot: {
+      path: string
+      revision: string
+      targets: Array<{
+        id: string
+        status: "unverified"
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }>
+      diagnostics: Array<{
+        severity: "error" | "warning"
+        path: string
+        message: string
+        offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }>
+      valid: boolean
+    }
+  }
+}
+
+export type V2TargetUpdateResponse = V2TargetUpdateResponses[keyof V2TargetUpdateResponses]
+
+export type V2TargetRestoreData = {
+  body: {
+    input: {
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+    referencedSessionIDs: Array<string>
+    expectedRevision: string
+  }
+  path: {
+    targetID: string
+  }
+  query?: never
+  url: "/api/target/{targetID}/restore"
+}
+
+export type V2TargetRestoreErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetRestoreError = V2TargetRestoreErrors[keyof V2TargetRestoreErrors]
+
+export type V2TargetRestoreResponses = {
+  /**
+   * Success
+   */
+  200: {
+    target: {
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }
+    snapshot: {
+      path: string
+      revision: string
+      targets: Array<{
+        id: string
+        status: "unverified"
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }>
+      diagnostics: Array<{
+        severity: "error" | "warning"
+        path: string
+        message: string
+        offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }>
+      valid: boolean
+    }
+  }
+}
+
+export type V2TargetRestoreResponse = V2TargetRestoreResponses[keyof V2TargetRestoreResponses]
+
+export type V2TargetTestData = {
+  body?: never
+  path: {
+    targetID: string
+  }
+  query?: never
+  url: "/api/target/{targetID}/test"
+}
+
+export type V2TargetTestErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetTestError = V2TargetTestErrors[keyof V2TargetTestErrors]
+
+export type V2TargetTestResponses = {
+  /**
+   * Success
+   */
+  200:
+    | {
+        status: "ready"
+        stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+      }
+    | {
+        status: "unavailable" | "invalid"
+        stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+        message: string
+      }
+}
+
+export type V2TargetTestResponse = V2TargetTestResponses[keyof V2TargetTestResponses]
+
+export type V2TargetPrepareData = {
+  body?: never
+  path: {
+    targetID: string
+  }
+  query?: never
+  url: "/api/target/{targetID}/prepare"
+}
+
+export type V2TargetPrepareErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetPrepareError = V2TargetPrepareErrors[keyof V2TargetPrepareErrors]
+
+export type V2TargetPrepareResponses = {
+  /**
+   * Success
+   */
+  200:
+    | {
+        status: "ready"
+        stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+      }
+    | {
+        status: "unavailable" | "invalid"
+        stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+        message: string
+      }
+}
+
+export type V2TargetPrepareResponse = V2TargetPrepareResponses[keyof V2TargetPrepareResponses]
+
+export type V2TargetLegacyPreviewData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/target/legacy/import"
+}
+
+export type V2TargetLegacyPreviewErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetLegacyPreviewError = V2TargetLegacyPreviewErrors[keyof V2TargetLegacyPreviewErrors]
+
+export type V2TargetLegacyPreviewResponses = {
+  /**
+   * Success
+   */
+  200: {
+    source: string
+    sourceRevision: string
+    candidates: Array<{
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }>
+    diagnostics: Array<{
+      severity: "error" | "warning"
+      path: string
+      message: string
+      offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+  }
+}
+
+export type V2TargetLegacyPreviewResponse = V2TargetLegacyPreviewResponses[keyof V2TargetLegacyPreviewResponses]
+
+export type V2TargetLegacyImportData = {
+  body: {
+    sourceRevision: string
+    expectedRevision: string
+  }
+  path?: never
+  query?: never
+  url: "/api/target/legacy/import"
+}
+
+export type V2TargetLegacyImportErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetLegacyImportError = V2TargetLegacyImportErrors[keyof V2TargetLegacyImportErrors]
+
+export type V2TargetLegacyImportResponses = {
+  /**
+   * Success
+   */
+  200: {
+    imported: Array<{
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }>
+    snapshot: {
+      path: string
+      revision: string
+      targets: Array<{
+        id: string
+        status: "unverified"
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }>
+      diagnostics: Array<{
+        severity: "error" | "warning"
+        path: string
+        message: string
+        offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }>
+      valid: boolean
+    }
+  }
+}
+
+export type V2TargetLegacyImportResponse = V2TargetLegacyImportResponses[keyof V2TargetLegacyImportResponses]
 
 export type PtyConnectData = {
   body?: never

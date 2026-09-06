@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from "solid-js"
+import { createEffect, createMemo, createSignal } from "solid-js"
 import { useLocal } from "../context/local"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
 import { DialogSelect } from "../ui/dialog-select"
@@ -8,12 +8,23 @@ import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
+import { load, summary, type Result } from "../provider-usage"
+import { useSDK } from "../context/sdk"
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
   const sync = useSync()
   const dialog = useDialog()
+  const sdk = useSDK()
   const [query, setQuery] = createSignal("")
+  const [usage, setUsage] = createSignal<Record<string, Result>>({})
+
+  createEffect(() => {
+    for (const provider of sync.data.provider) {
+      if (usage()[provider.id]) continue
+      void load(sdk, provider.id).then((result) => setUsage((current) => ({ ...current, [provider.id]: result })))
+    }
+  })
 
   const connected = useConnected()
   const providers = createDialogProviderOptions()
@@ -79,7 +90,9 @@ export function DialogModel(props: { providerID?: string }) {
               : undefined,
             category: connected() ? provider.name : undefined,
             disabled: provider.id === "opencode" && model.includes("-nano"),
-            footer: info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+            footer:
+              summary(usage()[provider.id]) ??
+              (info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined),
             onSelect() {
               onSelect(provider.id, model)
             },
@@ -158,6 +171,17 @@ export function DialogModel(props: { providerID?: string }) {
     <DialogSelect<ReturnType<typeof options>[number]["value"]>
       options={options()}
       actions={[
+        {
+          command: "model.dialog.usage.refresh",
+          title: "Refresh provider usage",
+          hidden: !connected(),
+          onTrigger: (option) => {
+            const providerID = (option.value as { providerID: string }).providerID
+            void load(sdk, providerID, true).then((result) =>
+              setUsage((current) => ({ ...current, [providerID]: result })),
+            )
+          },
+        },
         {
           command: "model.dialog.provider",
           title: connected() ? "Connect provider" : "View all providers",

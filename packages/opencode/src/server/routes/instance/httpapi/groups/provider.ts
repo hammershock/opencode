@@ -5,9 +5,14 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
-import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
+import {
+  WorkspaceRoutingMiddleware,
+  WorkspaceRoutingQuery,
+  WorkspaceRoutingQueryFields,
+} from "../middleware/workspace-routing"
 import { described } from "./metadata"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ProviderUsage } from "@/provider/usage"
 
 const root = "/provider"
 
@@ -87,6 +92,11 @@ export const ProviderApi = HttpApi.make("provider")
           title: "provider",
           description: "Experimental HttpApi provider routes.",
         }),
+        HttpApiEndpoint.get("usage", `${root}/:providerID/usage`, {
+          params: { providerID: ProviderV2.ID },
+          query: Schema.Struct({ ...WorkspaceRoutingQueryFields, refresh: Schema.optional(Schema.Literal("true")) }),
+          success: described(ProviderUsage.Result, "Provider usage snapshot"),
+        }).annotateMerge(OpenApi.annotations({ identifier: "provider.usage", summary: "Get provider usage" })),
       )
       .middleware(InstanceContextMiddleware)
       .middleware(WorkspaceRoutingMiddleware)

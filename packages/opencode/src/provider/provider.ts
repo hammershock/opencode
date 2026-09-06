@@ -31,6 +31,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { ProviderUsageAdapters } from "./usage-adapters"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
@@ -205,14 +206,27 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         options: ok ? {} : { apiKey: "public" },
       }
     }),
-    openai: () =>
-      Effect.succeed({
+    openai: Effect.fnUntraced(function* () {
+      const credential = yield* dep.auth("openai")
+      return {
         autoload: false,
         async getModel(sdk: any, modelID: string, _options?: Record<string, any>) {
           return sdk.responses(modelID)
         },
-        options: { headerTimeout: OPENAI_HEADER_TIMEOUT_DEFAULT },
-      }),
+        options: {
+          headerTimeout: OPENAI_HEADER_TIMEOUT_DEFAULT,
+          ...(credential?.type === "api"
+            ? {
+                fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+                  const response = await fetch(input, init)
+                  ProviderUsageAdapters.defaults.ingestOpenAI(credential, response.headers)
+                  return response
+                },
+              }
+            : {}),
+        },
+      }
+    }),
     meta: () =>
       Effect.succeed({
         autoload: false,
@@ -951,7 +965,6 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           }
 
           const response = await fetch(url, init)
-
           if (!response.ok && response.status === 400) {
             try {
               const errorData = await response.clone().json()

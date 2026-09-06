@@ -22,6 +22,8 @@ export function registry(request: Request = fetch, now: () => number = Date.now)
   return { adapters: values, ingestOpenAI: rateLimits.ingest }
 }
 
+export const defaults = registry()
+
 function balance(
   providerID: string,
   endpoint: string,

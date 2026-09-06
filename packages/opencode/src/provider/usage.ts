@@ -3,6 +3,7 @@ import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Auth } from "@/auth"
 import { Context, Effect, Layer, Schema } from "effect"
+import { ProviderUsageAdapters } from "./usage-adapters"
 
 export const Source = Schema.Literals(["official_api", "response_headers", "experimental_private"])
 export type Source = typeof Source.Type
@@ -280,7 +281,7 @@ function clearProvider(providerID: string, cache: Map<string, Cache>, inflight: 
   }
 }
 
-export const defaultLayer = layer([])
+export const defaultLayer = Layer.unwrap(Effect.sync(() => layer(ProviderUsageAdapters.defaults.adapters)))
 export const node = LayerNode.make({ service: Service, layer: defaultLayer, deps: [Auth.node] })
 
 export * as ProviderUsage from "./usage"

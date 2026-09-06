@@ -42,6 +42,11 @@ import { Locale } from "../../util/locale"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
+import {
+  load as loadProviderUsage,
+  summary as providerUsageSummary,
+  type Result as ProviderUsageResult,
+} from "../../provider-usage"
 import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
@@ -282,6 +287,24 @@ export function Prompt(props: PromptProps) {
       cost: cost > 0 ? money.format(cost) : undefined,
     }
   })
+
+  const [providerUsage, setProviderUsage] = createSignal<ProviderUsageResult>()
+  createEffect(
+    on(
+      () => {
+        if (!props.sessionID) return
+        const message = sync.data.message[props.sessionID]?.findLast(
+          (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
+        )
+        return message ? `${message.id}\0${message.providerID}` : undefined
+      },
+      (key) => {
+        setProviderUsage(undefined)
+        if (!key) return
+        void loadProviderUsage(sdk, key.split("\0")[1]!, true).then(setProviderUsage)
+      },
+    ),
+  )
 
   const [store, setStore] = createStore<{
     prompt: PromptInfo
@@ -1711,7 +1734,9 @@ export function Prompt(props: PromptProps) {
                     <Match when={usage()}>
                       {(item) => (
                         <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost].filter(Boolean).join(" · ")}
+                          {[item().context, item().cost, providerUsageSummary(providerUsage())]
+                            .filter(Boolean)
+                            .join(" · ")}
                         </text>
                       )}
                     </Match>

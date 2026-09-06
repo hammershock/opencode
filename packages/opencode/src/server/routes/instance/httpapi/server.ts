@@ -27,6 +27,7 @@ import { Project } from "@/project/project"
 import { Vcs } from "@/project/vcs"
 import { ProviderAuth } from "@/provider/auth"
 import { Provider } from "@/provider/provider"
+import { ProviderUsage } from "@/provider/usage"
 import { Question } from "@/question"
 import { SessionCompaction } from "@/session/compaction"
 import { Instruction } from "@/session/instruction"
@@ -225,6 +226,7 @@ const app = LayerNode.group([
   Plugin.node,
   ModelsDev.node,
   Provider.node,
+  ProviderUsage.node,
   ProviderAuth.node,
   Agent.node,
   Skill.node,

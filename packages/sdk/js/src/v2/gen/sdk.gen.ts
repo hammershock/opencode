@@ -387,6 +387,24 @@ import type {
   V2SessionWaitResponses,
   V2SkillListErrors,
   V2SkillListResponses,
+  V2TargetCreateErrors,
+  V2TargetCreateResponses,
+  V2TargetLegacyImportErrors,
+  V2TargetLegacyImportResponses,
+  V2TargetLegacyPreviewErrors,
+  V2TargetLegacyPreviewResponses,
+  V2TargetListErrors,
+  V2TargetListResponses,
+  V2TargetPrepareErrors,
+  V2TargetPrepareResponses,
+  V2TargetRemoveErrors,
+  V2TargetRemoveResponses,
+  V2TargetRestoreErrors,
+  V2TargetRestoreResponses,
+  V2TargetTestErrors,
+  V2TargetTestResponses,
+  V2TargetUpdateErrors,
+  V2TargetUpdateResponses,
   VcsApplyErrors,
   VcsApplyResponses,
   VcsDiffErrors,
@@ -7034,6 +7052,308 @@ export class ProjectCopy2 extends HeyApiClient {
   }
 }
 
+export class Legacy extends HeyApiClient {
+  /**
+   * Preview an explicit legacy target import
+   */
+  public preview<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      V2TargetLegacyPreviewResponses,
+      V2TargetLegacyPreviewErrors,
+      ThrowOnError
+    >({ url: "/api/target/legacy/import", ...options })
+  }
+
+  /**
+   * Confirm a legacy target import
+   */
+  public import<ThrowOnError extends boolean = false>(
+    parameters?: {
+      sourceRevision?: string
+      expectedRevision?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "sourceRevision" },
+            { in: "body", key: "expectedRevision" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2TargetLegacyImportResponses,
+      V2TargetLegacyImportErrors,
+      ThrowOnError
+    >({
+      url: "/api/target/legacy/import",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Target extends HeyApiClient {
+  /**
+   * List device-local execution targets
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2TargetListResponses, V2TargetListErrors, ThrowOnError>({
+      url: "/api/target",
+      ...options,
+    })
+  }
+
+  /**
+   * Create an execution target
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters?: {
+      input?: {
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }
+      expectedRevision?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "input" },
+            { in: "body", key: "expectedRevision" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2TargetCreateResponses, V2TargetCreateErrors, ThrowOnError>({
+      url: "/api/target",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove an execution target
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      targetID: string
+      expectedRevision?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "targetID" },
+            { in: "body", key: "expectedRevision" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<V2TargetRemoveResponses, V2TargetRemoveErrors, ThrowOnError>({
+      url: "/api/target/{targetID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Update an execution target
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      targetID: string
+      input?: {
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }
+      expectedRevision?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "targetID" },
+            { in: "body", key: "input" },
+            { in: "body", key: "expectedRevision" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<V2TargetUpdateResponses, V2TargetUpdateErrors, ThrowOnError>({
+      url: "/api/target/{targetID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Restore an RFC-0009 authorized missing target
+   */
+  public restore<ThrowOnError extends boolean = false>(
+    parameters: {
+      targetID: string
+      input?: {
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }
+      referencedSessionIDs?: Array<string>
+      expectedRevision?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "targetID" },
+            { in: "body", key: "input" },
+            { in: "body", key: "referencedSessionIDs" },
+            { in: "body", key: "expectedRevision" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2TargetRestoreResponses, V2TargetRestoreErrors, ThrowOnError>({
+      url: "/api/target/{targetID}/restore",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Test a target connection
+   */
+  public test<ThrowOnError extends boolean = false>(
+    parameters: {
+      targetID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "targetID" }] }])
+    return (options?.client ?? this.client).post<V2TargetTestResponses, V2TargetTestErrors, ThrowOnError>({
+      url: "/api/target/{targetID}/test",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Prepare a target
+   */
+  public prepare<ThrowOnError extends boolean = false>(
+    parameters: {
+      targetID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "targetID" }] }])
+    return (options?.client ?? this.client).post<V2TargetPrepareResponses, V2TargetPrepareErrors, ThrowOnError>({
+      url: "/api/target/{targetID}/prepare",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _legacy?: Legacy
+  get legacy(): Legacy {
+    return (this._legacy ??= new Legacy({ client: this.client }))
+  }
+}
+
 export class V2 extends HeyApiClient {
   private _health?: Health
   get health(): Health {
@@ -7118,6 +7438,11 @@ export class V2 extends HeyApiClient {
   private _projectCopy?: ProjectCopy2
   get projectCopy(): ProjectCopy2 {
     return (this._projectCopy ??= new ProjectCopy2({ client: this.client }))
+  }
+
+  private _target?: Target
+  get target(): Target {
+    return (this._target ??= new Target({ client: this.client }))
   }
 }
 

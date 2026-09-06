@@ -56,7 +56,7 @@ export function projector(events: EventV2.Interface, sourceDeviceID?: SyncEvent.
         if (
           !sourceDeviceID ||
           !(failure instanceof EventV2.InvalidDurableEventError) ||
-          !failure.message.includes("Replay diverged")
+          !["Replay diverged", "Replay owner mismatch"].some((message) => failure.message.includes(message))
         )
           return yield* Effect.failCause(exit.cause)
         const sibling = yield* Effect.promise(() => siblingID(event.aggregateID, sourceDeviceID))

@@ -27,7 +27,7 @@ superseded-by: []
 1. `.env` 加载由用户级实验配置启用或关闭，不是 Session 级设置。
 2. 配置开启时读取 Location 用户级和工作目录级 `.env`。
 3. 工作目录级值覆盖用户级同名值；二者覆盖 Location 基础环境中的同名值。
-4. 环境应用到 Agent Shell、一次性或持久 User Shell，以及新建的 Terminal panel PTY。
+4. 环境应用到 Agent Shell、一次性 User Shell，以及新建的 Terminal panel PTY。
 5. Agent 与 User Shell 共享基础环境快照，但不共享随后发生的可变 Shell 状态。
 6. `.env` 值不自动写入 Session、模型上下文、遥测或普通日志。
 7. 解析 `.env` 数据，但不执行其中的 Shell 代码。
@@ -52,8 +52,7 @@ Location 基础环境
 ## 执行面生命周期
 
 - Agent Shell：每个新进程使用当前 generation。
-- 一次性 User Shell：每条新命令使用当前 generation。
-- 持久 User Shell：只在 Shell 启动时继承 generation，刷新后需要重启才能更新。
+- User Shell：每条一次性命令使用执行时的当前 generation；RFC-0004 的 runtime cwd 不影响环境 generation。
 - Terminal panel：只在 PTY 创建时继承 generation，父进程无法可靠修改已运行 PTY 的环境。
 
 ## `/env` 命令草案
@@ -79,11 +78,10 @@ Location 基础环境
 1. 用户级 `.env` 的默认路径是什么，是否允许用户覆盖？
 2. 使用哪套 `.env` 解析兼容规则？
 3. 快照在进入 Session runtime 时建立，还是首次执行时懒加载？
-4. `/env reload` 是否自动重启持久 User Shell，还是先提示用户？
-5. 已运行 Terminal 应只标记 stale，提供 restart，还是有其他交互？
-6. `/env list` 是否永远只显示变量名，还是允许二次确认后临时 reveal？
-7. `/env init` 的 Agent prompt、模板和已有文件合并策略是什么？
-8. 哪些非 Shell Agent 工具或 language server 也应继承该环境？
+4. 已运行 Terminal 应只标记 stale，提供 restart，还是有其他交互？
+5. `/env list` 是否永远只显示变量名，还是允许二次确认后临时 reveal？
+6. `/env init` 的 Agent prompt、模板和已有文件合并策略是什么？
+7. 哪些非 Shell Agent 工具或 language server 也应继承该环境？
 
 ## Command toolkit 约束
 

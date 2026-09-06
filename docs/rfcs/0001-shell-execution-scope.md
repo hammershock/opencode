@@ -17,7 +17,7 @@ superseded-by: []
 
 定义 OpenCode 中 Session Location、User Shell、Agent execution 和 Terminal panel 的职责边界。用户与 Agent 使用同一个 Session Location，但默认不共享可变 Shell 状态；Terminal panel 继续作为独立交互终端；用户从对话框执行的有界 Shell 命令及结果可以记录在 Session 中，供后续 Agent 使用。
 
-本 RFC 只建立跨功能都必须遵守的语义，不规定持久 Shell、补全、`.env` 或 slash command 的具体实现。Rexd 远程执行只扩展 Location 的 provider，不改变这些上层语义。
+本 RFC 只建立跨功能都必须遵守的语义，不规定 User Shell cwd 连续性、补全、`.env` 或 slash command 的具体实现。Rexd 远程执行只扩展 Location 的 provider，不改变这些上层语义。
 
 ## 当前行为
 
@@ -87,7 +87,7 @@ Session Location
 | User Shell scope      | 保持 upstream 的一次性 Shell 行为；每条命令创建独立进程                             |
 | User Shell transcript | 保持现有 `!command` 语义，命令及结构化结果写入 Session，并可由后续 Agent 上下文读取 |
 
-因此，“Terminal 不进入上下文”和“User Shell 结果可进入上下文”是有意的产品差异，不应被统一执行基础设施抹平。RFC-0004 可以增加实验性的持久 User Shell，但关闭实验开关时必须完全回到本表所述行为。
+因此，“Terminal 不进入上下文”和“User Shell 结果可进入上下文”是有意的产品差异，不应被统一执行基础设施抹平。RFC-0004 可以在不保留 Shell 进程的前提下增加实验性的 runtime cwd 连续性，但关闭实验开关时必须完全回到本表所述行为。
 
 隔离 Agent 与 User Shell 可以保持工具调用可复现、可重试和可并发，并避免 alias、function、交互程序或后台 job 隐式改变 Agent 命令的含义。
 
@@ -97,7 +97,7 @@ Session Location
 | -------- | ---------------------------------------------------------------- |
 | RFC-0002 | 扩展 Session Location，使工作区执行可由本地或 Rexd target 提供   |
 | RFC-0003 | 为 Core 开发和下游 fork 提供 command toolkit，并隔离上游兼容边界 |
-| RFC-0004 | 定义一次性/持久 User Shell、完整补全、生命周期和失败恢复         |
+| RFC-0004 | 定义一次性 User Shell 的 runtime cwd 连续性、完整补全和失败恢复  |
 | RFC-0005 | 定义 Location `.env` 来源、覆盖、刷新、安全边界和 `/env` 命令    |
 
 这些 RFC 可以分别讨论和实现，但不得违反本 RFC 的隔离与 Location 边界。
@@ -107,7 +107,7 @@ Session Location
 本 RFC 不定义：
 
 - 本地或远程 target 的配置和 transport；
-- 持久 User Shell 的进程协议；
+- 持久 User Shell 或进程恢复协议；
 - Shell completion 的实现；
 - `.env` 路径、解析、覆盖或刷新机制；
 - slash command 的注册和上下文策略；

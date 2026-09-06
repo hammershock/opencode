@@ -24,6 +24,7 @@ test("exposes every standard HTTP API group", () => {
     "references",
     "projectCopies",
     "targets",
+    "environment",
   ])
   expect(Object.keys(client.messages)).toEqual(["list"])
   expect(Object.keys(client.integrations)).toEqual([
@@ -37,6 +38,40 @@ test("exposes every standard HTTP API group", () => {
   ])
   expect(Object.keys(client.files)).toEqual(["list", "find"])
   expect(Object.keys(client.ptys)).toEqual(["list", "create", "get", "update", "remove"])
+  expect(Object.keys(client.environment)).toEqual(["list", "reload", "reveal", "init"])
+})
+
+test("environment methods preserve the public HTTP boundary", async () => {
+  const requests: Array<{ url: string; init?: RequestInit }> = []
+  const response = {
+    location: {
+      target: { type: "local" as const },
+      directory: "/work/project",
+      project: { id: "project", directory: "/work/project" },
+    },
+    data: { enabled: true, generation: 2, variables: [], sources: [] },
+  }
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input, init) => {
+      requests.push({ url: typeof input === "string" ? input : input instanceof URL ? input.href : input.url, init })
+      return Response.json(
+        init?.body ? { ...response, data: { generation: 2, values: { TOKEN: "secret" } } } : response,
+      )
+    },
+  })
+
+  await client.environment.list({ location: { directory: "/work/project" } })
+  await client.environment.reload({ location: { directory: "/work/project" } })
+  await client.environment.reveal({ location: { directory: "/work/project" }, confirmed: true })
+
+  expect(requests.map((item) => [item.init?.method, item.url])).toEqual([
+    ["GET", "http://localhost:3000/api/environment?location%5Bdirectory%5D=%2Fwork%2Fproject"],
+    ["POST", "http://localhost:3000/api/environment/reload?location%5Bdirectory%5D=%2Fwork%2Fproject"],
+    ["POST", "http://localhost:3000/api/environment/reveal?location%5Bdirectory%5D=%2Fwork%2Fproject"],
+  ])
+  const reveal = requests[2]?.init?.body
+  expect(typeof reveal === "string" && JSON.parse(reveal)).toEqual({ confirmed: true })
 })
 
 test("sessions.get returns the wire projection", async () => {

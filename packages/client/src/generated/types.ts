@@ -2928,6 +2928,8 @@ export type PtysListOutput = {
     readonly status: "running" | "exited"
     readonly pid: number
     readonly exitCode?: number
+    readonly environmentGeneration?: number
+    readonly environmentStale?: boolean
   }>
 }
 
@@ -2989,6 +2991,8 @@ export type PtysCreateOutput = {
     readonly status: "running" | "exited"
     readonly pid: number
     readonly exitCode?: number
+    readonly environmentGeneration?: number
+    readonly environmentStale?: boolean
   }
 }
 
@@ -3016,6 +3020,8 @@ export type PtysGetOutput = {
     readonly status: "running" | "exited"
     readonly pid: number
     readonly exitCode?: number
+    readonly environmentGeneration?: number
+    readonly environmentStale?: boolean
   }
 }
 
@@ -3048,6 +3054,8 @@ export type PtysUpdateOutput = {
     readonly status: "running" | "exited"
     readonly pid: number
     readonly exitCode?: number
+    readonly environmentGeneration?: number
+    readonly environmentStale?: boolean
   }
 }
 
@@ -3653,4 +3661,104 @@ export type TargetsImportLegacyOutput = {
     }>
     readonly valid: boolean
   }
+}
+
+export type EnvironmentListInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type EnvironmentListOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly enabled: boolean
+    readonly generation: number | "Infinity" | "-Infinity" | "NaN"
+    readonly variables: ReadonlyArray<{
+      readonly name: string
+      readonly origin: "base" | "user" | "project" | "explicit"
+      readonly source?: string | null
+      readonly overrides: ReadonlyArray<"base" | "user" | "project" | "explicit">
+    }>
+    readonly sources: ReadonlyArray<{
+      readonly path: string
+      readonly origin: "user" | "project"
+      readonly present: boolean
+    }>
+  }
+}
+
+export type EnvironmentReloadInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type EnvironmentReloadOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly enabled: boolean
+    readonly generation: number | "Infinity" | "-Infinity" | "NaN"
+    readonly variables: ReadonlyArray<{
+      readonly name: string
+      readonly origin: "base" | "user" | "project" | "explicit"
+      readonly source?: string | null
+      readonly overrides: ReadonlyArray<"base" | "user" | "project" | "explicit">
+    }>
+    readonly sources: ReadonlyArray<{
+      readonly path: string
+      readonly origin: "user" | "project"
+      readonly present: boolean
+    }>
+  }
+}
+
+export type EnvironmentRevealInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly confirmed: { readonly confirmed: true }["confirmed"]
+}
+
+export type EnvironmentRevealOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly generation: number | "Infinity" | "-Infinity" | "NaN"
+    readonly values: { readonly [x: string]: string }
+  }
+}
+
+export type EnvironmentInitInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type EnvironmentInitOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly status: "created" | "existing" }
 }

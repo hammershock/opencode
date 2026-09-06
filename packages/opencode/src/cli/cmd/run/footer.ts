@@ -73,6 +73,8 @@ type RunFooterOptions = {
   completeShell: RunFooterViewProps["completeShell"]
   getUserShellCwd: () => Promise<boolean>
   setUserShellCwd: (enabled: boolean) => Promise<void>
+  getLocationEnvironment: () => Promise<boolean>
+  setLocationEnvironment: (enabled: boolean) => Promise<void>
   agents: RunAgent[]
   resources: RunResource[]
   commands?: RunCommand[]
@@ -316,6 +318,8 @@ export class RunFooter implements FooterApi {
               completeShell: options.completeShell,
               getUserShellCwd: options.getUserShellCwd,
               setUserShellCwd: options.setUserShellCwd,
+              getLocationEnvironment: options.getLocationEnvironment,
+              setLocationEnvironment: options.setLocationEnvironment,
               agents: footer.agents,
               resources: footer.resources,
               commands: footer.commands,

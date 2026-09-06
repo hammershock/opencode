@@ -171,24 +171,28 @@ export const layer = Layer.effect(
     const location = yield* Location.Service
     const config = yield* Config.Service
     const global = yield* Global.Service
-    const entries = yield* config.entries()
-    const enabled =
-      Config.latest(
-        entries.filter(
-          (entry) =>
-            entry.type === "document" && entry.path && path.dirname(entry.path) === path.resolve(global.config),
-        ),
-        "experimental",
-      )?.location_env === true
+    const readEnabled = Effect.fn("LocationEnvironment.readEnabled")(function* () {
+      const entries = yield* config.entries()
+      return (
+        Config.latest(
+          entries.filter(
+            (entry) =>
+              entry.type === "document" && entry.path && path.dirname(entry.path) === path.resolve(global.config),
+          ),
+          "experimental",
+        )?.location_env === true
+      )
+    })
     const lock = Semaphore.makeUnsafe(1)
     const listeners = new Set<(generation: number) => void>()
-    let current = yield* build(source, location, enabled, 1).pipe(Effect.orDie)
+    let current = yield* build(source, location, yield* readEnabled(), 1).pipe(Effect.orDie)
 
     return Service.of({
       snapshot: Effect.fn("LocationEnvironment.snapshot")(() => Effect.succeed(current)),
       reload: Effect.fn("LocationEnvironment.reload")(() =>
         lock.withPermit(
-          build(source, location, enabled, current.generation + 1).pipe(
+          readEnabled().pipe(
+            Effect.flatMap((enabled) => build(source, location, enabled, current.generation + 1)),
             Effect.tap((snapshot) =>
               Effect.sync(() => {
                 current = snapshot

@@ -425,7 +425,9 @@ test("direct command panel renders grouped command palette", async () => {
 
 test("experimental panel toggles User Shell cwd continuity", async () => {
   const [enabled, setEnabled] = createSignal(false)
+  const [locationEnvironment, setLocationEnvironment] = createSignal(false)
   let toggles = 0
+  let environmentToggles = 0
   const app = await testRender(
     () => (
       <box width={100} height={RUN_COMMAND_PANEL_ROWS}>
@@ -435,6 +437,11 @@ test("experimental panel toggles User Shell cwd continuity", async () => {
           onToggleUserShellCwd={() => {
             toggles++
             setEnabled(!enabled())
+          }}
+          locationEnvironment={locationEnvironment}
+          onToggleLocationEnvironment={() => {
+            environmentToggles++
+            setLocationEnvironment(!locationEnvironment())
           }}
           onClose={() => {}}
         />
@@ -447,11 +454,16 @@ test("experimental panel toggles User Shell cwd continuity", async () => {
     await app.renderOnce()
     expect(app.captureCharFrame()).toContain("Experimental features")
     expect(app.captureCharFrame()).toContain("CWD continuity")
+    expect(app.captureCharFrame()).toContain(".env loading")
     expect(app.captureCharFrame()).toContain("off")
     app.mockInput.pressEnter()
     await app.renderOnce()
     expect(toggles).toBe(1)
     expect(app.captureCharFrame()).toContain("on")
+    app.mockInput.pressKey("ARROW_DOWN")
+    app.mockInput.pressEnter()
+    await app.renderOnce()
+    expect(environmentToggles).toBe(1)
   } finally {
     app.renderer.destroy()
   }

@@ -769,6 +769,39 @@ const adaptGroup18 = (raw: RawClient["server.target"]) => ({
   importLegacy: Endpoint18_8(raw),
 })
 
+type Endpoint19_0Request = Parameters<RawClient["server.environment"]["environment.list"]>[0]
+type Endpoint19_0Input = { readonly location?: Endpoint19_0Request["query"]["location"] }
+const Endpoint19_0 = (raw: RawClient["server.environment"]) => (input?: Endpoint19_0Input) =>
+  raw["environment.list"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_1Request = Parameters<RawClient["server.environment"]["environment.reload"]>[0]
+type Endpoint19_1Input = { readonly location?: Endpoint19_1Request["query"]["location"] }
+const Endpoint19_1 = (raw: RawClient["server.environment"]) => (input?: Endpoint19_1Input) =>
+  raw["environment.reload"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_2Request = Parameters<RawClient["server.environment"]["environment.reveal"]>[0]
+type Endpoint19_2Input = {
+  readonly location?: Endpoint19_2Request["query"]["location"]
+  readonly confirmed: Endpoint19_2Request["payload"]["confirmed"]
+}
+const Endpoint19_2 = (raw: RawClient["server.environment"]) => (input: Endpoint19_2Input) =>
+  raw["environment.reveal"]({
+    query: { location: input["location"] },
+    payload: { confirmed: input["confirmed"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint19_3Request = Parameters<RawClient["server.environment"]["environment.init"]>[0]
+type Endpoint19_3Input = { readonly location?: Endpoint19_3Request["query"]["location"] }
+const Endpoint19_3 = (raw: RawClient["server.environment"]) => (input?: Endpoint19_3Input) =>
+  raw["environment.init"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError))
+
+const adaptGroup19 = (raw: RawClient["server.environment"]) => ({
+  list: Endpoint19_0(raw),
+  reload: Endpoint19_1(raw),
+  reveal: Endpoint19_2(raw),
+  init: Endpoint19_3(raw),
+})
+
 const adaptClient = (raw: RawClient) => ({
   health: adaptGroup0(raw["server.health"]),
   location: adaptGroup1(raw["server.location"]),
@@ -789,6 +822,7 @@ const adaptClient = (raw: RawClient) => ({
   references: adaptGroup16(raw["server.reference"]),
   projectCopies: adaptGroup17(raw["server.projectCopy"]),
   targets: adaptGroup18(raw["server.target"]),
+  environment: adaptGroup19(raw["server.environment"]),
 })
 
 export const make = (options?: { readonly baseUrl?: URL | string }) =>

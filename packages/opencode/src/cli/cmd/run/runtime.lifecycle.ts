@@ -66,6 +66,8 @@ export type LifecycleInput = {
   }>
   getUserShellCwd: () => Promise<boolean>
   setUserShellCwd: (enabled: boolean) => Promise<void>
+  getLocationEnvironment: () => Promise<boolean>
+  setLocationEnvironment: (enabled: boolean) => Promise<void>
   agents: RunAgent[]
   resources: RunResource[]
   sessionID: string
@@ -247,6 +249,8 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
       completeShell: input.completeShell,
       getUserShellCwd: input.getUserShellCwd,
       setUserShellCwd: input.setUserShellCwd,
+      getLocationEnvironment: input.getLocationEnvironment,
+      setLocationEnvironment: input.setLocationEnvironment,
       agents: input.agents,
       resources: input.resources,
       sessionID: input.getSessionID ?? (() => input.sessionID),

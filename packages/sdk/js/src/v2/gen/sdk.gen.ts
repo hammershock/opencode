@@ -273,6 +273,14 @@ import type {
   V2CredentialRemoveResponses,
   V2CredentialUpdateErrors,
   V2CredentialUpdateResponses,
+  V2EnvironmentInitErrors,
+  V2EnvironmentInitResponses,
+  V2EnvironmentListErrors,
+  V2EnvironmentListResponses,
+  V2EnvironmentReloadErrors,
+  V2EnvironmentReloadResponses,
+  V2EnvironmentRevealErrors,
+  V2EnvironmentRevealResponses,
   V2EventSubscribeErrors,
   V2EventSubscribeResponses,
   V2FsFindErrors,
@@ -7354,6 +7362,116 @@ export class Target extends HeyApiClient {
   }
 }
 
+export class Environment extends HeyApiClient {
+  /**
+   * List location environment metadata
+   *
+   * Lists names, origins, sources, and generation without exposing values.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).get<V2EnvironmentListResponses, V2EnvironmentListErrors, ThrowOnError>({
+      url: "/api/environment",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Reload location environment
+   *
+   * Atomically replaces the location snapshot after all target-side sources parse successfully.
+   */
+  public reload<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).post<V2EnvironmentReloadResponses, V2EnvironmentReloadErrors, ThrowOnError>(
+      {
+        url: "/api/environment/reload",
+        ...options,
+        ...params,
+      },
+    )
+  }
+
+  /**
+   * Reveal location environment values
+   *
+   * Returns values only after explicit per-dialog confirmation; clients must discard them when the dialog closes.
+   */
+  public reveal<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+      confirmed?: true
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "body", key: "confirmed" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2EnvironmentRevealResponses, V2EnvironmentRevealErrors, ThrowOnError>(
+      {
+        url: "/api/environment/reveal",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Ensure a project .env template
+   *
+   * Creates a deterministic template if absent; does not invoke an agent or reload by itself.
+   */
+  public init<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).post<V2EnvironmentInitResponses, V2EnvironmentInitErrors, ThrowOnError>({
+      url: "/api/environment/init",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class V2 extends HeyApiClient {
   private _health?: Health
   get health(): Health {
@@ -7443,6 +7561,11 @@ export class V2 extends HeyApiClient {
   private _target?: Target
   get target(): Target {
     return (this._target ??= new Target({ client: this.client }))
+  }
+
+  private _environment?: Environment
+  get environment(): Environment {
+    return (this._environment ??= new Environment({ client: this.client }))
   }
 }
 

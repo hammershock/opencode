@@ -58,6 +58,10 @@ import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
 import { UserShellRuntime } from "./user-shell-runtime"
 import { UserShellLocal } from "./user-shell-local"
+import { LocationEnvironment } from "@opencode-ai/core/location-environment"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { LocationServiceMap } from "@opencode-ai/core/location-services"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -145,6 +149,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const locations = yield* LocationServiceMap.Service
     const { db } = database
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
@@ -563,6 +568,9 @@ const layer = Layer.effect(
                 { cwd: executionCwd, sessionID: input.sessionID, callID: part.callID },
                 { env: {} },
               )
+              const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
+                service.environment({ ...shellEnv.env, TERM: "dumb" }),
+              ).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(cwd) }))))
               const append = (chunk: string) =>
                 Effect.gen(function* () {
                   output += chunk
@@ -577,7 +585,7 @@ const layer = Layer.effect(
                   sessionID: input.sessionID,
                   location,
                   command: input.command,
-                  environment: shellEnv.env,
+                  environment,
                   enabled: true,
                   provider: local,
                   onOutput: append,
@@ -586,8 +594,7 @@ const layer = Layer.effect(
               }
               const cmd = ChildProcess.make(sh, Shell.args(sh, input.command, cwd), {
                 cwd,
-                extendEnv: true,
-                env: { ...shellEnv.env, TERM: "dumb" },
+                env: environment,
                 stdin: "ignore",
                 forceKillAfter: "3 seconds",
               })
@@ -1382,12 +1389,15 @@ const layer = Layer.effect(
       const location = { target: "local", directory: ctx.directory }
       const cwd = yield* userShell.current({ sessionID: input.sessionID, location, enabled })
       const shellEnv = yield* plugin.trigger("shell.env", { cwd, sessionID: input.sessionID }, { env: {} })
+      const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
+        service.environment(shellEnv.env),
+      ).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
       return yield* userShell.complete({
         sessionID: input.sessionID,
         location,
         input: input.input,
         cursor: input.cursor,
-        environment: shellEnv.env,
+        environment,
         enabled,
         provider: UserShellLocal.provider(sh, fsys, spawner),
       })
@@ -1689,6 +1699,7 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     Database.node,
     UserShellRuntime.node,
+    LocationServiceMap.node,
   ],
 })
 

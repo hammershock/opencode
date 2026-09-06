@@ -10,6 +10,10 @@ import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { errorMessage } from "@/util/error"
 import * as Formatter from "./formatter"
+import { LocationServiceMap } from "@opencode-ai/core/location-services"
+import { LocationEnvironment } from "@opencode-ai/core/location-environment"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 export const Status = Schema.Struct({
   name: Schema.String,
@@ -34,9 +38,11 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const appProcess = yield* AppProcess.Service
     const flags = yield* RuntimeFlags.Service
+    const locations = yield* LocationServiceMap.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("Format.state")(function* (ctx) {
+        const locationLayer = locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))
         const commands: Record<string, string[] | false> = {}
         const formatters: Record<string, Formatter.Info> = {}
 
@@ -81,12 +87,14 @@ const layer = Layer.effect(
               yield* Effect.logInfo("running", { command: cmd })
               const replaced = cmd.map((x) => x.replace("$FILE", filepath))
               const dir = yield* InstanceState.directory
+              const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
+                service.environment(item.environment),
+              ).pipe(Effect.provide(locationLayer))
               const result = yield* appProcess
                 .run(
                   ChildProcess.make(replaced[0]!, replaced.slice(1), {
                     cwd: dir,
-                    env: item.environment,
-                    extendEnv: true,
+                    env: environment,
                     stdin: "ignore",
                     stdout: "ignore",
                     stderr: "ignore",
@@ -197,7 +205,7 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, AppProcess.node, RuntimeFlags.node],
+  deps: [Config.node, AppProcess.node, RuntimeFlags.node, LocationServiceMap.node],
 })
 
 export * as Format from "."

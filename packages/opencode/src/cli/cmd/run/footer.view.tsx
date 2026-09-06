@@ -88,6 +88,8 @@ export type RunFooterViewProps = {
   }>
   getUserShellCwd?: () => Promise<boolean>
   setUserShellCwd?: (enabled: boolean) => Promise<void>
+  getLocationEnvironment?: () => Promise<boolean>
+  setLocationEnvironment?: (enabled: boolean) => Promise<void>
   agents: () => RunAgent[]
   resources: () => RunResource[]
   commands: () => RunCommand[] | undefined
@@ -145,6 +147,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   })
   const [route, setRoute] = createSignal<FooterPromptRoute>({ type: "composer" })
   const [userShellCwd, setUserShellCwd] = createSignal(false)
+  const [locationEnvironment, setLocationEnvironment] = createSignal(false)
   const [subagentMenuRows, setSubagentMenuRows] = createSignal(RUN_SUBAGENT_PANEL_ROWS)
   const queuedPrompts = createMemo(() => props.queuedPrompts?.() ?? [])
   const skills = createMemo(() => (props.commands() ?? []).filter((item) => item.source === "skill"))
@@ -346,6 +349,10 @@ export function RunFooterView(props: RunFooterViewProps) {
       .getUserShellCwd?.()
       ?.then(setUserShellCwd)
       .catch(() => props.onStatus("failed to load experimental settings"))
+    void props
+      .getLocationEnvironment?.()
+      ?.then(setLocationEnvironment)
+      .catch(() => props.onStatus("failed to load location environment setting"))
   })
 
   const toggleUserShellCwd = () => {
@@ -354,6 +361,15 @@ export function RunFooterView(props: RunFooterViewProps) {
     void props.setUserShellCwd?.(next).catch(() => {
       setUserShellCwd(!next)
       props.onStatus("failed to update experimental setting")
+    })
+  }
+
+  const toggleLocationEnvironment = () => {
+    const next = !locationEnvironment()
+    setLocationEnvironment(next)
+    void props.setLocationEnvironment?.(next).catch(() => {
+      setLocationEnvironment(!next)
+      props.onStatus("failed to update location environment setting")
     })
   }
 
@@ -819,6 +835,8 @@ export function RunFooterView(props: RunFooterViewProps) {
                             theme={theme}
                             userShellCwd={userShellCwd}
                             onToggleUserShellCwd={toggleUserShellCwd}
+                            locationEnvironment={locationEnvironment}
+                            onToggleLocationEnvironment={toggleLocationEnvironment}
                             onClose={closePanel}
                           />
                         </Match>

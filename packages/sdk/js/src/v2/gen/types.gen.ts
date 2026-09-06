@@ -655,6 +655,8 @@ export type Pty = {
   status: "running" | "exited"
   pid: number
   exitCode?: number
+  environmentGeneration?: number
+  environmentStale?: boolean
 }
 
 export type Todo = {
@@ -2030,6 +2032,7 @@ export type Config = {
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     user_shell_cwd?: boolean
+    location_env?: boolean
     mcp_timeout?: number
     policies?: Array<ConfigV2ExperimentalPolicy>
   }
@@ -14966,6 +14969,191 @@ export type V2TargetLegacyImportResponses = {
 }
 
 export type V2TargetLegacyImportResponse = V2TargetLegacyImportResponses[keyof V2TargetLegacyImportResponses]
+
+export type V2EnvironmentListData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/environment"
+}
+
+export type V2EnvironmentListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2EnvironmentListError = V2EnvironmentListErrors[keyof V2EnvironmentListErrors]
+
+export type V2EnvironmentListResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      enabled: boolean
+      generation: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      variables: Array<{
+        name: string
+        origin: "base" | "user" | "project" | "explicit"
+        source?: string
+        overrides: Array<"base" | "user" | "project" | "explicit">
+      }>
+      sources: Array<{
+        path: string
+        origin: "user" | "project"
+        present: boolean
+      }>
+    }
+  }
+}
+
+export type V2EnvironmentListResponse = V2EnvironmentListResponses[keyof V2EnvironmentListResponses]
+
+export type V2EnvironmentReloadData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/environment/reload"
+}
+
+export type V2EnvironmentReloadErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2EnvironmentReloadError = V2EnvironmentReloadErrors[keyof V2EnvironmentReloadErrors]
+
+export type V2EnvironmentReloadResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      enabled: boolean
+      generation: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      variables: Array<{
+        name: string
+        origin: "base" | "user" | "project" | "explicit"
+        source?: string
+        overrides: Array<"base" | "user" | "project" | "explicit">
+      }>
+      sources: Array<{
+        path: string
+        origin: "user" | "project"
+        present: boolean
+      }>
+    }
+  }
+}
+
+export type V2EnvironmentReloadResponse = V2EnvironmentReloadResponses[keyof V2EnvironmentReloadResponses]
+
+export type V2EnvironmentRevealData = {
+  body: {
+    confirmed: true
+  }
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/environment/reveal"
+}
+
+export type V2EnvironmentRevealErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2EnvironmentRevealError = V2EnvironmentRevealErrors[keyof V2EnvironmentRevealErrors]
+
+export type V2EnvironmentRevealResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      generation: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      values: {
+        [key: string]: string
+      }
+    }
+  }
+}
+
+export type V2EnvironmentRevealResponse = V2EnvironmentRevealResponses[keyof V2EnvironmentRevealResponses]
+
+export type V2EnvironmentInitData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+    }
+  }
+  url: "/api/environment/init"
+}
+
+export type V2EnvironmentInitErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2EnvironmentInitError = V2EnvironmentInitErrors[keyof V2EnvironmentInitErrors]
+
+export type V2EnvironmentInitResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: {
+      status: "created" | "existing"
+    }
+  }
+}
+
+export type V2EnvironmentInitResponse = V2EnvironmentInitResponses[keyof V2EnvironmentInitResponses]
 
 export type PtyConnectData = {
   body?: never

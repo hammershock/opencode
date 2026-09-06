@@ -595,6 +595,8 @@ export function RunExperimentalMenuBody(props: {
   theme: Accessor<RunFooterTheme>
   userShellCwd: Accessor<boolean>
   onToggleUserShellCwd: () => void
+  locationEnvironment?: Accessor<boolean>
+  onToggleLocationEnvironment?: () => void
   onClose: () => void
 }) {
   let field: InputRenderable | undefined
@@ -607,12 +609,21 @@ export function RunExperimentalMenuBody(props: {
       footer: props.userShellCwd() ? "on" : "off",
       keywords: "shell cwd continuity",
     },
+    {
+      category: "Location Environment",
+      display: ".env loading",
+      description: "Inject target-side user and project .env files",
+      footer: props.locationEnvironment?.() ? "on" : "off",
+      keywords: "location environment dotenv env",
+    },
   ])
   const items = createMemo(() => match(query(), entries()))
   const menu = createFooterMenuState({ count: () => items().length, limit: PANEL_LIST_ROWS })
   const select = () => {
-    if (!items()[menu.selected()]) return
-    props.onToggleUserShellCwd()
+    const item = items()[menu.selected()]
+    if (!item) return
+    if (item.category === "Location Environment") props.onToggleLocationEnvironment?.()
+    else props.onToggleUserShellCwd()
   }
 
   createEffect(() => {

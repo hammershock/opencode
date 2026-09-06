@@ -7,13 +7,17 @@ import { pathToFileURL, fileURLToPath } from "url"
 import * as LSPServer from "./server"
 import { Config } from "@/config/config"
 import { Process } from "@/util/process"
-import { spawn as lspspawn } from "./launch"
+import { spawn as lspspawn, withEnvironment } from "./launch"
 import { Effect, Layer, Context, Schema } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { containsPath } from "@/project/instance-context"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { LspEvent } from "@opencode-ai/schema/lsp-event"
+import { LocationServiceMap } from "@opencode-ai/core/location-services"
+import { LocationEnvironment } from "@opencode-ai/core/location-environment"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 
 export const Event = LspEvent
 
@@ -114,6 +118,7 @@ interface State {
   servers: Record<string, LSPServer.Info>
   broken: Set<string>
   spawning: Map<string, Promise<LSPClient.Info | undefined>>
+  environment: () => Promise<Record<string, string>>
 }
 
 export interface Interface {
@@ -141,10 +146,18 @@ const layer = Layer.effect(
     const config = yield* Config.Service
     const flags = yield* RuntimeFlags.Service
     const events = yield* EventV2Bridge.Service
+    const locations = yield* LocationServiceMap.Service
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("LSP.state")(function* (ctx) {
         const cfg = yield* config.get()
+        const locationLayer = locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))
+        const environment = () =>
+          Effect.runPromise(
+            Effect.flatMap(LocationEnvironment.Service, (service) => service.environment()).pipe(
+              Effect.provide(locationLayer),
+            ),
+          )
 
         const servers: Record<string, LSPServer.Info> = {}
 
@@ -193,6 +206,7 @@ const layer = Layer.effect(
           servers,
           broken: new Set(),
           spawning: new Map(),
+          environment,
         }
 
         yield* Effect.addFinalizer(() =>
@@ -215,8 +229,7 @@ const layer = Layer.effect(
         let updated = 0
 
         async function schedule(server: LSPServer.Info, root: string, key: string) {
-          const handle = await server
-            .spawn(root, ctx, flags)
+          const handle = await withEnvironment(await s.environment(), () => server.spawn(root, ctx, flags))
             .then((value) => {
               if (!value) s.broken.add(key)
               return value
@@ -501,7 +514,7 @@ export * as Diagnostic from "./diagnostic"
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Config.node, RuntimeFlags.node, FSUtil.node, EventV2Bridge.node],
+  deps: [Config.node, RuntimeFlags.node, FSUtil.node, EventV2Bridge.node, LocationServiceMap.node],
 })
 
 export * as LSP from "./lsp"

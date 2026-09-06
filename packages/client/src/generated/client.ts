@@ -128,6 +128,14 @@ import type {
   TargetsPreviewLegacyImportOutput,
   TargetsImportLegacyInput,
   TargetsImportLegacyOutput,
+  EnvironmentListInput,
+  EnvironmentListOutput,
+  EnvironmentReloadInput,
+  EnvironmentReloadOutput,
+  EnvironmentRevealInput,
+  EnvironmentRevealOutput,
+  EnvironmentInitInput,
+  EnvironmentInitOutput,
 } from "./types"
 import { ClientError } from "./client-error"
 
@@ -1102,6 +1110,57 @@ export function make(options: ClientOptions) {
             body: { sourceRevision: input["sourceRevision"], expectedRevision: input["expectedRevision"] },
             successStatus: 200,
             declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+    },
+    environment: {
+      list: (input?: EnvironmentListInput, requestOptions?: RequestOptions) =>
+        request<EnvironmentListOutput>(
+          {
+            method: "GET",
+            path: `/api/environment`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      reload: (input?: EnvironmentReloadInput, requestOptions?: RequestOptions) =>
+        request<EnvironmentReloadOutput>(
+          {
+            method: "POST",
+            path: `/api/environment/reload`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      reveal: (input: EnvironmentRevealInput, requestOptions?: RequestOptions) =>
+        request<EnvironmentRevealOutput>(
+          {
+            method: "POST",
+            path: `/api/environment/reveal`,
+            query: { location: input["location"] },
+            body: { confirmed: input["confirmed"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      init: (input?: EnvironmentInitInput, requestOptions?: RequestOptions) =>
+        request<EnvironmentInitOutput>(
+          {
+            method: "POST",
+            path: `/api/environment/init`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
             empty: false,
           },
           requestOptions,

@@ -270,6 +270,23 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         { throwOnError: true },
       )
     },
+    getLocationEnvironment: async () => {
+      const result = await ctx.sdk.config.get()
+      return result.data?.experimental?.location_env === true
+    },
+    setLocationEnvironment: async (enabled) => {
+      const result = await ctx.sdk.config.get({}, { throwOnError: true })
+      if (!result.data) throw new Error("global config unavailable")
+      await ctx.sdk.config.update(
+        {
+          config: {
+            ...result.data,
+            experimental: { ...result.data.experimental, location_env: enabled },
+          },
+        },
+        { throwOnError: true },
+      )
+    },
     agents: [],
     resources: [],
     sessionID: state.sessionID,

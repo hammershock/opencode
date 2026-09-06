@@ -11,7 +11,7 @@ import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { DialogLocationDirectory } from "../../component/dialog-location-directory"
 import type { TargetDefinition } from "../../component/target-wizard"
-import { useTargetManager } from "../../component/target-manager"
+import { TargetHealth, useTargetManager } from "../../component/target-manager"
 
 const id = "internal:home-footer"
 
@@ -86,8 +86,9 @@ function Directory(props: { api: TuiPluginApi }) {
           { title: "local", description: paths.cwd, value: "local" as const, category: "Targets" },
           ...(targets()?.targets ?? []).map((target) => ({
             title: target.name,
-            description: `${targetManager.status(target.id)} · ${target.defaultDirectory ?? target.workspaceRoots[0]}`,
-            footer: targetManager.detail(target.id),
+            description: target.defaultDirectory ?? target.workspaceRoots[0],
+            footer: <TargetHealth state={targetManager.state(target.id)} />,
+            details: [targetManager.detail(target.id)].filter((item): item is string => Boolean(item)),
             value: target as TargetDefinition | "local" | "manage",
             category: "Targets",
           })),

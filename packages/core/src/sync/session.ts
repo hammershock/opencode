@@ -39,7 +39,11 @@ export function capture(store: SyncEventStore.Interface, payload: DurablePayload
 }
 
 /** Adapter used by SyncRuntime hydration to replay through normal projectors. */
-export function projector(events: EventV2.Interface, sourceDeviceID?: SyncEvent.DeviceID): SyncEvent.DurableProjector {
+export function projector(
+  events: EventV2.Interface,
+  sourceDeviceID?: SyncEvent.DeviceID,
+  onConflict?: (input: { sessionID: string; siblingID: string; sourceDeviceID: SyncEvent.DeviceID }) => Effect.Effect<void, unknown>,
+): SyncEvent.DurableProjector {
   const siblings = new Map<string, string>()
   return {
     project: (event) =>
@@ -61,6 +65,8 @@ export function projector(events: EventV2.Interface, sourceDeviceID?: SyncEvent.
           return yield* Effect.failCause(exit.cause)
         const sibling = yield* Effect.promise(() => siblingID(event.aggregateID, sourceDeviceID))
         siblings.set(event.aggregateID, sibling)
+        if (onConflict)
+          yield* onConflict({ sessionID: event.aggregateID, siblingID: sibling, sourceDeviceID }).pipe(Effect.orDie)
         const prefix = yield* events.durable({ aggregateID: event.aggregateID }).pipe(
           // Durable aggregate sequences are contiguous and zero based. Taking
           // exactly `seq` items snapshots the common prefix without subscribing

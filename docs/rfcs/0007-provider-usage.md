@@ -1,7 +1,7 @@
 ---
 id: 0007
 title: Provider Usage Surfaces
-status: draft
+status: accepted
 authors:
   - hammershock
 created: 2026-09-06
@@ -44,9 +44,11 @@ superseded-by: []
 ProviderUsageSnapshot {
   providerID
   accountID?
+  scopeID?
   fetchedAt
   expiresAt?
   status: available | unsupported | unauthenticated | error
+  source: official_api | response_headers | experimental_private
   meters: ProviderUsageMeter[]
 }
 
@@ -59,12 +61,15 @@ ProviderUsageMeter {
   limit?
   unit
   resetsAt?
+  order
 }
 ```
 
 `unit` 必须保留 provider 原始语义，例如 currency、credits、requests、tokens 或 percentage。Core 不把不同单位换算成一个虚构的统一百分比。只有同时存在 `remaining` 与 `limit`，或 provider 直接返回可靠 percentage 时，UI 才可显示进度比例。
 
 `accountID` 只能是适合展示和区分缓存的非敏感稳定标识；不得包含 access token、完整 secret 或未经允许的私人信息。
+
+`scopeID` 表示本次真实模型请求使用的 organization/project 等 provider scope。Session footer 只显示当前模型、账户和请求 scope 的 snapshot；`/models` 可以展示同一账户下已经可靠发现的其他 scopes，但不能把它们相加成账户总额。
 
 ## Adapter 边界
 
@@ -87,12 +92,30 @@ adapter 必须：
 - 不记录 authorization header、token、cookie 或完整原始响应；
 - 不把 provider 失败转换成 `remaining: 0`。
 
-新增 provider 只增加 adapter 与 contract tests，不修改 `/models` 或 Session footer 的业务逻辑。首批 provider 清单在实现计划中单独确认；没有可靠 API 的 provider 返回 `unsupported`。
+adapter 可以使用三类来源：
+
+1. provider 文档化的官方 usage/balance/quota API；
+2. 真实模型响应中 provider 官方定义的 rate-limit headers；
+3. 为满足 OpenAI OAuth/Codex 订阅配额而保留的、明确标记为 experimental 的私有兼容 endpoint。
+
+第三类 adapter 必须独立版本化、严格验证 response schema、使用短超时，并在任何漂移、认证错误或字段缺失时返回 unsupported/error。它不能成为模型调用的前置条件，也不能把私有 endpoint 描述成 OpenAI 公共 API。
+
+新增 provider 只增加 adapter 与 contract tests，不修改 `/models` 或 Session footer 的业务逻辑。service 对所有已连接 provider 运行 capability probe；没有可靠数据源的 provider 返回 `unsupported`。
+
+旧实现提供了 OpenAI OAuth、DeepSeek、Moonshot CN 和 MiniMax adapters。v1 重新审查后保留以下基线：
+
+- DeepSeek 使用官方 [`GET /user/balance`](https://api-docs.deepseek.com/api/get-user-balance)；
+- Moonshot CN 使用官方 [`GET /v1/users/me/balance`](https://platform.moonshot.cn/docs/api/balance)；
+- MiniMax Token Plan 使用[当前官方文档声明的 remains endpoint](https://platform.minimaxi.com/docs/token-plan/faq)，不沿用已经漂移的旧 URL；
+- OpenAI API Key 从[官方定义的 rate-limit response headers](https://developers.openai.com/api/docs/guides/rate-limits) 更新 meters；
+- OpenAI OAuth/Codex 可以使用旧 `wham/usage` 兼容 adapter，但其 `source` 必须是 `experimental_private`。
+
+这些是首批迁移对象而不是封闭 allowlist。其他已连接 provider 仍执行 probe，并在未来通过独立 adapter 提交扩展。
 
 ## 查询与缓存
 
 1. usage 查询由控制设备上的 Provider Usage service 发起，不属于 Session Location，也不经过 Rexd。
-2. cache key 至少包含 providerID、非敏感 account identity 和影响配额范围的 organization/project identity。
+2. cache key 至少包含 providerID、非敏感 account identity 和当前模型请求实际使用的 organization/project identity。
 3. 默认使用短时内存缓存；具体 TTL 可由 adapter 在合理上限内声明。
 4. 相同 cache key 的并发请求合并为一个 in-flight request。
 5. `/models` 的 refresh action 绕过 fresh cache，但仍执行并发合并和速率保护。
@@ -110,10 +133,11 @@ RFC-0006 保持 `/models` 的模型选择功能。本 RFC 只添加 usage presen
 - loading、unsupported、unauthenticated、error 和 stale 使用不同文案；
 - usage 排版不得破坏搜索、收藏、provider 分组或模型选择快捷键；
 - refresh 只刷新 usage，不重新加载 provider credential，也不改变当前模型。
+- Favorites 不再集中在单一分组；按 provider 分组，并在对应 provider header 使用同一 usage presentation。
 
 ## Session footer 注脚
 
-Session footer 只显示当前所选模型 provider 的紧凑摘要，例如：
+Session footer 只显示当前所选模型 provider 和实际请求 scope 的单行摘要，例如：
 
 ```text
 OpenAI · 72% left · resets 14:00
@@ -127,6 +151,9 @@ Provider X · ¥18.20
 - provider turn 完成后可以异步 revalidate，但不能延迟消息完成；
 - 没有可靠信息时省略注脚，不显示估算值；
 - 注脚只是 UI，不序列化到 Session，也不计入导出 transcript。
+- 每个 provider 使用设备级用户偏好保存一个有序 meter ID 列表；用户在 `/models` provider 区域选择、隐藏和重排 footer 项目。
+- 尚未配置偏好时，按 adapter 的稳定 `order` 顺次显示全部有效 meters；失效或不存在的已选 meter 自动跳过，但保留偏好以便恢复。
+- footer 始终使用一行，从左到右排列所选有效信息；超出可用宽度时按用户顺序从尾部截断并显示省略提示，不能改变选择或另起多行。
 
 ## 安全与隐私
 
@@ -138,16 +165,10 @@ Provider X · ¥18.20
 ## 实现阶段
 
 1. 定义 usage schema、service、cache 和 adapter contract tests。
-2. 选择至少一个具有可靠官方 usage API 的 provider 实现端到端 adapter。
+2. 迁移并审查 OpenAI、DeepSeek、Moonshot CN 和 MiniMax adapters，再为其他已连接 provider 增加 capability probes。
 3. 接入 `/models` provider 分组展示和 refresh action。
 4. 接入当前 Session provider footer 注脚。
 5. 按 provider 独立增加 adapters；每个 adapter 使用单独实现提交。
-
-## 待确认问题
-
-1. 哪些 provider 具有我们可以稳定调用的官方 usage API，并作为首批支持对象？
-2. 不同 provider 的多 organization/project 配额应如何让用户选择展示 scope？
-3. 哪些 meter 适合作为 provider header 和 Session footer 的默认摘要？
 
 ## 验收条件
 
@@ -157,3 +178,6 @@ Provider X · ¥18.20
 4. `/models` 查询失败不影响搜索、选择或 prompt 提交。
 5. Session footer 只显示当前 provider 的可靠摘要，且不进入 Session、同步数据、导出或 Agent context。
 6. 日志、错误与 snapshot 不泄露 provider credential 或敏感原始响应。
+7. 所有已连接 provider 都经过 adapter probe；首批四类旧 adapters 有 fixture、schema drift、认证、限流和超时测试。
+8. OpenAI 私有兼容 endpoint 失效只移除 usage 展示，不影响认证、模型发现、选择或请求。
+9. `/models` 按 provider 分组 Favorites；footer 的默认全量顺序、用户选择、重排、失效 meter 和单行截断均有测试。

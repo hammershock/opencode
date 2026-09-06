@@ -57,6 +57,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { ProviderUsage } from "@/provider/usage"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SessionSync } from "@opencode-ai/core/sync/session"
+import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -75,6 +76,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     ProviderUsage.node,
     SyncSetup.node,
     SessionSync.node,
+    SyncMetadata.node,
     ProviderAuth.node,
     Agent.node,
     Skill.node,

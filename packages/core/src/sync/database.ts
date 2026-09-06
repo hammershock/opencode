@@ -17,7 +17,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncDatabase") {}
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 const layer = Layer.effect(
   Service,
@@ -44,6 +44,10 @@ const layer = Layer.effect(
           if ((current?.version ?? 1) < 3) {
             yield* Effect.forEach(schemaV3, (statement) => tx.run(statement), { discard: true })
             yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (3)`)
+          }
+          if ((current?.version ?? 1) < 4) {
+            yield* Effect.forEach(schemaV4, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (4)`)
           }
         }),
       { behavior: "immediate" },
@@ -99,5 +103,12 @@ const schemaV3 = [
   sql`CREATE TABLE sync_apply_journal (
     device_id TEXT NOT NULL, generation INTEGER NOT NULL, payload TEXT NOT NULL,
     created_at INTEGER NOT NULL, PRIMARY KEY(device_id, generation)
+  )`,
+]
+
+const schemaV4 = [
+  sql`CREATE TABLE sync_session_metadata (
+    session_id TEXT PRIMARY KEY, payload TEXT NOT NULL, source_device TEXT NOT NULL,
+    revision INTEGER NOT NULL, availability TEXT NOT NULL, updated_at INTEGER NOT NULL
   )`,
 ]

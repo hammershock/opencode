@@ -51,7 +51,7 @@ describe("SyncEventStore", () => {
         return yield* db.get<{ version: number }>(sql`SELECT MAX(version) AS version FROM sync_schema`)
       }).pipe(Effect.scoped, Effect.provide(database)),
     )
-    expect(version).toEqual({ version: 3 })
+    expect(version).toEqual({ version: 4 })
   })
 
   test("durably seals ordered outbox events into one immutable per-device generation", async () => {

@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP=opencode-rexd
+INSTALL_DIR="${OPENCODE_REXD_INSTALL_DIR:-${HOME}/.opencode-rexd/bin}"
+BINARY=""
+MANIFEST=""
+ROLLBACK=false
+
+usage() {
+  cat <<EOF
+Install a local OpenCode Rexd build without replacing the upstream opencode command.
+
+Usage:
+  ./script/install-rexd --binary <path> [--manifest <path>] [--install-dir <path>]
+  ./script/install-rexd --rollback [--install-dir <path>]
+
+The previous working build is retained as opencode-rexd.previous and can be
+restored atomically with --rollback.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --binary)
+      BINARY="${2:-}"
+      shift 2
+      ;;
+    --manifest)
+      MANIFEST="${2:-}"
+      shift 2
+      ;;
+    --install-dir)
+      INSTALL_DIR="${2:-}"
+      shift 2
+      ;;
+    --rollback)
+      ROLLBACK=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+mkdir -p "$INSTALL_DIR"
+CURRENT="$INSTALL_DIR/$APP"
+PREVIOUS="$INSTALL_DIR/$APP.previous"
+CURRENT_MANIFEST="$INSTALL_DIR/$APP.build.json"
+PREVIOUS_MANIFEST="$INSTALL_DIR/$APP.previous.build.json"
+
+if [[ "$ROLLBACK" == true ]]; then
+  if [[ -n "$BINARY" || -n "$MANIFEST" ]]; then
+    echo "--rollback cannot be combined with --binary or --manifest" >&2
+    exit 2
+  fi
+  if [[ ! -x "$PREVIOUS" ]]; then
+    echo "No previous opencode-rexd build is available" >&2
+    exit 1
+  fi
+  rollback_swap="$INSTALL_DIR/.$APP.rollback.$$"
+  rollback_manifest="$INSTALL_DIR/.$APP.rollback-manifest.$$"
+  trap 'rm -f "$rollback_swap" "$rollback_manifest"' EXIT
+  [[ ! -e "$CURRENT" ]] || mv "$CURRENT" "$rollback_swap"
+  mv "$PREVIOUS" "$CURRENT"
+  [[ ! -e "$rollback_swap" ]] || mv "$rollback_swap" "$PREVIOUS"
+  [[ ! -e "$CURRENT_MANIFEST" ]] || mv "$CURRENT_MANIFEST" "$rollback_manifest"
+  [[ ! -e "$PREVIOUS_MANIFEST" ]] || mv "$PREVIOUS_MANIFEST" "$CURRENT_MANIFEST"
+  [[ ! -e "$rollback_manifest" ]] || mv "$rollback_manifest" "$PREVIOUS_MANIFEST"
+  "$CURRENT" --version >/dev/null
+  echo "Restored $CURRENT ($("$CURRENT" --version))"
+  exit 0
+fi
+
+if [[ -z "$BINARY" || ! -f "$BINARY" ]]; then
+  echo "--binary must name an existing build" >&2
+  exit 2
+fi
+if [[ -n "$MANIFEST" && ! -f "$MANIFEST" ]]; then
+  echo "--manifest must name an existing file" >&2
+  exit 2
+fi
+
+candidate="$INSTALL_DIR/.$APP.candidate.$$"
+candidate_manifest="$INSTALL_DIR/.$APP.candidate-manifest.$$"
+displaced="$INSTALL_DIR/.$APP.displaced.$$"
+displaced_manifest="$INSTALL_DIR/.$APP.displaced-manifest.$$"
+committed=false
+
+cleanup() {
+  rm -f "$candidate" "$candidate_manifest"
+  if [[ "$committed" != true && -e "$displaced" ]]; then
+    rm -f "$CURRENT"
+    mv "$displaced" "$CURRENT"
+  fi
+  if [[ "$committed" != true && -e "$displaced_manifest" ]]; then
+    rm -f "$CURRENT_MANIFEST"
+    mv "$displaced_manifest" "$CURRENT_MANIFEST"
+  fi
+  rm -f "$displaced" "$displaced_manifest"
+}
+trap cleanup EXIT
+
+cp "$BINARY" "$candidate"
+chmod 755 "$candidate"
+candidate_version=$("$candidate" --version)
+if [[ -z "$candidate_version" ]]; then
+  echo "Candidate did not report a version; existing install was not changed" >&2
+  exit 1
+fi
+if [[ -n "$MANIFEST" ]]; then
+  cp "$MANIFEST" "$candidate_manifest"
+  if ! grep -Fq '"entrypoint": "opencode-rexd"' "$candidate_manifest"; then
+    echo "Manifest does not describe the opencode-rexd entrypoint" >&2
+    exit 1
+  fi
+fi
+
+rm -f "$PREVIOUS" "$PREVIOUS_MANIFEST"
+[[ ! -e "$CURRENT" ]] || mv "$CURRENT" "$displaced"
+[[ ! -e "$CURRENT_MANIFEST" ]] || mv "$CURRENT_MANIFEST" "$displaced_manifest"
+mv "$candidate" "$CURRENT"
+[[ ! -e "$candidate_manifest" ]] || mv "$candidate_manifest" "$CURRENT_MANIFEST"
+"$CURRENT" --version >/dev/null
+[[ ! -e "$displaced" ]] || mv "$displaced" "$PREVIOUS"
+[[ ! -e "$displaced_manifest" ]] || mv "$displaced_manifest" "$PREVIOUS_MANIFEST"
+committed=true
+
+echo "Installed $CURRENT ($candidate_version)"
+echo "Add $INSTALL_DIR to PATH if it is not already present."

@@ -4,6 +4,7 @@ import path from "node:path"
 import fs from "node:fs/promises"
 
 export const SERVICE = "opencode-rexd-sync"
+export const LEGACY_BAIDU_SERVICE = "opencode-rexd-baidu"
 
 export interface Store {
   readonly platform: "macos-keychain" | "windows-password-vault"
@@ -40,22 +41,45 @@ export async function detect(
     readonly findInterop?: () => Promise<string | undefined>
   } = {},
 ): Promise<Store> {
+  return detectService(SERVICE, options)
+}
+
+export async function detectLegacyBaidu(
+  options: {
+    readonly platform?: NodeJS.Platform
+    readonly runner?: Runner
+    readonly procVersion?: string
+    readonly findInterop?: () => Promise<string | undefined>
+  } = {},
+): Promise<Store> {
+  return detectService(LEGACY_BAIDU_SERVICE, options)
+}
+
+async function detectService(
+  service: string,
+  options: {
+    readonly platform?: NodeJS.Platform
+    readonly runner?: Runner
+    readonly procVersion?: string
+    readonly findInterop?: () => Promise<string | undefined>
+  },
+): Promise<Store> {
   const platform = options.platform ?? process.platform
   const runner = options.runner ?? run
-  if (platform === "darwin") return macos(runner)
+  if (platform === "darwin") return macos(runner, service)
   const procVersion = options.procVersion ?? (await fs.readFile("/proc/version", "utf8").catch(() => ""))
   if (platform === "linux" && /microsoft|wsl/i.test(procVersion))
-    return windowsVault(runner, options.findInterop ?? findWslInterop)
+    return windowsVault(runner, options.findInterop ?? findWslInterop, service)
   throw new SecureStoreUnavailableError("Sync secure storage requires macOS Keychain or WSL PasswordVault")
 }
 
-export function macos(runner: Runner): Store {
+export function macos(runner: Runner, service = SERVICE): Store {
   const security = "/usr/bin/security"
   return {
     platform: "macos-keychain",
     async get(account) {
       validateAccount(account)
-      const result = await runner([security, "find-generic-password", "-a", account, "-s", SERVICE, "-w"])
+      const result = await runner([security, "find-generic-password", "-a", account, "-s", service, "-w"])
       if (result.exitCode === 44) return undefined
       ensure(result)
       return trimOneNewline(result.stdout)
@@ -65,17 +89,17 @@ export function macos(runner: Runner): Store {
       // macOS security(1) has no non-interactive stdin secret option. The
       // argument is passed directly to spawn (never through a shell) and is
       // never logged or retained by this service.
-      ensure(await runner([security, "add-generic-password", "-U", "-a", account, "-s", SERVICE, "-w", secret]))
+      ensure(await runner([security, "add-generic-password", "-U", "-a", account, "-s", service, "-w", secret]))
     },
     async remove(account) {
       validateAccount(account)
-      const result = await runner([security, "delete-generic-password", "-a", account, "-s", SERVICE])
+      const result = await runner([security, "delete-generic-password", "-a", account, "-s", service])
       if (result.exitCode !== 0 && result.exitCode !== 44) ensure(result)
     },
   }
 }
 
-export function windowsVault(runner: Runner, findInterop: () => Promise<string | undefined>): Store {
+export function windowsVault(runner: Runner, findInterop: () => Promise<string | undefined>, service = SERVICE): Store {
   const powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
   const invoke = async (operation: "get" | "set" | "remove", account: string, secret?: string) => {
     validateAccount(account)
@@ -84,7 +108,7 @@ export function windowsVault(runner: Runner, findInterop: () => Promise<string |
       const interop = await findInterop()
       if (interop) env.WSL_INTEROP = interop
     }
-    const input = JSON.stringify({ operation, resource: SERVICE, account, secret })
+    const input = JSON.stringify({ operation, resource: service, account, secret })
     const result = await runner(
       [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", script],
       input,

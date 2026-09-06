@@ -1,0 +1,552 @@
+import { createHash } from "node:crypto"
+import path from "node:path"
+import { SyncProvider } from "./provider"
+import { SyncSecureStore } from "./secure-store"
+
+export * as BaiduSyncProvider from "./baidu-provider"
+
+const FILE_API = "https://pan.baidu.com/rest/2.0/xpan/file"
+const MEDIA_API = "https://pan.baidu.com/rest/2.0/xpan/multimedia"
+const UPLOAD_API = "https://d.pcs.baidu.com/rest/2.0/pcs/superfile2"
+const TOKEN_API = "https://openapi.baidu.com/oauth/2.0/token"
+const PART_SIZE = 4 * 1024 * 1024
+
+export type Credential = {
+  readonly appKey: string
+  readonly secretKey: string
+  readonly accessToken: string
+  readonly refreshToken: string
+  readonly expiresAt: number
+}
+
+export type Request = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>
+
+export function credentialAccount(deviceID: string) {
+  if (!deviceID || /[\r\n\0]/.test(deviceID)) throw new Error("Invalid sync device ID")
+  return `baidu:${deviceID}`
+}
+
+export async function saveCredential(store: SyncSecureStore.Store, deviceID: string, credential: Credential) {
+  validateCredential(credential)
+  await store.set(credentialAccount(deviceID), JSON.stringify(credential))
+}
+
+export async function readCredential(store: SyncSecureStore.Store, deviceID: string) {
+  const value = await store.get(credentialAccount(deviceID))
+  if (!value) return
+  return parseCredential(value)
+}
+
+export async function readLegacyCredential(
+  deviceID: string,
+  options?: Parameters<typeof SyncSecureStore.detectLegacyBaidu>[0],
+) {
+  const store = await SyncSecureStore.detectLegacyBaidu(options)
+  const value = await store.get(deviceID)
+  if (!value) return
+  return parseCredential(value)
+}
+
+export async function exchangeCode(input: {
+  readonly appKey: string
+  readonly secretKey: string
+  readonly code: string
+  readonly redirectURI: string
+  readonly request?: Request
+  readonly now?: () => number
+}) {
+  return token(
+    {
+      grant_type: "authorization_code",
+      code: input.code,
+      client_id: input.appKey,
+      client_secret: input.secretKey,
+      redirect_uri: input.redirectURI,
+    },
+    input.appKey,
+    input.secretKey,
+    input.request ?? fetch,
+    input.now ?? Date.now,
+    undefined,
+    undefined,
+  )
+}
+
+export function authorizationURL(appKey: string, redirectURI: string) {
+  const url = new URL("https://openapi.baidu.com/oauth/2.0/authorize")
+  url.search = new URLSearchParams({
+    response_type: "code",
+    client_id: appKey,
+    redirect_uri: redirectURI,
+    scope: "basic,netdisk",
+  }).toString()
+  return url.toString()
+}
+
+export function adapter(input: {
+  readonly store: SyncSecureStore.Store
+  readonly deviceID: string
+  readonly root: string
+  readonly request?: Request
+  readonly now?: () => number
+  readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
+}): SyncProvider.Adapter {
+  const request = input.request ?? fetch
+  const now = input.now ?? Date.now
+  const sleep = input.sleep ?? delay
+  const root = normalizeRoot(input.root)
+
+  const credential = async (signal?: AbortSignal, force = false) => {
+    signal?.throwIfAborted()
+    const current = await readCredential(input.store, input.deviceID)
+    if (!current) throw error("stat", "unauthenticated", false)
+    if (!force && current.expiresAt > now() + 60_000) return current
+    const refreshed = await token(
+      {
+        grant_type: "refresh_token",
+        refresh_token: current.refreshToken,
+        client_id: current.appKey,
+        client_secret: current.secretKey,
+      },
+      current.appKey,
+      current.secretKey,
+      request,
+      now,
+      signal,
+      current.refreshToken,
+    )
+    await saveCredential(input.store, input.deviceID, refreshed)
+    return refreshed
+  }
+
+  const call = async <A>(
+    operation: SyncProvider.ProviderError["operation"],
+    run: (credential: Credential) => Promise<A>,
+    signal?: AbortSignal,
+  ) => {
+    let auth = await credential(signal)
+    for (let attempt = 0; attempt < 4; attempt++) {
+      signal?.throwIfAborted()
+      try {
+        return await run(auth)
+      } catch (cause) {
+        const failure = classify(operation, cause)
+        if (failure.kind === "unauthenticated" && attempt === 0) {
+          auth = await credential(signal, true)
+          continue
+        }
+        if (!failure.retryable || attempt === 3) throw failure
+        await sleep(failure.retryAfter ?? Math.min(4_000, 250 * 2 ** attempt), signal)
+      }
+    }
+    throw error(operation, "provider", false)
+  }
+
+  const stat = async (object: string, signal?: AbortSignal) => {
+    const remote = remotePath(root, object)
+    const listed = await call(
+      "stat",
+      (auth) => listDirectory(auth, path.posix.dirname(remote), request, signal),
+      signal,
+    )
+    return listed.find((item) => item.remotePath === remote)?.info
+  }
+
+  const download = async (object: string, version?: string, signal?: AbortSignal) => {
+    const remote = remotePath(root, object)
+    const before = await stat(object, signal)
+    if (!before) throw error("download", "not-found", false)
+    if (version && before.version !== version) throw error("download", "conflict", false)
+    const fsID = Number(before.version.split(":", 1)[0])
+    const bytes = await call(
+      "download",
+      async (auth) => {
+        const url = endpoint(MEDIA_API, {
+          method: "filemetas",
+          access_token: auth.accessToken,
+          fsids: JSON.stringify([fsID]),
+          dlink: "1",
+        })
+        const body = await json(await request(url, { signal, headers: { "User-Agent": "pan.baidu.com" } }), "download")
+        const item = Array.isArray(body.list) ? record(body.list[0], "download") : undefined
+        if (!item || typeof item.dlink !== "string") throw error("download", "invalid-response", false)
+        const link = endpoint(item.dlink, { access_token: auth.accessToken })
+        const response = await request(link, { signal, redirect: "follow", headers: { "User-Agent": "pan.baidu.com" } })
+        if (!response.ok) throw responseFailure("download", response)
+        return new Uint8Array(await response.arrayBuffer())
+      },
+      signal,
+    )
+    const after = await stat(object, signal)
+    if (!after || after.version !== before.version) throw error("download", "conflict", false)
+    return { ...before, bytes }
+  }
+
+  const uploadAtomic = async (
+    object: string,
+    bytes: Uint8Array,
+    precondition: SyncProvider.Precondition,
+    signal?: AbortSignal,
+  ) => {
+    const current = await stat(object, signal)
+    checkPrecondition(current, precondition, "upload")
+    const remote = remotePath(root, object)
+    const blocks = split(bytes).map((part) => ({ part, md5: createHash("md5").update(part).digest("hex") }))
+    let expectedUploadID: string | undefined
+    try {
+      return await call(
+        "upload",
+        async (auth) => {
+          const prepared = await form(
+            endpoint(FILE_API, { method: "precreate", access_token: auth.accessToken }),
+            {
+              path: remote,
+              size: String(bytes.byteLength),
+              isdir: "0",
+              autoinit: "1",
+              rtype: "3",
+              block_list: JSON.stringify(blocks.map((block) => block.md5)),
+            },
+            request,
+            "upload",
+            signal,
+          )
+          expectedUploadID = string(prepared.uploadid, "upload")
+          await Promise.all(
+            blocks.map(async (block, index) => {
+              const body = new FormData()
+              body.set("file", new Blob([block.part]))
+              await json(
+                await request(
+                  endpoint(UPLOAD_API, {
+                    method: "upload",
+                    type: "tmpfile",
+                    path: remote,
+                    uploadid: expectedUploadID!,
+                    partseq: String(index),
+                    access_token: auth.accessToken,
+                  }),
+                  { method: "POST", body, signal },
+                ),
+                "upload",
+              )
+            }),
+          )
+          checkPrecondition(await stat(object, signal), precondition, "upload")
+          const created = await form(
+            endpoint(FILE_API, { method: "create", access_token: auth.accessToken }),
+            {
+              path: remote,
+              size: String(bytes.byteLength),
+              isdir: "0",
+              rtype: "3",
+              uploadid: expectedUploadID,
+              block_list: JSON.stringify(blocks.map((block) => block.md5)),
+            },
+            request,
+            "upload",
+            signal,
+          ).catch((cause) => {
+            const failure = classify("upload", cause)
+            throw new SyncProvider.ProviderError("baidu", "upload", failure.kind, false, "unknown", failure.retryAfter)
+          })
+          return objectInfo(object, created)
+        },
+        signal,
+      )
+    } catch (cause) {
+      const failure = classify("upload", cause)
+      if (failure.kind === "conflict" || failure.kind === "unauthenticated" || !expectedUploadID) throw failure
+      const verified = await verifyUpload(stat, download, object, bytes, signal).catch(() => undefined)
+      if (verified) return verified
+      throw new SyncProvider.ProviderError(
+        "baidu",
+        "upload",
+        failure.kind,
+        failure.retryable,
+        "unknown",
+        failure.retryAfter,
+      )
+    }
+  }
+
+  const deleteBatch: SyncProvider.Adapter["deleteBatch"] = async (objects, signal) => {
+    const checked = await Promise.all(objects.map(async (item) => ({ item, current: await stat(item.path, signal) })))
+    const removable = checked.filter(
+      ({ item, current }) => current && (!item.version || item.version === current.version),
+    )
+    if (removable.length)
+      await call(
+        "delete",
+        (auth) =>
+          form(
+            endpoint(FILE_API, { method: "filemanager", opera: "delete", access_token: auth.accessToken }),
+            { async: "0", filelist: JSON.stringify(removable.map(({ item }) => remotePath(root, item.path))) },
+            request,
+            "delete",
+            signal,
+          ),
+        signal,
+      )
+    return checked.map(({ item, current }) => {
+      if (!current) return { path: item.path, status: "missing" as const }
+      if (item.version && item.version !== current.version)
+        return { path: item.path, status: "conflict" as const, version: current.version }
+      return { path: item.path, status: "deleted" as const }
+    })
+  }
+
+  return {
+    id: "baidu",
+    list: async (prefix, cursor, signal) => {
+      const remote = remotePath(root, prefix)
+      const start = cursor ? requireCursor(cursor) : 0
+      const result = await call("list", (auth) => listPage(auth, remote, start, request, signal), signal)
+      return {
+        objects: result.items.map((item) => ({ ...item.info, path: item.remotePath.slice(root.length + 1) })),
+        ...(result.more ? { cursor: String(start + result.items.length) } : {}),
+      }
+    },
+    stat,
+    download,
+    uploadAtomic,
+    deleteBatch,
+  }
+}
+
+async function token(
+  fields: Record<string, string>,
+  appKey: string,
+  secretKey: string,
+  request: Request,
+  now: () => number,
+  signal?: AbortSignal,
+  previousRefreshToken?: string,
+) {
+  const response = await request(endpoint(TOKEN_API, fields), { method: "POST", signal })
+  const body = await response.json().catch(() => undefined)
+  const value = record(body, "stat")
+  if (!response.ok || typeof value.error === "string") throw responseFailure("stat", response, value)
+  const credential = {
+    appKey,
+    secretKey,
+    accessToken: string(value.access_token, "stat"),
+    refreshToken:
+      typeof value.refresh_token === "string" && value.refresh_token
+        ? value.refresh_token
+        : string(previousRefreshToken, "stat"),
+    expiresAt: now() + number(value.expires_in, "stat") * 1_000,
+  }
+  validateCredential(credential)
+  return credential
+}
+
+async function listPage(auth: Credential, directory: string, start: number, request: Request, signal?: AbortSignal) {
+  const body = await json(
+    await request(
+      endpoint(FILE_API, {
+        method: "list",
+        access_token: auth.accessToken,
+        dir: directory,
+        start: String(start),
+        limit: "1000",
+        order: "name",
+      }),
+      { signal, headers: { "User-Agent": "pan.baidu.com" } },
+    ),
+    "list",
+  )
+  if (!Array.isArray(body.list)) throw error("list", "invalid-response", false)
+  return {
+    items: body.list.filter((item) => record(item, "list").isdir !== 1).map((item) => listed(record(item, "list"))),
+    more: body.has_more === 1,
+  }
+}
+
+async function listDirectory(auth: Credential, directory: string, request: Request, signal?: AbortSignal) {
+  const output = []
+  for (let start = 0; ; ) {
+    const page = await listPage(auth, directory, start, request, signal)
+    output.push(...page.items)
+    if (!page.more) return output
+    start += page.items.length
+    if (!page.items.length) throw error("stat", "invalid-response", false)
+  }
+}
+
+function listed(value: Record<string, unknown>) {
+  const remotePath = string(value.path, "list")
+  return { remotePath, info: objectInfo(remotePath, value) }
+}
+
+function objectInfo(object: string, value: Record<string, unknown>): SyncProvider.ObjectInfo {
+  const fsID = number(value.fs_id, "stat")
+  const size = number(value.size, "stat")
+  const modifiedAt = number(value.server_mtime, "stat") * 1_000
+  return { path: object, version: `${fsID}:${modifiedAt}:${size}`, size, modifiedAt }
+}
+
+async function verifyUpload(
+  stat: SyncProvider.Adapter["stat"],
+  download: SyncProvider.Adapter["download"],
+  object: string,
+  bytes: Uint8Array,
+  signal?: AbortSignal,
+) {
+  const info = await stat(object, signal)
+  if (!info || info.size !== bytes.byteLength) return
+  const remote = await download(object, info.version, signal)
+  if (!Buffer.from(remote.bytes).equals(Buffer.from(bytes))) return
+  return info
+}
+
+function checkPrecondition(
+  current: SyncProvider.ObjectInfo | undefined,
+  precondition: SyncProvider.Precondition,
+  operation: "upload",
+) {
+  if (precondition.type === "any") return
+  if (precondition.type === "absent" && !current) return
+  if (precondition.type === "version" && current?.version === precondition.version) return
+  throw error(operation, "conflict", false)
+}
+
+async function form(
+  url: URL,
+  fields: Record<string, string>,
+  request: Request,
+  operation: SyncProvider.ProviderError["operation"],
+  signal?: AbortSignal,
+) {
+  return json(
+    await request(url, {
+      method: "POST",
+      signal,
+      body: new URLSearchParams(fields),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    }),
+    operation,
+  )
+}
+
+async function json(response: Response, operation: SyncProvider.ProviderError["operation"]) {
+  const value = await response.json().catch(() => undefined)
+  const body = record(value, operation)
+  if (!response.ok || Number(body.errno ?? 0) !== 0) throw responseFailure(operation, response, body)
+  return body
+}
+
+function responseFailure(
+  operation: SyncProvider.ProviderError["operation"],
+  response: Response,
+  body?: Record<string, unknown>,
+) {
+  const code = Number(body?.errno ?? body?.error_code)
+  const retryAfter = retryDelay(response.headers.get("retry-after"))
+  if (response.status === 401 || code === -6 || code === 111) return error(operation, "unauthenticated", false)
+  if (response.status === 403 || code === -7) return error(operation, "permission", false)
+  if (response.status === 404 || code === -9 || code === 31066) return error(operation, "not-found", false)
+  if (response.status === 409) return error(operation, "conflict", false)
+  if (response.status === 429 || code === 31034 || code === 31045)
+    return error(operation, "rate-limit", true, retryAfter)
+  return error(operation, response.status >= 500 ? "network" : "provider", response.status >= 500, retryAfter)
+}
+
+function classify(operation: SyncProvider.ProviderError["operation"], cause: unknown) {
+  if (cause instanceof SyncProvider.ProviderError) return cause
+  if (cause instanceof DOMException && cause.name === "AbortError") return error(operation, "cancelled", false)
+  return error(operation, "network", true)
+}
+
+function error(
+  operation: SyncProvider.ProviderError["operation"],
+  kind: SyncProvider.ErrorKind,
+  retryable: boolean,
+  retryAfter?: number,
+) {
+  return new SyncProvider.ProviderError("baidu", operation, kind, retryable, "failed", retryAfter)
+}
+
+function endpoint(base: string, fields: Record<string, string>) {
+  const url = new URL(base)
+  for (const [key, value] of Object.entries(fields)) url.searchParams.set(key, value)
+  return url
+}
+
+function remotePath(root: string, object: string) {
+  return `${root}/${SyncProvider.objectPath(object)}`
+}
+
+function normalizeRoot(root: string) {
+  if (!root.startsWith("/apps/") || root.endsWith("/") || /[\0\r\n]/.test(root))
+    throw new Error("Invalid Baidu sync root")
+  return root
+}
+
+function split(bytes: Uint8Array) {
+  if (!bytes.byteLength) return [bytes]
+  return Array.from({ length: Math.ceil(bytes.byteLength / PART_SIZE) }, (_, index) =>
+    bytes.slice(index * PART_SIZE, (index + 1) * PART_SIZE),
+  )
+}
+
+function record(value: unknown, operation: SyncProvider.ProviderError["operation"]): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw error(operation, "invalid-response", false)
+  return value as Record<string, unknown>
+}
+
+function string(value: unknown, operation: SyncProvider.ProviderError["operation"]) {
+  if (typeof value !== "string" || !value) throw error(operation, "invalid-response", false)
+  return value
+}
+
+function number(value: unknown, operation: SyncProvider.ProviderError["operation"]) {
+  const parsed = typeof value === "string" ? Number(value) : value
+  if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed < 0)
+    throw error(operation, "invalid-response", false)
+  return parsed
+}
+
+function requireCursor(value: string) {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw error("list", "invalid-response", false)
+  return parsed
+}
+
+function retryDelay(value: string | null) {
+  if (!value) return
+  const seconds = Number(value)
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined
+}
+
+function parseCredential(value: string) {
+  const parsed = JSON.parse(value) as Credential
+  validateCredential(parsed)
+  return parsed
+}
+
+function validateCredential(value: Credential) {
+  if (
+    !value ||
+    !value.appKey ||
+    !value.secretKey ||
+    !value.accessToken ||
+    !value.refreshToken ||
+    !Number.isFinite(value.expiresAt)
+  )
+    throw new SyncSecureStore.SecureStoreOperationError("Invalid Baidu credential")
+}
+
+function delay(milliseconds: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds)
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason)
+      },
+      { once: true },
+    )
+  })
+}

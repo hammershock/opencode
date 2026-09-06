@@ -402,6 +402,18 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             }
             this.set(variants[index + 1])
           },
+          move(direction: -1 | 1) {
+            const variants = this.list()
+            if (variants.length === 0) return false
+            const current = this.current()
+            if (!current) {
+              if (direction === 1) this.set(variants[0])
+              return true
+            }
+            const index = variants.indexOf(current)
+            this.set(variants[Math.max(0, Math.min(variants.length - 1, index + direction))])
+            return true
+          },
         },
       }
     }

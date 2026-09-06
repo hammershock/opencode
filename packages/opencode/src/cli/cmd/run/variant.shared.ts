@@ -75,6 +75,14 @@ export function cycleVariant(current: string | undefined, variants: string[]): s
   return variants[idx + 1]
 }
 
+export function moveVariant(current: string | undefined, variants: string[], direction: -1 | 1): string | undefined {
+  if (variants.length === 0) return undefined
+  if (!current || !variants.includes(current)) return direction === 1 ? variants[0] : undefined
+
+  const index = variants.indexOf(current)
+  return variants[Math.max(0, Math.min(variants.length - 1, index + direction))]
+}
+
 export function pickVariant(model: RunInput["model"], input: RunSession | SessionMessages): string | undefined {
   return sessionVariant(Array.isArray(input) ? createSession(input) : input, model)
 }

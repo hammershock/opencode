@@ -130,6 +130,8 @@ export const Definitions = {
   agent_cycle: keybind("tab", "Next agent"),
   agent_cycle_reverse: keybind("shift+tab", "Previous agent"),
   variant_cycle: keybind("ctrl+t", "Cycle model variants"),
+  variant_increase: keybind("shift+up", "Increase model variant"),
+  variant_decrease: keybind("shift+down", "Decrease model variant"),
   variant_list: keybind("none", "List model variants"),
 
   messages_page_up: keybind("pageup,ctrl+alt+b", "Scroll messages up by one page"),
@@ -156,6 +158,7 @@ export const Definitions = {
   prompt_stash: keybind("none", "Stash prompt"),
   prompt_stash_pop: keybind("none", "Pop stashed prompt"),
   prompt_stash_list: keybind("none", "List stashed prompts"),
+  prompt_shell_exit: keybind("escape", "Exit shell mode"),
   workspace_set: keybind("none", "Set workspace"),
 
   input_clear: keybind("ctrl+c", "Clear input field"),
@@ -336,6 +339,8 @@ export const CommandMap = {
   agent_cycle: "agent.cycle",
   agent_cycle_reverse: "agent.cycle.reverse",
   variant_cycle: "variant.cycle",
+  variant_increase: "variant.increase",
+  variant_decrease: "variant.decrease",
   variant_list: "variant.list",
   messages_page_up: "session.page.up",
   messages_page_down: "session.page.down",
@@ -360,6 +365,7 @@ export const CommandMap = {
   prompt_stash: "prompt.stash",
   prompt_stash_pop: "prompt.stash.pop",
   prompt_stash_list: "prompt.stash.list",
+  prompt_shell_exit: "prompt.shell.exit",
   workspace_set: "workspace.set",
   input_clear: "prompt.clear",
   input_paste: "prompt.paste",

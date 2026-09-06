@@ -270,4 +270,26 @@ describe("SyncEventStore", () => {
       }),
     )
   })
+
+  test("persists lease exclusion across independent processes", async () => {
+    await using tmp = await tmpdir()
+    const filename = path.join(tmp.path, "sync.db")
+    const worker = path.join(import.meta.dir, "fixture", "sync-lease-worker.ts")
+    const runWorker = async (owner: string, now: number) => {
+      const child = Bun.spawn([process.execPath, worker, filename, owner, String(now)], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const [exit, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect(exit, stderr).toBe(0)
+      return JSON.parse(stdout) as { acquired: boolean }
+    }
+    expect(await runWorker("first", 1_000)).toEqual({ acquired: true })
+    expect(await runWorker("second", 1_050)).toEqual({ acquired: false })
+    expect(await runWorker("second", 1_101)).toEqual({ acquired: true })
+  })
 })

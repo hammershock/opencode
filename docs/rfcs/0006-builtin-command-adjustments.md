@@ -1,7 +1,7 @@
 ---
 id: 0006
 title: Built-in Slash Command Adjustments
-status: draft
+status: accepted
 authors:
   - hammershock
 created: 2026-09-06
@@ -187,8 +187,10 @@ Upstream baseline：打开 Session 列表并进行选择。
 - 搜索覆盖标题、target、directory，以及存在时的 device；
 - target 在当前设备未配置或 Location 无法恢复时，保留该 Session 并显示 unresolved/unavailable 状态，不从列表隐藏；
 - 未配置 Rexd 或同步时退化为 upstream 信息，不显示虚假占位；
-- 云端 Session 的发现、只读打开和 ownership 规则由后续同步 RFC 定义；
+- 云端 Session 的发现、按需打开和 ownership 规则由 RFC-0010 定义；
 - `/sessions` 只调用可复用 Session query service，不直接实现云端下载或冲突处理。
+
+`/sessions` 还可以承载 RFC-0009 定义的实验性 `Force rebind location...` 管理操作。该入口默认隐藏，只在设备级实验设置开启时显示，并必须标注为不推荐。Location 校验、空闲检查、事务提交、运行时重建和同步 revision 全部属于 RFC-0009 domain workflow，不在 Session list 组件中实现。
 
 ### `/models` 与 provider usage
 
@@ -206,7 +208,7 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 
 | Command family         | 从旧归档恢复的基础职责                                          |
 | ---------------------- | --------------------------------------------------------------- |
-| `/target`              | 实验性的运行中 Location 操作；不参与 RFC-0002 QuickStart 主流程 |
+| `/target`              | 打开 RFC-0002 target registry manager；不切换当前 Session      |
 | `/env`                 | 管理 location environment                                       |
 | `/sync`、`/devices`    | 管理跨设备同步和设备                                            |
 | `/permissions`         | 打开现有权限模式选择面板                                        |
@@ -219,7 +221,7 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 - `/expand` 将当前 Session route 的命令输出全局展开 override 明确设为 on；`/collapse` 明确设为 off。二者不是同一个 toggle command 的 aliases，重复执行必须幂等。
 - output expansion 只属于当前客户端进程中当前 Session view 的运行时展示状态；不写入用户配置、Session、同步数据或模型上下文，route/view 销毁后可以重置。逐条点击产生的局部展开状态仍由原组件维护。
 - `/delete` 只针对当前 Session，展示包含 Session title 的二次确认；取消不产生副作用。确认后调用统一 Session delete domain API，成功后返回 home 并刷新 Session 列表。
-- `/delete` 不直接写同步墓碑或调用云存储。同步层只能通过正式 Session deletion event/domain change 响应删除。
+- `/delete` 不直接写同步墓碑或调用云存储。同步层只能通过正式 Session deletion event/domain change 响应删除；RFC-0010 启用时，该事件默认删除所有设备上的同步副本。
 - 所有命令都不创建 Session message、不触发模型调用，也不能在 prompt submit 中按字符串特判。
 
 `/target`、`/env` 和 `/sync` 的业务语义仍分别由对应 RFC 定义；本节只确认它们属于 toolkit Core command，而非 upstream override。
@@ -255,7 +257,7 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 
 - RFC-0006 v1 只调整 TUI；Web/Desktop 保持 upstream 行为。
 - `/rename <title>` 和 Session Location query 应沉到可跨客户端复用的 domain API，但不因此要求 Web/Desktop 暴露相同 slash command。
-- `/sessions` 只消费 RFC-0002 和未来同步 RFC 提供的 metadata，不拥有远程连接或同步逻辑。
+- `/sessions` 只消费 RFC-0002、RFC-0009 和 RFC-0010 提供的 metadata/workflow，不拥有远程连接或同步逻辑。
 - `/permissions`、`/expand`、`/collapse` 和实验性 `/exit` 都是 TUI client-host effects。
 
 ## 验收条件
@@ -269,3 +271,4 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 7. 实验性 `/exit` 默认关闭并可在 panel 切换；关闭时 `/exit`、`/quit`、`/q` 均保持 upstream 行为。
 8. `/rename <title>`、`/permissions`、`/expand`、`/collapse` 和 `/delete` 均由 toolkit 消费，不会成为 prompt、Session message 或 Agent 调用。
 9. `/sessions` 可以显示并搜索 local、Rexd 和同步 metadata 所描述的执行位置，unresolved Session 不会静默消失或改为 local。
+10. 实验性 Location 重绑定只暴露 RFC-0009 workflow；同步删除和 local-only 语义只消费 RFC-0010 domain event，不在 TUI command handler 中重复实现。

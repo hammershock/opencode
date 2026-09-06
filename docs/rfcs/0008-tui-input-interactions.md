@@ -1,7 +1,7 @@
 ---
 id: 0008
 title: TUI Input Interaction Defaults
-status: draft
+status: accepted
 authors:
   - hammershock
 created: 2026-09-06

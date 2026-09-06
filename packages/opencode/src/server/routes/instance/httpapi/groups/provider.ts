@@ -86,6 +86,8 @@ export const ProviderApi = HttpApi.make("provider")
             description: "Handle the OAuth callback from a provider after user authorization.",
           }),
         ),
+      )
+      .add(
         HttpApiEndpoint.get("usage", `${root}/:providerID/usage`, {
           params: { providerID: ProviderV2.ID },
           query: Schema.Struct({ ...WorkspaceRoutingQueryFields, refresh: Schema.optional(Schema.Literal("true")) }),

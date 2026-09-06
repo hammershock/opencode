@@ -47,7 +47,10 @@ describe("SyncEventStore", () => {
         expect((yield* store.pending(10)).map((item) => item.id)).toEqual(["first", "later"])
         const sealed = yield* store.seal(device, 10, 30)
         expect(sealed).toMatchObject({ generation: 1, deviceID: device })
-        expect(sealed?.operations.map((item) => item.event.id)).toEqual(["first", "later"])
+        expect(sealed?.operations.map((item) => (item.kind === "event" ? item.event.id : item.tombstone.id))).toEqual([
+          "first",
+          "later",
+        ])
         expect(yield* store.seal(device, 10, 40)).toEqual(sealed)
         expect(yield* store.head(device)).toBe(0)
         const database = (yield* SyncDatabase.Service).db
@@ -102,6 +105,7 @@ describe("SyncEventStore", () => {
         yield* database.run(sql`CREATE TABLE projection_probe (event_id TEXT PRIMARY KEY)`)
         const failure = yield* store
           .apply(segment(1, [event("one", 0), event("two", 1)]), {
+            delete: () => Effect.void,
             project: (tx, item) =>
               item.id === "two"
                 ? Effect.fail("projection failed")
@@ -114,6 +118,7 @@ describe("SyncEventStore", () => {
         expect(yield* database.all(sql`SELECT * FROM projection_probe`)).toEqual([])
 
         yield* store.apply(segment(1, [event("one", 0), event("two", 1)]), {
+          delete: () => Effect.void,
           project: (tx, item) =>
             tx.run(sql`INSERT INTO projection_probe (event_id) VALUES (${item.id})`).pipe(Effect.asVoid),
         })
@@ -134,6 +139,7 @@ describe("SyncEventStore", () => {
         yield* database.run(sql`CREATE TABLE projection_count (value INTEGER NOT NULL)`)
         yield* database.run(sql`INSERT INTO projection_count (value) VALUES (0)`)
         const projector = {
+          delete: () => Effect.void,
           project: (tx: SyncEventStore.Transaction) =>
             tx.run(sql`UPDATE projection_count SET value = value + 1`).pipe(Effect.asVoid),
         }
@@ -150,6 +156,47 @@ describe("SyncEventStore", () => {
           .pipe(Effect.exit)
         expect(Exit.isFailure(exit)).toBe(true)
         expect(yield* store.cursor(remote)).toBe(1)
+      }),
+    )
+  })
+
+  test("makes deletion permanent across late and replayed Session events", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const database = (yield* SyncDatabase.Service).db
+        yield* database.run(sql`CREATE TABLE projection_session (id TEXT PRIMARY KEY)`)
+        const projector: SyncEvent.Projector<SyncEventStore.Transaction> = {
+          project: (tx, item) =>
+            tx.run(sql`INSERT OR IGNORE INTO projection_session (id) VALUES (${item.aggregateID})`).pipe(Effect.asVoid),
+          delete: (tx, item) =>
+            tx.run(sql`DELETE FROM projection_session WHERE id = ${item.sessionID}`).pipe(Effect.asVoid),
+        }
+        yield* store.apply(segment(1, [event("before", 0)]), projector)
+        expect(yield* database.all(sql`SELECT id FROM projection_session`)).toEqual([{ id: "session-a" }])
+
+        const tombstone = SyncEvent.Tombstone.make({ id: "delete-a", sessionID: "session-a", deletedAt: 20 })
+        const deletion = SyncEvent.Segment.make({
+          version: 1,
+          id: SyncEvent.SegmentID.make(`${remote}:2`),
+          deviceID: remote,
+          generation: 2,
+          createdAt: 20,
+          operations: [{ kind: "tombstone", tombstone }],
+        })
+        yield* store.apply(deletion, projector)
+        expect(yield* database.all(sql`SELECT id FROM projection_session`)).toEqual([])
+
+        yield* store.apply(segment(3, [event("late", 1)]), projector)
+        expect(yield* database.all(sql`SELECT id FROM projection_session`)).toEqual([])
+        yield* store.apply(deletion, projector)
+        expect(yield* store.cursor(remote)).toBe(3)
+
+        yield* store.delete(tombstone, 30)
+        yield* store.enqueue(event("stale-local", 2), 30)
+        expect(yield* store.pending(10)).toEqual([])
+        const local = yield* store.seal(device, 10, 31)
+        expect(local?.operations).toEqual([{ kind: "tombstone", tombstone }])
       }),
     )
   })

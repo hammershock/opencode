@@ -23,7 +23,15 @@ export type Envelope = typeof Envelope.Type
 
 /** Tagged so tombstones and other monotonic control records can be added without overloading event payloads. */
 export const EventOperation = Schema.Struct({ kind: Schema.Literal("event"), event: Envelope })
-export const Operation = Schema.Union([EventOperation])
+export const Tombstone = Schema.Struct({
+  id: Schema.NonEmptyString,
+  sessionID: Schema.NonEmptyString,
+  deletedAt: NonNegativeInt,
+})
+export type Tombstone = typeof Tombstone.Type
+
+export const TombstoneOperation = Schema.Struct({ kind: Schema.Literal("tombstone"), tombstone: Tombstone })
+export const Operation = Schema.Union([EventOperation, TombstoneOperation])
 export type Operation = typeof Operation.Type
 
 export const Segment = Schema.Struct({
@@ -42,4 +50,6 @@ export type Segment = typeof Segment.Type
  */
 export interface Projector<Transaction> {
   readonly project: (transaction: Transaction, event: Envelope) => Effect.Effect<void, unknown>
+  /** Removes both metadata projections and hydrated Session content. */
+  readonly delete: (transaction: Transaction, tombstone: Tombstone) => Effect.Effect<void, unknown>
 }

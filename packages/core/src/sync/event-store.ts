@@ -20,6 +20,7 @@ export class DivergentEventError extends Schema.TaggedErrorClass<DivergentEventE
 
 export interface Interface {
   readonly enqueue: (event: SyncEvent.Envelope, createdAt?: number) => Effect.Effect<void, unknown>
+  readonly delete: (tombstone: SyncEvent.Tombstone, createdAt?: number) => Effect.Effect<void, unknown>
   readonly pending: (limit: number) => Effect.Effect<ReadonlyArray<SyncEvent.Envelope>, unknown>
   readonly seal: (
     deviceID: SyncEvent.DeviceID,
@@ -41,6 +42,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncEventStore") {}
 
 type OutboxRow = { payload: string }
+type OperationRow = { payload: string; kind: "event" | "tombstone" }
 type SegmentRow = { payload: string }
 type NumberRow = { value: number }
 type RemoteEventRow = { fingerprint: string }
@@ -56,10 +58,14 @@ export const layer = Layer.effect(
       yield* db.transaction(
         (tx) =>
           Effect.gen(function* () {
+            const deleted = yield* tx.get(sql`
+              SELECT 1 FROM sync_deletion_set WHERE session_id = ${event.aggregateID}
+            `)
+            if (deleted) return
             const payload = encodeEvent(event)
             yield* tx.run(sql`
-              INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at)
-              VALUES (${event.id}, ${event.aggregateID}, ${event.seq}, ${payload}, ${createdAt})
+              INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind)
+              VALUES (${event.id}, ${event.aggregateID}, ${event.seq}, ${payload}, ${createdAt}, 'event')
               ON CONFLICT(event_id) DO NOTHING
             `)
             const stored = yield* tx.get<OutboxRow>(sql`
@@ -72,10 +78,42 @@ export const layer = Layer.effect(
       )
     })
 
+    const remove = Effect.fn("SyncEventStore.delete")(function* (
+      tombstone: SyncEvent.Tombstone,
+      createdAt = Date.now(),
+    ) {
+      yield* db.transaction(
+        (tx) =>
+          Effect.gen(function* () {
+            const payload = canonical(tombstone)
+            yield* tx.run(sql`
+              DELETE FROM sync_event_outbox
+              WHERE aggregate_id = ${tombstone.sessionID} AND segment_id IS NULL
+            `)
+            yield* tx.run(sql`
+              INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind)
+              VALUES (${tombstone.id}, ${tombstone.sessionID}, 0, ${payload}, ${createdAt}, 'tombstone')
+              ON CONFLICT(event_id) DO NOTHING
+            `)
+            const stored = yield* tx.get<OperationRow>(sql`
+              SELECT payload, kind FROM sync_event_outbox WHERE event_id = ${tombstone.id}
+            `)
+            if (stored?.payload !== payload || stored.kind !== "tombstone")
+              return yield* Effect.die(new Error(`Sync tombstone ${tombstone.id} has divergent payload`))
+            yield* tx.run(sql`
+              INSERT INTO sync_deletion_set (session_id, marker, deleted_at)
+              VALUES (${tombstone.sessionID}, ${payload}, ${tombstone.deletedAt})
+              ON CONFLICT(session_id) DO NOTHING
+            `)
+          }),
+        { behavior: "immediate" },
+      )
+    })
+
     const pending = Effect.fn("SyncEventStore.pending")(function* (limit: number) {
       const rows = yield* db.all<OutboxRow>(sql`
         SELECT payload FROM sync_event_outbox
-        WHERE segment_id IS NULL
+        WHERE segment_id IS NULL AND kind = 'event'
         ORDER BY created_at, event_id
         LIMIT ${limit}
       `)
@@ -97,8 +135,8 @@ export const layer = Layer.effect(
               LIMIT 1
             `)
             if (existing) return decodeSegment(existing.payload)
-            const rows = yield* tx.all<OutboxRow>(sql`
-              SELECT payload FROM sync_event_outbox
+            const rows = yield* tx.all<OperationRow>(sql`
+              SELECT payload, kind FROM sync_event_outbox
               WHERE segment_id IS NULL
               ORDER BY created_at, event_id
               LIMIT ${limit}
@@ -115,7 +153,11 @@ export const layer = Layer.effect(
               deviceID,
               generation: next,
               createdAt,
-              operations: rows.map((row) => ({ kind: "event" as const, event: decodeEvent(row.payload) })),
+              operations: rows.map((row) =>
+                row.kind === "tombstone"
+                  ? { kind: "tombstone" as const, tombstone: decodeTombstone(row.payload) }
+                  : { kind: "event" as const, event: decodeEvent(row.payload) },
+              ),
             })
             const payload = encodeSegment(segment)
             yield* tx.run(sql`
@@ -124,7 +166,7 @@ export const layer = Layer.effect(
             `)
             yield* tx.run(sql`
               UPDATE sync_event_outbox SET segment_id = ${segment.id}
-              WHERE event_id IN (SELECT value FROM json_each(${JSON.stringify(segment.operations.map((item) => item.event.id))}))
+              WHERE event_id IN (SELECT value FROM json_each(${JSON.stringify(segment.operations.map(operationID))}))
             `)
             return segment
           }),
@@ -178,7 +220,7 @@ export const layer = Layer.effect(
               `))?.value ?? 0
             const payload = encodeSegment(segment)
             const received = segment.generation - 1
-            if (current === segment.generation) {
+            if (current >= segment.generation) {
               const stored = yield* tx.get<RemoteSegmentRow>(sql`
                 SELECT payload FROM sync_remote_segment
                 WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation}
@@ -190,18 +232,32 @@ export const layer = Layer.effect(
             if (current !== received)
               return yield* new CursorMismatchError({ deviceID: segment.deviceID, expected: current, received })
             for (const operation of segment.operations) {
-              const event = operation.event
-              const fingerprint = encodeEvent(event)
+              const id = operationID(operation)
+              // Preserve the v1 event fingerprint across the schema migration.
+              const fingerprint = operation.kind === "event" ? encodeEvent(operation.event) : canonical(operation)
               const stored = yield* tx.get<RemoteEventRow>(sql`
                 SELECT fingerprint FROM sync_remote_event
-                WHERE device_id = ${segment.deviceID} AND event_id = ${event.id}
+                WHERE device_id = ${segment.deviceID} AND event_id = ${id}
               `)
               if (stored?.fingerprint === fingerprint) continue
-              if (stored) return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: event.id })
-              yield* projector.project(tx, event)
+              if (stored) return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
+              if (operation.kind === "tombstone") {
+                const marker = canonical(operation.tombstone)
+                yield* tx.run(sql`
+                  INSERT INTO sync_deletion_set (session_id, marker, deleted_at)
+                  VALUES (${operation.tombstone.sessionID}, ${marker}, ${operation.tombstone.deletedAt})
+                  ON CONFLICT(session_id) DO NOTHING
+                `)
+                yield* projector.delete(tx, operation.tombstone)
+              } else {
+                const deleted = yield* tx.get(sql`
+                  SELECT 1 FROM sync_deletion_set WHERE session_id = ${operation.event.aggregateID}
+                `)
+                if (!deleted) yield* projector.project(tx, operation.event)
+              }
               yield* tx.run(sql`
                 INSERT INTO sync_remote_event (device_id, event_id, fingerprint)
-                VALUES (${segment.deviceID}, ${event.id}, ${fingerprint})
+                VALUES (${segment.deviceID}, ${id}, ${fingerprint})
               `)
             }
             yield* tx.run(sql`
@@ -262,7 +318,7 @@ export const layer = Layer.effect(
       yield* db.run(sql`DELETE FROM sync_event_lease WHERE name = ${name} AND owner = ${owner}`)
     })
 
-    return { enqueue, pending, seal, acknowledge, head, cursor, apply, acquire, renew, release }
+    return { enqueue, delete: remove, pending, seal, acknowledge, head, cursor, apply, acquire, renew, release }
   }).pipe(Effect.orDie),
 )
 
@@ -272,6 +328,14 @@ function encodeEvent(event: SyncEvent.Envelope) {
 
 function decodeEvent(value: string) {
   return Schema.decodeUnknownSync(SyncEvent.Envelope)(JSON.parse(value))
+}
+
+function decodeTombstone(value: string) {
+  return Schema.decodeUnknownSync(SyncEvent.Tombstone)(JSON.parse(value))
+}
+
+function operationID(operation: SyncEvent.Operation) {
+  return operation.kind === "event" ? operation.event.id : operation.tombstone.id
 }
 
 function encodeSegment(segment: SyncEvent.Segment) {

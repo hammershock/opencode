@@ -14,7 +14,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncDatabase") {}
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 const layer = Layer.effect(
   Service,
@@ -30,9 +30,14 @@ const layer = Layer.effect(
           const current = yield* tx.get<{ version: number }>(sql`SELECT version FROM sync_schema ORDER BY version DESC`)
           if (current && current.version > schemaVersion)
             return yield* Effect.die(new Error(`Unsupported sync database schema ${current.version}`))
-          if (current?.version === schemaVersion) return
-          yield* Effect.forEach(schema, (statement) => tx.run(statement), { discard: true })
-          yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (${schemaVersion})`)
+          if (!current) {
+            yield* Effect.forEach(schemaV1, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (1)`)
+          }
+          if ((current?.version ?? 1) < 2) {
+            yield* Effect.forEach(schemaV2, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (2)`)
+          }
         }),
       { behavior: "immediate" },
     )
@@ -44,7 +49,7 @@ export function layerFromPath(filename: string) {
   return layer.pipe(Layer.provide(sqliteLayer({ filename })))
 }
 
-const schema = [
+const schemaV1 = [
   sql`CREATE TABLE sync_event_outbox (
     event_id TEXT PRIMARY KEY, aggregate_id TEXT NOT NULL, seq INTEGER NOT NULL,
     payload TEXT NOT NULL, created_at INTEGER NOT NULL, segment_id TEXT
@@ -68,4 +73,11 @@ const schema = [
   sql`CREATE TRIGGER sync_event_segment_immutable
     BEFORE UPDATE OF device_id, generation, payload, created_at ON sync_event_segment
     BEGIN SELECT RAISE(ABORT, 'sync event segments are immutable'); END`,
+]
+
+const schemaV2 = [
+  sql`ALTER TABLE sync_event_outbox ADD COLUMN kind TEXT NOT NULL DEFAULT 'event'`,
+  sql`CREATE TABLE sync_deletion_set (
+    session_id TEXT PRIMARY KEY, marker TEXT NOT NULL, deleted_at INTEGER NOT NULL
+  )`,
 ]

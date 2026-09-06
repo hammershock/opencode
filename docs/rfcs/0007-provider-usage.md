@@ -28,6 +28,7 @@ superseded-by: []
 3. Session footer 展示当前模型所属 provider 的简短 usage 注脚。
 4. 不支持、未认证、失败和过期数据具有不同状态，不能伪装成零余额。
 5. 查询失败不影响 provider 连接、模型选择、prompt 提交或已有 Session。
+6. Provider Usage 功能默认开启，并且只复用 OpenCode 当前已保存、已解析且用于模型请求的 provider 凭据。
 
 ## 非目标
 
@@ -36,6 +37,8 @@ superseded-by: []
 - 自动充值、购买额度或切换账户；
 - 把 usage 写入 Session、同步数据或模型上下文；
 - 绕过 provider 官方认证方式抓取网页；
+- 读取或复用浏览器、provider CLI、其他应用或操作系统中的外部登录态；
+- 为查询 usage 单独登录、发现账户或导入 OpenCode 尚未保存的 credential；
 - 在 v1 向第三方插件开放不稳定的 provider usage API。
 
 ## 领域模型
@@ -85,7 +88,7 @@ ProviderUsageAdapter {
 
 adapter 必须：
 
-- 使用 OpenCode 已建立的 provider authentication/config service，不自行读取散落的 credential 文件；
+- 只使用 OpenCode provider authentication/config service 为当前连接解析出的已保存 credential；usage service 不拥有额外的 credential discovery 或登录能力；
 - 只调用 provider 明确提供且适合该认证方式的 usage、quota、billing 或 rate-limit API；
 - 将 provider-specific response 转换为通用 snapshot，同时保留无法通用化的 meter label/unit；
 - 为响应 schema、认证错误、限流、超时和字段缺失提供测试；
@@ -99,6 +102,8 @@ adapter 可以使用三类来源：
 3. 为满足 OpenAI OAuth/Codex 订阅配额而保留的、明确标记为 experimental 的私有兼容 endpoint。
 
 第三类 adapter 必须独立版本化、严格验证 response schema、使用短超时，并在任何漂移、认证错误或字段缺失时返回 unsupported/error。它不能成为模型调用的前置条件，也不能把私有 endpoint 描述成 OpenAI 公共 API。
+
+即使 provider 的网页、桌面客户端或官方 CLI 已经登录，adapter 也不能读取其 cookie、token、credential store、CLI config 或系统级单点登录状态。只有当前 OpenCode 连接本身已经持有兼容 credential 时，usage adapter 才可启用；否则返回 `unauthenticated` 或 `unsupported`，不得发起交互式登录。OpenCode 断开或移除该 credential 后，usage 查询能力与相关 cache 必须同时失效。
 
 新增 provider 只增加 adapter 与 contract tests，不修改 `/models` 或 Session footer 的业务逻辑。service 对所有已连接 provider 运行 capability probe；没有可靠数据源的 provider 返回 `unsupported`。
 
@@ -114,7 +119,7 @@ adapter 可以使用三类来源：
 
 ## 查询与缓存
 
-1. usage 查询由控制设备上的 Provider Usage service 发起，不属于 Session Location，也不经过 Rexd。
+1. Provider Usage service 默认启用；usage 查询由控制设备发起，不属于 Session Location，也不经过 Rexd。
 2. cache key 至少包含 providerID、非敏感 account identity 和当前模型请求实际使用的 organization/project identity。
 3. 默认使用短时内存缓存；具体 TTL 可由 adapter 在合理上限内声明。
 4. 相同 cache key 的并发请求合并为一个 in-flight request。
@@ -158,6 +163,7 @@ Provider X · ¥18.20
 ## 安全与隐私
 
 - usage endpoint 与模型调用使用同等级别的 credential 保护。
+- usage service 的认证能力严格小于等于 OpenCode 当前 provider 连接：只能借用该连接已经解析的 credential，不能从外部登录态补全或扩大账户访问范围。
 - UI 只显示完成任务所需的账户和额度摘要；原始账单、付款方式与个人资料不进入通用 snapshot。
 - 错误日志按 provider、阶段和错误类型记录，认证值与敏感 response 字段必须脱敏。
 - 远程 target、Rexd 和云同步不能读取 provider usage credential 或 cache。
@@ -181,3 +187,4 @@ Provider X · ¥18.20
 7. 所有已连接 provider 都经过 adapter probe；首批四类旧 adapters 有 fixture、schema drift、认证、限流和超时测试。
 8. OpenAI 私有兼容 endpoint 失效只移除 usage 展示，不影响认证、模型发现、选择或请求。
 9. `/models` 按 provider 分组 Favorites；footer 的默认全量顺序、用户选择、重排、失效 meter 和单行截断均有测试。
+10. Provider Usage 默认开启；只有 OpenCode 已保存并用于当前 provider 连接的 credential 可被 adapter 使用，外部登录态、额外 credential discovery 和交互式登录均有拒绝测试。

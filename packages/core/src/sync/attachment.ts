@@ -78,13 +78,34 @@ export function make(input: {
   }) => {
     if (!inputGC.allActiveDevicesAcknowledged) return { deleted: 0, deferred: true }
     const manifests = await SyncProvider.listAll(input.provider, "chunks/manifests", inputGC.signal)
+    const referenced = new Set<string>()
+    for (const item of manifests) {
+      const id = /^chunks\/manifests\/(.+)\.enc$/.exec(item.path)?.[1]
+      if (!id || !inputGC.liveObjectIDs.has(id)) continue
+      const manifest = Schema.decodeUnknownSync(SyncChunk.Manifest)(
+        JSON.parse(
+          decoder.decode(
+            await open(
+              item.path,
+              "manifest",
+              (await input.provider.download(item.path, item.version, inputGC.signal)).bytes,
+            ),
+          ),
+        ),
+      )
+      for (const chunk of manifest.chunks) referenced.add(chunk.id)
+    }
     const stale = manifests.filter((item) => {
       const id = /^chunks\/manifests\/(.+)\.enc$/.exec(item.path)?.[1]
       return id && !inputGC.liveObjectIDs.has(id)
     })
-    // Chunks are deliberately retained until a later reference-count pass;
-    // deleting a manifest is safe only after every active device acked.
-    const result = stale.length ? await input.provider.deleteBatch(stale, inputGC.signal) : []
+    const chunks = await SyncProvider.listAll(input.provider, "chunks", inputGC.signal)
+    const staleChunks = chunks.filter((item) => {
+      const id = /^chunks\/([^/]+)\.enc$/.exec(item.path)?.[1]
+      return id && !referenced.has(id)
+    })
+    const remove = [...stale, ...staleChunks]
+    const result = remove.length ? await input.provider.deleteBatch(remove, inputGC.signal) : []
     return {
       deleted: result.filter((item) => item.status === "deleted" || item.status === "missing").length,
       deferred: false,

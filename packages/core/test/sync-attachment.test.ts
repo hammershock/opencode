@@ -58,6 +58,7 @@ describe("SyncAttachment", () => {
       true,
     )
     expect(remote.files.size).toBeGreaterThan(0)
-    expect((await service.collect({ liveObjectIDs: new Set(), allActiveDevicesAcknowledged: true })).deleted).toBe(1)
+    expect((await service.collect({ liveObjectIDs: new Set(), allActiveDevicesAcknowledged: true })).deleted).toBe(2)
+    expect(remote.files.size).toBe(0)
   })
 })

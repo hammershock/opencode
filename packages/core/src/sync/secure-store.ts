@@ -145,6 +145,7 @@ function trimOneNewline(value: string) {
 const source = String.raw`
 $ErrorActionPreference = 'Stop'
 $inputJson = [Console]::In.ReadToEnd() | ConvertFrom-Json
+[Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime] | Out-Null
 $vault = New-Object Windows.Security.Credentials.PasswordVault
 $resource = [string]$inputJson.resource
 $account = [string]$inputJson.account

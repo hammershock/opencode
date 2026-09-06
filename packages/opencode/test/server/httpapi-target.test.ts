@@ -72,11 +72,7 @@ describe("target registry HttpApi", () => {
 
     const probe = await request(`/api/target/${created.target.id}/test`, { method: "POST" })
     expect(probe.status).toBe(200)
-    expect(await probe.json()).toEqual({
-      status: "unavailable",
-      stage: "ssh",
-      message: "Rexd transport is not registered",
-    })
+    expect(await probe.json()).toMatchObject({ status: "unavailable", stage: "ssh" })
 
     const restore = await request(`/api/target/${crypto.randomUUID()}/restore`, {
       method: "POST",

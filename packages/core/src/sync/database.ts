@@ -7,6 +7,7 @@ import { sql } from "drizzle-orm"
 import { Global } from "../global"
 import { makeGlobalNode } from "../effect/app-node"
 import path from "node:path"
+import fs from "node:fs/promises"
 
 const makeDatabase = EffectDrizzleSqlite.makeWithDefaults()
 type Shape = Effect.Success<typeof makeDatabase>
@@ -57,7 +58,12 @@ const layer = Layer.effect(
 )
 
 export function layerFromPath(filename: string) {
-  return layer.pipe(Layer.provide(sqliteLayer({ filename })))
+  return Layer.unwrap(
+    Effect.promise(async () => {
+      await fs.mkdir(path.dirname(filename), { recursive: true })
+      return layer.pipe(Layer.provide(sqliteLayer({ filename })))
+    }),
+  )
 }
 
 const nodeLayer = Layer.unwrap(

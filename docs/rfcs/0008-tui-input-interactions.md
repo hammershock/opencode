@@ -20,6 +20,8 @@ superseded-by: []
 
 这些行为不是 slash command toolkit 的职责，不应混入 RFC-0006 的 command override。
 
+两项调整都是本 fork 的稳定默认行为，不放入实验性功能分区，也不设置迁移 feature flag。用户仍可通过 upstream keybinding 配置修改按键，但不能通过实验开关恢复空输入 Backspace 退出 Shell mode 的旧行为。
+
 ## Upstream baseline
 
 当前 upstream 已提供：
@@ -64,6 +66,7 @@ v1 保留 upstream 的 `variant.cycle` 与默认 `Ctrl+T`，同时增加两个�
 ## 客户端和配置范围
 
 - v1 只调整 TUI；Web/Desktop composer 和 Terminal panel 不受影响。
+- 两项行为随 TUI 默认启用，不依赖 experimental setting。
 - variant 选择继续使用设备本地模型偏好存储，不写入历史消息以外的新 Session 状态。
 - Shell mode 的当前状态是组件运行时状态，不写入用户配置或 Session。
 - keybinding override 继续使用 upstream TUI keybind 配置格式。
@@ -77,3 +80,4 @@ v1 保留 upstream 的 `variant.cycle` 与默认 `Ctrl+T`，同时增加两个�
 5. Escape 在 prompt 拥有焦点时退出 Shell mode；autocomplete/dialog 获得焦点时遵守焦点优先级。
 6. Shell mode 取消不提交命令、不写 history/Session，也不触发 Agent。
 7. footer 从有效 keybinding 映射生成提示，不硬编码 Escape 文案。
+8. 默认安装不需要开启实验选项即可获得两项交互，实验功能面板也不提供重复开关。

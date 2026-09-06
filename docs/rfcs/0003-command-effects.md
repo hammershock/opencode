@@ -1,7 +1,7 @@
 ---
 id: 0003
 title: Core Command Toolkit and Upstream Compatibility
-status: draft
+status: accepted
 authors:
   - hammershock
 created: 2026-09-06
@@ -31,7 +31,7 @@ Command toolkit 的直接使用者是：
 - 后续维护本 fork 的 Agent 和人类贡献者；
 - 希望在自己的 fork 中增加一等 Core command、但不希望侵入通用 UI 的下游维护者。
 
-外部插件作者仍以对应 upstream 发布的 plugin API 为默认契约。只有主动检测并采用本 fork 扩展能力的插件，才直接使用新 toolkit 的公开扩展部分。
+外部插件作者仍以对应 upstream 发布的 plugin API 为默认契约。toolkit v1 不发布新的插件接口；未来版本只有经过版本化并允许 feature detection 后，才可以向主动采用的插件开放扩展能力。
 
 工具集至少应提供：
 
@@ -39,7 +39,7 @@ Command toolkit 的直接使用者是：
 - 单段和分层 command path 的统一解析；
 - 参数 schema、帮助和补全接入点；
 - provenance、shadowing 和冲突诊断；
-- client/server execution context；
+- client invocation context 与类型化 domain service 调用约定；
 - confirmation、capability、取消、失败和 outcome 基础设施；
 - Core services 调用约定；
 - 上游来源 adapter；
@@ -108,8 +108,8 @@ OpenCode 当前把多种机制都呈现为 `/name`：
 
 toolkit 分成两层：
 
-- definition plane：统一描述身份、路径、参数、来源、展示、兼容模式、声明能力和 executor placement；
-- execution plane：由受信任的 handler 使用 Core services 编排实际 workflow。
+- definition plane：统一描述身份、路径、参数、来源、展示、兼容模式、声明能力和 host 要求；
+- execution plane：由受信任的 client handler 调用类型化 Core/domain services 编排实际 workflow。
 
 客户端 UI action 可以保留客户端 handler；涉及 Location、Session 或持久状态的 operation 应进入共享 Core/Server service；Agent prompt 通过 Session prompt service 提交。统一 registry 不意味着把这些代码塞进同一进程或同一种回调。
 
@@ -162,34 +162,177 @@ defineCommand({
 
 能力、handler 和兼容策略属于 `/env init` 等叶子，而不是笼统属于 `/env` group。上游单段命令作为长度为一的 path 适配，不改变其输入形式。
 
-## 核心模型
+## Toolkit v1 接受方案
 
-下面是概念模型，公共 Schema 应在实现阶段以独立 PR 确认：
+### v1 边界
+
+v1 只解决本仓库新增 Core command 和经 RFC-0006 接受的 upstream override，不替换 upstream 已有的 prompt-command catalog、TUI keymap、Web CommandProvider、`session.command` 或插件 API。
+
+v1 不建立可从网络调用任意 Core handler 的通用 `command.execute` endpoint。所有 toolkit handler 都在发起交互的 client host 内执行；涉及 Session、Location、Agent 或持久状态的业务操作必须调用已有或功能 RFC 新增的类型化 domain service/API。这样可以保持授权、返回 Schema 和重试语义属于业务域，而不是退化成一个返回 `unknown` 的万能命令 RPC。
+
+例如：
+
+- `/expand` handler 可以直接改变当前客户端的显示状态；
+- `/env reload` handler 调用 environment API，不能自己读取文件；
+- `/env init` handler 调用 environment workflow API，该 workflow 可以创建模板、提交 Agent prompt 并 reload；
+- `/delete` handler 负责获取确认并调用 Session delete API，同步模块通过 domain event 观察删除。
+
+如果未来需要无客户端的远程命令执行、自动化 API 或 server-owned command discovery，必须新增版本化协议并另行评审，不属于 toolkit v1。
+
+### 代码归属
+
+v1 新建私有 workspace package `@opencode-ai/command-kit`，建议目录为 `packages/command-kit`。它只能依赖通用 TypeScript/runtime primitives，不依赖 Solid、OpenTUI、Server、SDK 或具体 feature。
+
+该 package 提供：
+
+- `defineCommand()` 类型辅助；
+- registry、longest-match resolver 和冲突诊断；
+- raw argument boundary 解析；
+- completion 与 replacement range 类型；
+- invocation context 和 outcome 基础类型；
+- 可脱离 UI 运行的 conformance test harness。
+
+适配层分别位于所属客户端：
+
+```text
+packages/command-kit                 shared definition + resolver
+packages/tui/src/command-toolkit    OpenTUI keymap adapter
+packages/app/src/command-toolkit    Web/Desktop CommandProvider adapter
+packages/opencode                   typed domain services and legacy compatibility path
+```
+
+Core command definition 放在对应的 client-safe feature contract 模块附近，再由客户端 composition root 注册；不建立一个知道所有业务模块的中央巨型文件。不同客户端共享 metadata 时，该模块不能依赖 Server 或具体 UI。业务 workflow 不放进 `packages/command-kit`。
+
+现有 `packages/core/src/command.ts` / `CommandV2` 继续表示 prompt template command catalog。v1 不扩写它来承载 UI action 或 Core operation，避免改变 V2 plugin transform 和 `/api/command` 的既有语义。
+
+### v1 definition contract
+
+下面的接口是 v1 必须表达的语义；实现时允许按仓库风格调整具体 TypeScript 拼写，但不得增加新的架构职责：
 
 ```ts
-interface CommandDefinition {
+type CommandDefinition<Input, Context> = {
   id: string
   path: readonly string[]
   aliases?: readonly (readonly string[])[]
   title: string
   description?: string
-  provenance: CommandProvenance
-  arguments?: CommandArgumentSchema
-  placement: "client" | "server"
-  capabilities: readonly CommandCapability[]
-  compatibility?: CommandCompatibility
-  execute: CommandHandler
+  category?: string
+  provenance: { type: "core"; feature: string }
+  requires?: { session?: boolean; location?: boolean }
+  capabilities: readonly string[]
+  parse: (input: RawArguments) => ParseResult<Input>
+  complete?: (input: CompletionInput, context: Context) => Promise<readonly CompletionItem[]>
+  available?: (context: Context) => boolean
+  execute: (context: Context, input: Input) => Promise<CommandOutcome>
 }
 ```
 
-关键语义：
+稳定语义：
 
-- `id` 是稳定身份，不因用户修改 alias 而变化；
-- `path` 是用户输入路径；
-- `provenance` 记录来源和外部 provider/plugin 标识；
-- `placement` 说明 handler 在哪里运行，不代表它只能调用本地资源；
-- `capabilities` 是可能使用的权限上界；
-- `execute` 可以包含条件分支、等待 Agent 和成功后的收尾步骤。
+- `id` 使用不含开发者名称的反向域式身份，例如 `core.environment.reload`；
+- `path` 和 alias 是不含 `/` 的 token 数组；token 使用小写 ASCII 字母、数字和 `-`；
+- group 只是具有共同 path prefix 的展示结果，不是可执行对象；如果 `/env` 本身可执行，它必须注册为独立叶子；
+- `parse` 属于叶子命令并返回类型化 input，不提供全局 flags DSL；
+- `available` 只表达客户端状态可用性，不代替权限检查；
+- `capabilities` 是静态上界和审查信息，v1 不把它实现成新的安全沙箱；
+- `execute` 只能通过 context 中暴露的窄服务执行，并返回统一 outcome。
+
+### 输入解析
+
+v1 采用以下固定算法：
+
+1. 只有首字符为 `/` 的输入参与 slash 解析；不忽略前导空格，也不预先删除后续换行。
+2. command path 只从第一行按 ASCII whitespace 切分 token。
+3. registry 在 path 和 aliases 中进行 longest-match。
+4. 匹配完成后，将原输入中未消费的部分作为 `RawArguments`，保留内部空格、Unicode 和后续行；只移除 path 后作为分隔符的一段空白。
+5. 叶子的 `parse` 决定引号、flags、枚举、路径或多行内容的具体语义。
+6. 未匹配时返回 `not-found`，不得把输入吞掉；host 随后继续原 upstream 提交流程。
+
+这允许 `/env init` 与 `/env reload` 共存，也允许 `/rename <title>` 保留完整标题，而不要求 toolkit 实现一门 Shell 参数语言。
+
+### Invocation 与 outcome
+
+Invocation context 至少提供：
+
+```text
+source = slash | palette | keybind
+client = tui | web | desktop | cli
+sessionID?
+location?
+abortSignal
+confirm(request)
+```
+
+客户端 adapter 可以增加自己的窄 UI service，但 command definition 不得直接获取整个应用 store 或任意 service locator。
+
+统一 outcome 固定为：
+
+```text
+completed | cancelled | failed | unknown
+```
+
+- `failed` 必须包含稳定 error code、可展示消息和 `retryable`；
+- `unknown` 只用于无法判断远端副作用是否已经发生的情况；
+- toolkit 不自动重试有副作用的 handler；
+- outcome 可以携带安全的用户提示，但不作为无类型业务数据传输通道；
+- 查询结果和 domain object 继续使用对应 feature 的类型化 API。
+
+### Host adapter 与 dispatch 顺序
+
+每个客户端只允许有一个 toolkit integration point，负责 autocomplete、palette、keybind 和 submit dispatch。具体业务命令不得再修改这些通用组件。
+
+为完整保持 upstream 兼容，raw slash dispatch 顺序固定为：
+
+```text
+upstream host resolver
+  -> accepted upstream override decorator（如果目标 identity/fingerprint 匹配）
+  -> fork Core registry longest-match
+  -> normal prompt submission
+```
+
+因此，按照当前 upstream 规则已经生效的用户 command、MCP、Skill 或插件 command 继续优先，不会因为 fork 新增同名 Core path 而改变行为。如果它遮蔽了 fork Core command，诊断接口必须同时显示 winner 和 shadowed candidate。
+
+Core registry 内：
+
+- duplicate `id` 注册失败；
+- 不同 Core identity 注册相同 path 或 alias 也注册失败；
+- alias 与其他 Core canonical path 发生冲突同样失败；
+- 失败必须在开发和测试中可见，不能依赖注册顺序选 winner。
+
+### Upstream override decorator
+
+RFC-0006 的 override 不是注册一个抢占同名 path 的新命令，而是显式装饰 host 已解析出的 upstream identity：
+
+```ts
+defineOverride({
+  id: "fork.session.exit-to-home",
+  target: {
+    host: "tui",
+    id: "app.exit",
+    fingerprint: "...",
+  },
+  decorate: (next) => async (context, input) => {
+    if (context.sessionID) return context.navigation.home()
+    return next(context, input)
+  },
+})
+```
+
+`fingerprint` 由目标 command 的稳定 metadata 和 contract fixture 产生。目标缺失或 fingerprint 不匹配时，override 被禁用并报告 drift；不得按 slash 名称猜测并继续执行。外部来源的优先级仍由 upstream host resolver 决定。
+
+### v1 capability 与配置边界
+
+capability 名称采用命名空间字符串，例如 `workspace.write`、`agent.invoke`、`environment.reload`。v1 用它完成代码审查、帮助展示、确认策略和测试断言；真正的权限仍由被调用的 domain service 与现有 permission system 执行。
+
+v1 只允许对 Core command 配置：
+
+- enable/disable；
+- hidden/visible；
+- alias、keybind 和展示 category；
+- 增加确认要求；
+- 按 capability 拒绝整个 command。
+
+v1 不允许配置者改写 handler、删除 handler 内的步骤或扩大 capability。对外部命令的可配置范围继续保持 upstream 行为，不在 v1 引入新的通用编辑器。
 
 ## 来源与信任边界
 
@@ -275,6 +418,8 @@ Fork-aware 插件或下游 fork 可以 feature-detect 新 command API；普通�
 
 ## 用户可配置边界
 
+以下是 toolkit 的长期安全边界；其中 Core command 的 v1 范围以上文“v1 capability 与配置边界”为准，外部来源在 v1 继续使用 upstream 已有配置能力。
+
 用户可以对任意来源的命令配置表现和更严格的限制：
 
 - enable/disable；
@@ -336,7 +481,7 @@ completed | cancelled | failed | unknown
 
 1. 稳定 `id`、用户 path、aliases 和 provenance 是什么？
 2. 是叶子命令还是 group？参数如何解析和补全？
-3. handler placement 在 client 还是 server？为什么？
+3. 哪些 client host 支持它，handler 调用哪个类型化 domain service/API？
 4. 业务逻辑位于哪个可复用 domain/feature service？
 5. 可能使用哪些 capabilities？哪些步骤有副作用？
 6. 哪一步可能调用 Agent、写入 Session 或影响模型上下文？
@@ -349,59 +494,70 @@ completed | cancelled | failed | unknown
 
 ## 实现阶段
 
-### 阶段一：兼容性基线
+### 阶段一：最小原型
 
-- 为所有上游命令来源建立 fixture 和行为快照。
-- 固定 command list、执行、冲突、hook、Session part 和 Agent 调用的现有语义。
-- 记录公开 SDK/plugin API 的兼容矩阵。
+- 建立私有 `packages/command-kit`，只实现 definition、registry、解析、completion contract、outcome 和诊断。
+- 用纯单元测试覆盖 longest-match、alias、raw arguments、多行输入、duplicate rejection、取消和失败。
+- 建立 synthetic upstream resolver fixture，验证 upstream-first、not-found passthrough 和 shadowing 诊断。
+- 建立 synthetic override fixture，验证 identity/fingerprint、fallback 和 drift disable。
 
-### 阶段二：内部 registry
+原型不得先加入真实 `/env`、`/target` 或同步业务。它的目标是验证 toolkit contract，而不是借原型提交未接受的功能实现。
 
-- 引入稳定 identity、path、provenance、placement 和 capability 上界。
-- 用 adapter 投影现有命令，不修改外部行为。
-- 提供 longest-match 解析、来源检查和 shadowing 诊断。
+### 阶段二：TUI adapter 与第一个消费者
 
-### 阶段三：Core workflow API
+- 在 TUI 建立唯一 integration point，并复用现有 OpenTUI keymap。
+- 首个真实消费者使用低风险、client-local 的 `/expand` 与 `/collapse` alias。
+- 验证 slash、palette、keybind 使用同一 identity 和 handler。
+- 验证关闭或移除 toolkit consumer 后，原 upstream submit 行为不变。
 
-- 提供窄的 command context 和统一 outcome。
-- 将业务操作下沉到可复用 domain services。
-- 首先迁移一个低风险 query，再迁移复合 `/env init`；每次迁移保持用户可见行为或明确记录变化。
+### 阶段三：类型化 domain workflow
 
-### 阶段四：可选扩展 API
+- 在对应功能 RFC 接受后，实现一个只读 command 和一个复合 command。
+- 推荐先实现 `/env list`，再实现 `/env init`；两者都只通过 environment domain API/workflow 工作。
+- 验证 Agent prompt、Session parts、取消和 finalize 由 domain workflow 控制，而不是 command metadata 猜测。
 
-- 仅在内部 API 稳定后向插件公开。
-- 使用 feature detection 和版本化能力。
-- legacy adapter 在完整弃用周期内保留。
+### 阶段四：其他客户端 adapter
+
+- Web/Desktop 和 CLI 根据各功能 RFC 声明的 client scope 接入同一 command-kit contract。
+- adapter 使用各自已有的 CommandProvider/keymap，不复制 resolver。
+- 每个客户端保留 upstream-first 兼容 fixture。
+
+### 阶段五：评估 v2
+
+只有 v1 消费者和兼容测试稳定后，才评估 server-owned discovery、无客户端执行或公开插件扩展。任何网络 API 都必须使用 feature detection 和版本化协议；legacy adapter 在完整弃用周期内保留。
 
 ## 验收条件
 
-1. 通用 prompt/UI 组件中不再包含 fork-specific 命令字符串分支。
-2. `/env init` 等复合命令可以通过可测试 workflow 表达条件步骤和 finalize。
-3. 当前兼容矩阵中的上游命令来源均通过兼容 fixture。
-4. 未适配本 fork 的代表性上游插件可以正常加载并保持原行为。
-5. 现有 command API 和生成 SDK 不发生未经版本化的破坏性变化。
-6. UI 可以显示生效命令的 provenance，并诊断 shadowing。
-7. 用户只能配置表现和收紧策略，不能制造违反 Session、上下文或权限不变量的组合。
-8. 新增命令遵守维护清单，业务逻辑可脱离 UI 单独测试。
-9. `/target`、`/env` 和 `/sync` 没有在通用输入组件中维护各自的命令解析分支。
+1. `packages/command-kit` 不依赖 UI、Server、SDK 或具体 feature。
+2. 通用 prompt/UI 组件只有一个 toolkit integration point，不包含 fork-specific 命令字符串分支。
+3. longest-match、alias、raw arguments、多行输入和冲突错误具有纯单元测试。
+4. `/env init` 等复合命令可以通过可测试 domain workflow 表达条件步骤和 finalize。
+5. 当前兼容矩阵中的上游命令来源均通过 upstream-first 兼容 fixture。
+6. 未适配本 fork 的代表性上游插件可以正常加载并保持原行为。
+7. 现有 `CommandV2`、`/api/command`、`session.command` 和生成 SDK 不发生未经版本化的行为变化。
+8. UI 可以显示生效命令的 provenance，并诊断 winner、shadowed candidate 和 override drift。
+9. capability 与实际 service 调用均可在测试中断言，配置只能收紧，不能扩大权限。
+10. `/target`、`/env`、`/sync`、`/permissions`、`/expand` 和 `/delete` 没有各自维护通用输入解析分支。
 
 ## 非目标
 
 - 在第一阶段设计声明式 workflow DSL；
 - 让所有命令在同一进程执行；
+- 在 v1 增加通用远程 `command.execute` endpoint；
+- 在 v1 发布新的第三方插件 API；
 - 强迫外部插件、MCP、Skill 或普通 custom command 迁移到 toolkit；
 - 沙箱化任意第三方插件；
 - 允许用户任意重写外部插件 handler；
 - 在本 RFC 中定义 `/env`、Rexd 或同步功能的业务规则；
 - 立即移除上游 legacy command/plugin API。
 
-## 待实现验证
+## v1 已解决的架构问题
 
-以下内容由实现原型验证，不改变本 RFC 的兼容原则：
+1. registry 与 resolver 位于新的 runtime-neutral 私有 workspace package，不放入 Server、UI framework 或现有 prompt-command catalog。
+2. v1 不合并 client/server executable handler，也不新增通用执行 endpoint；客户端 handler 调用类型化 domain API。
+3. capability 在 v1 是静态上界、确认与策略输入，domain service 继续承担真正授权。
+4. v1 不扩展现有 command endpoint 或 generated SDK；未来网络发现使用新的版本化协议。
+5. legacy command 只投影 upstream 已知 metadata，无法可靠推断时保持 `legacy-opaque`。
+6. v1 package 是仓库内部 API；稳定后是否公开给第三方插件由 v2 RFC 决定。
 
-1. 内部 registry 最适合位于 Core、Server 还是共享 package；
-2. client/server handler 的发现结果如何合并且保持确定顺序；
-3. capability token 是静态审查信息，还是同时用于 runtime service gating；
-4. 新命令详情通过扩展 endpoint 还是新的版本化 endpoint 暴露；
-5. 对 legacy plugin command 可以安全推断到什么程度，哪些必须保持 opaque。
-6. toolkit 的哪些部分保持内部 API，哪些部分稳定后作为下游 fork/插件扩展 API 发布。
+这些是 Accepted 决策，不再作为实现者可以自行更换的候选方案。实现原型可以调整类型命名和文件拆分，但如果需要改变上述六项边界，必须修订本 RFC。

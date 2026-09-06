@@ -1,5 +1,6 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
+import path from "path"
 import { createMemo, Match, Show, Switch } from "solid-js"
 import { abbreviateHome } from "../../runtime"
 import { useTuiPaths } from "../../context/runtime"
@@ -10,6 +11,7 @@ import { useSDK } from "../../context/sdk"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { DialogLocationDirectory } from "../../component/dialog-location-directory"
+import { DialogPrompt } from "../../ui/dialog-prompt"
 import type { TargetDefinition } from "../../component/target-wizard"
 import { TargetHealth, useTargetManager } from "../../component/target-manager"
 
@@ -54,23 +56,80 @@ function Directory(props: { api: TuiPluginApi }) {
     ))
   }
 
+  const chooseLocal = () => {
+    void (async () => {
+      const starting = paths.cwd
+      const directory = await DialogPrompt.show(dialog, "local working directory", {
+        value: starting,
+        placeholder: starting,
+        description: () => <text>Absolute local directory used by the new Session. Press Tab to complete paths.</text>,
+        complete: async (value, cursor) => {
+          const prefix = value.slice(0, cursor)
+          const expanded =
+            prefix === "~" ? paths.home : prefix.startsWith("~/") ? path.join(paths.home, prefix.slice(2)) : prefix
+          const absolute = path.isAbsolute(expanded) ? expanded : path.join(starting, expanded)
+          const parent = absolute.endsWith(path.sep) ? absolute : path.dirname(absolute)
+          const fragment = absolute.endsWith(path.sep) ? "" : path.basename(absolute)
+          const result = await sdk.client.v2.fs.list(
+            { location: { directory: parent }, path: "." },
+            { throwOnError: true },
+          )
+          const candidates = result.data.data
+            .filter((entry) => entry.type === "directory" && path.basename(entry.path).startsWith(fragment))
+            .map((entry) => path.join(parent, path.basename(entry.path)) + path.sep)
+            .sort()
+          const completion = candidates.slice(1).reduce((common, candidate) => {
+            let index = 0
+            while (index < common.length && common[index] === candidate[index]) index++
+            return common.slice(0, index)
+          }, candidates[0] ?? "")
+          if (!completion) return { value, cursor, candidates }
+          return { value: completion + value.slice(cursor), cursor: completion.length, candidates }
+        },
+      })
+      if (!directory?.trim()) return
+      destination?.setTarget({ type: "local" })
+      destination?.setDestination({ type: "directory", directory: directory.trim(), subdirectory: false })
+      dialog.clear()
+    })().catch((error) =>
+      toast.show({ title: "Cannot select local directory", message: errorMessage(error), variant: "error" }),
+    )
+  }
+
   const choose = (target: TargetDefinition) => {
     void (async () => {
       try {
         const result = await sdk.client.v2.target.prepare({ targetID: target.id }, { throwOnError: true })
         if (result.data.status !== "ready") throw new Error(`${result.data.stage}: ${result.data.message}`)
+        const input = {
+          name: target.name,
+          connection: target.connection,
+          workspaceRoots: target.workspaceRoots,
+          transport: target.transport,
+          ...(target.defaultDirectory ? { defaultDirectory: target.defaultDirectory } : {}),
+          ...(target.command ? { command: target.command } : {}),
+        }
+        const inspected = await sdk.client.v2.target.wizard.inspect({ input }, { throwOnError: true })
+        const starting = inspected.data.home
+        const directory = await DialogPrompt.show(dialog, `${target.name} working directory`, {
+          value: starting,
+          placeholder: starting,
+          description: () => (
+            <text>Absolute remote directory used by the new Session. Press Tab to complete paths.</text>
+          ),
+          complete: async (value, cursor) => {
+            const completed = await sdk.client.v2.target.wizard.complete(
+              { input, value, cursor, cwd: starting },
+              { throwOnError: true },
+            )
+            return { ...completed.data, cursor: Number(completed.data.cursor) }
+          },
+        })
+        if (!directory?.trim()) return
         const selected = { type: "rexd" as const, targetID: target.id, name: target.name }
-        dialog.replace(() => (
-          <DialogLocationDirectory
-            target={selected}
-            initial={target.defaultDirectory ?? target.workspaceRoots[0] ?? "/"}
-            onSelect={(directory) => {
-              destination?.setTarget(selected)
-              destination?.setDestination({ type: "directory", directory, subdirectory: false })
-              dialog.clear()
-            }}
-          />
-        ))
+        destination?.setTarget(selected)
+        destination?.setDestination({ type: "directory", directory: directory.trim(), subdirectory: false })
+        dialog.clear()
       } catch (error) {
         toast.show({ title: "Target unavailable", message: errorMessage(error), variant: "error" })
       }
@@ -78,6 +137,7 @@ function Directory(props: { api: TuiPluginApi }) {
   }
 
   const openTargets = () => {
+    void targetManager.refreshHealth()
     dialog.replace(() => (
       <DialogSelect
         title="Execution target"
@@ -96,11 +156,7 @@ function Directory(props: { api: TuiPluginApi }) {
         ]}
         onSelect={(option) => {
           if (option.value === "manage") return targetManager.open()
-          if (option.value === "local") {
-            destination?.setTarget({ type: "local" })
-            destination?.setDestination({ type: "directory", directory: paths.cwd, subdirectory: false })
-            return openDirectory()
-          }
+          if (option.value === "local") return chooseLocal()
           choose(option.value)
         }}
       />

@@ -150,6 +150,7 @@ export function useTargetManager() {
 
   function open(mode: "manage" | "add" = "manage") {
     if (mode === "add") return save()
+    void healthControls.refetch()
     dialog.replace(() => (
       <DialogSelect
         title="Manage targets"
@@ -175,6 +176,7 @@ export function useTargetManager() {
     health,
     state,
     detail,
+    refreshHealth: () => healthControls.refetch(),
     refetch: async () => {
       await controls.refetch()
       await healthControls.refetch()

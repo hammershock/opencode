@@ -28,6 +28,11 @@ export type DialogPromptProps = {
   onCancel?: () => void
 }
 
+export function compactPromptCandidates(candidates: string[], limit = 12) {
+  if (candidates.length <= limit) return candidates
+  return [...candidates.slice(0, limit - 1), `… ${candidates.length - limit + 1} more matches`]
+}
+
 export function DialogPrompt(props: DialogPromptProps) {
   const dialog = useDialog()
   const { theme } = useTheme()
@@ -36,6 +41,7 @@ export function DialogPrompt(props: DialogPromptProps) {
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
   const [completing, setCompleting] = createSignal(false)
   const [candidates, setCandidates] = createSignal<string[]>([])
+  const visibleCandidates = () => compactPromptCandidates(candidates())
   let textarea: TextareaRenderable
   let completedValue: string | undefined
 
@@ -144,7 +150,7 @@ export function DialogPrompt(props: DialogPromptProps) {
         </Show>
         <Show when={candidates().length > 0}>
           <text fg={theme.textMuted} wrapMode="word">
-            {candidates().slice(0, 12).join("\n")}
+            {visibleCandidates().join("\n")}
           </text>
         </Show>
       </box>

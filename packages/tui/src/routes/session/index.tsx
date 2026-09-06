@@ -91,6 +91,7 @@ import { reportOverrideDiagnostic } from "../../command-toolkit/experimental-set
 import { createCommandHost } from "../../command-toolkit/host"
 import { environmentCommands, type EnvironmentCommandContext } from "../../command-toolkit/environment"
 import { targetCommand, TARGET_MANAGER_SETTING, type TargetCommandContext } from "../../command-toolkit/target"
+import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
 import { useTargetManager } from "../../component/target-manager"
 
 addDefaultParsers(parsers.parsers)
@@ -173,6 +174,7 @@ const context = createContext<{
   showTimestamps: () => boolean
   showDetails: () => boolean
   showGenericToolOutput: () => boolean
+  outputExpansion: () => boolean | undefined
   diffWrapMode: () => "word" | "none"
   providers: () => ReadonlyMap<string, Provider>
   sync: ReturnType<typeof useSync>
@@ -284,6 +286,7 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
+  const [outputExpansion, setOutputExpansion] = createSignal<boolean | undefined>()
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -464,10 +467,11 @@ export function Session() {
   const local = useLocal()
   const targetManager = useTargetManager()
   const coreCommandHost = createMemo(() =>
-    createCommandHost<EnvironmentCommandContext & TargetCommandContext>({
+    createCommandHost<EnvironmentCommandContext & TargetCommandContext & SessionControlCommandContext>({
       register: (registry) => {
         environmentCommands.forEach((command) => registry.register(command))
         registry.register(targetCommand)
+        sessionControlCommands.forEach((command) => registry.register(command))
       },
       context: () => {
         const current = location()
@@ -493,6 +497,23 @@ export function Session() {
           abortSignal: new AbortController().signal,
           targetManagerEnabled: kv.get(TARGET_MANAGER_SETTING, false),
           openTargetManager: targetManager.open,
+          sessionControls: {
+            permissions: () => local.permission.toggle(),
+            outputExpansion: setOutputExpansion,
+            delete: async () => {
+              const current = session()
+              if (!current) return "cancelled"
+              const confirmed = await DialogConfirm.show(
+                dialog,
+                "Delete Session",
+                `Delete “${current.title}” on all synced devices?`,
+              )
+              if (!confirmed) return "cancelled"
+              await sdk.client.session.delete({ sessionID: route.sessionID }, { throwOnError: true })
+              navigate({ type: "home" })
+              return "deleted"
+            },
+          },
           confirm: async (request) => Boolean(await DialogConfirm.show(dialog, request.title, request.message)),
           environment: {
             list: () => metadata("list"),
@@ -503,7 +524,8 @@ export function Session() {
             },
           },
           presentEnvironment: async (snapshot) => {
-            const variables = snapshot.variables.map((item) => `${item.name} · ${item.origin}`).join("\n") || "No variables"
+            const variables =
+              snapshot.variables.map((item) => `${item.name} · ${item.origin}`).join("\n") || "No variables"
             await DialogAlert.show(dialog, `Environment generation ${snapshot.generation}`, variables)
           },
           invokeAgent: async (prompt) => {
@@ -522,7 +544,10 @@ export function Session() {
       upstream: () => undefined,
       invalid: (message) => toast.show({ message, variant: "warning" }),
       outcome: (message, status) =>
-        toast.show({ message, variant: status === "failed" ? "error" : status === "cancelled" ? "warning" : "success" }),
+        toast.show({
+          message,
+          variant: status === "failed" ? "error" : status === "cancelled" ? "warning" : "success",
+        }),
     }),
   )
 
@@ -1258,6 +1283,7 @@ export function Session() {
           showTimestamps,
           showDetails,
           showGenericToolOutput,
+          outputExpansion,
           diffWrapMode,
           providers,
           sync,
@@ -1909,7 +1935,7 @@ function GenericTool(props: ToolProps) {
   const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
   const collapsed = createMemo(() => collapseToolOutput(output(), maxLines, maxChars()))
   const limited = createMemo(() => {
-    if (expanded() || !collapsed().overflow) return output()
+    if ((ctx.outputExpansion() ?? expanded()) || !collapsed().overflow) return output()
     return collapsed().output
   })
 
@@ -1930,7 +1956,9 @@ function GenericTool(props: ToolProps) {
         <box gap={1}>
           <text fg={theme.text}>{limited()}</text>
           <Show when={collapsed().overflow}>
-            <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
+            <text fg={theme.textMuted}>
+              {(ctx.outputExpansion() ?? expanded()) ? "Click to collapse" : "Click to expand"}
+            </text>
           </Show>
         </box>
       </BlockTool>
@@ -2159,7 +2187,7 @@ function Shell(props: ToolProps) {
   const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
   const collapsed = createMemo(() => collapseToolOutput(output(), maxLines, maxChars()))
   const limited = createMemo(() => {
-    if (expanded() || !collapsed().overflow) return output()
+    if ((ctx.outputExpansion() ?? expanded()) || !collapsed().overflow) return output()
     return collapsed().output
   })
 
@@ -2193,7 +2221,9 @@ function Shell(props: ToolProps) {
               <text fg={theme.text}>{limited()}</text>
             </Show>
             <Show when={collapsed().overflow}>
-              <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
+              <text fg={theme.textMuted}>
+                {(ctx.outputExpansion() ?? expanded()) ? "Click to collapse" : "Click to expand"}
+              </text>
             </Show>
           </box>
         </BlockTool>

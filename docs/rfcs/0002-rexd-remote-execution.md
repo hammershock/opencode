@@ -131,7 +131,8 @@ target 定义由 OpenCode 而非 Rexd 拥有，使用 OpenCode 解析后的设�
 - `connection` 是互斥 tagged union：`ssh-config` 只保存 host alias 并完全使用 OpenSSH 的解析结果；`manual` 使用结构化的 host、user、port 和可选 identity file，两种模式不能互相覆盖字段；
 - `identityFile` 只保存控制设备路径引用，不复制私钥内容；高级 SSH 参数必须作为独立参数传递，禁止拼接 Shell command；
 - `workspaceRoots` 用于准备 OpenCode 管理的 Rexd 配置，并仍须由握手返回值确认；它不能伪造服务端允许范围；
-- wizard 默认把探测到的远端用户 HOME 作为 `defaultDirectory`，把 `/` 作为 `workspaceRoots`；保存前必须警告 `/` 代表允许 Rexd 访问的最大路径范围，且 workspace roots 不是任意 Shell 命令的 sandbox；
+- wizard 默认把探测到的远端用户 HOME 作为 `defaultDirectory`，把 `/` 作为 `workspaceRoots`；字段说明必须明确前者是新 Session 的初始目录，后者是 Rexd 文件能力和 cwd 的允许边界，并警告 `/` 代表最大路径范围、workspace roots 不是任意 Shell 命令的 sandbox；
+- `workspaceRoots` 与 `defaultDirectory` 的文本输入必须支持基于当前 target 草稿的远端目录补全。Tab 展示逐行候选并可补齐公共前缀；候选只能来自目标机器，不能读取控制设备上的同名路径。远端 HOME 无法探测时不得把 `/` 冒充为 HOME；应允许留空并显示探测诊断；
 - `defaultDirectory` 必须位于至少一个配置并经握手确认的 workspace root 内；
 - 未知字段、重复语义和非法类型产生带 JSON path 的配置诊断；
 - 文件缺失等价于没有配置远程 targets；文件损坏不影响 local Location，但 QuickStart 必须显示配置错误；
@@ -153,14 +154,16 @@ v1 向导至少支持：
 
 1. 自动生成不可变 target ID，并设置设备内唯一、可修改的显示名称；
 2. 选择已有 SSH Config host alias，或切换到互斥的 manual 模式填写 host、user、port 和可选 identity file；
-3. 设置一个或多个远端 workspace roots，以及可选默认工作目录；
+3. 设置一个或多个远端 workspace roots，以及可选默认工作目录；新建时分别默认 `/` 和探测到的远端 HOME，并为两个字段提供上述用途与安全边界说明以及远端 Tab 目录补全；
 4. 展示即将使用的主机身份校验策略，不自动接受未知 host key；
 5. 测试 SSH、环境检测、managed daemon 准备和 Rexd 握手，并按阶段展示经过脱敏的错误；
-6. 保存已验证配置，或经用户明确确认后保存为 `unverified`，留待选择或创建 Session 时重新验证。
+6. 保存后自动执行连接探测；保存动作本身不增加一次摘要确认。探测失败时保留配置并明确标记为 `unverified`，只有稍后成功 prepare 后才可用于创建 Session。真正选择不可用 target 时才展示连接错误并拒绝创建，且不得回退 local。
 
 managed daemon 的命令和安装路径由本 RFC 的 prepare 流程派生，不作为普通向导必填项。为兼容自行准备的 Rexd，高级配置可以提供显式 command，但必须标明它绕过自动安装且仍受完整握手和 capability 校验。
 
 TUI 不直接读写 `targets.jsonc`，也不自行执行 SSH。Core/Server 提供结构化的 target registry CRUD、校验、连接测试和 prepare API，所有客户端复用同一实现。配置写入必须做到原子替换、并发冲突检测，并尽量保留 JSONC 注释、未知的兼容字段和未修改 target；文件权限不得扩大。重命名只更新显示名称；移除 target 只使引用其 ID 的 Session 进入 unresolved，不删除 Session。
+
+QuickStart 的 `Execution Target` picker 与 target manager 必须在打开时异步、非阻塞地探测每个已配置 target，并以简洁的 `checking`、`ready`、`unavailable` 或 `invalid` 状态展示。聚焦失败项时可以显示脱敏的阶段和原因；探测失败不得关闭面板、切换选择或导致 TUI crash。用户可主动刷新。此处健康探测只检查现有 SSH/Rexd 可达性、握手与能力，不执行 daemon 安装或升级；完整 managed-daemon prepare 仍只在激活 target/创建 Session 的准备阶段运行。
 
 ### Location
 

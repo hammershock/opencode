@@ -327,7 +327,13 @@ export function adapter(input: {
     list: async (prefix, cursor, signal) => {
       const remote = remotePath(root, prefix)
       const start = cursor ? requireCursor(cursor) : 0
-      const result = await call("list", (auth) => listPage(auth, remote, start, request, signal), signal)
+      const result = await call("list", (auth) => listPage(auth, remote, start, request, signal), signal).catch(
+        (cause) => {
+          if (cause instanceof SyncProvider.ProviderError && cause.kind === "not-found")
+            return { items: [], more: false }
+          throw cause
+        },
+      )
       return {
         objects: result.items.map((item) => ({ ...item.info, path: item.remotePath.slice(root.length + 1) })),
         ...(result.more ? { cursor: String(start + result.items.length) } : {}),

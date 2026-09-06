@@ -170,6 +170,23 @@ v1 只解决本仓库新增 Core command 和经 RFC-0006 接受的 upstream over
 
 v1 不建立可从网络调用任意 Core handler 的通用 `command.execute` endpoint。所有 toolkit handler 都在发起交互的 client host 内执行；涉及 Session、Location、Agent 或持久状态的业务操作必须调用已有或功能 RFC 新增的类型化 domain service/API。这样可以保持授权、返回 Schema 和重试语义属于业务域，而不是退化成一个返回 `unknown` 的万能命令 RPC。
 
+这里的“从网络执行 command”特指让客户端通过 command 名称和不透明参数调用任意 Server handler，例如：
+
+```text
+POST /command.execute { command: "env init", args: "..." }
+```
+
+它不限制 Rexd Location 上的远程 Shell/process，也不禁止 command 调用 Server。正确边界是 command handler 调用用途明确、输入输出类型化的 domain API：`/delete` 调用 Session delete，`/env reload` 调用 Environment reload，`/sync now` 调用 Sync service。Rexd process 仍通过 RFC-0002 的 Location process contract 执行，与 command toolkit 的网络边界无关。
+
+不提供万能 endpoint 的理由是：
+
+- UI-only command（例如 `/expand` 或打开 dialog）没有合理的 Server 执行语义；
+- 将任意 Core workflow 暴露为字符串 RPC 会扩大权限面，使授权、幂等、错误和副作用只能依赖运行时 metadata；
+- 不透明参数和 outcome 无法形成可靠的 generated SDK contract；
+- 各业务 domain 已经需要自己的 schema、权限、事件和重试规则，万能 endpoint 只会形成第二条绕过路径。
+
+因此 v1 的统一对象是 command 的定义、解析、发现和客户端 dispatch，而不是把所有 handler 远程化。如果未来确实需要 server-owned discovery、自动化或无客户端调用，必须设计可 feature-detect、输入输出类型化且版本化的 command protocol，不能直接公开内部 registry。
+
 例如：
 
 - `/expand` handler 可以直接改变当前客户端的显示状态；

@@ -62,7 +62,10 @@ export function projector(events: EventV2.Interface, sourceDeviceID?: SyncEvent.
         const sibling = yield* Effect.promise(() => siblingID(event.aggregateID, sourceDeviceID))
         siblings.set(event.aggregateID, sibling)
         const prefix = yield* events.durable({ aggregateID: event.aggregateID }).pipe(
-          Stream.takeWhile((item) => (item.durable?.seq ?? Number.MAX_SAFE_INTEGER) < event.seq),
+          // Durable aggregate sequences are contiguous and zero based. Taking
+          // exactly `seq` items snapshots the common prefix without subscribing
+          // forever to the live tail.
+          Stream.take(event.seq),
           Stream.runCollect,
         )
         for (const item of prefix) {

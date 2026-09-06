@@ -3,8 +3,6 @@ import { DialogSelect } from "../ui/dialog-select"
 import { useRoute } from "../context/route"
 import { useSync } from "../context/sync"
 import { createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js"
-import path from "path"
-import { Locale } from "../util/locale"
 import { useProject } from "../context/project"
 import { useTheme } from "../context/theme"
 import { useSDK } from "../context/sdk"
@@ -18,6 +16,7 @@ import { errorMessage } from "../util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
 import { useEvent } from "../context/event"
+import { sessionListLocation, sessionListMatches, type SessionListLocationRecord } from "./session-list-location"
 
 type SessionListFilter = { scope?: "project"; path?: string }
 
@@ -77,7 +76,14 @@ export function DialogSessionList() {
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
   const sessions = createMemo(() => {
-    const result = searchResults() ?? browseResults() ?? sync.data.session
+    const searched = searchResults()
+    const browsed = browseResults() ?? sync.data.session
+    // The upstream server search only knows about titles. Keep its wider title
+    // matches, but merge the reusable browse query so location/device fields can
+    // be searched locally without teaching this component about sync transport.
+    const result = searched
+      ? [...searched, ...browsed.filter((candidate) => !searched.some((item) => item.id === candidate.id))]
+      : browsed
     const synced = new Map(sync.data.session.map((session) => [session.id, session]))
     const ids = new Set(result.map((session) => session.id))
     const extra = [currentSessionID(), ...local.session.pinned()].flatMap((id) => {
@@ -89,7 +95,7 @@ export function DialogSessionList() {
     const query = search().trim().toLowerCase()
     return [...result.map((session) => synced.get(session.id) ?? session), ...extra]
       .filter((session) => !deleted().has(session.id))
-      .filter((session) => !query || session.title.toLowerCase().includes(query))
+      .filter((session) => sessionListMatches(session as typeof session & SessionListLocationRecord, query))
   })
 
   onCleanup(
@@ -225,13 +231,8 @@ export function DialogSessionList() {
     function buildOption(id: string, category: string) {
       const x = sessionMap.get(id)
       if (!x) return undefined
-      const directory = x.path
-        ? x.directory.endsWith(x.path)
-          ? x.directory.slice(0, -x.path.length).replace(/\/$/, "")
-          : undefined
-        : x.directory
-      const footer =
-        directory && directory !== project.data.project.mainDir ? Locale.truncate(path.basename(directory), 20) : ""
+      const location = sessionListLocation(x as typeof x & SessionListLocationRecord)
+      const footer = location.label
 
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]

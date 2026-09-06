@@ -35,6 +35,7 @@ export const groupNames = {
   "server.question": "questions",
   "server.reference": "references",
   "server.projectCopy": "projectCopies",
+  "server.target": "targets",
 } as const
 
 export const endpointNames = {
@@ -48,6 +49,9 @@ export const endpointNames = {
   "permission.saved.list": "listSaved",
   "permission.saved.remove": "removeSaved",
   "question.request.list": "listRequests",
+  "target.test": "testConnection",
+  "target.legacy.preview": "previewLegacyImport",
+  "target.legacy.import": "importLegacy",
 } as const
 
 export const omitEndpoints = new Set(["fs.read", "pty.connect", "pty.connectToken"])

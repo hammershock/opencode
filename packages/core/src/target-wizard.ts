@@ -15,6 +15,7 @@ export type Draft = {
   readonly hostKeyPolicyAcknowledged: boolean
   readonly verification?: TargetRegistry.ProbeResult
   readonly command?: { readonly program: string; readonly args: readonly string[] }
+  readonly saveDisposition?: "verified" | "unverified-confirmed"
 }
 
 export type State = {
@@ -53,13 +54,28 @@ export function edit(target: TargetRegistry.Definition): State {
 }
 
 export function update(state: State, patch: Partial<Omit<Draft, "id" | "mode">>): State {
-  const draft = { ...state.draft, ...patch }
+  const draft = {
+    ...state.draft,
+    ...patch,
+    ...(patch.verification
+      ? { saveDisposition: patch.verification.status === "ready" ? ("verified" as const) : undefined }
+      : {}),
+  }
   return {
     ...state,
     draft,
     warning: draft.workspaceRoots.includes("/")
       ? "Workspace root / grants Rexd the widest filesystem scope; it is not a shell sandbox."
       : undefined,
+  }
+}
+
+export function confirmUnverified(state: State): State {
+  if (!state.draft.verification || state.draft.verification.status === "ready") return state
+  return {
+    ...state,
+    draft: { ...state.draft, saveDisposition: "unverified-confirmed" },
+    warning: "This target will be saved as unverified and must pass full validation before creating a Session.",
   }
 }
 
@@ -76,7 +92,13 @@ export function previous(state: State): State {
 }
 
 export function input(state: State): TargetRegistry.Input | undefined {
-  if (!state.draft.name || !state.draft.connection || !state.draft.workspaceRoots.length) return
+  if (
+    !state.draft.name ||
+    !state.draft.connection ||
+    !state.draft.workspaceRoots.length ||
+    !state.draft.saveDisposition
+  )
+    return
   return {
     name: state.draft.name,
     transport: "ssh",

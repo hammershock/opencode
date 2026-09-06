@@ -1,0 +1,100 @@
+import { afterEach, describe, expect, test } from "bun:test"
+import fs from "fs/promises"
+import path from "path"
+import { Global } from "@opencode-ai/core/global"
+import { Context } from "effect"
+import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
+
+const context = Context.empty() as Context.Context<unknown>
+const file = path.join(Global.Path.config, "targets.jsonc")
+
+function request(route: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers)
+  if (init.body) headers.set("content-type", "application/json")
+  return HttpApiApp.webHandler().handler(new Request(`http://localhost${route}`, { ...init, headers }), context)
+}
+
+const input = {
+  name: "gpu",
+  transport: "ssh",
+  connection: { type: "ssh-config", host: "gpu-alias" },
+  defaultDirectory: "/data/project",
+  workspaceRoots: ["/data"],
+} as const
+
+afterEach(async () => {
+  await fs.rm(file, { force: true })
+})
+
+describe("target registry HttpApi", () => {
+  test("exposes CRUD with revision conflicts and no project-location header", async () => {
+    const listed = await request("/api/target")
+    expect(listed.status).toBe(200)
+    const initial = (await listed.json()) as { revision: string; targets: unknown[] }
+    expect(initial.targets).toEqual([])
+
+    const createdResponse = await request("/api/target", {
+      method: "POST",
+      body: JSON.stringify({ input, expectedRevision: initial.revision }),
+    })
+    expect(createdResponse.status).toBe(200)
+    const created = (await createdResponse.json()) as {
+      target: { id: string; name: string; connection: { type: string } }
+      snapshot: { revision: string }
+    }
+    expect(created.target).toMatchObject({ name: "gpu", connection: { type: "ssh-config" } })
+
+    const stale = await request("/api/target", {
+      method: "POST",
+      body: JSON.stringify({ input: { ...input, name: "other" }, expectedRevision: initial.revision }),
+    })
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toMatchObject({ _tag: "ConflictError", resource: "targets.jsonc" })
+
+    const removed = await request(`/api/target/${created.target.id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ expectedRevision: created.snapshot.revision }),
+    })
+    expect(removed.status).toBe(200)
+    expect(await removed.json()).toMatchObject({ targets: [] })
+  })
+
+  test("maps missing, unauthorized restore, and unavailable transport without leaking credentials", async () => {
+    const initial = (await (await request("/api/target")).json()) as { revision: string }
+    const created = (await (
+      await request("/api/target", {
+        method: "POST",
+        body: JSON.stringify({ input, expectedRevision: initial.revision }),
+      })
+    ).json()) as { target: { id: string }; snapshot: { revision: string } }
+
+    const probe = await request(`/api/target/${created.target.id}/test`, { method: "POST" })
+    expect(probe.status).toBe(200)
+    expect(await probe.json()).toEqual({
+      status: "unavailable",
+      stage: "ssh",
+      message: "Rexd transport is not registered",
+    })
+
+    const restore = await request(`/api/target/${crypto.randomUUID()}/restore`, {
+      method: "POST",
+      body: JSON.stringify({
+        input,
+        referencedSessionIDs: ["fabricated"],
+        expectedRevision: created.snapshot.revision,
+      }),
+    })
+    expect(restore.status).toBe(403)
+    expect(await restore.json()).toMatchObject({ _tag: "ForbiddenError" })
+
+    const missing = await request(`/api/target/${crypto.randomUUID()}/test`, { method: "POST" })
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toMatchObject({ _tag: "TargetNotFoundError" })
+  })
+
+  test("requires explicit confirmation token for legacy import", async () => {
+    const preview = await request("/api/target/legacy/import")
+    expect(preview.status).toBe(200)
+    expect(await preview.json()).toMatchObject({ candidates: [], diagnostics: [] })
+  })
+})

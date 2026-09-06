@@ -101,6 +101,18 @@ export type ProjectCopyError = {
 export const isProjectCopyError = (value: unknown): value is ProjectCopyError =>
   typeof value === "object" && value !== null && "name" in value && value["name"] === "ProjectCopyError"
 
+export type ForbiddenError = { readonly _tag: "ForbiddenError"; readonly message: string }
+export const isForbiddenError = (value: unknown): value is ForbiddenError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ForbiddenError"
+
+export type TargetNotFoundError = {
+  readonly _tag: "TargetNotFoundError"
+  readonly targetID: string
+  readonly message: string
+}
+export const isTargetNotFoundError = (value: unknown): value is TargetNotFoundError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "TargetNotFoundError"
+
 export type HealthGetOutput = { readonly healthy: true }
 
 export type LocationGetInput = {
@@ -3170,3 +3182,475 @@ export type ProjectCopiesRefreshInput = {
 }
 
 export type ProjectCopiesRefreshOutput = void
+
+export type TargetsListOutput = {
+  readonly path: string
+  readonly revision: string
+  readonly targets: ReadonlyArray<{
+    readonly id: string
+    readonly status: "unverified"
+    readonly name: string
+    readonly transport: "ssh"
+    readonly connection:
+      | { readonly type: "ssh-config"; readonly host: string }
+      | {
+          readonly type: "manual"
+          readonly host: string
+          readonly user: string
+          readonly port: number
+          readonly identityFile?: string | undefined
+        }
+    readonly defaultDirectory?: string | undefined
+    readonly workspaceRoots: ReadonlyArray<string>
+    readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+  }>
+  readonly diagnostics: ReadonlyArray<{
+    readonly severity: "error" | "warning"
+    readonly path: string
+    readonly message: string
+    readonly offset?: number | undefined
+  }>
+  readonly valid: boolean
+}
+
+export type TargetsCreateInput = {
+  readonly input: {
+    readonly input: {
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }
+    readonly expectedRevision: string
+  }["input"]
+  readonly expectedRevision: {
+    readonly input: {
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }
+    readonly expectedRevision: string
+  }["expectedRevision"]
+}
+
+export type TargetsCreateOutput = {
+  readonly target: {
+    readonly id: string
+    readonly status: "unverified"
+    readonly name: string
+    readonly transport: "ssh"
+    readonly connection:
+      | { readonly type: "ssh-config"; readonly host: string }
+      | {
+          readonly type: "manual"
+          readonly host: string
+          readonly user: string
+          readonly port: number
+          readonly identityFile?: string | undefined
+        }
+    readonly defaultDirectory?: string | undefined
+    readonly workspaceRoots: ReadonlyArray<string>
+    readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+  }
+  readonly snapshot: {
+    readonly path: string
+    readonly revision: string
+    readonly targets: ReadonlyArray<{
+      readonly id: string
+      readonly status: "unverified"
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }>
+    readonly diagnostics: ReadonlyArray<{
+      readonly severity: "error" | "warning"
+      readonly path: string
+      readonly message: string
+      readonly offset?: number | undefined
+    }>
+    readonly valid: boolean
+  }
+}
+
+export type TargetsUpdateInput = {
+  readonly targetID: { readonly targetID: string }["targetID"]
+  readonly input: {
+    readonly input: {
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }
+    readonly expectedRevision: string
+  }["input"]
+  readonly expectedRevision: {
+    readonly input: {
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }
+    readonly expectedRevision: string
+  }["expectedRevision"]
+}
+
+export type TargetsUpdateOutput = {
+  readonly target: {
+    readonly id: string
+    readonly status: "unverified"
+    readonly name: string
+    readonly transport: "ssh"
+    readonly connection:
+      | { readonly type: "ssh-config"; readonly host: string }
+      | {
+          readonly type: "manual"
+          readonly host: string
+          readonly user: string
+          readonly port: number
+          readonly identityFile?: string | undefined
+        }
+    readonly defaultDirectory?: string | undefined
+    readonly workspaceRoots: ReadonlyArray<string>
+    readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+  }
+  readonly snapshot: {
+    readonly path: string
+    readonly revision: string
+    readonly targets: ReadonlyArray<{
+      readonly id: string
+      readonly status: "unverified"
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }>
+    readonly diagnostics: ReadonlyArray<{
+      readonly severity: "error" | "warning"
+      readonly path: string
+      readonly message: string
+      readonly offset?: number | undefined
+    }>
+    readonly valid: boolean
+  }
+}
+
+export type TargetsRemoveInput = {
+  readonly targetID: { readonly targetID: string }["targetID"]
+  readonly expectedRevision: { readonly expectedRevision: string }["expectedRevision"]
+}
+
+export type TargetsRemoveOutput = {
+  readonly path: string
+  readonly revision: string
+  readonly targets: ReadonlyArray<{
+    readonly id: string
+    readonly status: "unverified"
+    readonly name: string
+    readonly transport: "ssh"
+    readonly connection:
+      | { readonly type: "ssh-config"; readonly host: string }
+      | {
+          readonly type: "manual"
+          readonly host: string
+          readonly user: string
+          readonly port: number
+          readonly identityFile?: string | undefined
+        }
+    readonly defaultDirectory?: string | undefined
+    readonly workspaceRoots: ReadonlyArray<string>
+    readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+  }>
+  readonly diagnostics: ReadonlyArray<{
+    readonly severity: "error" | "warning"
+    readonly path: string
+    readonly message: string
+    readonly offset?: number | undefined
+  }>
+  readonly valid: boolean
+}
+
+export type TargetsRestoreInput = {
+  readonly targetID: { readonly targetID: string }["targetID"]
+  readonly input: {
+    readonly input: {
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }
+    readonly referencedSessionIDs: ReadonlyArray<string>
+    readonly expectedRevision: string
+  }["input"]
+  readonly referencedSessionIDs: {
+    readonly input: {
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }
+    readonly referencedSessionIDs: ReadonlyArray<string>
+    readonly expectedRevision: string
+  }["referencedSessionIDs"]
+  readonly expectedRevision: {
+    readonly input: {
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }
+    readonly referencedSessionIDs: ReadonlyArray<string>
+    readonly expectedRevision: string
+  }["expectedRevision"]
+}
+
+export type TargetsRestoreOutput = {
+  readonly target: {
+    readonly id: string
+    readonly status: "unverified"
+    readonly name: string
+    readonly transport: "ssh"
+    readonly connection:
+      | { readonly type: "ssh-config"; readonly host: string }
+      | {
+          readonly type: "manual"
+          readonly host: string
+          readonly user: string
+          readonly port: number
+          readonly identityFile?: string | undefined
+        }
+    readonly defaultDirectory?: string | undefined
+    readonly workspaceRoots: ReadonlyArray<string>
+    readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+  }
+  readonly snapshot: {
+    readonly path: string
+    readonly revision: string
+    readonly targets: ReadonlyArray<{
+      readonly id: string
+      readonly status: "unverified"
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }>
+    readonly diagnostics: ReadonlyArray<{
+      readonly severity: "error" | "warning"
+      readonly path: string
+      readonly message: string
+      readonly offset?: number | undefined
+    }>
+    readonly valid: boolean
+  }
+}
+
+export type TargetsTestConnectionInput = { readonly targetID: { readonly targetID: string }["targetID"] }
+
+export type TargetsTestConnectionOutput =
+  | {
+      readonly status: "ready"
+      readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+    }
+  | {
+      readonly status: "unavailable" | "invalid"
+      readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+      readonly message: string
+    }
+
+export type TargetsPrepareInput = { readonly targetID: { readonly targetID: string }["targetID"] }
+
+export type TargetsPrepareOutput =
+  | {
+      readonly status: "ready"
+      readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+    }
+  | {
+      readonly status: "unavailable" | "invalid"
+      readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+      readonly message: string
+    }
+
+export type TargetsPreviewLegacyImportOutput = {
+  readonly source: string
+  readonly sourceRevision: string
+  readonly candidates: ReadonlyArray<{
+    readonly id: string
+    readonly status: "unverified"
+    readonly name: string
+    readonly transport: "ssh"
+    readonly connection:
+      | { readonly type: "ssh-config"; readonly host: string }
+      | {
+          readonly type: "manual"
+          readonly host: string
+          readonly user: string
+          readonly port: number
+          readonly identityFile?: string | undefined
+        }
+    readonly defaultDirectory?: string | undefined
+    readonly workspaceRoots: ReadonlyArray<string>
+    readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+  }>
+  readonly diagnostics: ReadonlyArray<{
+    readonly severity: "error" | "warning"
+    readonly path: string
+    readonly message: string
+    readonly offset?: number | undefined
+  }>
+}
+
+export type TargetsImportLegacyInput = {
+  readonly sourceRevision: { readonly sourceRevision: string; readonly expectedRevision: string }["sourceRevision"]
+  readonly expectedRevision: { readonly sourceRevision: string; readonly expectedRevision: string }["expectedRevision"]
+}
+
+export type TargetsImportLegacyOutput = {
+  readonly imported: ReadonlyArray<{
+    readonly id: string
+    readonly status: "unverified"
+    readonly name: string
+    readonly transport: "ssh"
+    readonly connection:
+      | { readonly type: "ssh-config"; readonly host: string }
+      | {
+          readonly type: "manual"
+          readonly host: string
+          readonly user: string
+          readonly port: number
+          readonly identityFile?: string | undefined
+        }
+    readonly defaultDirectory?: string | undefined
+    readonly workspaceRoots: ReadonlyArray<string>
+    readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+  }>
+  readonly snapshot: {
+    readonly path: string
+    readonly revision: string
+    readonly targets: ReadonlyArray<{
+      readonly id: string
+      readonly status: "unverified"
+      readonly name: string
+      readonly transport: "ssh"
+      readonly connection:
+        | { readonly type: "ssh-config"; readonly host: string }
+        | {
+            readonly type: "manual"
+            readonly host: string
+            readonly user: string
+            readonly port: number
+            readonly identityFile?: string | undefined
+          }
+      readonly defaultDirectory?: string | undefined
+      readonly workspaceRoots: ReadonlyArray<string>
+      readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    }>
+    readonly diagnostics: ReadonlyArray<{
+      readonly severity: "error" | "warning"
+      readonly path: string
+      readonly message: string
+      readonly offset?: number | undefined
+    }>
+    readonly valid: boolean
+  }
+}

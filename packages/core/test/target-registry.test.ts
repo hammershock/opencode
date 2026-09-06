@@ -51,6 +51,7 @@ describe("TargetRegistry", () => {
 
     const created = await registry.create(manual("gpu"), initial.revision)
     expect(created.target.id).toMatch(/^[0-9a-f-]{36}$/)
+    expect(created.target.status).toBe("unverified")
     expect(await fs.readFile(file, "utf8")).toContain("// owned by the user")
     expect(await fs.readFile(file, "utf8")).toContain('"future": true')
     expect((await fs.stat(file)).mode & 0o777).toBe(0o640)
@@ -255,11 +256,14 @@ describe("TargetWizard", () => {
     )
     expect(reviewed.step).toBe("review")
     expect(reviewed.draft.id).toBe(id)
-    expect(TargetWizard.input(reviewed)?.name).toBe("gpu")
+    expect(TargetWizard.input(reviewed)).toBeUndefined()
+    const confirmed = TargetWizard.confirmUnverified(reviewed)
+    expect(confirmed.draft.saveDisposition).toBe("unverified-confirmed")
+    expect(TargetWizard.input(confirmed)?.name).toBe("gpu")
   })
 
   test("edit retains target identity", () => {
     const id = Location.TargetID.make("bbbf7f19-ab10-4f5d-94ab-fd9225b8f3e9")
-    expect(TargetWizard.edit({ id, ...manual("gpu") }).draft.id).toBe(id)
+    expect(TargetWizard.edit({ id, status: "unverified", ...manual("gpu") }).draft.id).toBe(id)
   })
 })

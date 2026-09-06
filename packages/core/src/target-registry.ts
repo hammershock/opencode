@@ -27,6 +27,8 @@ export type Connection = SshConfigConnection | ManualConnection
 
 export type Definition = {
   readonly id: Location.TargetID
+  /** Runtime view only. A saved config never claims current connectivity without a fresh probe. */
+  readonly status: "unverified"
   readonly name: string
   readonly transport: "ssh"
   readonly connection: Connection
@@ -35,7 +37,7 @@ export type Definition = {
   readonly command?: { readonly program: string; readonly args: readonly string[] }
 }
 
-export type Input = Omit<Definition, "id">
+export type Input = Omit<Definition, "id" | "status">
 
 export type Diagnostic = {
   readonly severity: "error" | "warning"
@@ -173,7 +175,7 @@ export function make(options: {
       const id = Location.TargetID.make(randomUUID())
       const result = await mutate(expectedRevision, (text, snapshot) => {
         validateInput(input, snapshot.targets)
-        const target = { id, ...input } satisfies Definition
+        const target = { id, status: "unverified" as const, ...input } satisfies Definition
         return [edit(text, ["targets", id], encode(target)), target]
       })
       return { target: result.value, snapshot: result.snapshot }
@@ -182,7 +184,7 @@ export function make(options: {
       const result = await mutate(expectedRevision, (text, snapshot) => {
         if (!snapshot.targets.some((target) => target.id === targetID)) throw new NotFoundError({ targetID })
         validateInput(input, snapshot.targets, targetID)
-        const target = { id: targetID, ...input } satisfies Definition
+        const target = { id: targetID, status: "unverified" as const, ...input } satisfies Definition
         const fields = encode(target)
         const scalar = ["name", "transport", "defaultDirectory", "workspaceRoots", "command"] as const
         const base = scalar.reduce((current, key) => edit(current, ["targets", targetID, key], fields[key]), text)
@@ -216,19 +218,21 @@ export function make(options: {
       const result = await mutate(expectedRevision, (text, snapshot) => {
         if (snapshot.targets.some((target) => target.id === targetID)) throw new NameConflictError({ name: input.name })
         validateInput(input, snapshot.targets)
-        const target = { id: targetID, ...input } satisfies Definition
+        const target = { id: targetID, status: "unverified" as const, ...input } satisfies Definition
         return [edit(text, ["targets", targetID], encode(target)), target]
       })
       return { target: result.value, snapshot: result.snapshot }
     },
     async testConnection(targetID) {
+      const target = await find(targetID)
       if (!options.probe) return { status: "unavailable", stage: "ssh", message: "Rexd transport is not registered" }
-      return options.probe.test(await find(targetID))
+      return options.probe.test(target)
     },
     async prepare(targetID) {
+      const target = await find(targetID)
       if (!options.probe)
         return { status: "unavailable", stage: "prepare", message: "Rexd transport is not registered" }
-      return options.probe.prepare(await find(targetID))
+      return options.probe.prepare(target)
     },
     async previewLegacyImport() {
       const text = await fs.readFile(legacyFile, "utf8").catch((error: NodeJS.ErrnoException) => {
@@ -398,7 +402,16 @@ function decodeTarget(prefix: string, value: unknown, diagnostics: Diagnostic[],
     diagnostics.some((item) => item.severity === "error" && item.path.startsWith(prefix))
   )
     return
-  return { id, name, transport: "ssh" as const, connection, defaultDirectory, workspaceRoots: roots, command }
+  return {
+    id,
+    status: "unverified" as const,
+    name,
+    transport: "ssh" as const,
+    connection,
+    defaultDirectory,
+    workspaceRoots: roots,
+    command,
+  }
 }
 
 function decodeConnection(value: unknown, prefix: string, diagnostics: Diagnostic[]): Connection | undefined {
@@ -584,6 +597,7 @@ function decodeLegacy(source: string, text: string): ImportPreview {
     return [
       {
         id: Location.TargetID.make(randomUUID()),
+        status: "unverified" as const,
         name,
         transport: "ssh" as const,
         connection,

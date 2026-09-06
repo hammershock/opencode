@@ -8,6 +8,7 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import semver from "semver"
 import { described } from "./metadata"
+import { SyncSetup } from "@opencode-ai/core/sync/setup"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -71,6 +72,10 @@ export const GlobalPaths = {
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
+  syncSetup: "/global/sync/setup",
+  syncAuthorize: "/global/sync/setup/authorize",
+  syncComplete: "/global/sync/setup/complete",
+  syncReuseLegacy: "/global/sync/setup/reuse-legacy",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -103,6 +108,25 @@ export const GlobalApi = HttpApi.make("global").add(
           description: "Retrieve the current global OpenCode configuration settings and preferences.",
         }),
       ),
+      HttpApiEndpoint.get("syncSetup", GlobalPaths.syncSetup, {
+        success: Schema.Struct({ config: Schema.optional(SyncSetup.Config), legacy: SyncSetup.Legacy }),
+        error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.post("syncAuthorize", GlobalPaths.syncAuthorize, {
+        payload: SyncSetup.BeginInput,
+        success: SyncSetup.BeginResult,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.post("syncComplete", GlobalPaths.syncComplete, {
+        payload: SyncSetup.CompleteInput,
+        success: SyncSetup.SetupResult,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.post("syncReuseLegacy", GlobalPaths.syncReuseLegacy, {
+        payload: SyncSetup.ReuseLegacyInput,
+        success: SyncSetup.SetupResult,
+        error: HttpApiError.BadRequest,
+      }),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,
         success: described(ConfigV1.Info, "Successfully updated global config"),

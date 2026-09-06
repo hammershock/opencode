@@ -72,6 +72,28 @@ export async function exchangeCode(input: {
   )
 }
 
+export async function refreshCredential(input: {
+  readonly credential: Credential
+  readonly request?: Request
+  readonly now?: () => number
+  readonly signal?: AbortSignal
+}) {
+  return token(
+    {
+      grant_type: "refresh_token",
+      refresh_token: input.credential.refreshToken,
+      client_id: input.credential.appKey,
+      client_secret: input.credential.secretKey,
+    },
+    input.credential.appKey,
+    input.credential.secretKey,
+    input.request ?? fetch,
+    input.now ?? Date.now,
+    input.signal,
+    input.credential.refreshToken,
+  )
+}
+
 export function authorizationURL(appKey: string, redirectURI: string) {
   const url = new URL("https://openapi.baidu.com/oauth/2.0/authorize")
   url.search = new URLSearchParams({

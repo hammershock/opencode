@@ -12,6 +12,8 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import { GlobalUpgradeInput } from "../groups/global"
+import { SyncSetup } from "@opencode-ai/core/sync/setup"
+import { HttpApiError } from "effect/unstable/httpapi"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -62,6 +64,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const config = yield* Config.Service
     const installation = yield* Installation.Service
     const bridge = yield* EffectBridge.make()
+    const syncSetup = yield* SyncSetup.Service
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
       return { healthy: true as const, version: InstallationVersion }
@@ -84,6 +87,16 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
       yield* disposeAllInstancesAndEmitGlobalDisposed()
       return true
+    })
+
+    const badSetup = <A>(effect: Effect.Effect<A, SyncSetup.SetupError>) =>
+      effect.pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+
+    const getSyncSetup = Effect.fn("GlobalHttpApi.syncSetup")(function* () {
+      const [current, legacy] = yield* Effect.all([syncSetup.config(), syncSetup.inspectLegacy()]).pipe(
+        Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
+      )
+      return { config: current, legacy }
     })
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
@@ -120,6 +133,10 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handleRaw("event", event)
       .handle("configGet", configGet)
       .handle("configUpdate", configUpdate)
+      .handle("syncSetup", getSyncSetup)
+      .handle("syncAuthorize", (ctx) => badSetup(syncSetup.begin(ctx.payload)))
+      .handle("syncComplete", (ctx) => badSetup(syncSetup.complete(ctx.payload)))
+      .handle("syncReuseLegacy", (ctx) => badSetup(syncSetup.reuseLegacy(ctx.payload)))
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
   }),

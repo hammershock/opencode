@@ -55,6 +55,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { ProviderUsage } from "@/provider/usage"
+import { SyncSetup } from "@opencode-ai/core/sync/setup"
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -71,6 +72,7 @@ export const AppLayer = AppNodeBuilderV1.build(
     ModelsDev.node,
     Provider.node,
     ProviderUsage.node,
+    SyncSetup.node,
     ProviderAuth.node,
     Agent.node,
     Skill.node,

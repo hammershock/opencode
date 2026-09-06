@@ -47,6 +47,7 @@ import { DialogDebug } from "./component/dialog-debug"
 import { DialogThemeList } from "./component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { DialogExperimentalCommands } from "./component/dialog-experimental-commands"
+import { SESSION_EXIT_TO_HOME_SETTING } from "./command-toolkit/experimental-settings"
 import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
@@ -836,9 +837,23 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "app.exit",
         title: "Exit the app",
-        slashName: "exit",
-        slashAliases: ["quit", "q"],
+        slashName: "quit",
+        slashAliases: ["q"],
         run: () => exit(),
+        category: "System",
+      },
+      {
+        name: "route.exit",
+        title: route.data.type === "session" ? "Return to QuickStart" : "Exit the app",
+        slashName: "exit",
+        run: () => {
+          if (kv.get(SESSION_EXIT_TO_HOME_SETTING, false) && route.data.type === "session") {
+            route.navigate({ type: "home" })
+            dialog.clear()
+            return
+          }
+          exit()
+        },
         category: "System",
       },
       {

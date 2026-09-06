@@ -10,7 +10,16 @@ export type ExperimentalCommandSetting = {
   defaultValue: false
 }
 
+export const SESSION_EXIT_TO_HOME_SETTING = "experimental.commands.exit_to_home"
+
 export const experimentalCommandSettings = [
+  {
+    id: "fork.session.exit-to-home",
+    key: SESSION_EXIT_TO_HOME_SETTING,
+    title: "Exit Session to QuickStart",
+    description: "Make /exit return from a Session to QuickStart while /quit and /q still exit the app",
+    defaultValue: false,
+  },
   {
     id: "fork.session.rename-direct",
     key: SESSION_RENAME_DIRECT_SETTING,

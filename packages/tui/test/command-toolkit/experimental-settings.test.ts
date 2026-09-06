@@ -5,6 +5,11 @@ describe("experimental command settings", () => {
   test("uses one discoverable default-off setting per override", () => {
     expect(experimentalCommandSettings).toEqual([
       expect.objectContaining({
+        id: "fork.session.exit-to-home",
+        key: "experimental.commands.exit_to_home",
+        defaultValue: false,
+      }),
+      expect.objectContaining({
         id: "fork.session.rename-direct",
         key: "experimental.commands.rename_direct",
         defaultValue: false,

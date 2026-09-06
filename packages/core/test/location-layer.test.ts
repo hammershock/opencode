@@ -1,14 +1,20 @@
 import fs from "fs/promises"
 import path from "path"
-import { describe, expect } from "bun:test"
-import { DateTime, Effect, Equal, Hash, Schema } from "effect"
+import { describe, expect, test } from "bun:test"
+import { DateTime, Effect, Equal, Exit, Hash, Schema } from "effect"
 import { Tool } from "@opencode-ai/core/tool/tool"
 import { define } from "@opencode-ai/plugin/v2/effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { LocationServiceMap } from "@opencode-ai/core/location-services"
+import {
+  buildLocationServiceMap,
+  localProvider,
+  type LocationProvider,
+  LocationServiceMap,
+} from "@opencode-ai/core/location-services"
 import { Location } from "@opencode-ai/core/location"
 import { PluginV2 } from "@opencode-ai/core/plugin"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -37,6 +43,83 @@ const it = testEffect(
 )
 
 describe("LocationServiceMap", () => {
+  const targetID = Location.TargetID.make("d9428888-122b-4d8f-a40b-a7b5a2f4cc63")
+  const routed: Location.Ref[] = []
+  const syntheticRexd: LocationProvider = {
+    target: "rexd",
+    build: (ref, replacements) => {
+      routed.push(ref)
+      return localProvider.build(ref, replacements)
+    },
+  }
+  const providerMap = makeGlobalNode({
+    service: LocationServiceMap.Service,
+    layer: buildLocationServiceMap([], [localProvider, syntheticRexd]),
+    deps: [],
+  })
+  const itProvider = testEffect(
+    AppNodeBuilder.build(
+      LayerNode.group([ApplicationTools.node, Database.node, EventV2.node, LocationServiceMap.node]),
+      [[LocationServiceMap.node, providerMap]],
+    ),
+  )
+
+  itProvider.live("routes local and synthetic Rexd refs through the same location service contract", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const locations = yield* LocationServiceMap.Service
+          const directory = AbsolutePath.make(dir.path)
+          const refs = [
+            Location.Ref.make({ directory }),
+            Location.Ref.make({ target: { type: "rexd", targetID }, directory, lastKnownTargetName: "synthetic" }),
+          ]
+          const resolved = yield* Effect.forEach(refs, (ref) =>
+            Location.Service.pipe(
+              Effect.map((location) => ({ target: location.target, directory: location.directory })),
+              Effect.provide(locations.get(ref)),
+              Effect.scoped,
+            ),
+          )
+
+          expect(resolved).toEqual(refs.map((ref) => ({ target: ref.target, directory: ref.directory })))
+          expect(routed).toContainEqual(refs[1]!)
+        }),
+      ),
+    ),
+  )
+
+  test("encodes explicit targets and decodes historical refs without a target as local", () => {
+    const directory = AbsolutePath.make("/project")
+    const legacy = Schema.decodeUnknownSync(Location.Ref)({ directory })
+    const remote = Location.Ref.make({ target: { type: "rexd", targetID }, directory, lastKnownTargetName: "gpu" })
+
+    expect(legacy.target).toEqual({ type: "local" })
+    expect(Schema.encodeSync(Location.Ref)(legacy)).toMatchObject({ target: { type: "local" }, directory })
+    expect(Schema.decodeUnknownSync(Location.Ref)(Schema.encodeSync(Location.Ref)(remote))).toEqual(remote)
+  })
+
+  it.live("does not fall back to local when a Rexd provider is unavailable", () =>
+    Effect.gen(function* () {
+      const locations = yield* LocationServiceMap.Service
+      const result = yield* locations
+        .contextEffect(
+          Location.Ref.make({
+            target: { type: "rexd", targetID },
+            directory: AbsolutePath.make("/remote/project"),
+          }),
+        )
+        .pipe(Effect.exit)
+
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isSuccess(result)) return
+      expect(String(result.cause)).toContain("LocationServiceMap.ProviderUnavailableError")
+    }),
+  )
+
   it.live("reuses cached services for constructed and decoded location refs", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
@@ -50,7 +133,12 @@ describe("LocationServiceMap", () => {
             const constructed = Location.Ref.make({ directory })
             const decoded = Schema.decodeUnknownSync(Location.Ref)({ directory })
 
-            expect(constructed).toEqual({ directory, workspaceID: undefined })
+            expect(constructed).toEqual({
+              target: { type: "local" },
+              directory,
+              workspaceID: undefined,
+              lastKnownTargetName: undefined,
+            })
             expect(decoded).toEqual(constructed)
             expect(Equal.equals(constructed, decoded)).toBe(true)
             expect(Hash.hash(constructed)).toBe(Hash.hash(decoded))

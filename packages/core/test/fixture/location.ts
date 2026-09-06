@@ -4,8 +4,13 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Effect, Layer } from "effect"
 import { tmpdir } from "./tmpdir"
 
-export function location(ref: Location.Ref, input: { projectDirectory?: AbsolutePath; vcs?: Project.Vcs } = {}) {
+export function location(
+  value: Parameters<typeof Location.Ref.make>[0],
+  input: { projectDirectory?: AbsolutePath; vcs?: Project.Vcs } = {},
+) {
+  const ref = Location.Ref.make(value)
   return {
+    target: ref.target,
     directory: ref.directory,
     workspaceID: ref.workspaceID,
     project: { id: Project.ID.global, directory: input.projectDirectory ?? ref.directory },

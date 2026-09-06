@@ -77,6 +77,10 @@ describe("SessionV2.create", () => {
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const workspaceID = WorkspaceV2.ID.make("wrk_test")
+      const target = Location.RexdTarget.make({
+        type: "rexd",
+        targetID: Location.TargetID.make("013ea0a8-4523-4d39-a609-552222340b19"),
+      })
       const model = ModelV2.Ref.make({
         id: ModelV2.ID.make("sonnet"),
         providerID: ProviderV2.ID.anthropic,
@@ -85,11 +89,20 @@ describe("SessionV2.create", () => {
 
       expect(
         yield* session.create({
-          location: Location.Ref.make({ directory: location.directory, workspaceID }),
+          location: Location.Ref.make({
+            target,
+            directory: location.directory,
+            workspaceID,
+            lastKnownTargetName: "gpu",
+          }),
           agent: AgentV2.ID.make("build"),
           model,
         }),
-      ).toMatchObject({ location: { directory: location.directory, workspaceID }, agent: "build", model })
+      ).toMatchObject({
+        location: { target, directory: location.directory, workspaceID, lastKnownTargetName: "gpu" },
+        agent: "build",
+        model,
+      })
     }),
   )
 

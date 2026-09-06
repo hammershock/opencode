@@ -223,6 +223,8 @@ const layer = Layer.effect(
           version: InstallationVersion,
           projectID: project.id,
           directory: input.location.directory,
+          target: input.location.target,
+          lastKnownTargetName: input.location.lastKnownTargetName,
           path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
           title: `New session - ${new Date(now).toISOString()}`,

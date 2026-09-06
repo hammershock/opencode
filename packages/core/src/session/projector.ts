@@ -48,6 +48,8 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     parent_id: info.parentID,
     slug: info.slug,
     directory: info.directory,
+    target: info.target ?? null,
+    last_known_target_name: info.lastKnownTargetName ?? null,
     path: info.path,
     title: info.title,
     agent: info.agent,
@@ -245,6 +247,8 @@ const layer = Layer.effectDiscard(
           .update(SessionTable)
           .set({
             directory: event.data.location.directory,
+            target: event.data.location.target,
+            last_known_target_name: event.data.location.lastKnownTargetName ?? null,
             path: event.data.subdirectory,
             workspace_id: event.data.location.workspaceID ? WorkspaceV2.ID.make(event.data.location.workspaceID) : null,
             time_updated: DateTime.toEpochMillis(event.data.timestamp),

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, LayerMap } from "effect"
+import { Context, Effect, Layer, LayerMap, Schema } from "effect"
 import { LayerNode } from "./effect/layer-node"
 import { Node } from "./effect/app-node"
 import { Location } from "./location"
@@ -12,6 +12,11 @@ export class Service extends Context.Service<
     return Layer.unwrap(Effect.map(Service, (locations) => locations.get(ref)))
   }
 }
+
+export class ProviderUnavailableError extends Schema.TaggedErrorClass<ProviderUnavailableError>()(
+  "LocationServiceMap.ProviderUnavailableError",
+  { target: Schema.Literals(["local", "rexd"]) },
+) {}
 
 export const node = LayerNode.unbound(Service, Node.tags.values.global)
 

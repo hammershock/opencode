@@ -97,6 +97,7 @@ describe("EventV2", () => {
       expect(event).not.toHaveProperty("version")
       expect(event.data).toEqual({ text: "hello" })
       expect(event.location).toEqual({
+        target: { type: "local" },
         directory: AbsolutePath.make("project"),
         workspaceID: WorkspaceV2.ID.make("wrk_test"),
       })

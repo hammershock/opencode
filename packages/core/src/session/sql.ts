@@ -14,6 +14,7 @@ import { Timestamps } from "../database/schema.sql"
 import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
+import type { Location } from "../location"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -31,6 +32,8 @@ export const SessionTable = sqliteTable(
     parent_id: text().$type<SessionSchema.ID>(),
     slug: text().notNull(),
     directory: DatabasePath.directoryColumn().notNull(),
+    target: text({ mode: "json" }).$type<Location.Target>(),
+    last_known_target_name: text(),
     path: DatabasePath.pathColumn(),
     title: text().notNull(),
     version: text().notNull(),

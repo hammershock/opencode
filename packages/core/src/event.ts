@@ -422,7 +422,12 @@ export const layerWith = (options?: LayerOptions) =>
           const location =
             options?.location ??
             (serviceLocation
-              ? { directory: serviceLocation.directory, workspaceID: serviceLocation.workspaceID }
+              ? {
+                  target: serviceLocation.target ?? Location.LocalTarget.make({ type: "local" }),
+                  directory: serviceLocation.directory,
+                  workspaceID: serviceLocation.workspaceID,
+                  lastKnownTargetName: serviceLocation.lastKnownTargetName,
+                }
               : undefined)
           return yield* publishEvent(
             definition,

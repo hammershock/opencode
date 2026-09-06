@@ -52,6 +52,7 @@ import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
+import { DialogPermissionMode } from "../../component/dialog-permission-mode"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { filetype } from "../../util/filetype"
@@ -498,7 +499,7 @@ export function Session() {
           targetManagerEnabled: kv.get(TARGET_MANAGER_SETTING, false),
           openTargetManager: targetManager.open,
           sessionControls: {
-            permissions: () => local.permission.toggle(),
+            permissions: () => dialog.replace(() => <DialogPermissionMode />),
             outputExpansion: setOutputExpansion,
             delete: async () => {
               const current = session()

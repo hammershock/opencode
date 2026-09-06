@@ -16,7 +16,7 @@ superseded-by: []
 
 ## 摘要
 
-规范本 fork 对 TUI 输入模式和模型 variant 快捷操作的少量调整。`/variants` 保持 upstream 的选择面板语义；Shell mode 不再因空输入上的 Backspace 自动退出，只能通过明确的 Escape action 取消。
+规范本 fork 对 TUI 输入模式和模型 variant 快捷操作的少量调整。`/variants` 保持 upstream 的选择面板语义；normal prompt 中使用 `Shift+↑/↓` 调整思考强度；Shell mode 不再因空输入上的 Backspace 自动退出，只能通过明确的 Escape action 取消。
 
 这些行为不是 slash command toolkit 的职责，不应混入 RFC-0006 的 command override。
 
@@ -37,9 +37,16 @@ superseded-by: []
 
 reasoning effort 在 OpenCode 中由当前模型的 variant 表示。快捷操作必须使用 provider/model 已声明的有序 variant 列表，不能根据 `low`、`high`、`max` 等字符串自行猜测顺序，也不能在 TUI 中硬编码模型 ID。
 
-v1 保留 upstream 的 `variant.cycle` 与默认 `Ctrl+T`，不额外增加未经验证的 increase/decrease 默认键。用户仍可通过 `/variants` 精确选择，并通过现有 keybinding 配置覆盖 `variant_cycle` 或 `variant_list`。未来配置界面如支持 keybinding 编辑，应展示并修改同一份配置，不能维护 TUI-only 的第二份映射。
+v1 保留 upstream 的 `variant.cycle` 与默认 `Ctrl+T`，同时增加两个方向明确、不循环的 actions：
 
-如果后续确认需要单向 increase/decrease，应先增加独立的 `variant.increase` 与 `variant.decrease` actions，再为其配置按键；不能把方向逻辑塞入 `/variants` handler。
+- `variant.increase`：默认 `Shift+↑`，移动到下一个更强的 variant；
+- `variant.decrease`：默认 `Shift+↓`，移动到下一个更弱的 variant。
+
+强弱顺序必须来自当前 provider/model 声明的有序 variants。位于端点时保持当前值，不循环；当前值缺失时，以模型解析后的默认 variant 为基线。没有可用 variants 时不修改状态，并显示简短提示。
+
+调整只影响后续 provider turn，不改变正在运行的 turn 或历史消息。结果写入与 `/variants` 选择器相同的设备本地模型偏好，不创建新的 Session message。
+
+`Shift+↑/↓` 与 upstream 的 `input_select_up/down` 默认键存在冲突。本 fork 规定在 normal prompt 拥有焦点且没有 autocomplete、dialog 或其他 modal consumer 时，variant action 优先；Shell mode 和 modal 中仍由相应输入组件处理。需要保留纵向选择的用户可以通过现有 keybinding 配置覆盖 `variant_increase`、`variant_decrease`、`input_select_up` 和 `input_select_down`。未来配置界面如支持 keybinding 编辑，应修改同一份配置，不能维护 TUI-only 的第二份映射。
 
 ## 决策二：Shell mode 只由 Escape 取消
 
@@ -64,8 +71,9 @@ v1 保留 upstream 的 `variant.cycle` 与默认 `Ctrl+T`，不额外增加未�
 ## 验收条件
 
 1. `/variants` 与没有 fork patch 时的 upstream 行为一致。
-2. `variant.cycle` 只在当前模型声明的 variants 中移动，并保留可配置的 `Ctrl+T` 默认值。
-3. Shell mode 中空输入、单字符和多字符场景下的 Backspace 都不会退出模式。
-4. Escape 在 prompt 拥有焦点时退出 Shell mode；autocomplete/dialog 获得焦点时遵守焦点优先级。
-5. Shell mode 取消不提交命令、不写 history/Session，也不触发 Agent。
-6. footer 从有效 keybinding 映射生成提示，不硬编码 Escape 文案。
+2. `variant.cycle` 保留可配置的 `Ctrl+T` 默认值；`variant.increase/decrease` 默认使用 `Shift+↑/↓`，按 provider/model 声明的顺序移动且端点不循环。
+3. normal prompt、Shell mode、autocomplete 和 dialog 的快捷键优先级有测试，不能同时触发 variant 与文本选择操作。
+4. Shell mode 中空输入、单字符和多字符场景下的 Backspace 都不会退出模式。
+5. Escape 在 prompt 拥有焦点时退出 Shell mode；autocomplete/dialog 获得焦点时遵守焦点优先级。
+6. Shell mode 取消不提交命令、不写 history/Session，也不触发 Agent。
+7. footer 从有效 keybinding 映射生成提示，不硬编码 Escape 文案。

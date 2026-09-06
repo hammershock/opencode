@@ -1108,6 +1108,177 @@
         ]
       }
     },
+    "/global/sync/sessions": {
+      "get": {
+        "tags": ["global"],
+        "operationId": "global.syncSessions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sessionID": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "ownerDeviceID": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "targetLabel": {
+                        "type": "string"
+                      },
+                      "directory": {
+                        "type": "string"
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "updatedAt": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "deleted": {
+                        "type": "boolean"
+                      },
+                      "sourceDeviceID": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "availability": {
+                        "type": "string",
+                        "enum": ["metadata-only", "hydrating", "ready", "partial", "conflict", "unresolved"]
+                      }
+                    },
+                    "required": [
+                      "sessionID",
+                      "title",
+                      "ownerDeviceID",
+                      "directory",
+                      "revision",
+                      "updatedAt",
+                      "sourceDeviceID",
+                      "availability"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/effect_HttpApiError_ServiceUnavailable"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.syncSessions({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/global/sync/hydrate": {
+      "post": {
+        "tags": ["global"],
+        "operationId": "global.syncHydrate",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionID": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "availability": {
+                      "type": "string",
+                      "enum": ["metadata-only", "hydrating", "ready", "partial", "conflict", "unresolved"]
+                    }
+                  },
+                  "required": ["sessionID", "availability"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/effect_HttpApiError_ServiceUnavailable"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionID": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["sessionID"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.syncHydrate({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/global/sync/devices": {
       "get": {
         "tags": ["global"],

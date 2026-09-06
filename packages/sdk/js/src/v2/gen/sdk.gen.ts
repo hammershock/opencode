@@ -98,6 +98,8 @@ import type {
   GlobalSyncDeviceUpdateResponses,
   GlobalSyncEnabledErrors,
   GlobalSyncEnabledResponses,
+  GlobalSyncHydrateErrors,
+  GlobalSyncHydrateResponses,
   GlobalSyncNowErrors,
   GlobalSyncNowResponses,
   GlobalSyncRecoveryExportErrors,
@@ -106,6 +108,8 @@ import type {
   GlobalSyncResetResponses,
   GlobalSyncReuseLegacyErrors,
   GlobalSyncReuseLegacyResponses,
+  GlobalSyncSessionsErrors,
+  GlobalSyncSessionsResponses,
   GlobalSyncSetupErrors,
   GlobalSyncSetupResponses,
   GlobalSyncStatusErrors,
@@ -1544,6 +1548,32 @@ export class Global extends HeyApiClient {
     return (options?.client ?? this.client).post<GlobalSyncNowResponses, GlobalSyncNowErrors, ThrowOnError>({
       url: "/global/sync/now",
       ...options,
+    })
+  }
+
+  public syncSessions<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalSyncSessionsResponses, GlobalSyncSessionsErrors, ThrowOnError>({
+      url: "/global/sync/sessions",
+      ...options,
+    })
+  }
+
+  public syncHydrate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "sessionID" }] }])
+    return (options?.client ?? this.client).post<GlobalSyncHydrateResponses, GlobalSyncHydrateErrors, ThrowOnError>({
+      url: "/global/sync/hydrate",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

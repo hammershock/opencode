@@ -8226,6 +8226,80 @@ export type GlobalSyncNowResponses = {
 
 export type GlobalSyncNowResponse = GlobalSyncNowResponses[keyof GlobalSyncNowResponses]
 
+export type GlobalSyncSessionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/sessions"
+}
+
+export type GlobalSyncSessionsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncSessionsError = GlobalSyncSessionsErrors[keyof GlobalSyncSessionsErrors]
+
+export type GlobalSyncSessionsResponses = {
+  /**
+   * Success
+   */
+  200: Array<{
+    sessionID: string
+    title: string
+    ownerDeviceID: string
+    targetLabel?: string
+    directory: string
+    revision: number
+    updatedAt: number
+    deleted?: boolean
+    sourceDeviceID: string
+    availability: "metadata-only" | "hydrating" | "ready" | "partial" | "conflict" | "unresolved"
+  }>
+}
+
+export type GlobalSyncSessionsResponse = GlobalSyncSessionsResponses[keyof GlobalSyncSessionsResponses]
+
+export type GlobalSyncHydrateData = {
+  body?: {
+    sessionID: string
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/hydrate"
+}
+
+export type GlobalSyncHydrateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncHydrateError = GlobalSyncHydrateErrors[keyof GlobalSyncHydrateErrors]
+
+export type GlobalSyncHydrateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    sessionID: string
+    availability: "metadata-only" | "hydrating" | "ready" | "partial" | "conflict" | "unresolved"
+  }
+}
+
+export type GlobalSyncHydrateResponse = GlobalSyncHydrateResponses[keyof GlobalSyncHydrateResponses]
+
 export type GlobalSyncDevicesData = {
   body?: never
   path?: never

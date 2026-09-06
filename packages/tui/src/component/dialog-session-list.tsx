@@ -23,6 +23,49 @@ import { SESSION_FORCE_REBIND_SETTING } from "../command-toolkit/experimental-se
 
 type SessionListFilter = { scope?: "project"; path?: string }
 
+type SyncAvailability = "metadata-only" | "hydrating" | "ready" | "partial" | "conflict" | "unresolved"
+type SyncedSession = {
+  readonly sessionID: string
+  readonly title: string
+  readonly targetLabel?: string
+  readonly deleted?: boolean
+  readonly directory: string
+  readonly updatedAt: number
+  readonly availability: SyncAvailability
+}
+
+type DialogSessionEntry = {
+  readonly id: string
+  readonly title: string
+  readonly directory: string
+  readonly path?: string
+  readonly parentID?: string
+  readonly workspaceID?: string
+  readonly time: { readonly updated: number }
+  readonly syncMetadata?: SyncedSession
+}
+
+export function syncAvailabilityLabel(availability: SyncAvailability) {
+  return {
+    "metadata-only": "cloud · not downloaded",
+    hydrating: "cloud · downloading",
+    ready: "cloud · ready",
+    partial: "cloud · incomplete; retry",
+    conflict: "cloud · conflict copy",
+    unresolved: "cloud · target needs binding",
+  }[availability]
+}
+
+function fromSyncedSession(session: SyncedSession): DialogSessionEntry {
+  return {
+    id: session.sessionID,
+    title: session.title,
+    directory: session.directory,
+    time: { updated: session.updatedAt },
+    syncMetadata: session,
+  }
+}
+
 export function createDialogSessionListQuery(input: { search?: string; filter: SessionListFilter }) {
   const search = input.search?.trim()
   return {
@@ -77,6 +120,16 @@ export function DialogSessionList() {
       })
     },
   )
+  const [syncedSessions, { refetch: refetchSyncedSessions }] = createResource(async (): Promise<SyncedSession[]> => {
+    try {
+      const result = await sdk.client.global.syncSessions()
+      return (result.data ?? []) as SyncedSession[]
+    } catch {
+      // Sync is optional. A local session list remains usable when the secure
+      // store is locked, sync is not configured, or the provider is offline.
+      return []
+    }
+  })
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
   const sessions = createMemo(() => {
@@ -89,6 +142,7 @@ export function DialogSessionList() {
       ? [...searched, ...browsed.filter((candidate) => !searched.some((item) => item.id === candidate.id))]
       : browsed
     const synced = new Map(sync.data.session.map((session) => [session.id, session]))
+    const remote = new Map((syncedSessions() ?? []).map((session) => [session.sessionID, session]))
     const ids = new Set(result.map((session) => session.id))
     const extra = [currentSessionID(), ...local.session.pinned()].flatMap((id) => {
       if (!id || ids.has(id)) return []
@@ -97,7 +151,16 @@ export function DialogSessionList() {
       return session ? [session] : []
     })
     const query = search().trim().toLowerCase()
-    return [...result.map((session) => synced.get(session.id) ?? session), ...extra]
+    const remoteOnly = [...remote.values()]
+      .filter((session) => !ids.has(session.sessionID))
+      .filter((session) => !session.deleted)
+      .filter((session) => !query || session.title.toLowerCase().includes(query))
+      .map(fromSyncedSession)
+    const localEntry = (session: (typeof sync.data.session)[number]): DialogSessionEntry => ({
+      ...session,
+      syncMetadata: remote.get(session.id),
+    })
+    return [...result.map((session) => localEntry(synced.get(session.id) ?? session)), ...extra.map(localEntry), ...remoteOnly]
       .filter((session) => !deleted().has(session.id))
       .filter((session) => sessionListMatches(session as typeof session & SessionListLocationRecord, query))
   })
@@ -108,7 +171,7 @@ export function DialogSessionList() {
     }),
   )
 
-  function recover(session: NonNullable<ReturnType<typeof sessions>[number]>) {
+  function recover(session: DialogSessionEntry) {
     const workspace = project.workspace.get(session.workspaceID!)
     const list = () => dialog.replace(() => <DialogSessionList />)
     const warp = async (selection: WorkspaceSelection) => {
@@ -237,6 +300,7 @@ export function DialogSessionList() {
       if (!x) return undefined
       const location = sessionListLocation(x as typeof x & SessionListLocationRecord)
       const footer = location.label
+      const syncStatus = x.syncMetadata ? syncAvailabilityLabel(x.syncMetadata.availability) : undefined
 
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]
@@ -252,7 +316,7 @@ export function DialogSessionList() {
         bg: isDeleting ? theme.error : undefined,
         value: x.id,
         category,
-        footer,
+        footer: [footer, syncStatus].filter(Boolean).join(" · "),
         gutter,
       }
     }
@@ -285,21 +349,45 @@ export function DialogSessionList() {
       onMove={() => {
         setToDelete(undefined)
       }}
-      onSelect={(option) => {
-        void sdk.client.v2.sessionLocation
-          .resolve({ sessionID: option.value }, { throwOnError: true })
-          .then((result) => {
-            const resolution = result.data
-            if (resolution.status === "resolved") {
-              route.navigate({ type: "session", sessionID: option.value })
-              dialog.clear()
+      onSelect={async (option) => {
+        const selected = sessions().find((session) => session.id === option.value)
+        const remote = selected?.syncMetadata
+        if (
+          remote &&
+          (!sync.data.session.some((session) => session.id === option.value) || remote.availability === "partial")
+        ) {
+          try {
+            const result = await sdk.client.global.syncHydrate({ sessionID: option.value }, { throwOnError: true })
+            await Promise.all([sync.session.refresh(), refetchSyncedSessions()])
+            if (!["ready", "conflict", "unresolved"].includes(result.data.availability)) {
+              toast.show({
+                title: "Session is not ready",
+                message: syncAvailabilityLabel(result.data.availability),
+                variant: "error",
+              })
               return
             }
-            dialog.replace(() => <DialogSessionLocationRecovery sessionID={option.value} resolution={resolution} />)
-          })
-          .catch((cause) =>
-            toast.show({ title: "Session target resolution failed", message: errorMessage(cause), variant: "error" }),
+          } catch (err) {
+            await refetchSyncedSessions()
+            toast.show({ title: "Failed to download session", message: errorMessage(err), variant: "error" })
+            return
+          }
+        }
+        try {
+          const result = await sdk.client.v2.sessionLocation.resolve(
+            { sessionID: option.value },
+            { throwOnError: true },
           )
+          const resolution = result.data
+          if (resolution.status === "resolved") {
+            route.navigate({ type: "session", sessionID: option.value })
+            dialog.clear()
+            return
+          }
+          dialog.replace(() => <DialogSessionLocationRecovery sessionID={option.value} resolution={resolution} />)
+        } catch (cause) {
+          toast.show({ title: "Session target resolution failed", message: errorMessage(cause), variant: "error" })
+        }
       }}
       actions={[
         ...(kv.get(SESSION_FORCE_REBIND_SETTING, false)

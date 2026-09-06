@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createDialogSessionListQuery, loadDialogSessionList } from "../../src/component/dialog-session-list"
+import { createDialogSessionListQuery, loadDialogSessionList, syncAvailabilityLabel } from "../../src/component/dialog-session-list"
 
 describe("dialog session list", () => {
   test("requests root sessions for the default browse list", () => {
@@ -42,5 +42,13 @@ describe("dialog session list", () => {
         list: () => Promise.reject(new Error("offline")),
       }),
     ).toBeUndefined()
+  })
+
+  test("labels every metadata-first availability state", () => {
+    expect(syncAvailabilityLabel("metadata-only")).toContain("not downloaded")
+    expect(syncAvailabilityLabel("hydrating")).toContain("downloading")
+    expect(syncAvailabilityLabel("partial")).toContain("retry")
+    expect(syncAvailabilityLabel("conflict")).toContain("conflict")
+    expect(syncAvailabilityLabel("unresolved")).toContain("binding")
   })
 })

@@ -2,11 +2,12 @@ export * as SyncControl from "./control"
 
 import path from "node:path"
 import { Context, Effect, Layer, Schema } from "effect"
-import { sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { makeGlobalNode } from "../effect/app-node"
 import { Global } from "../global"
 import { Database } from "../database/database"
 import { SessionTable } from "../session/sql"
+import { SessionV2 } from "../session"
 import { EventV2 } from "../event"
 import { BaiduSyncProvider } from "./baidu-provider"
 import { SyncSecureStore } from "./secure-store"
@@ -47,7 +48,10 @@ export const BindingUpdate = Schema.Struct({
 })
 export const Recovery = Schema.Struct({ recoveryString: Schema.NonEmptyString })
 export const HydrateInput = Schema.Struct({ sessionID: Schema.NonEmptyString })
-export const HydrateResult = Schema.Struct({ sessionID: Schema.NonEmptyString, availability: SyncMetadata.Availability })
+export const HydrateResult = Schema.Struct({
+  sessionID: Schema.NonEmptyString,
+  availability: SyncMetadata.Availability,
+})
 
 export class ControlError extends Schema.TaggedErrorClass<ControlError>()("SyncControlError", {
   kind: Schema.Literals(["unconfigured", "locked", "provider", "storage"]),
@@ -115,7 +119,18 @@ const layer = Layer.effect(
         provider,
         store,
         projector: (deviceID) =>
-          SessionSync.projector(events, deviceID, ({ sessionID }) => metadata.availability(sessionID, "conflict"), attachment),
+          SessionSync.projector(
+            events,
+            deviceID,
+            ({ sessionID }) => metadata.availability(sessionID, "conflict"),
+            attachment,
+            (sessionID) =>
+              sessionDB
+                .delete(SessionTable)
+                .where(eq(SessionTable.id, SessionV2.ID.make(sessionID)))
+                .run()
+                .pipe(Effect.andThen(metadata.remove(sessionID)), Effect.asVoid),
+          ),
         attachment: {
           externalize: (event) => SessionSync.externalize(event, attachment),
           references: SyncAttachment.references,
@@ -303,9 +318,9 @@ const layer = Layer.effect(
         Effect.andThen(availability()),
         Effect.map((items) => items.find((item) => item.sessionID === input.sessionID)),
         Effect.catch(() =>
-          metadata.availability(input.sessionID, "partial").pipe(
-            Effect.andThen(Effect.fail(new ControlError({ kind: "provider" }))),
-          ),
+          metadata
+            .availability(input.sessionID, "partial")
+            .pipe(Effect.andThen(Effect.fail(new ControlError({ kind: "provider" })))),
         ),
       )
       lastSuccessAt = Date.now()

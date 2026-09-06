@@ -74,6 +74,7 @@ export function projector(
     sourceDeviceID: SyncEvent.DeviceID
   }) => Effect.Effect<void, unknown>,
   attachment?: Pick<SyncAttachment.Interface, "get">,
+  onDelete?: (sessionID: string) => Effect.Effect<void, unknown>,
 ): SyncEvent.DurableProjector {
   const siblings = new Map<string, string>()
   return {
@@ -121,7 +122,11 @@ export function projector(
         }
         yield* replayAs(events, hydrated, sibling, sourceDeviceID)
       }),
-    delete: (tombstone) => events.remove(tombstone.sessionID),
+    delete: (tombstone) =>
+      Effect.gen(function* () {
+        if (onDelete) yield* onDelete(tombstone.sessionID)
+        yield* events.remove(tombstone.sessionID)
+      }),
   }
 }
 

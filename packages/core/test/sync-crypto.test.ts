@@ -51,8 +51,8 @@ describe("SyncCrypto", () => {
     const cases: Array<unknown> = [
       { ...envelope, version: 2 },
       { ...envelope, nonce: "AA" },
-      { ...envelope, ciphertext: `${envelope.ciphertext.slice(0, -1)}A` },
-      { ...envelope, tag: `${envelope.tag.slice(0, -1)}A` },
+      { ...envelope, ciphertext: flip(envelope.ciphertext) },
+      { ...envelope, tag: flip(envelope.tag) },
     ]
     for (const item of cases)
       await expect(SyncCrypto.decrypt(root, "metadata", context, item)).rejects.toBeInstanceOf(
@@ -75,3 +75,7 @@ describe("SyncCrypto", () => {
     expect(await SyncCrypto.objectID(first, 1, payload)).not.toBe(await SyncCrypto.objectID(first, 2, payload))
   })
 })
+
+function flip(value: string) {
+  return `${value[0] === "A" ? "B" : "A"}${value.slice(1)}`
+}

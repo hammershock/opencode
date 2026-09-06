@@ -1,0 +1,97 @@
+name: Fork Development Task
+description: Track one accepted, reviewable implementation task for this fork
+title: "[TASK]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One task maps to one semantic branch, one dedicated worktree, and one pull request. Read `docs/development-workflow.md` before claiming work.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: State the observable result, not an implementation activity.
+      placeholder: A user or caller can...
+    validations:
+      required: true
+
+  - type: input
+    id: rfc
+    attributes:
+      label: Governing RFC
+      description: Link the exact RFC section, or write "Not RFC-governed" with a short reason.
+      placeholder: docs/rfcs/0002-rexd-remote-execution.md#...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List both in-scope and explicitly out-of-scope behavior.
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Link blocking issues or state "None". Do not describe an implicit branch chain.
+      placeholder: Blocked by #...
+    validations:
+      required: true
+
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Contracts and likely areas
+      description: Identify shared contracts and likely code areas. This is not a directory restriction.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      description: Include success, failure, compatibility, migration, and generated-artifact expectations as applicable.
+      placeholder: |
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: List package-local tests, typechecks, manual checks, and UI evidence required.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and compatibility
+      description: Cover credentials, remote execution, sync, deletion, upstream compatibility, or state why none apply.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: ready
+    attributes:
+      label: Ready checklist
+      options:
+        - label: The governing RFC is accepted, or this task does not require an RFC.
+          required: true
+        - label: The task has one reviewable outcome and no unrelated work.
+          required: true
+        - label: Dependencies and shared-contract ownership are explicit.
+          required: true
+        - label: No developer or Agent identity will be used in the branch or worktree name.
+          required: true

@@ -1,6 +1,6 @@
 export * as SessionSync from "./session"
 
-import { Effect } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { EventV2 } from "../event"
 import { SyncEvent } from "./event"
 import { SyncEventStore } from "./event-store"
@@ -53,6 +53,18 @@ export function projector(events: EventV2.Interface): SyncEvent.Projector<SyncEv
     delete: (_transaction, tombstone) => events.remove(tombstone.sessionID),
   }
 }
+
+/** Scoped bridge used by the application runtime after sync.db is available. */
+export const captureLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const events = yield* EventV2.Service
+    const store = yield* SyncEventStore.Service
+    yield* events.all().pipe(
+      Stream.runForEach((event) => capture(store, event as DurablePayload)),
+      Effect.forkScoped,
+    )
+  }),
+)
 
 function isSessionDeleted(payload: DurablePayload) {
   return payload.type === "session.deleted" || payload.type.startsWith("session.deleted@")

@@ -60,14 +60,14 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 - 任意版本升级、后台自动更新或管理用户自行安装的 Rexd daemon；
 - Web App 和 Desktop 的远程 target 选择界面。
 - Shell 持久化、补全、环境继承或 `.env` 加载语义。
-- 运行中 Session 的 `/target` 切换；该能力如需实现，必须作为默认关闭的实验功能另行规定事务和失败语义。
+- 通用的运行中 Session `/target` 切换；v1 只允许 RFC-0009 从 `/sessions` 提供默认隐藏的实验性强制重绑定 workflow。
 
 ## 用户流程
 
 1. 用户启动 OpenCode，进入 TUI QuickStart 页面。
 2. QuickStart 显示当前选择的 target 和工作目录。
 3. 用户可以选择 `local` 或一个已配置的 Rexd target；picker 同时提供 `Add target...` 和 `Manage targets...` 入口。
-4. 新增或编辑 target 时，QuickStart 打开配置向导。向导收集稳定名称、SSH 连接方式和远端工作位置，允许测试连接后保存；暂时无法连接时，用户也可以明确选择保存为尚未验证的配置。
+4. 新增或编辑 target 时，QuickStart 打开配置向导。向导生成稳定 ID，并收集显示名称、SSH 连接方式和远端工作位置；允许测试连接后保存，暂时无法连接时也可以由用户明确选择保存为尚未验证的配置。
 5. 用户在所选 target 上选择工作目录：
    - local 目录从本机文件系统选择；
    - Rexd 目录通过该 target 查询，不使用本机文件系统结果。
@@ -87,9 +87,9 @@ Target 表示执行发生在哪台机器上：
 TargetRef = local | rexd(targetID)
 ```
 
-`targetID` 是设备本地 target 配置中的稳定名称。target 配置保存连接方式、host、port、user、identity、SSH options、Rexd 启动方式以及可选的默认目录；凭据、SSH 配置和连接细节不写入 Session。
+`targetID` 是创建 target 时生成的设备本地 UUID，一经创建不可修改。target 配置另有设备内唯一、可修改的显示名称，并保存连接方式、Rexd 启动方式、workspace roots 和默认目录；凭据、SSH 配置和连接细节不写入 Session。
 
-target 名称一旦被 Session 引用即视为稳定标识。重命名必须保留旧名称的显式 alias 或执行可审计迁移，不能让历史 Session 静默指向另一个主机。
+Session 只引用不可变 `targetID`，因此重命名显示名称不需要迁移历史 Session。修改一个既有 ID 的连接配置必须视为更新同一个执行位置并留下可诊断的配置变更，不能复用该 ID 创建语义无关的新 target。
 
 ### Target 配置文件
 
@@ -109,24 +109,30 @@ target 定义由 OpenCode 而非 Rexd 拥有，使用 OpenCode 解析后的设�
 {
   "version": 1,
   "targets": {
-    "a100-2gpu": {
+    "a20c4f65-7ad8-47ae-bc91-7f2b9476108d": {
+      "name": "a100-2gpu",
       "transport": "ssh",
-      "host": "example-host",
-      "user": "hammer",
-      "port": 22,
-      "identityFile": "/path/to/key",
-      "sshOptions": [],
+      "connection": {
+        "type": "manual",
+        "host": "example-host",
+        "user": "hammer",
+        "port": 22,
+        "identityFile": "/path/to/key",
+      },
       "defaultDirectory": "/home/hammer",
-      "workspaceRoots": ["/home/hammer/workspace"],
+      "workspaceRoots": ["/"],
     },
   },
 }
 ```
 
-- target map key 是 Session 保存的稳定名称；
+- target map key 是 Session 保存的不可变 UUID，`name` 是设备内唯一的可修改显示名称；
 - v1 只接受 `ssh` transport；
-- `identityFile` 只保存本机路径引用，不复制私钥内容；
+- `connection` 是互斥 tagged union：`ssh-config` 只保存 host alias 并完全使用 OpenSSH 的解析结果；`manual` 使用结构化的 host、user、port 和可选 identity file，两种模式不能互相覆盖字段；
+- `identityFile` 只保存控制设备路径引用，不复制私钥内容；高级 SSH 参数必须作为独立参数传递，禁止拼接 Shell command；
 - `workspaceRoots` 用于准备 OpenCode 管理的 Rexd 配置，并仍须由握手返回值确认；它不能伪造服务端允许范围；
+- wizard 默认把探测到的远端用户 HOME 作为 `defaultDirectory`，把 `/` 作为 `workspaceRoots`；保存前必须警告 `/` 代表允许 Rexd 访问的最大路径范围，且 workspace roots 不是任意 Shell 命令的 sandbox；
+- `defaultDirectory` 必须位于至少一个配置并经握手确认的 workspace root 内；
 - 未知字段、重复语义和非法类型产生带 JSON path 的配置诊断；
 - 文件缺失等价于没有配置远程 targets；文件损坏不影响 local Location，但 QuickStart 必须显示配置错误；
 - target 配置不属于 Session/cloud sync payload。未来如同步非敏感 target metadata，必须由同步 RFC 另行定义 allowlist。
@@ -141,10 +147,12 @@ QuickStart target picker 必须提供：
 - `Manage targets...`：查看状态，并执行编辑、测试连接、重命名和移除；
 - 空 target 列表中的直接创建入口。
 
+`/target` 使用 RFC-0003 toolkit，作为打开同一 target registry manager 的可信 Core command；`/target add` 可以直接进入同一新增向导。它们只能管理、测试和选择配置视图，不能修改当前 Session Location。既有 Session 的重绑定只能通过 RFC-0009 workflow。
+
 v1 向导至少支持：
 
-1. 设置稳定的 target 名称；
-2. 选择已有 SSH Config host alias，或手动填写 host、user、port 和可选 identity file；
+1. 自动生成不可变 target ID，并设置设备内唯一、可修改的显示名称；
+2. 选择已有 SSH Config host alias，或切换到互斥的 manual 模式填写 host、user、port 和可选 identity file；
 3. 设置一个或多个远端 workspace roots，以及可选默认工作目录；
 4. 展示即将使用的主机身份校验策略，不自动接受未知 host key；
 5. 测试 SSH、环境检测、managed daemon 准备和 Rexd 握手，并按阶段展示经过脱敏的错误；
@@ -152,7 +160,7 @@ v1 向导至少支持：
 
 managed daemon 的命令和安装路径由本 RFC 的 prepare 流程派生，不作为普通向导必填项。为兼容自行准备的 Rexd，高级配置可以提供显式 command，但必须标明它绕过自动安装且仍受完整握手和 capability 校验。
 
-TUI 不直接读写 `targets.jsonc`，也不自行执行 SSH。Core/Server 提供结构化的 target registry CRUD、校验、连接测试和 prepare API，所有客户端复用同一实现。配置写入必须做到原子替换、并发冲突检测，并尽量保留 JSONC 注释、未知的兼容字段和未修改 target；文件权限不得扩大。重命名已被 Session 引用的 target 时，必须遵守稳定 ID 规则；移除 target 只使相关 Session 进入 unresolved，不删除 Session。
+TUI 不直接读写 `targets.jsonc`，也不自行执行 SSH。Core/Server 提供结构化的 target registry CRUD、校验、连接测试和 prepare API，所有客户端复用同一实现。配置写入必须做到原子替换、并发冲突检测，并尽量保留 JSONC 注释、未知的兼容字段和未修改 target；文件权限不得扩大。重命名只更新显示名称；移除 target 只使引用其 ID 的 Session 进入 unresolved，不删除 Session。
 
 ### Location
 
@@ -331,7 +339,7 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 
 ## 连接与 Session 生命周期
 
-持久的 OpenCode Session 与临时的 Rexd protocol session 相互独立：OpenCode Session 只保存 target 名称和 directory；Rexd `session_id`、SSH process 与 negotiated state 都是当前 OpenCode 进程的运行时资源，不写入数据库或同步数据。
+持久的 OpenCode Session 与临时的 Rexd protocol session 相互独立：OpenCode Session 只保存设备本地不可变 target ID 和 directory；Rexd `session_id`、SSH process 与 negotiated state 都是当前 OpenCode 进程的运行时资源，不写入数据库或同步数据。
 
 1. 远程 Location 首次使用时按需建立一个 connection lease，完成 `session.open` 后供该 Location 的文件、进程和 PTY services 复用。
 2. 不为每次工具调用重新建立 SSH。JSON-RPC transport 可以并发复用，但必须按 request、process、PTY 和 session 正确分发响应与事件。
@@ -355,10 +363,10 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 ## 兼容性
 
 - 没有显式 target 的历史 Session 视为 local。
-- 恢复远程 Session 时，当前设备找不到同名 target、连接失败或历史 directory 不再有效，Session 保持 unresolved 并展示错误；不得静默改为 local、默认 target 或默认目录。
+- 恢复远程 Session 时，当前设备找不到对应 target ID、连接失败或历史 directory 不再有效，Session 保持 unresolved 并展示错误；不得静默改为 local、默认 target 或默认目录。
 - 选择 local 时，现有 Shell、文件、PTY 和 Agent 工具行为保持不变。
 - 公共 Schema 或 HttpApi 发生变化后，必须通过仓库生成脚本更新 Client/SDK，不得直接编辑 generated 文件。
-- 旧实现的 `~/.config/rexd/targets.json` 不是新的 active 配置源。新文件不存在而旧文件存在时，QuickStart/target manager 应提供一次显式导入：展示将导入的 target 和字段诊断，转换后写入 canonical `targets.jsonc`；不得静默删除或修改旧文件，也不得长期合并两个来源。
+- 旧实现的 `~/.config/rexd/targets.json` 不是新的 active 配置源。新文件不存在而旧文件存在时，QuickStart/target manager 应提供一次显式导入：为每个合法旧 target 生成 UUID，展示 alias/manual 转换结果和字段诊断，再写入 canonical `targets.jsonc`；不得静默删除或修改旧文件，也不得长期合并两个来源。
 - 旧配置中的显式 Rexd command、workspace roots 和其他可表达字段应尽量导入；不能安全转换的字段必须逐项报告，由用户确认或修正。
 - 旧归档分支中的 per-Session TUI 状态不保证迁移；只有 target registry 提供上述导入路径。
 
@@ -409,7 +417,7 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 
 1. QuickStart 可以选择 local 或已配置 target，并完成远端目录补全、验证和原子 Session 创建；整个流程不依赖 `/target`，失败时保留尚未提交的 prompt。
 2. QuickStart 可以通过 Core/Server API 新增、编辑、测试、重命名和移除 target；TUI 不直接读写配置或执行 SSH，保存未验证配置需要明确确认。
-3. Session 持久数据只包含稳定 target 名称和规范化 directory，连接配置与运行时 Rexd session 不进入 Session 或同步数据。
+3. Session 持久数据只包含设备本地不可变 target ID 和规范化 directory，显示名称、连接配置与运行时 Rexd session 不进入 Session 或同步数据。
 4. managed daemon 的支持平台安装、已安装复用、并发准备、checksum 失败和 unsupported platform 均有测试。
 5. 握手强制检查 protocol、server version、`exec`、`fs`、`events`、`pty`、limits 和 workspace roots。
 6. User Shell、Agent process、read/write/edit/patch/list/glob/search 与 Terminal PTY 均通过同一个远程 Location；测试证明没有访问控制设备的同名路径。

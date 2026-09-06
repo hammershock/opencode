@@ -51,12 +51,12 @@ Command toolkit 的直接使用者是：
 
 | Command family         | 基础职责                   | 业务规格归属     |
 | ---------------------- | -------------------------- | ---------------- |
-| `/target`、`/cd`       | 选择执行 target 和工作目录 | RFC-0002         |
+| `/target`              | 打开和管理设备 target registry | RFC-0002      |
 | `/env`                 | 管理 location environment  | RFC-0005         |
-| `/sync`、`/devices`    | 管理跨设备同步和设备       | 后续同步 RFC     |
-| `/permissions`         | 查看或切换权限交互策略     | 后续权限 RFC     |
-| `/expand`、`/collapse` | 展开或收起截断的命令输出   | 后续显示交互 RFC |
-| `/delete`              | 确认并删除当前 Session     | 后续 Session RFC |
+| `/sync`、`/devices`    | 管理跨设备同步和设备       | RFC-0010         |
+| `/permissions`         | 查看或切换权限交互策略     | RFC-0006         |
+| `/expand`、`/collapse` | 展开或收起截断的命令输出   | RFC-0006         |
+| `/delete`              | 确认并删除当前 Session     | RFC-0006         |
 
 这些都是本仓库提供的基础 Core 能力。列入本表只确认其身份、基础职责和 toolkit 接入要求，不代表接受旧归档中的具体实现，也不替代各功能 RFC 对状态、权限、持久化、同步和失败语义的定义。
 

@@ -14,14 +14,16 @@ process.env.OPENCODE_CHANNEL = "rexd"
 
 await import("./build.ts")
 
-const artifacts = await Array.fromAsync(new Bun.Glob("opencode-*/bin/opencode").scan({ cwd: "dist" }))
+const artifacts = (await Array.fromAsync(new Bun.Glob("opencode-*/bin/opencode*").scan({ cwd: "dist" }))).filter((artifact) =>
+  ["opencode", "opencode.exe"].includes(path.basename(artifact)),
+)
 if (artifacts.length === 0) throw new Error("OpenCode build produced no executable artifacts")
 
 await Promise.all(
   artifacts.map(async (artifact) => {
     const directory = path.dirname(path.join("dist", artifact))
     const source = path.join("dist", artifact)
-    const destination = path.join(directory, "opencode-rexd")
+    const destination = path.join(directory, artifact.endsWith(".exe") ? "opencode-rexd.exe" : "opencode-rexd")
     await rename(source, destination)
     await Bun.write(
       path.join(directory, "opencode-rexd.build.json"),

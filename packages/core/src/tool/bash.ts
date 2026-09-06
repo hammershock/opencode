@@ -3,13 +3,12 @@ export * as BashTool from "./bash"
 import path from "path"
 import { ToolFailure } from "@opencode-ai/llm"
 import { Duration, Effect, Layer, Schema } from "effect"
-import { ChildProcess } from "effect/unstable/process"
 import { Config } from "../config"
 import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { LocationEnvironment } from "../location-environment"
-import { AppProcess } from "../process"
+import { LocationProcess } from "../location-process"
 import { PermissionV2 } from "../permission"
 import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
@@ -100,7 +99,7 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const mutation = yield* LocationMutation.Service
     const fs = yield* FSUtil.Service
-    const appProcess = yield* AppProcess.Service
+    const locationProcess = yield* LocationProcess.Service
     const config = yield* Config.Service
     const permission = yield* PermissionV2.Service
     const environment = yield* LocationEnvironment.Service
@@ -157,18 +156,12 @@ const layer = Layer.effectDiscard(
               const shell =
                 Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
                   .shell ?? defaultShell()
-              const command = ChildProcess.make(input.command, [], {
-                cwd: target.canonical,
-                shell,
-                env: yield* environment.environment(),
-                stdin: "ignore",
-                detached: process.platform !== "win32",
-                forceKillAfter: Duration.seconds(3),
-              })
               const timeout = input.timeout ?? DEFAULT_TIMEOUT_MS
-              const result = yield* appProcess
-                .run(command, {
-                  combineOutput: true,
+              const result = yield* locationProcess
+                .runShell(input.command, {
+                  cwd: target.canonical,
+                  shell,
+                  env: yield* environment.environment(),
                   timeout: Duration.millis(timeout),
                   maxOutputBytes: MAX_CAPTURE_BYTES,
                 })
@@ -211,7 +204,7 @@ export const node = makeLocationNode({
     LocationMutation.node,
     LocationEnvironment.node,
     FSUtil.node,
-    AppProcess.node,
+    LocationProcess.node,
     Config.node,
     PermissionV2.node,
   ],

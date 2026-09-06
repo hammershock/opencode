@@ -40,7 +40,12 @@ export const sessionLocationLayer = Layer.effect(
           ),
         )
         const row = yield* db
-          .select({ directory: SessionTable.directory, workspaceID: SessionTable.workspace_id })
+          .select({
+            target: SessionTable.target,
+            directory: SessionTable.directory,
+            workspaceID: SessionTable.workspace_id,
+            lastKnownTargetName: SessionTable.last_known_target_name,
+          })
           .from(SessionTable)
           .where(eq(SessionTable.id, sessionID))
           .get()
@@ -55,8 +60,10 @@ export const sessionLocationLayer = Layer.effect(
           Effect.provide(
             locations.get(
               Location.Ref.make({
+                target: row.target ?? { type: "local" },
                 directory: AbsolutePath.make(row.directory),
                 workspaceID: row.workspaceID ? WorkspaceV2.ID.make(row.workspaceID) : undefined,
+                lastKnownTargetName: row.lastKnownTargetName ?? undefined,
               }),
             ),
           ),

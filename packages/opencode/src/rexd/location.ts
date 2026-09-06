@@ -1,0 +1,40 @@
+import { FileMutation } from "@opencode-ai/core/file-mutation"
+import { FileSystem } from "@opencode-ai/core/filesystem"
+import { FileSystemSearch } from "@opencode-ai/core/filesystem/search"
+import { Location } from "@opencode-ai/core/location"
+import { LocationMutation } from "@opencode-ai/core/location-mutation"
+import { LocationProcess } from "@opencode-ai/core/location-process"
+import { locationServices, type LocationProvider } from "@opencode-ai/core/location-services"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { Node } from "@opencode-ai/core/effect/app-node"
+import { ReadToolFileSystem } from "@opencode-ai/core/tool/read-filesystem"
+import { Pty } from "@opencode-ai/core/pty"
+import { Layer } from "effect"
+import { rexdFilesystemNodes } from "./location-filesystem"
+import { rexdMutationNodes } from "./location-mutation"
+import { rexdProcessNode } from "./location-process"
+import { rexdReadNode } from "./location-read"
+import { rexdPtyNode } from "./location-pty"
+import { rexdLocationNode, rexdSessionNode } from "./location-session"
+
+export const rexdLocationProvider: LocationProvider = {
+  target: "rexd",
+  build(ref, replacements) {
+    if (ref.target.type !== "rexd") throw new Error("Rexd provider received a local Location")
+    const session = rexdSessionNode(ref)
+    const filesystem = rexdFilesystemNodes(session, ref.target.targetID, ref.directory)
+    const mutation = rexdMutationNodes(session, ref.target.targetID, ref.directory)
+    const selected = replacements.concat([
+      [Location.node, rexdLocationNode(ref)],
+      [FileSystemSearch.node, filesystem[0]],
+      [FileSystem.node, filesystem[1]],
+      [LocationProcess.node, rexdProcessNode(session)],
+      [LocationMutation.node, mutation[0]],
+      [FileMutation.node, mutation[1]],
+      [ReadToolFileSystem.node, rexdReadNode(session, ref.target.targetID, ref.directory)],
+      [Pty.node, rexdPtyNode(session)],
+    ])
+    const location = LayerNode.hoist(locationServices, Node.tags.values.global, selected)
+    return LayerNode.compile(location.node).pipe(Layer.fresh, Layer.provide(LayerNode.compile(location.hoisted)))
+  },
+}

@@ -155,4 +155,34 @@ describe("SyncRuntime", () => {
     await Promise.all([Effect.runPromise(runtime.upload()), Effect.runPromise(runtime.upload())])
     expect(uploads).toBe(0)
   })
+
+  test("recovers when cloud segment committed before local acknowledgement", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("mac")
+    const event = SyncEvent.Envelope.make({
+      id: "event",
+      aggregateID: "session",
+      seq: 0,
+      type: "session.created",
+      data: {},
+    })
+    const local = store(id, event)
+    let acknowledgements = 0
+    const original = local.service.acknowledge
+    local.service.acknowledge = (segmentID: SyncEvent.SegmentID) =>
+      ++acknowledgements === 1 ? Effect.fail(new Error("crash before ack")) : original(segmentID)
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      rootKey: SyncCrypto.createSpace().rootKey,
+      provider: remote.adapter,
+      store: local.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await expect(Effect.runPromise(runtime.upload())).rejects.toBeDefined()
+    const objects = remote.files.size
+    await Effect.runPromise(runtime.upload())
+    expect(remote.files.size).toBe(objects + 1) // only the newly written head
+  })
 })

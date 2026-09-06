@@ -82,7 +82,18 @@ export function make(input: {
           segmentContext(segment.deviceID, segment.generation, path),
           segment,
         )
-        await input.provider.uploadAtomic(path, bytes, { type: "absent" }, signal)
+        const existing = await input.provider.stat(path, signal)
+        if (existing) {
+          const downloaded = await input.provider.download(path, existing.version, signal)
+          const committed = await decrypt(
+            (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+            "event",
+            input.rootKey,
+            segmentContext(segment.deviceID, segment.generation, path),
+            downloaded.bytes,
+          )
+          if (JSON.stringify(committed) !== JSON.stringify(segment)) throw new Error("Remote segment conflict")
+        } else await input.provider.uploadAtomic(path, bytes, { type: "absent" }, signal)
         await Effect.runPromise(input.store.acknowledge(segment.id))
       }
       const generation = await Effect.runPromise(input.store.head(input.config.deviceID))

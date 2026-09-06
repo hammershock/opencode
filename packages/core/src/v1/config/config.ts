@@ -182,6 +182,9 @@ export const Info = Schema.Struct({
       user_shell_cwd: Schema.optional(Schema.Boolean).annotate({
         description: "Keep User Shell cwd in memory for the current runtime (default: false)",
       }),
+      location_env: Schema.optional(Schema.Boolean).annotate({
+        description: "Load target-side user and project dotenv files for Location processes (default: false)",
+      }),
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),

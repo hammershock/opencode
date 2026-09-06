@@ -18,4 +18,7 @@ export class Experimental extends Schema.Class<Experimental>("ConfigV2.Experimen
   user_shell_cwd: Schema.Boolean.pipe(Schema.optional).annotate({
     description: "Keep User Shell cwd in memory for the current runtime (default: false)",
   }),
+  location_env: Schema.Boolean.pipe(Schema.optional).annotate({
+    description: "Load target-side user and project dotenv files for Location processes (default: false)",
+  }),
 }) {}

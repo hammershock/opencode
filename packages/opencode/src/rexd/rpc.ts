@@ -154,7 +154,11 @@ export class RexdRpcClient {
     if (!pending) return
     if (isRecord(value.error)) {
       const code = typeof value.error.code === "number" ? value.error.code : undefined
-      this.#settle(id, new RexdError("transport", `Rexd rejected ${pending.method}${code ? ` (${code})` : ""}`, false))
+      const detail = typeof value.error.message === "string" ? `: ${value.error.message}` : ""
+      this.#settle(
+        id,
+        new RexdError("transport", `Rexd rejected ${pending.method}${code ? ` (${code})` : ""}${detail}`, false),
+      )
       return
     }
     this.#settle(id, undefined, value.result)

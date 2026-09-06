@@ -7,7 +7,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ShareNext } from "./share-next"
 
 export interface Interface {
-  readonly create: (input?: Session.CreateInput) => Effect.Effect<Session.Info>
+  readonly create: (input?: Session.CreateOptions) => Effect.Effect<Session.Info>
   readonly share: (sessionID: SessionID) => Effect.Effect<{ url: string }, unknown>
   readonly unshare: (sessionID: SessionID) => Effect.Effect<void, unknown>
 }
@@ -36,7 +36,7 @@ const layer = Layer.effect(
       yield* session.setShare({ sessionID, share: undefined })
     })
 
-    const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateInput) {
+    const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateOptions) {
       const result = yield* session.create(input)
       if (result.parentID) return result
       const conf = yield* cfg.get()

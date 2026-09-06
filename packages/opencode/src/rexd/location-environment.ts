@@ -49,7 +49,7 @@ export function rexdEnvironmentSourceNode(
                 const sources = await Promise.all(
                   candidates.map(async (item) => {
                     const stat = await files.stat(item.path, input.directory)
-                    if (!stat.exists) return item
+                    if (!stat.exists || stat.type !== "file") return item
                     return {
                       ...item,
                       content: Buffer.from((await files.read(item.path, input.directory)).content).toString("utf8"),

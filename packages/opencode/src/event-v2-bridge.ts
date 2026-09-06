@@ -7,7 +7,7 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option } from "effect"
 
 export class Service extends Context.Service<Service, EventV2.Interface>()("@opencode/EventV2Bridge") {}
 
@@ -19,6 +19,18 @@ const layer = Layer.effect(
     const publish: EventV2.Interface["publish"] = (definition, data, options) =>
       Effect.gen(function* () {
         if (options?.location) return yield* events.publish(definition, data, options)
+        const location = Option.getOrUndefined(yield* Effect.serviceOption(Location.Service))
+        if (location)
+          return yield* events.publish(definition, data, {
+            ...options,
+            location: new Location.Info({
+              target: location.target,
+              directory: location.directory,
+              workspaceID: location.workspaceID,
+              lastKnownTargetName: location.lastKnownTargetName,
+              project: location.project,
+            }),
+          })
         const ctx = yield* InstanceRef
         if (!ctx) return yield* events.publish(definition, data, options)
         const workspaceID = yield* WorkspaceRef

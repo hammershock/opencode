@@ -5,6 +5,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Command } from "@/command"
 import { Permission } from "@/permission"
 import { SessionShare } from "@/share/session"
+import { Location } from "@opencode-ai/core/location"
 import { Session } from "@/session/session"
 import { SessionCompaction } from "@/session/compaction"
 import { MessageV2 } from "@/session/message-v2"
@@ -154,7 +155,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {
-      return yield* shareSvc.create(ctx.payload)
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const targetID = request.headers["x-opencode-target"]
+      return yield* shareSvc.create({
+        ...ctx.payload,
+        target: targetID
+          ? Location.RexdTarget.make({ type: "rexd", targetID: Location.TargetID.make(targetID) })
+          : undefined,
+      })
     })
 
     const createRaw = Effect.fn("SessionHttpApi.createRaw")(function* (ctx: {

@@ -56,26 +56,16 @@ export class RexdFiles {
 
   async read(value: string, cwd: string, signal?: AbortSignal) {
     const target = this.resolve(value, cwd)
-    const chunks: Uint8Array[] = []
-    const size = 512 * 1024
-    let offset = 0
-    let mtime: number | undefined
-    while (true) {
-      const result = Schema.decodeUnknownSync(Read)(
-        await this.lease.client.request(
-          "fs.read",
-          { session_id: this.lease.handshake.sessionID, path: target, offset, length: size, encoding: "base64" },
-          { signal },
-        ),
-      )
-      if (mtime !== undefined && result.mtime !== mtime) throw new Error(`Remote file changed while reading: ${target}`)
-      mtime = result.mtime
-      const chunk = Buffer.from(result.content, result.encoding)
-      chunks.push(chunk)
-      offset += chunk.length
-      if (!result.truncated || offset >= result.size) return { content: Buffer.concat(chunks), mtime }
-      if (!chunk.length) throw new Error(`Remote file read made no progress: ${target}`)
-    }
+    const result = Schema.decodeUnknownSync(Read)(
+      await this.lease.client.request(
+        "fs.read",
+        { session_id: this.lease.handshake.sessionID, path: target },
+        { signal },
+      ),
+    )
+    if (result.truncated)
+      throw new Error(`Remote file exceeds the negotiated Rexd read limit and cannot be read safely: ${target}`)
+    return { content: Buffer.from(result.content, result.encoding), mtime: result.mtime }
   }
 
   async list(value: string, cwd: string, recursive = false) {

@@ -11,6 +11,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { Location } from "@opencode-ai/core/location"
 import * as SessionExecutionLocal from "@opencode-ai/core/session/execution/local"
 import { locationServiceMapLayer } from "@opencode-ai/core/location-services"
 
@@ -227,6 +228,8 @@ export const Info = Schema.Struct({
   projectID: ProjectV2.ID,
   workspaceID: optional(WorkspaceV2.ID),
   directory: Schema.String,
+  target: optional(Location.Target),
+  lastKnownTargetName: optional(Schema.String),
   path: optional(Schema.String),
   parentID: optional(SessionID),
   summary: optional(Summary),
@@ -269,6 +272,10 @@ export const CreateInput = Schema.optional(
   }),
 )
 export type CreateInput = Types.DeepMutable<Schema.Schema.Type<typeof CreateInput>>
+export type CreateOptions = CreateInput & {
+  target?: Location.Target
+  lastKnownTargetName?: string
+}
 
 export const ForkInput = Schema.Struct({
   sessionID: SessionID,
@@ -421,6 +428,8 @@ export interface Interface {
     metadata?: typeof Metadata.Type
     permission?: PermissionV1.Ruleset
     workspaceID?: WorkspaceV2.ID
+    target?: Location.Target
+    lastKnownTargetName?: string
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
@@ -504,6 +513,8 @@ const layer: Layer.Layer<
       parentID?: SessionID
       workspaceID?: WorkspaceV2.ID
       directory: string
+      target?: Location.Target
+      lastKnownTargetName?: string
       path?: string
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
@@ -515,6 +526,8 @@ const layer: Layer.Layer<
         version: InstallationVersion,
         projectID: ctx.project.id,
         directory: input.directory,
+        target: input.target,
+        lastKnownTargetName: input.lastKnownTargetName,
         path: input.path,
         workspaceID: input.workspaceID,
         parentID: input.parentID,
@@ -672,12 +685,17 @@ const layer: Layer.Layer<
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
       workspaceID?: WorkspaceV2.ID
+      target?: Location.Target
+      lastKnownTargetName?: string
     }) {
       const ctx = yield* InstanceState.context
       const workspace = yield* InstanceState.workspaceID
+      const location = Option.getOrUndefined(yield* Effect.serviceOption(Location.Service))
       return yield* createNext({
         parentID: input?.parentID,
         directory: ctx.directory,
+        target: input?.target ?? location?.target,
+        lastKnownTargetName: input?.lastKnownTargetName ?? location?.lastKnownTargetName,
         path: sessionPath(ctx.worktree, ctx.directory),
         title: input?.title,
         agent: input?.agent,

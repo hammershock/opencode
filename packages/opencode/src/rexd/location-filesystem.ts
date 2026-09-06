@@ -5,6 +5,7 @@ import { FileSystemSearch } from "@opencode-ai/core/filesystem/search"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { RelativePath } from "@opencode-ai/core/schema"
 import { Effect, FileSystem as PlatformFileSystem, Layer, Option } from "effect"
+import * as PlatformError from "effect/PlatformError"
 import fuzzysort from "fuzzysort"
 import { RexdFiles } from "./location-files"
 import { RexdLocationSession } from "./location-session"
@@ -119,7 +120,17 @@ export function rexdFilesystemNodes(
             ),
           )
         const read = (value: string) =>
-          Effect.promise(() => files.read(value, directory)).pipe(Effect.map((x) => x.content))
+          Effect.tryPromise({
+            try: () => files.read(value, directory),
+            catch: (cause) =>
+              PlatformError.systemError({
+                _tag: cause instanceof Error && cause.message.includes("no such file") ? "NotFound" : "Unknown",
+                module: "FileSystem",
+                method: "readFile",
+                pathOrDescriptor: value,
+                cause,
+              }),
+          }).pipe(Effect.map((x) => x.content))
         const write = (value: string, content: Uint8Array) =>
           Effect.promise(() => files.write(value, directory, content))
         const ensure = (value: string) =>

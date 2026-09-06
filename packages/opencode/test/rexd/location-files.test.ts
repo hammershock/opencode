@@ -51,25 +51,27 @@ describe("Rexd Location filesystem boundary", () => {
     expect(called).toBe(false)
   })
 
-  test("detects mid-read mutation instead of combining inconsistent chunks", async () => {
-    let offset = 0
+  test("rejects truncated reads without using unsupported offset pagination", async () => {
+    const calls: Readonly<Record<string, unknown>>[] = []
     const lease = {
       handshake: { sessionID: "session-1", workspaceRoots: ["/"] },
       client: {
-        async request() {
-          const first = offset++ === 0
+        async request(_method: string, params: Readonly<Record<string, unknown>>) {
+          calls.push(params)
           return {
             path: "/large",
             size: 600_000,
-            mtime: first ? 1 : 2,
+            mtime: 1,
             encoding: "base64",
-            content: Buffer.alloc(first ? 512 * 1024 : 1).toString("base64"),
-            truncated: first,
+            content: Buffer.alloc(512 * 1024).toString("base64"),
+            truncated: true,
           }
         },
       },
     } as unknown as RexdLease
 
-    await expect(new RexdFiles("gpu", lease).read("/large", "/")).rejects.toThrow("changed while reading")
+    await expect(new RexdFiles("gpu", lease).read("/large", "/")).rejects.toThrow("negotiated Rexd read limit")
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).not.toHaveProperty("offset")
   })
 })

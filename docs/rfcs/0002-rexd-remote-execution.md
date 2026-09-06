@@ -28,7 +28,9 @@ Rexd 是 OpenCode 内建的远程执行实现，不作为 OpenCode 插件加载�
 
 OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当前架构已经使用 `Location.Ref`、`LocationServiceMap` 和 Location-scoped services 表示会话的工作位置，但 `Location.Ref` 目前只能区分目录和 workspace，不能表达本地与远程执行 target。
 
-归档中的旧实现证明了 Rexd 工作流的可行性，同时也暴露了不可继续沿用的问题：target 状态主要由 TUI 保存，Shell、文件和工具执行存在各自的远程分流逻辑，执行位置没有成为统一的核心概念。本 RFC 只保留产品需求，不继承旧实现的结构。
+归档中的早期 `remote-opencode-dev` 实现曾由 TUI 保存 target 状态并分别处理远程执行。后续 `rexd-integration` 分支已经完成一次架构重构，验证了 `LocationServiceMap`、内建 Rexd provider、Server target API 和 QuickStart picker 这一分层方案的可行性。
+
+`rexd-integration` 是实现证据而不是本 RFC 的规范来源。新实现可以复用它的架构经验和测试场景，但必须针对当前 upstream 与本 RFC 重新实现；尤其不能直接继承其中未强制检查 capabilities、未替换全部 Location services、覆盖用户 Rexd 安装位置或依赖隐式 transport cleanup 的行为。
 
 ## 目标
 
@@ -40,7 +42,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
    - 所选 target 上的工作目录。
 5. OpenCode 的启动目录只可作为本地目录的初始建议，不再是新会话不可选择的隐式工作位置。
 6. 本地执行继续使用同一套 Location 接口，未启用远程 target 时保持现有行为。
-7. `/target` command family 使用 RFC-0003 的 Core command toolkit 注册和执行，不在 TUI prompt 组件中硬编码解析。
+7. QuickStart 直接调用结构化 target domain API，不要求用户通过 `/target` 创建新会话。
 
 ## 非目标
 
@@ -54,9 +56,10 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 - 容器编排；
 - Rexd 插件兼容层；
 - QuickStart 之外的完整 target 管理界面；
-- 自动安装、升级或管理远端 Rexd daemon；
+- 任意版本升级、后台自动更新或管理用户自行安装的 Rexd daemon；
 - Web App 和 Desktop 的远程 target 选择界面。
 - Shell 持久化、补全、环境继承或 `.env` 加载语义。
+- 运行中 Session 的 `/target` 切换；该能力如需实现，必须作为默认关闭的实验功能另行规定事务和失败语义。
 
 ## 用户流程
 
@@ -82,7 +85,9 @@ Target 表示执行发生在哪台机器上：
 TargetRef = local | rexd(targetID)
 ```
 
-`targetID` 引用本机已有的 Rexd/SSH target 配置。凭据、SSH 配置和连接细节不写入 Session；Session 只持久化稳定的 target 引用。
+`targetID` 是设备本地 target 配置中的稳定名称。target 配置保存连接方式、host、port、user、identity、SSH options、Rexd 启动方式以及可选的默认目录；凭据、SSH 配置和连接细节不写入 Session。
+
+target 名称一旦被 Session 引用即视为稳定标识。重命名必须保留旧名称的显式 alias 或执行可审计迁移，不能让历史 Session 静默指向另一个主机。
 
 ### Location
 
@@ -96,7 +101,7 @@ LocationRef {
 }
 ```
 
-其中 `directory` 必须属于 `target` 的文件系统。相同的目录字符串位于不同 target 时，是两个不同的 Location。
+其中 `directory` 是在对应 target 上验证并规范化后的绝对路径。它表示 Session Location directory，不等同于 RFC-0004 中 User Shell 自己维护的可变 `$PWD`。相同的目录字符串位于不同 target 时，是两个不同的 Location。
 
 为了兼容已有本地 Session，缺少 target 的历史 Location 按 `local` 解释。新代码不得依靠进程当前目录推断一个已经创建的 Session 的执行位置。
 
@@ -126,7 +131,9 @@ local target -> Local Location services
 rexd target  -> Rexd Location services over SSH
 ```
 
-Rexd provider 至少为远程 Location 提供与工作区有关的进程、文件系统、搜索、监听和 PTY 能力。上层调用方只依赖 Core service contract，不包含 `if remote`、SSH 命令或 Rexd RPC 分支。
+Rexd provider 至少为远程 Location 提供与工作区有关的进程、文件系统、搜索和 PTY 能力；文件监听遵循本 RFC 的可选 watcher 规则。上层调用方只依赖 Core service contract，不包含 `if remote`、SSH 命令或 Rexd RPC 分支。
+
+远端缺少某项可选能力时，对应 service 必须显式报告 unavailable 或使用本 RFC 允许的远端降级实现；绝不能继续实例化访问控制设备文件系统或进程的 local service。
 
 ### 3. Rexd 是内建 provider
 
@@ -177,16 +184,101 @@ gpu-server · /data/project
 - 执行中连接中断：当前操作以明确的远程执行错误结束；不得报告为本地成功。
 - OpenCode 无法确定远端进程是否已经执行：报告结果未知，不自动重复可能有副作用的操作。
 
+## Rexd 协议边界
+
+### 基线协议与能力协商
+
+OpenCode 通过 SSH stdio 使用 Rexd JSON-RPC，并以 `session.open` 返回的协议版本、server version、capabilities、limits 和 workspace roots 为服务端事实来源。本机 target 配置可以声明期望能力，但不能伪造服务端能力。
+
+一个远程 Location 激活前必须确认：
+
+- protocol 与本实现支持的 `rexd/1` 基线兼容；
+- `exec`、`fs`、`events` 和 `pty` capabilities 均可用；
+- daemon 返回至少一个允许所选 directory 的 workspace root；
+- 服务端 limits 可以支持 OpenCode 本次操作，客户端请求只能在 limits 以内进一步收紧。
+
+`http` capability 不是 SSH stdio profile 的要求。能力不满足时，QuickStart 显示缺失项并拒绝创建 Session。
+
+Rexd v1 没有稳定的文件监听方法。远程 Location 的 watcher 因此是可选能力：不得监听控制设备上的同名路径；没有远端原生 watcher 时，可以明确禁用，或由 Location adapter 使用有界、可取消且带退避的轮询。轮询不是 Rexd wire protocol 的一部分，也不能影响 Shell、文件和 Agent 工具的正确远程路由。
+
+### 方法映射
+
+OpenCode Core 只依赖 Location services，Rexd adapter 负责映射：
+
+```text
+process/shell  -> exec.start + exec events + exec.kill/wait
+file read      -> fs.stat + fs.read
+file mutation  -> fs.write + fs.edit/fs.patch
+search/list    -> fs.list + fs.glob，必要时使用受控 remote exec
+terminal PTY   -> pty.open/input/resize/close + pty events
+```
+
+上层工具不得直接构造 Rexd method 名称。adapter 必须验证响应 schema、事件所属 session/process、单调序号、输出上限和结构化错误码。
+
+## Managed daemon 准备
+
+自动准备与安装基线 Rexd daemon 是本 RFC 的核心职责。默认实现使用 OpenCode 自己的版本化目录和最小配置，不覆盖用户安装的 `rexd` binary 或 `~/.config/rexd`：
+
+```text
+remote data dir/opencode/rexd/<baseline-version>/rexd
+remote config dir/opencode/rexd/config.toml
+```
+
+远端目录的具体展开遵循检测到的平台约定，不能假设所有 target 都是 Linux `/home/<user>`。
+
+准备事务按以下顺序执行：
+
+```text
+建立 SSH
+  -> 检测 OS、architecture、HOME 与所需基础工具
+  -> 检查 OpenCode 管理的基线 binary
+  -> 缺失时下载对应固定版本并校验 checksum
+  -> 原子安装并生成最小配置
+  -> 启动 SSH stdio transport
+  -> session.open 握手
+  -> 校验版本、capabilities、limits 和 roots
+  -> 验证 directory
+```
+
+实现必须满足：
+
+- 安装 manifest 固定 daemon 版本、各平台 artifact 和 checksum，不解析 `latest`；
+- 不使用 `sudo`，不修改系统级 service，不覆盖用户管理的 binary/config；
+- 并发准备同一 target 时使用远端锁或等价的原子机制；
+- 下载、校验或替换失败时保留此前完整可用的 managed baseline；
+- 已配置的显式 Rexd command 只有在握手满足本 RFC 时才可使用；
+- unsupported platform、SSH authentication、缺少工具、下载、checksum、install、launch、handshake、capability 和 directory validation 分别产生可识别的错误阶段；
+- QuickStart 显示可操作的摘要，诊断日志保留经脱敏的底层 stderr 和阶段信息。
+
+“尽力而为”表示实现应检测环境并自动完成安全、无特权的准备；不表示可以忽略校验、修改系统环境或在失败后本地回退。
+
+## 连接与 Session 生命周期
+
+持久的 OpenCode Session 与临时的 Rexd protocol session 相互独立：OpenCode Session 只保存 target 名称和 directory；Rexd `session_id`、SSH process 与 negotiated state 都是当前 OpenCode 进程的运行时资源，不写入数据库或同步数据。
+
+1. 远程 Location 首次使用时按需建立一个 connection lease，完成 `session.open` 后供该 Location 的文件、进程和 PTY services 复用。
+2. 不为每次工具调用重新建立 SSH。JSON-RPC transport 可以并发复用，但必须按 request、process、PTY 和 session 正确分发响应与事件。
+3. 正常释放时先停止或关闭该 lease 所属的非 detached process/PTY，调用 `session.close`，再关闭 SSH transport。
+4. 本 RFC 禁止创建 detached remote process；OpenCode Session 的持久化不能被误解为远端进程托管。
+5. 存在运行中 process、等待中的请求或活跃 PTY 时，lease 不得被 idle eviction 回收。空闲 lease 可以按实现策略回收。
+6. transport 意外断开时，该 lease 立即失效；当前操作返回远程断线错误。无法确认是否产生副作用时标记 outcome unknown，禁止自动重试。
+7. 后续新操作可以创建新 lease 和新的 Rexd `session_id`，但必须重新握手并重新验证原 target 与 directory。只读操作是否自动重试由调用方显式决定，adapter 不做透明重试。
+8. OpenCode 正常退出时尽力执行 graceful close；异常退出依赖 SSH stdio 断开和 Rexd 清理非 detached 子进程。实现必须用测试确认不会遗留专用 SSH、Rexd、process 或 PTY。
+9. 一个 lease 的故障不得使同 target 的其他 OpenCode Session 静默切换本地，也不得破坏不共享该 lease 的 Location。
+
 ## 安全边界
 
 - SSH 凭据和 target 连接配置保留在控制设备本地，不写入 Session 或模型上下文。
 - 日志和工具输出不得包含私钥或认证材料。
 - Rexd target 未通过验证前，不得创建绑定该 target 的 Session。
 - 不自动接受未知 SSH 主机身份。
+- managed daemon 下载必须经过固定 checksum 校验；配置文件权限应限制为远端用户可读写。
+- workspace roots 约束 Rexd filesystem RPC 和 command cwd，但不构成对任意 Shell 命令的完整 sandbox；UI 与文档不得把它描述成主机隔离。
 
 ## 兼容性
 
 - 没有显式 target 的历史 Session 视为 local。
+- 恢复远程 Session 时，当前设备找不到同名 target、连接失败或历史 directory 不再有效，Session 保持 unresolved 并展示错误；不得静默改为 local、默认 target 或默认目录。
 - 选择 local 时，现有 Shell、文件、PTY 和 Agent 工具行为保持不变。
 - 公共 Schema 或 HttpApi 发生变化后，必须通过仓库生成脚本更新 Client/SDK，不得直接编辑 generated 文件。
 - 本 RFC 不保证旧归档分支中的 Rexd 数据或 TUI 状态可以直接迁移。
@@ -201,8 +293,8 @@ gpu-server · /data/project
 
 ### 阶段二：Rexd provider
 
-- 实现通过 SSH 使用 Rexd 的 Location services。
-- 覆盖进程、文件、搜索、监听和 PTY 的核心路径。
+- 实现 managed daemon prepare、SSH stdio、握手、capability/limit 校验和连接 lease。
+- 覆盖进程、文件、搜索和 PTY 的核心路径；远程 watcher 按本 RFC 显式禁用或有界降级。
 - 对 local 与 Rexd provider 运行共同的 contract tests。
 
 ### 阶段三：统一执行入口
@@ -218,29 +310,6 @@ gpu-server · /data/project
 - 选择或补全所选 target 上的目录。
 - 在验证 Location 后原子地创建 Session 并提交 prompt。
 
-### 阶段五：Target command family
-
-- 通过 RFC-0003 toolkit 注册 `/target` group 及其叶子命令。
-- 复用 QuickStart 和 Location provider 已使用的 target 查询、验证与选择 services。
-- TUI、Web/Desktop 或其他客户端只负责呈现交互，不持有独立 target 业务逻辑。
-- 在本 RFC 接受前确定具体子命令集合；不从旧归档直接复制字符串分支实现。
-
-## 验收条件
-
-以下条件全部满足后，本 RFC 才能标记为 `implemented`：
-
-1. QuickStart 可以选择 local target 和本地目录，并在该目录创建 Session。
-2. QuickStart 可以选择已配置的 Rexd target，并从远端查询和选择目录。
-3. 在远程 Session 中执行用户 Shell 命令（例如 `pwd`）返回远端结果。
-4. 在尚未改变 User Shell 状态时，让 Agent 在同一 Session 调用 Shell，两者都以 Session Location 的远端目录启动。
-5. Agent 读取、写入、搜索文件时只访问远端工作目录。
-6. PTY 和文件监听等已纳入范围的 Location 能力不访问本机对应路径。
-7. 断开远程连接后，操作明确失败且没有在本机执行。
-8. target 或目录验证失败时，不创建 Session，QuickStart prompt 不丢失。
-9. local Session 的现有相关测试保持通过。
-10. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。
-11. `/target` 通过 RFC-0003 toolkit 工作，且通用 prompt/autocomplete 组件中没有 target-specific dispatch。
-
 ## 实现约束
 
 - 不从归档仓库整块复制旧实现；只允许复用经重新审查的协议、算法或测试场景。
@@ -248,3 +317,17 @@ gpu-server · /data/project
 - 不在 TUI 中持有一套独立于 Core/Session 的执行位置事实来源。
 - 不把远程判断散布到各个工具实现中。
 - 不在本 RFC 的实现 PR 中加入非目标功能。
+
+## 验收条件
+
+以下条件全部满足后，本 RFC 才能标记为 `implemented`：
+
+1. QuickStart 可以选择 local 或已配置 target，并完成远端目录补全、验证和原子 Session 创建；整个流程不依赖 `/target`，失败时保留尚未提交的 prompt。
+2. Session 持久数据只包含稳定 target 名称和规范化 directory，连接配置与运行时 Rexd session 不进入 Session 或同步数据。
+3. managed daemon 的支持平台安装、已安装复用、并发准备、checksum 失败和 unsupported platform 均有测试。
+4. 握手强制检查 protocol、server version、`exec`、`fs`、`events`、`pty`、limits 和 workspace roots。
+5. User Shell、Agent process、read/write/edit/patch/list/glob/search 与 Terminal PTY 均通过同一个远程 Location；测试证明没有访问控制设备的同名路径。
+6. graceful close、transport crash、超时、中断、OpenCode 退出和重新连接均有 lifecycle 测试；副作用不明的操作不会透明重试。
+7. target 缺失、认证失败、安装失败、握手失败、能力不足和 directory 失效均产生分阶段、可展示且经过脱敏的错误，不回退本地。
+8. local Location 与没有 target 的历史 Session 保持 upstream 行为。
+9. 所有受影响 package 的 typecheck 和定向测试通过，生成代码与公共 API 一致。

@@ -233,14 +233,22 @@ const layer = Layer.effectDiscard(
         }
       }),
     )
-    yield* events.project(SessionV1.Event.Updated, (event) =>
-      db
+    yield* events.project(SessionV1.Event.Updated, (event) => {
+      const {
+        directory: _directory,
+        target: _target,
+        last_known_target_name: _lastKnownTargetName,
+        workspace_id: _workspaceID,
+        path: _path,
+        ...metadata
+      } = sessionRow(event.data.info)
+      return db
         .update(SessionTable)
-        .set(sessionRow(event.data.info))
+        .set(metadata)
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
-        .pipe(Effect.orDie),
-    )
+        .pipe(Effect.orDie)
+    })
     yield* events.project(SessionEvent.Moved, (event) =>
       Effect.gen(function* () {
         yield* db
@@ -269,7 +277,9 @@ const layer = Layer.effectDiscard(
           location_revision: event.data.revision,
           time_updated: DateTime.toEpochMillis(event.data.timestamp),
         })
-        .where(and(eq(SessionTable.id, event.data.sessionID), eq(SessionTable.location_revision, event.data.revision - 1)))
+        .where(
+          and(eq(SessionTable.id, event.data.sessionID), eq(SessionTable.location_revision, event.data.revision - 1)),
+        )
         .run()
         .pipe(Effect.orDie),
     )

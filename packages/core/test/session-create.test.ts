@@ -156,7 +156,15 @@ describe("SessionV2.create", () => {
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const events = yield* EventV2.Service
-      const input = { id, location }
+      const remote = Location.Ref.make({
+        target: Location.RexdTarget.make({
+          type: "rexd",
+          targetID: Location.TargetID.make("013ea0a8-4523-4d39-a609-552222340b19"),
+        }),
+        directory: location.directory,
+        lastKnownTargetName: "gpu",
+      })
+      const input = { id, location: remote }
       const created = yield* session.create(input)
 
       yield* events.publish(SessionV1.Event.Updated, {
@@ -173,7 +181,7 @@ describe("SessionV2.create", () => {
         }),
       })
 
-      expect(yield* session.create(input)).toMatchObject({ id, agent: "build" })
+      expect(yield* session.create(input)).toMatchObject({ id, agent: "build", location: remote })
     }),
   )
 

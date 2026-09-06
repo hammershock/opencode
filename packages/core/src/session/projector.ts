@@ -8,12 +8,14 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SessionEvent } from "./event"
 import { SessionV1 } from "../v1/session"
 import { WorkspaceTable } from "../control-plane/workspace.sql"
+import { ProjectTable } from "../project/sql"
+import { ProjectV2 } from "../project"
 import { SessionMessage } from "./message"
 import { SessionMessageUpdater } from "./message-updater"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
 import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable } from "./sql"
-import type { DeepMutable } from "../schema"
+import { AbsolutePath, type DeepMutable } from "../schema"
 
 type DatabaseService = Database.Interface["db"]
 
@@ -215,6 +217,19 @@ const layer = Layer.effectDiscard(
     const { db } = yield* Database.Service
     yield* events.project(SessionV1.Event.Created, (event) =>
       Effect.gen(function* () {
+        // A synced Session may arrive before this device has ever resolved its
+        // project. Materialize the minimum parent row required by the Session
+        // foreign key; normal project discovery can enrich it later.
+        yield* db
+          .insert(ProjectTable)
+          .values({
+            id: ProjectV2.ID.make(event.data.info.projectID),
+            worktree: AbsolutePath.make(event.data.info.directory),
+            sandboxes: [],
+          })
+          .onConflictDoNothing()
+          .run()
+          .pipe(Effect.orDie)
         const stored = yield* db
           .insert(SessionTable)
           .values(sessionRow(event.data.info))

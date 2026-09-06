@@ -63,6 +63,8 @@ import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
+import { TargetRegistry } from "@opencode-ai/core/target-registry"
+import { Reference } from "@opencode-ai/core/reference"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -151,6 +153,7 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const locations = yield* LocationServiceMap.Service
+    const targetRegistry = yield* TargetRegistry.Service
     const { db } = database
     const sessionLocation = Effect.fn("SessionPrompt.sessionLocation")(function* (sessionID: SessionID) {
       const row = yield* db
@@ -1120,6 +1123,29 @@ const layer = Layer.effect(
         let structured: unknown
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+        const loopLocation = yield* sessionLocation(sessionID)
+        const locationLayer = locations.get(loopLocation)
+        const locationRegistry = yield* ToolRegistry.Service.pipe(
+          Effect.provide(locationLayer),
+          Effect.provideService(FSUtil.Service, fsys),
+          Effect.provideService(ToolRegistry.Service, registry),
+          Effect.provideService(TargetRegistry.Service, targetRegistry),
+          Effect.provideService(LocationServiceMap.Service, locations),
+        )
+        const locationFilesystem = yield* FSUtil.Service.pipe(
+          Effect.provide(locationLayer),
+          Effect.provideService(FSUtil.Service, fsys),
+          Effect.provideService(ToolRegistry.Service, registry),
+          Effect.provideService(TargetRegistry.Service, targetRegistry),
+          Effect.provideService(LocationServiceMap.Service, locations),
+        )
+        const locationReference = yield* Reference.Service.pipe(
+          Effect.provide(locationLayer),
+          Effect.provideService(FSUtil.Service, fsys),
+          Effect.provideService(ToolRegistry.Service, registry),
+          Effect.provideService(TargetRegistry.Service, targetRegistry),
+          Effect.provideService(LocationServiceMap.Service, locations),
+        )
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
@@ -1215,8 +1241,8 @@ const layer = Layer.effect(
           const isLastStep = step >= maxSteps
           msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
             Effect.provideService(RuntimeFlags.Service, flags),
-            Effect.provideService(FSUtil.Service, fsys),
             Effect.provideService(Session.Service, sessions),
+            Effect.provideService(FSUtil.Service, locationFilesystem),
           )
 
           const msg: SessionV1.Assistant = {
@@ -1270,7 +1296,7 @@ const layer = Layer.effect(
             }).pipe(
               Effect.provideService(Plugin.Service, plugin),
               Effect.provideService(Permission.Service, permission),
-              Effect.provideService(ToolRegistry.Service, registry),
+              Effect.provideService(ToolRegistry.Service, locationRegistry),
               Effect.provideService(MCP.Service, mcp),
               Effect.provideService(Truncate.Service, truncate),
               Effect.provideService(RuntimeFlags.Service, flags),
@@ -1290,14 +1316,13 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const promptLocation = yield* sessionLocation(sessionID)
             const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
-              sys.environment(model),
-              instruction.system().pipe(Effect.orDie),
+              sys.environment(model).pipe(Effect.provideService(Reference.Service, locationReference)),
+              instruction.system(locationFilesystem).pipe(Effect.orDie),
               sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
-            ]).pipe(Effect.provide(locations.get(promptLocation)))
+            ])
             const system = [
               ...env,
               ...instructions,
@@ -1717,6 +1742,7 @@ export const node = LayerNode.make({
     Database.node,
     UserShellRuntime.node,
     LocationServiceMap.node,
+    TargetRegistry.node,
   ],
 })
 

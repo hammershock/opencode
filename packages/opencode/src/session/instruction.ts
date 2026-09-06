@@ -33,14 +33,14 @@ function extract(messages: SessionV1.WithParts[]) {
 
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
-  readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error, FSUtil.Service>
-  readonly system: () => Effect.Effect<string[], FSUtil.Error, FSUtil.Service>
-  readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error, FSUtil.Service>
+  readonly systemPaths: (filesystem?: FSUtil.Interface) => Effect.Effect<Set<string>, FSUtil.Error>
+  readonly system: (filesystem?: FSUtil.Interface) => Effect.Effect<string[], FSUtil.Error>
+  readonly find: (dir: string, filesystem?: FSUtil.Interface) => Effect.Effect<string | undefined, FSUtil.Error>
   readonly resolve: (
     messages: SessionV1.WithParts[],
     filepath: string,
     messageID: MessageID,
-  ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error, FSUtil.Service>
+  ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Instruction") {}
@@ -53,7 +53,7 @@ const layer: Layer.Layer<
   Service,
   Effect.gen(function* () {
     const cfg = yield* Config.Service
-    const localFs = yield* FSUtil.Service
+    const fs = yield* FSUtil.Service
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
     const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
@@ -76,22 +76,21 @@ const layer: Layer.Layer<
       ),
     )
 
-    const relative = Effect.fnUntraced(function* (instruction: string) {
-      const fs = yield* FSUtil.Service
+    const relative = Effect.fnUntraced(function* (instruction: string, filesystem: FSUtil.Interface = fs) {
       const ctx = yield* InstanceState.context
       if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-        return yield* fs
+        return yield* filesystem
           .globUp(instruction, ctx.directory, ctx.worktree)
           .pipe(Effect.catch(() => Effect.succeed([] as string[])))
       }
-      return yield* fs
+      return yield* filesystem
         .globUp(instruction, global.config, global.config)
         .pipe(Effect.catch(() => Effect.succeed([] as string[])))
     })
 
-    const read = Effect.fnUntraced(function* (filepath: string) {
-      const fs = filepath.startsWith(global.config + path.sep) ? localFs : yield* FSUtil.Service
-      return yield* fs.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
+    const read = Effect.fnUntraced(function* (filepath: string, filesystem: FSUtil.Interface = fs) {
+      const selected = filepath.startsWith(global.config + path.sep) ? fs : filesystem
+      return yield* selected.readFileString(filepath).pipe(Effect.catch(() => Effect.succeed("")))
     })
 
     const fetch = Effect.fnUntraced(function* (url: string) {
@@ -109,14 +108,13 @@ const layer: Layer.Layer<
       s.claims.delete(messageID)
     })
 
-    const systemPaths = Effect.fn("Instruction.systemPaths")(function* () {
-      const fs = yield* FSUtil.Service
+    const systemPaths = Effect.fn("Instruction.systemPaths")(function* (filesystem: FSUtil.Interface = fs) {
       const config = yield* cfg.get()
       const ctx = yield* InstanceState.context
       const paths = new Set<string>()
 
       for (const file of globalFiles) {
-        if (yield* localFs.existsSafe(file)) {
+        if (yield* fs.existsSafe(file)) {
           paths.add(path.resolve(file))
           break
         }
@@ -125,7 +123,7 @@ const layer: Layer.Layer<
       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
       if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
         for (const file of instructionFiles) {
-          const matches = yield* fs
+          const matches = yield* filesystem
             .findUp(file, ctx.directory, ctx.worktree)
             .pipe(Effect.catch(() => Effect.succeed([])))
           if (matches.length > 0) {
@@ -141,12 +139,12 @@ const layer: Layer.Layer<
           const instruction = raw.startsWith("~/") ? path.join(global.home, raw.slice(2)) : raw
           const matches = yield* (
             path.isAbsolute(instruction)
-              ? fs.glob(path.basename(instruction), {
+              ? filesystem.glob(path.basename(instruction), {
                   cwd: path.dirname(instruction),
                   absolute: true,
                   include: "file",
                 })
-              : relative(instruction)
+              : relative(instruction, filesystem)
           ).pipe(Effect.catch(() => Effect.succeed([] as string[])))
           matches.forEach((item) => paths.add(path.resolve(item)))
         }
@@ -155,14 +153,14 @@ const layer: Layer.Layer<
       return paths
     })
 
-    const system = Effect.fn("Instruction.system")(function* () {
+    const system = Effect.fn("Instruction.system")(function* (filesystem: FSUtil.Interface = fs) {
       const config = yield* cfg.get()
-      const paths = yield* systemPaths()
+      const paths = yield* systemPaths(filesystem)
       const urls = (config.instructions ?? []).filter(
         (item) => item.startsWith("https://") || item.startsWith("http://"),
       )
 
-      const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
+      const files = yield* Effect.forEach(Array.from(paths), (file) => read(file, filesystem), { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
 
       return [
@@ -171,11 +169,10 @@ const layer: Layer.Layer<
       ]
     })
 
-    const find = Effect.fn("Instruction.find")(function* (dir: string) {
-      const fs = yield* FSUtil.Service
+    const find = Effect.fn("Instruction.find")(function* (dir: string, filesystem: FSUtil.Interface = fs) {
       for (const file of instructionFiles) {
         const filepath = path.resolve(path.join(dir, file))
-        if (yield* fs.existsSafe(filepath)) return filepath
+        if (yield* filesystem.existsSafe(filepath)) return filepath
       }
       return undefined
     })

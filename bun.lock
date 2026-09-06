@@ -156,6 +156,15 @@
         "@typescript/native-preview": "catalog:",
       },
     },
+    "packages/command-kit": {
+      "name": "@opencode-ai/command-kit",
+      "version": "1.18.29",
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
     "packages/console/app": {
       "name": "@opencode-ai/console-app",
       "version": "1.18.29",
@@ -1948,6 +1957,8 @@
     "@opencode-ai/client": ["@opencode-ai/client@workspace:packages/client"],
 
     "@opencode-ai/codemode": ["@opencode-ai/codemode@workspace:packages/codemode"],
+
+    "@opencode-ai/command-kit": ["@opencode-ai/command-kit@workspace:packages/command-kit"],
 
     "@opencode-ai/console-app": ["@opencode-ai/console-app@workspace:packages/console/app"],
 

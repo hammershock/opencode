@@ -45,6 +45,22 @@ export interface MetadataProjector {
   readonly apply: (metadata: readonly Metadata[], deviceID: SyncEvent.DeviceID) => Effect.Effect<void, unknown>
 }
 
+/**
+ * Optional bridge for Session payloads which are stored separately from the
+ * encrypted event stream.  Runtime owns ordering: object upload happens
+ * before segment commit; GC runs only after every active device acknowledged
+ * every observed segment.
+ */
+export interface AttachmentPipeline {
+  readonly externalize: (event: SyncEvent.Envelope) => Promise<SyncEvent.Envelope>
+  readonly references: (value: unknown) => ReadonlySet<string>
+  readonly collect: (input: {
+    readonly liveObjectIDs: ReadonlySet<string>
+    readonly allActiveDevicesAcknowledged: boolean
+    readonly signal?: AbortSignal
+  }) => Promise<unknown>
+}
+
 export function make(input: {
   readonly config: { readonly deviceID: SyncEvent.DeviceID; readonly deviceName?: string; readonly enabled: boolean }
   readonly rootKey: Uint8Array
@@ -56,6 +72,7 @@ export function make(input: {
   readonly acknowledged?: () => Effect.Effect<Readonly<Record<string, number>>, unknown>
   readonly revoked?: () => Effect.Effect<readonly SyncEvent.DeviceID[], unknown>
   readonly deviceProjector?: (head: Head) => Effect.Effect<void, unknown>
+  readonly attachment?: AttachmentPipeline
   readonly now?: () => number
   readonly owner?: string
 }) {
@@ -66,6 +83,7 @@ export function make(input: {
   let pullFlight: Promise<void> | undefined
   let hydrateFlight: Promise<void> | undefined
   let indexedHeads: readonly Head[] = []
+  let localHead: Head | undefined
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
   const projector = (deviceID: SyncEvent.DeviceID) => {
     if (typeof input.projector !== "function") return input.projector
@@ -84,12 +102,13 @@ export function make(input: {
     try {
       const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
       if (segment) {
+        const wire = input.attachment ? await externalizeSegment(segment, input.attachment) : segment
         const path = segmentPath(segment.deviceID, segment.generation)
         const bytes = await encrypt(
           "event",
           input.rootKey,
           segmentContext(segment.deviceID, segment.generation, path),
-          segment,
+          wire,
         )
         const existing = await input.provider.stat(path, signal)
         if (existing) {
@@ -101,7 +120,7 @@ export function make(input: {
             segmentContext(segment.deviceID, segment.generation, path),
             downloaded.bytes,
           )
-          if (JSON.stringify(committed) !== JSON.stringify(segment)) throw new Error("Remote segment conflict")
+          if (JSON.stringify(committed) !== JSON.stringify(wire)) throw new Error("Remote segment conflict")
         } else await input.provider.uploadAtomic(path, bytes, { type: "absent" }, signal)
         await Effect.runPromise(input.store.acknowledge(segment.id))
       }
@@ -116,6 +135,7 @@ export function make(input: {
         metadata,
         revoked: input.revoked ? [...(await Effect.runPromise(input.revoked()))] : [],
       }
+      localHead = head
       const path = headPath(input.config.deviceID)
       const bytes = await encrypt("metadata", input.rootKey, headContext(input.config.deviceID, path), head)
       const existing = await input.provider.stat(path, signal)
@@ -125,6 +145,7 @@ export function make(input: {
         existing ? { type: "version", version: existing.version } : { type: "absent" },
         signal,
       )
+      await collectAttachments(signal)
       status = { ...status, running: "idle", lastUploadAt: now(), lastError: undefined }
     } catch (cause) {
       status = { ...status, running: "idle", lastError: diagnostic("upload", cause) }
@@ -165,6 +186,7 @@ export function make(input: {
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
         await Effect.runPromise(input.metadataProjector.apply(head.metadata, head.deviceID))
       }
+      await collectAttachments(signal)
       status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }
     } catch (cause) {
       status = { ...status, running: "idle", lastError: diagnostic("pull", cause) }
@@ -210,6 +232,64 @@ export function make(input: {
     }
   }
 
+  const collectAttachments = async (signal?: AbortSignal) => {
+    if (!input.attachment) return
+    const generation = await Effect.runPromise(input.store.head(input.config.deviceID))
+    const local: Head =
+      localHead ?? {
+        version: 1,
+        deviceID: input.config.deviceID,
+        deviceName: input.config.deviceName ?? String(input.config.deviceID),
+        generation,
+        acknowledged: input.acknowledged ? await Effect.runPromise(input.acknowledged()) : {},
+        metadata: [],
+        revoked: [],
+      }
+    const active = [local, ...indexedHeads]
+    // A device inherently knows its own generation. Every *other* active
+    // device must explicitly acknowledge it before a referenced object can be
+    // removed. Missing acknowledgement information is intentionally unsafe.
+    const allActiveDevicesAcknowledged =
+      Boolean(input.acknowledged) &&
+      active.every((target) =>
+        active.every(
+          (observer) =>
+            target.generation === 0 ||
+            observer.deviceID === target.deviceID ||
+            (observer.acknowledged[String(target.deviceID)] ?? -1) >= target.generation,
+        ),
+      )
+    const objects = await SyncProvider.listAll(input.provider, "segments", signal)
+    const liveObjectIDs = new Set<string>()
+    const segments: SyncEvent.Segment[] = []
+    for (const object of objects) {
+      const location = segmentFromPath(object.path)
+      if (!location) continue
+      segments.push(
+        await decrypt(
+        (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+        "event",
+        input.rootKey,
+        segmentContext(location.deviceID, location.generation, object.path),
+        (await input.provider.download(object.path, object.version, signal)).bytes,
+        ),
+      )
+    }
+    // Global session deletion is monotonic.  First collect tombstones from the
+    // complete observed history so an attachment in an old event is not kept
+    // alive merely because that event was encountered before its tombstone.
+    const deleted = new Set<string>()
+    for (const segment of segments)
+      for (const operation of segment.operations) if (operation.kind === "tombstone") deleted.add(operation.tombstone.sessionID)
+    for (const segment of segments) {
+      for (const operation of segment.operations) {
+        if (operation.kind !== "event" || deleted.has(operation.event.aggregateID)) continue
+        for (const objectID of input.attachment.references(operation.event.data)) liveObjectIDs.add(objectID)
+      }
+    }
+    await input.attachment.collect({ liveObjectIDs, allActiveDevicesAcknowledged, signal })
+  }
+
   const coalesce = (direction: "upload" | "pull", signal?: AbortSignal) => {
     if (direction === "upload") return (uploadFlight ??= uploadOnce(signal).finally(() => (uploadFlight = undefined)))
     return (pullFlight ??= pullOnce(signal).finally(() => (pullFlight = undefined)))
@@ -239,6 +319,12 @@ function segmentPath(deviceID: string, generation: number) {
   return SyncProvider.objectPath(`segments/${deviceID}/${generation}-${generation}.enc`)
 }
 
+function segmentFromPath(path: string) {
+  const match = /^segments\/([^/]+)\/(\d+)-\d+\.enc$/.exec(path)
+  if (!match?.[1] || !match[2]) return
+  return { deviceID: SyncEvent.DeviceID.make(match[1]), generation: Number.parseInt(match[2], 10) }
+}
+
 function deviceFromHeadPath(path: string) {
   const match = /^devices\/(.+)\.head\.enc$/.exec(path)
   if (!match?.[1]) throw new Error("Invalid remote sync head path")
@@ -261,6 +347,17 @@ async function encrypt(
 ) {
   const envelope = await SyncCrypto.encrypt(rootKey, purpose, 1, context, encoder.encode(JSON.stringify(value)))
   return encoder.encode(JSON.stringify(envelope))
+}
+
+async function externalizeSegment(segment: SyncEvent.Segment, attachment: AttachmentPipeline): Promise<SyncEvent.Segment> {
+  const operations = await Promise.all(
+    segment.operations.map(async (operation) =>
+      operation.kind === "event"
+        ? SyncEvent.EventOperation.make({ kind: "event", event: await attachment.externalize(operation.event) })
+        : operation,
+    ),
+  )
+  return SyncEvent.Segment.make({ ...segment, operations })
 }
 
 async function decrypt<A>(

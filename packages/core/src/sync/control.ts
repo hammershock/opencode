@@ -21,6 +21,7 @@ import { SyncScheduler } from "./scheduler"
 import { SyncDatabase } from "./database"
 import { NonNegativeInt } from "../schema"
 import { SyncCrypto } from "./crypto"
+import { SyncAttachment } from "./attachment"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -103,6 +104,7 @@ const layer = Layer.effect(
       if (!credential || !encodedKey) return yield* new ControlError({ kind: "locked" })
       const rootKey = new Uint8Array(Buffer.from(encodedKey, "base64url"))
       const provider = BaiduSyncProvider.adapter({ store: secure, deviceID: config.deviceID, root: config.remoteRoot })
+      const attachment = SyncAttachment.make({ rootKey, namespaceID: config.namespaceID, provider })
       engine = SyncRuntime.make({
         config: {
           deviceID: SyncEvent.DeviceID.make(config.deviceID),
@@ -113,7 +115,12 @@ const layer = Layer.effect(
         provider,
         store,
         projector: (deviceID) =>
-          SessionSync.projector(events, deviceID, ({ sessionID }) => metadata.availability(sessionID, "conflict")),
+          SessionSync.projector(events, deviceID, ({ sessionID }) => metadata.availability(sessionID, "conflict"), attachment),
+        attachment: {
+          externalize: (event) => SessionSync.externalize(event, attachment),
+          references: SyncAttachment.references,
+          collect: attachment.collect,
+        },
         metadata: () =>
           sessionDB
             .select()
@@ -286,6 +293,9 @@ const layer = Layer.effect(
     })
     const hydrateRaw = Effect.fn("SyncControl.hydrate")(function* (input: typeof HydrateInput.Type) {
       const runtime = yield* load()
+      // Keep the typed API self-contained: callers are not required to visit
+      // the metadata browser endpoint before requesting a Session.
+      yield* runtime.pull().pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
       const known = (yield* metadata.list()).find((item) => item.sessionID === input.sessionID)
       if (!known) return yield* new ControlError({ kind: "storage" })
       yield* metadata.availability(input.sessionID, "hydrating")

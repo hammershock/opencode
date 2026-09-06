@@ -37,7 +37,7 @@ function provider() {
   return { adapter, files }
 }
 
-function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope) {
+function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operations?: readonly SyncEvent.Operation[]) {
   let local = event
   let sealed: SyncEvent.Segment | undefined
   const cursors = new Map<string, number>()
@@ -49,14 +49,14 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope) {
     seal: (_deviceID: SyncEvent.DeviceID) =>
       Effect.sync(() => {
         if (sealed) return sealed
-        if (!local) return undefined
+        if (!local && !operations) return undefined
         return (sealed = SyncEvent.Segment.make({
           version: 1,
           id: SyncEvent.SegmentID.make(`${deviceID}:1`),
           deviceID,
           generation: 1,
           createdAt: 1,
-          operations: [{ kind: "event", event: local }],
+          operations: operations ?? [{ kind: "event", event: local! }],
         }))
       }),
     acknowledge: () => Effect.sync(() => void (local = undefined)),
@@ -190,5 +190,96 @@ describe("SyncRuntime", () => {
     const objects = remote.files.size
     await Effect.runPromise(runtime.upload())
     expect(remote.files.size).toBe(objects + 1) // only the newly written head
+  })
+
+  test("commits attachment references before segments and gates collection on device acknowledgements", async () => {
+    const remote = provider()
+    const space = SyncCrypto.createSpace()
+    const macID = SyncEvent.DeviceID.make("mac")
+    const winID = SyncEvent.DeviceID.make("windows")
+    const event = SyncEvent.Envelope.make({
+      id: "event",
+      aggregateID: "session",
+      seq: 0,
+      type: "session.part.updated",
+      data: { part: { url: "data:image/png;base64,aGVsbG8=" } },
+    })
+    const mac = store(macID, event)
+    const collected: any[] = []
+    const attachment = {
+      externalize: async (value: SyncEvent.Envelope) =>
+        SyncEvent.Envelope.make({ ...value, data: { part: { url: "opencode-sync-attachment://image" } } }),
+      references: (value: unknown) =>
+        JSON.stringify(value).includes("opencode-sync-attachment://image") ? new Set<string>(["image"]) : new Set<string>(),
+      collect: async (input: unknown) => void collected.push(input),
+    }
+    const uploader = SyncRuntime.make({
+      config: { deviceID: macID, enabled: true },
+      rootKey: space.rootKey,
+      provider: remote.adapter,
+      store: mac.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+      acknowledged: () => Effect.succeed({}),
+      attachment,
+    })
+    await Effect.runPromise(uploader.upload())
+    expect(collected[0]).toMatchObject({ liveObjectIDs: new Set(["image"]), allActiveDevicesAcknowledged: true })
+
+    const windows = store(winID)
+    const gated: any[] = []
+    const downloader = SyncRuntime.make({
+      config: { deviceID: winID, enabled: true },
+      rootKey: space.rootKey,
+      provider: remote.adapter,
+      store: windows.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+      acknowledged: () => Effect.succeed({}),
+      attachment: { ...attachment, collect: async (input: unknown) => void gated.push(input) },
+    })
+    await Effect.runPromise(downloader.pull())
+    expect(gated[0]).toMatchObject({ liveObjectIDs: new Set(["image"]), allActiveDevicesAcknowledged: false })
+  })
+
+  test("does not retain attachment references belonging to globally deleted sessions", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("mac")
+    const local = store(id, undefined, [
+      {
+        kind: "event",
+        event: SyncEvent.Envelope.make({
+          id: "event",
+          aggregateID: "deleted-session",
+          seq: 0,
+          type: "session.part.updated",
+          data: { ref: "opencode-sync-attachment://old" },
+        }),
+      },
+      {
+        kind: "tombstone",
+        tombstone: SyncEvent.Tombstone.make({ id: "delete", sessionID: "deleted-session", deletedAt: 2 }),
+      },
+    ])
+    const collected: any[] = []
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      rootKey: SyncCrypto.createSpace().rootKey,
+      provider: remote.adapter,
+      store: local.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+      acknowledged: () => Effect.succeed({}),
+      attachment: {
+        externalize: async (event) => event,
+        references: () => new Set(["old"]),
+        collect: async (input) => void collected.push(input),
+      },
+    })
+    await Effect.runPromise(runtime.upload())
+    expect(collected[0]).toMatchObject({ liveObjectIDs: new Set(), allActiveDevicesAcknowledged: true })
   })
 })

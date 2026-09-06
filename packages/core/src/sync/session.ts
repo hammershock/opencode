@@ -88,7 +88,7 @@ export function projector(
           !["Replay diverged", "Replay owner mismatch"].some((message) => failure.message.includes(message))
         )
           return yield* Effect.failCause(exit.cause)
-        const sibling = yield* Effect.promise(() => siblingID(hydrated.aggregateID, sourceDeviceID))
+        const sibling = yield* Effect.promise(() => siblingID(hydrated.aggregateID, sourceDeviceID, hydrated.seq))
         siblings.set(hydrated.aggregateID, sibling)
         if (onConflict)
           yield* onConflict({ sessionID: hydrated.aggregateID, siblingID: sibling, sourceDeviceID }).pipe(Effect.orDie)
@@ -156,10 +156,10 @@ function replaceSessionID(value: unknown, source: string, target: string): any {
   )
 }
 
-async function siblingID(sessionID: string, deviceID: string) {
+async function siblingID(sessionID: string, deviceID: string, firstConflictSeq: number) {
   const bytes = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(`opencode-sync-sibling\0${sessionID}\0${deviceID}`),
+    new TextEncoder().encode(`opencode-sync-sibling\0${sessionID}\0${deviceID}\0${firstConflictSeq}`),
   )
   return `${sessionID}-conflict-${Buffer.from(bytes).toString("hex").slice(0, 16)}`
 }

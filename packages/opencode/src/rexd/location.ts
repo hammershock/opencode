@@ -12,6 +12,7 @@ import { Node } from "@opencode-ai/core/effect/app-node"
 import { ReadToolFileSystem } from "@opencode-ai/core/tool/read-filesystem"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Pty } from "@opencode-ai/core/pty"
+import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Layer } from "effect"
 import { rexdFilesystemNodes } from "./location-filesystem"
 import { rexdMutationNodes } from "./location-mutation"
@@ -21,6 +22,7 @@ import { rexdPtyNode } from "./location-pty"
 import { rexdLocationNode, rexdSessionNode } from "./location-session"
 import { rexdEnvironmentSourceNode } from "./location-environment"
 import { rexdFormatterNode } from "./location-formatter"
+import { rexdSnapshotNode } from "./location-snapshot"
 
 export const rexdLocationProvider: LocationProvider = {
   target: "rexd",
@@ -42,6 +44,7 @@ export const rexdLocationProvider: LocationProvider = {
       [FileMutation.node, mutation[1]],
       [ReadToolFileSystem.node, rexdReadNode(session, ref.target.targetID, ref.directory)],
       [Pty.node, rexdPtyNode(session)],
+      [Snapshot.node, rexdSnapshotNode],
     ])
     const location = LayerNode.hoist(locationServices, Node.tags.values.global, selected)
     return LayerNode.compile(location.node).pipe(Layer.fresh, Layer.provide(LayerNode.compile(location.hoisted)))

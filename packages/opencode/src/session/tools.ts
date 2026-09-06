@@ -162,7 +162,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               })
               .pipe(
                 Effect.flatMap((settlement) => {
-                  if (settlement.result.type === "error") return Effect.die(new Error(settlement.result.value))
+                  if (settlement.result.type === "error") return Effect.die(new Error(String(settlement.result.value)))
                   const output = settlement.output
                   const text = output?.content
                     .filter((part) => part.type === "text")

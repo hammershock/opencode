@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { lstat } from "node:fs/promises"
 import path from "path"
 
 const temporary: string[] = []
@@ -38,6 +39,23 @@ describe("opencode-rexd installer", () => {
 
     expect(result.exitCode).not.toBe(0)
     expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.working\n")
+  })
+
+  test("replaces and restores an existing symlink entrypoint", async () => {
+    const root = await createFixture()
+    const install = path.join(root, "install")
+    const legacy = await fakeBinary(root, "legacy", "1.0.0-rexd.legacy")
+    const candidate = await fakeBinary(root, "candidate", "1.0.0-rexd.candidate")
+    await Bun.$`mkdir -p ${install}`
+    await Bun.$`ln -s ${legacy} ${path.join(install, "opencode-rexd")}`
+
+    await Bun.$`${installer} --binary ${candidate} --install-dir ${install}`
+    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.candidate\n")
+    expect((await lstat(path.join(install, "opencode-rexd.previous"))).isSymbolicLink()).toBe(true)
+
+    await Bun.$`${installer} --rollback --install-dir ${install}`
+    expect((await lstat(path.join(install, "opencode-rexd"))).isSymbolicLink()).toBe(true)
+    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.legacy\n")
   })
 })
 

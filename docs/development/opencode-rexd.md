@@ -27,9 +27,9 @@ Install the artifact on macOS or Linux/WSL without changing an existing `opencod
   --manifest dist/opencode-darwin-arm64/bin/opencode-rexd.build.json
 ```
 
-The default destination is `~/.opencode-rexd/bin/opencode-rexd`. Override it with `--install-dir` or `OPENCODE_REXD_INSTALL_DIR`. Add that directory to `PATH` explicitly; the installer does not edit shell startup files.
+The default destination is the existing fork entrypoint at `~/.local/bin/opencode-rexd`. Override it with `--install-dir` or `OPENCODE_REXD_INSTALL_DIR`. The installer does not edit shell startup files and never writes `~/.local/bin/opencode`.
 
-The installer validates the candidate before an atomic same-directory rename. It retains the previous executable and manifest. Restore them with:
+The installer validates the candidate before an atomic same-directory rename. An existing executable or symbolic link is moved intact to `opencode-rexd.previous`, so legacy entrypoints remain rollback-safe. Restore it with:
 
 ```bash
 ./script/install-rexd --rollback

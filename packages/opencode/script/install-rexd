@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP=opencode-rexd
-INSTALL_DIR="${OPENCODE_REXD_INSTALL_DIR:-${HOME}/.opencode-rexd/bin}"
+INSTALL_DIR="${OPENCODE_REXD_INSTALL_DIR:-${HOME}/.local/bin}"
 BINARY=""
 MANIFEST=""
 ROLLBACK=false

@@ -25,6 +25,7 @@ const layer = Layer.effect(
         return yield* events.publish(definition, data, {
           ...options,
           location: new Location.Info({
+            target: Location.LocalTarget.make({ type: "local" }),
             directory: AbsolutePath.make(ctx.directory),
             ...(workspaceID ? { workspaceID } : {}),
             project: { id: Project.ID.make(ctx.project.id), directory: AbsolutePath.make(ctx.worktree) },

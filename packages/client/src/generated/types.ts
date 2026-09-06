@@ -110,7 +110,7 @@ export type LocationGetInput = {
 }
 
 export type LocationGetOutput = {
-  readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+  readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
   readonly directory: string
   readonly workspaceID?: string
   readonly lastKnownTargetName?: string
@@ -125,7 +125,7 @@ export type AgentsListInput = {
 
 export type AgentsListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2264,7 +2264,7 @@ export type ModelsListInput = {
 
 export type ModelsListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2325,7 +2325,7 @@ export type ProvidersListInput = {
 
 export type ProvidersListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2360,7 +2360,7 @@ export type ProvidersGetInput = {
 
 export type ProvidersGetOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2394,7 +2394,7 @@ export type IntegrationsListInput = {
 
 export type IntegrationsListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2448,7 +2448,7 @@ export type IntegrationsGetInput = {
 
 export type IntegrationsGetOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2528,7 +2528,7 @@ export type IntegrationsConnectOauthInput = {
 
 export type IntegrationsConnectOauthOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2555,7 +2555,7 @@ export type IntegrationsAttemptStatusInput = {
 
 export type IntegrationsAttemptStatusOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2639,7 +2639,7 @@ export type PermissionsListRequestsInput = {
 
 export type PermissionsListRequestsOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2797,7 +2797,7 @@ export type FilesListInput = {
 
 export type FilesListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2835,7 +2835,7 @@ export type FilesFindInput = {
 
 export type FilesFindOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2852,7 +2852,7 @@ export type CommandsListInput = {
 
 export type CommandsListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2876,7 +2876,7 @@ export type SkillsListInput = {
 
 export type SkillsListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2901,7 +2901,7 @@ export type PtysListInput = {
 
 export type PtysListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2962,7 +2962,7 @@ export type PtysCreateInput = {
 
 export type PtysCreateOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -2989,7 +2989,7 @@ export type PtysGetInput = {
 
 export type PtysGetOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -3021,7 +3021,7 @@ export type PtysUpdateInput = {
 
 export type PtysUpdateOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -3056,7 +3056,7 @@ export type QuestionsListRequestsInput = {
 
 export type QuestionsListRequestsOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string
@@ -3116,7 +3116,7 @@ export type ReferencesListInput = {
 
 export type ReferencesListOutput = {
   readonly location: {
-    readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
     readonly workspaceID?: string
     readonly lastKnownTargetName?: string

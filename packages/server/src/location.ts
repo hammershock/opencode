@@ -17,6 +17,7 @@ export function response<A, E, R>(data: Effect.Effect<A, E, R>) {
     const location = yield* Location.Service
     return {
       location: new Location.Info({
+        target: location.target,
         directory: location.directory,
         workspaceID: location.workspaceID,
         project: location.project,

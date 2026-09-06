@@ -54,6 +54,7 @@ describe("node build", () => {
             Layer.succeed(
               Location.Service,
               Location.Service.of({
+                target: ref.target,
                 directory: ref.directory,
                 workspaceID: ref.workspaceID,
                 project: { id: Project.ID.global, directory: service.directory },

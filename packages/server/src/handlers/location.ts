@@ -9,6 +9,7 @@ export const LocationHandler = HttpApiBuilder.group(Api, "server.location", (han
     Effect.fn(function* () {
       const location = yield* Location.Service
       return new Location.Info({
+        target: location.target,
         directory: location.directory,
         workspaceID: location.workspaceID,
         project: location.project,

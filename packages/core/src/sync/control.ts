@@ -34,6 +34,15 @@ export const Status = Schema.Struct({
   error: Schema.optional(Schema.String),
 })
 export type Status = typeof Status.Type
+export const DeviceUpdate = Schema.Struct({
+  id: Schema.NonEmptyString,
+  name: Schema.optional(Schema.NonEmptyString),
+  revoke: Schema.optional(Schema.Boolean),
+})
+export const BindingUpdate = Schema.Struct({
+  label: Schema.NonEmptyString,
+  targetID: Schema.optional(Schema.NonEmptyString),
+})
 
 export class ControlError extends Schema.TaggedErrorClass<ControlError>()("SyncControlError", {
   kind: Schema.Literals(["unconfigured", "locked", "provider", "storage"]),
@@ -43,6 +52,9 @@ export interface Interface {
   readonly status: () => Effect.Effect<Status, ControlError>
   readonly now: () => Effect.Effect<void, ControlError>
   readonly enable: (enabled: boolean) => Effect.Effect<void, ControlError>
+  readonly devices: () => Effect.Effect<SyncDevice.State, ControlError>
+  readonly updateDevice: (input: typeof DeviceUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
+  readonly updateBinding: (input: typeof BindingUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
 }
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncControl") {}
 
@@ -185,7 +197,27 @@ const layer = Layer.effect(
       if (enabled) scheduler.start()
       else scheduler.stop()
     })
-    return { status, now, enable }
+    const deviceState = () =>
+      Effect.tryPromise({ try: () => devices.read(), catch: () => new ControlError({ kind: "storage" }) })
+    const updateDevice = Effect.fn("SyncControl.updateDevice")(function* (input: typeof DeviceUpdate.Type) {
+      yield* Effect.tryPromise({
+        try: async () => {
+          if (input.name) await devices.rename(input.id, input.name)
+          if (input.revoke) await devices.revoke(input.id)
+        },
+        catch: () => new ControlError({ kind: "storage" }),
+      })
+      engine = undefined
+      return yield* deviceState()
+    })
+    const updateBinding = Effect.fn("SyncControl.updateBinding")(function* (input: typeof BindingUpdate.Type) {
+      yield* Effect.tryPromise({
+        try: () => (input.targetID ? devices.bind(input.label, input.targetID) : devices.unbind(input.label)),
+        catch: () => new ControlError({ kind: "storage" }),
+      })
+      return yield* deviceState()
+    })
+    return { status, now, enable, devices: deviceState, updateDevice, updateBinding }
   }),
 )
 

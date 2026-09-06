@@ -97,6 +97,7 @@ import { useTargetManager } from "../../component/target-manager"
 import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
 import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
 import { DialogPrompt } from "../../ui/dialog-prompt"
+import { DialogSelect } from "../../ui/dialog-select"
 
 addDefaultParsers(parsers.parsers)
 
@@ -670,13 +671,62 @@ export function Session() {
             return syncSetup()
           },
           openDevices: async () => {
-            const result = await sdk.client.global.syncSetup({ throwOnError: true })
-            const config = result.data.config
-            await DialogAlert.show(
-              dialog,
-              "Sync devices",
-              config ? `${config.deviceName} · ${config.deviceID}` : "Cloud sync is not configured",
+            const result = await sdk.client.global.syncDevices({ throwOnError: true })
+            const choice = await new Promise<{ kind: "device"; id: string } | undefined>(
+              (resolve) =>
+                dialog.replace(
+                  () => (
+                    <DialogSelect
+                      title="Sync devices"
+                      options={[
+                        ...result.data.devices.map((device) => ({
+                          title: `${device.name}${device.revoked ? " (revoked)" : ""}`,
+                          description: device.id,
+                          value: { kind: "device" as const, id: device.id },
+                        })),
+                        { title: "Bind portable target label", value: { kind: "device" as const, id: "" } },
+                      ]}
+                      onSelect={(option) => resolve(option.value)}
+                    />
+                  ),
+                  () => resolve(undefined),
+                ),
             )
+            if (!choice) return "cancelled"
+            if (!choice.id) {
+              const label = await DialogPrompt.show(dialog, "Portable target label")
+              if (!label?.trim()) return "cancelled"
+              const targetID = await DialogPrompt.show(dialog, "Local target ID", {
+                description: () => <text>Leave empty to remove this device-local binding.</text>,
+              })
+              if (targetID === null) return "cancelled"
+              await sdk.client.global.syncBindingUpdate(
+                { label: label.trim(), ...(targetID.trim() ? { targetID: targetID.trim() } : {}) },
+                { throwOnError: true },
+              )
+              return "completed"
+            }
+            const device = result.data.devices.find((item) => item.id === choice.id)
+            if (!device || device.revoked) return "cancelled"
+            const action = await DialogPrompt.show(dialog, `Manage ${device.name}`, {
+              placeholder: "rename or revoke",
+              description: () => (
+                <text>Enter “rename” or “revoke”. Revocation stops the device blocking garbage collection.</text>
+              ),
+            })
+            if (action?.trim() === "rename") {
+              const name = await DialogPrompt.show(dialog, "Device name", { value: device.name })
+              if (!name?.trim()) return "cancelled"
+              await sdk.client.global.syncDeviceUpdate({ id: device.id, name: name.trim() }, { throwOnError: true })
+            } else if (action?.trim() === "revoke") {
+              const confirmed = await DialogConfirm.show(
+                dialog,
+                "Revoke device",
+                `Revoke “${device.name}”? This is monotonic and cannot reactivate the old device identity.`,
+              )
+              if (!confirmed) return "cancelled"
+              await sdk.client.global.syncDeviceUpdate({ id: device.id, revoke: true }, { throwOnError: true })
+            } else return "cancelled"
             return "completed"
           },
         }

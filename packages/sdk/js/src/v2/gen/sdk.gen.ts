@@ -88,8 +88,14 @@ import type {
   GlobalHealthResponses,
   GlobalSyncAuthorizeErrors,
   GlobalSyncAuthorizeResponses,
+  GlobalSyncBindingUpdateErrors,
+  GlobalSyncBindingUpdateResponses,
   GlobalSyncCompleteErrors,
   GlobalSyncCompleteResponses,
+  GlobalSyncDevicesErrors,
+  GlobalSyncDevicesResponses,
+  GlobalSyncDeviceUpdateErrors,
+  GlobalSyncDeviceUpdateResponses,
   GlobalSyncEnabledErrors,
   GlobalSyncEnabledResponses,
   GlobalSyncNowErrors,
@@ -1534,6 +1540,83 @@ export class Global extends HeyApiClient {
     return (options?.client ?? this.client).post<GlobalSyncNowResponses, GlobalSyncNowErrors, ThrowOnError>({
       url: "/global/sync/now",
       ...options,
+    })
+  }
+
+  public syncDevices<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalSyncDevicesResponses, GlobalSyncDevicesErrors, ThrowOnError>({
+      url: "/global/sync/devices",
+      ...options,
+    })
+  }
+
+  public syncDeviceUpdate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+      name?: string
+      revoke?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "id" },
+            { in: "body", key: "name" },
+            { in: "body", key: "revoke" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      GlobalSyncDeviceUpdateResponses,
+      GlobalSyncDeviceUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/global/sync/devices",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncBindingUpdate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      label?: string
+      targetID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "label" },
+            { in: "body", key: "targetID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<
+      GlobalSyncBindingUpdateResponses,
+      GlobalSyncBindingUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/global/sync/bindings",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

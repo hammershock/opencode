@@ -10,6 +10,7 @@ import semver from "semver"
 import { described } from "./metadata"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
+import { SyncDevice } from "@opencode-ai/core/sync/device"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -80,6 +81,8 @@ export const GlobalPaths = {
   syncEnabled: "/global/sync/enabled",
   syncStatus: "/global/sync/status",
   syncNow: "/global/sync/now",
+  syncDevices: "/global/sync/devices",
+  syncBindings: "/global/sync/bindings",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -143,6 +146,20 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.post("syncNow", GlobalPaths.syncNow, {
         success: Schema.Boolean,
         error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.get("syncDevices", GlobalPaths.syncDevices, {
+        success: SyncDevice.State,
+        error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.patch("syncDeviceUpdate", GlobalPaths.syncDevices, {
+        payload: SyncControl.DeviceUpdate,
+        success: SyncDevice.State,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.patch("syncBindingUpdate", GlobalPaths.syncBindings, {
+        payload: SyncControl.BindingUpdate,
+        success: SyncDevice.State,
+        error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,

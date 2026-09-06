@@ -8226,6 +8226,128 @@ export type GlobalSyncNowResponses = {
 
 export type GlobalSyncNowResponse = GlobalSyncNowResponses[keyof GlobalSyncNowResponses]
 
+export type GlobalSyncDevicesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/devices"
+}
+
+export type GlobalSyncDevicesErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncDevicesError = GlobalSyncDevicesErrors[keyof GlobalSyncDevicesErrors]
+
+export type GlobalSyncDevicesResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 1
+    devices: Array<{
+      id: string
+      name: string
+      revision: number
+      updatedAt: number
+      revoked: boolean
+    }>
+    bindings: {
+      [key: string]: string
+    }
+  }
+}
+
+export type GlobalSyncDevicesResponse = GlobalSyncDevicesResponses[keyof GlobalSyncDevicesResponses]
+
+export type GlobalSyncDeviceUpdateData = {
+  body?: {
+    id: string
+    name?: string
+    revoke?: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/devices"
+}
+
+export type GlobalSyncDeviceUpdateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncDeviceUpdateError = GlobalSyncDeviceUpdateErrors[keyof GlobalSyncDeviceUpdateErrors]
+
+export type GlobalSyncDeviceUpdateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 1
+    devices: Array<{
+      id: string
+      name: string
+      revision: number
+      updatedAt: number
+      revoked: boolean
+    }>
+    bindings: {
+      [key: string]: string
+    }
+  }
+}
+
+export type GlobalSyncDeviceUpdateResponse = GlobalSyncDeviceUpdateResponses[keyof GlobalSyncDeviceUpdateResponses]
+
+export type GlobalSyncBindingUpdateData = {
+  body?: {
+    label: string
+    targetID?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/bindings"
+}
+
+export type GlobalSyncBindingUpdateErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncBindingUpdateError = GlobalSyncBindingUpdateErrors[keyof GlobalSyncBindingUpdateErrors]
+
+export type GlobalSyncBindingUpdateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 1
+    devices: Array<{
+      id: string
+      name: string
+      revision: number
+      updatedAt: number
+      revoked: boolean
+    }>
+    bindings: {
+      [key: string]: string
+    }
+  }
+}
+
+export type GlobalSyncBindingUpdateResponse = GlobalSyncBindingUpdateResponses[keyof GlobalSyncBindingUpdateResponses]
+
 export type GlobalDisposeData = {
   body?: never
   path?: never

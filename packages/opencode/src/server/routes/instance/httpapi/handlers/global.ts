@@ -155,6 +155,15 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
         ),
       )
+      .handle("syncDevices", () =>
+        syncControl.devices().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+      )
+      .handle("syncDeviceUpdate", (ctx) =>
+        syncControl.updateDevice(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
+      )
+      .handle("syncBindingUpdate", (ctx) =>
+        syncControl.updateBinding(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
+      )
       .handle("dispose", dispose)
       .handle("upgrade", upgrade)
   }),

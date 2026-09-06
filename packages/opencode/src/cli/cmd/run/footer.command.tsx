@@ -20,6 +20,7 @@ type CommandEntry =
   | (PanelEntry & { action: "subagent" })
   | (PanelEntry & { action: "variant.cycle" })
   | (PanelEntry & { action: "variant.list" })
+  | (PanelEntry & { action: "experimental" })
   | (PanelEntry & { action: "slash"; name: string })
   | (PanelEntry & { action: "exit" })
 
@@ -346,6 +347,7 @@ export function RunCommandMenuBody(props: {
   onQueued: () => void
   onVariant: () => void
   onVariantCycle: () => void
+  onExperimental?: () => void
   onCommand: (name: string) => void
   onNew: () => void
   onExit: () => void
@@ -440,6 +442,16 @@ export function RunCommandMenuBody(props: {
           ]
         : []),
     ]
+    const settings: CommandEntry[] = props.onExperimental
+      ? [
+          {
+            action: "experimental",
+            category: "Settings",
+            display: "Experimental features",
+            keywords: "experimental settings user shell cwd continuity",
+          },
+        ]
+      : []
     const commands = (props.commands() ?? [])
       .filter((item) => item.source !== "skill" && !builtins.includes(item.name))
       .map(
@@ -462,6 +474,7 @@ export function RunCommandMenuBody(props: {
       ...session,
       ...prompt,
       ...agent,
+      ...settings,
       ...commands,
       { action: "exit", category: "System", display: "Exit", footer: "/exit", keywords: "/exit exit" },
     ]
@@ -501,6 +514,11 @@ export function RunCommandMenuBody(props: {
 
     if (item.action === "variant.list") {
       props.onVariant()
+      return
+    }
+
+    if (item.action === "experimental") {
+      props.onExperimental?.()
       return
     }
 
@@ -568,6 +586,73 @@ export function RunCommandMenuBody(props: {
         grouped={!query().trim()}
         background
         headerColor={props.theme().muted}
+      />
+    </PanelShell>
+  )
+}
+
+export function RunExperimentalMenuBody(props: {
+  theme: Accessor<RunFooterTheme>
+  userShellCwd: Accessor<boolean>
+  onToggleUserShellCwd: () => void
+  onClose: () => void
+}) {
+  let field: InputRenderable | undefined
+  const [query, setQuery] = createSignal("")
+  const entries = createMemo<PanelEntry[]>(() => [
+    {
+      category: "User Shell",
+      display: "CWD continuity",
+      description: "Remember only the verified cwd until OpenCode exits",
+      footer: props.userShellCwd() ? "on" : "off",
+      keywords: "shell cwd continuity",
+    },
+  ])
+  const items = createMemo(() => match(query(), entries()))
+  const menu = createFooterMenuState({ count: () => items().length, limit: PANEL_LIST_ROWS })
+  const select = () => {
+    if (!items()[menu.selected()]) return
+    props.onToggleUserShellCwd()
+  }
+
+  createEffect(() => {
+    query()
+    menu.reset()
+  })
+
+  useKeyboard((event) => {
+    if (event.defaultPrevented) return
+    handleKey({ event, menu, field: () => field, setQuery, select, close: props.onClose })
+  })
+
+  return (
+    <PanelShell
+      title="Experimental features"
+      query={query()}
+      count={items().length}
+      total={entries().length}
+      placeholder="Search"
+      theme={props.theme}
+      inputRef={(input) => {
+        field = input
+      }}
+      onQuery={setQuery}
+      dark
+      chrome="minimal"
+    >
+      <RunFooterMenu
+        theme={props.theme}
+        items={items}
+        selected={menu.selected}
+        offset={menu.offset}
+        rows={() => PANEL_LIST_ROWS}
+        limit={PANEL_LIST_ROWS}
+        empty="No experimental features found"
+        border={false}
+        paddingLeft={PANEL_PAD}
+        paddingRight={PANEL_PAD}
+        grouped={false}
+        background
       />
     </PanelShell>
   )

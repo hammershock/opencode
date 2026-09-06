@@ -51,13 +51,29 @@ type SlashOption = RunFooterMenuItem & {
   action?: "skill-menu" | "editor"
 }
 
-type PromptOption = Auto | SlashOption
+type ShellOption = RunFooterMenuItem & {
+  kind: "shell"
+  value: string
+  replacement: { start: number; end: number }
+}
 
-type MenuMode = false | "mention" | "slash"
+type PromptOption = Auto | SlashOption | ShellOption
+
+type MenuMode = false | "mention" | "slash" | "shell"
 
 type PromptInput = {
   directory: string
   findFiles: (query: string) => Promise<string[]>
+  completeShell: (input: { input: string; cursor: number }) => Promise<{
+    stale: boolean
+    candidates: Array<{
+      value: string
+      display: string
+      replacement: { start: number; end: number }
+      kind: string
+      description?: string
+    }>
+  }>
   agents: Accessor<RunAgent[]>
   resources: Accessor<RunResource[]>
   commands: Accessor<RunCommand[] | undefined>
@@ -101,6 +117,26 @@ export type PromptState = {
 
 function clamp(rows: number): number {
   return Math.max(TEXTAREA_MIN_ROWS, Math.min(TEXTAREA_MAX_ROWS, rows))
+}
+
+export function stringOffset(text: string, width: number) {
+  let offset = 0
+  let current = 0
+  for (const char of text) {
+    if (current + Bun.stringWidth(char) > width) break
+    current += Bun.stringWidth(char)
+    offset += char.length
+  }
+  return offset
+}
+
+export function applyShellCompletion(
+  text: string,
+  candidate: { value: string; replacement: { start: number; end: number } },
+) {
+  const before = text.slice(0, candidate.replacement.start)
+  const value = before + candidate.value + text.slice(candidate.replacement.end)
+  return { value, cursor: Bun.stringWidth(before + candidate.value) }
 }
 
 function clonePrompt(prompt: RunPrompt): RunPrompt {
@@ -306,7 +342,10 @@ export function createPromptState(input: PromptInput): PromptState {
   const [mode, setMode] = createSignal<MenuMode>(false)
   const [at, setAt] = createSignal(0)
   const [query, setQuery] = createSignal("")
-  const visible = createMemo(() => mode() !== false)
+  let shellGeneration = 0
+  const [shellRequest, setShellRequest] = createSignal<{ generation: number; input: string; cursor: number }>()
+  const [shellCount, setShellCount] = createSignal(0)
+  const visible = createMemo(() => mode() !== false && (mode() !== "shell" || shellCount() > 0))
 
   const setShellMode = (value: boolean) => {
     setShell(value)
@@ -402,6 +441,26 @@ export function createPromptState(input: PromptInput): PromptState {
     },
     { initialValue: [] as Auto[] },
   )
+  const [shellCandidates] = createResource(shellRequest, async (request) => {
+    const result = await input
+      .completeShell({ input: request.input, cursor: request.cursor })
+      .catch(() => ({ stale: false, candidates: [] }))
+    if (request.generation !== shellGeneration || result.stale) {
+      setShellCount(0)
+      return []
+    }
+    const candidates = result.candidates.map(
+      (candidate): ShellOption => ({
+        kind: "shell",
+        value: candidate.value,
+        display: candidate.display,
+        description: candidate.description ?? candidate.kind,
+        replacement: candidate.replacement,
+      }),
+    )
+    setShellCount(candidates.length)
+    return candidates
+  })
   const mentionOptions = createMemo(() => [...agents(), ...files(), ...resources()])
   const skillCommands = createMemo(() => (input.commands() ?? []).filter((item) => item.source === "skill"))
   const hasSkillsCommand = createMemo(() =>
@@ -452,7 +511,8 @@ export function createPromptState(input: PromptInput): PromptState {
     ].sort((a, b) => a.display.localeCompare(b.display))
   })
   const options = createMemo<PromptOption[]>(() => {
-    const mixed: PromptOption[] = mode() === "slash" ? slashOptions() : mentionOptions()
+    if (mode() === "shell") return shellCandidates() ?? []
+    const mixed: Array<Auto | SlashOption> = mode() === "slash" ? slashOptions() : mentionOptions()
     if (!query()) {
       return mixed
     }
@@ -644,6 +704,14 @@ export function createPromptState(input: PromptInput): PromptState {
 
     const cursor = area.cursorOffset
     const text = area.plainText
+    if (shell()) {
+      setShellCount(0)
+      setMode("shell")
+      setQuery("")
+      setShellRequest({ generation: ++shellGeneration, input: text, cursor: stringOffset(text, cursor) })
+      menu.reset()
+      return
+    }
     const slash = slashQuery(text, cursor)
     if (mode() === "slash") {
       if (slash === undefined) {
@@ -798,6 +866,13 @@ export function createPromptState(input: PromptInput): PromptState {
       return
     }
 
+    if (mode() === "shell") {
+      hide()
+      scheduleRows()
+      area.focus()
+      return
+    }
+
     const cursor = area.cursorOffset
     const startOffset = mode() === "slash" ? 0 : at()
     area.cursorOffset = startOffset
@@ -842,6 +917,17 @@ export function createPromptState(input: PromptInput): PromptState {
   const select = (item?: PromptOption) => {
     const next = item ?? options()[menu.selected()]
     if (!next || !area || area.isDestroyed) {
+      return
+    }
+
+    if (next.kind === "shell") {
+      const completed = applyShellCompletion(area.plainText, next)
+      area.setText(completed.value)
+      area.cursorOffset = completed.cursor
+      hide()
+      syncDraft()
+      scheduleRows()
+      area.focus()
       return
     }
 

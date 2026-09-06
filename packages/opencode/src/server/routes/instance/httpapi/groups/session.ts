@@ -70,6 +70,9 @@ export const SummarizePayload = Schema.Struct({
 export const PromptPayload = Schema.Struct(Struct.omit(SessionPrompt.PromptInput.fields, ["sessionID"]))
 export const CommandPayload = Schema.Struct(Struct.omit(SessionPrompt.CommandInput.fields, ["sessionID"]))
 export const ShellPayload = Schema.Struct(Struct.omit(SessionPrompt.ShellInput.fields, ["sessionID"]))
+export const ShellCompletionPayload = Schema.Struct(
+  Struct.omit(SessionPrompt.ShellCompletionInput.fields, ["sessionID"]),
+)
 export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput.fields, ["sessionID"]))
 export const PermissionResponsePayload = Schema.Struct({
   response: PermissionV1.Reply,
@@ -96,6 +99,7 @@ export const SessionPaths = {
   promptAsync: `${root}/:sessionID/prompt_async`,
   command: `${root}/:sessionID/command`,
   shell: `${root}/:sessionID/shell`,
+  shellCompletion: `${root}/:sessionID/shell/completion`,
   revert: `${root}/:sessionID/revert`,
   unrevert: `${root}/:sessionID/unrevert`,
   permissions: `${root}/:sessionID/permissions/:permissionID`,
@@ -364,6 +368,19 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.shell",
             summary: "Run shell command",
             description: "Execute a shell command within the session context and return the AI's response.",
+          }),
+        ),
+        HttpApiEndpoint.post("shellCompletion", SessionPaths.shellCompletion, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: ShellCompletionPayload,
+          success: described(SessionPrompt.ShellCompletionResult, "Shell completion candidates"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.shellCompletion",
+            summary: "Complete shell input",
+            description: "Return structured completion candidates for User Shell input without changing the session.",
           }),
         ),
         HttpApiEndpoint.post("revert", SessionPaths.revert, {

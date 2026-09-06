@@ -33,6 +33,7 @@ import {
   PromptPayload,
   RevertPayload,
   ShellPayload,
+  ShellCompletionPayload,
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
@@ -177,6 +178,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID))
+      yield* promptSvc.resetShell(ctx.params.sessionID)
       return true
     })
 
@@ -346,6 +348,16 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
     })
 
+    const shellCompletion = Effect.fn("SessionHttpApi.shellCompletion")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof ShellCompletionPayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* promptSvc
+        .completeShell({ ...ctx.payload, sessionID: ctx.params.sessionID })
+        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+    })
+
     const revert = Effect.fn("SessionHttpApi.revert")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof RevertPayload.Type
@@ -432,6 +444,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("promptAsync", promptAsync)
       .handle("command", command)
       .handle("shell", shell)
+      .handle("shellCompletion", shellCompletion)
       .handle("revert", revert)
       .handle("unrevert", unrevert)
       .handle("permissionRespond", permissionRespond)

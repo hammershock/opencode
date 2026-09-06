@@ -56,6 +56,8 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+import { UserShellRuntime } from "./user-shell-runtime"
+import { UserShellLocal } from "./user-shell-local"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -104,6 +106,8 @@ export interface Interface {
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
+  readonly completeShell: (input: ShellCompletionInput) => Effect.Effect<ShellCompletionResult, unknown>
+  readonly resetShell: (sessionID: SessionID) => Effect.Effect<void>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
 }
@@ -128,6 +132,7 @@ const layer = Layer.effect(
     const lsp = yield* LSP.Service
     const registry = yield* ToolRegistry.Service
     const truncate = yield* Truncate.Service
+    const userShell = yield* UserShellRuntime.Service
     const image = yield* Image.Service
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const scope = yield* Scope.Scope
@@ -521,7 +526,9 @@ const layer = Layer.effect(
 
           const cfg = yield* config.get()
           const sh = Shell.preferred(cfg.shell)
-          const args = Shell.args(sh, input.command, cwd)
+          const continuity = cfg.experimental?.user_shell_cwd === true
+          const location = { target: "local", directory: cwd }
+          const executionCwd = yield* userShell.current({ sessionID: input.sessionID, location, enabled: continuity })
           let output = ""
           let aborted = false
 
@@ -553,10 +560,31 @@ const layer = Layer.effect(
             Effect.gen(function* () {
               const shellEnv = yield* plugin.trigger(
                 "shell.env",
-                { cwd, sessionID: input.sessionID, callID: part.callID },
+                { cwd: executionCwd, sessionID: input.sessionID, callID: part.callID },
                 { env: {} },
               )
-              const cmd = ChildProcess.make(sh, args, {
+              const append = (chunk: string) =>
+                Effect.gen(function* () {
+                  output += chunk
+                  if (part.state.status === "running") {
+                    part.state.metadata = { output }
+                    yield* sessions.updatePart(part)
+                  }
+                })
+              if (continuity) {
+                const local = UserShellLocal.provider(sh, fsys, spawner)
+                const result = yield* userShell.execute({
+                  sessionID: input.sessionID,
+                  location,
+                  command: input.command,
+                  environment: shellEnv.env,
+                  enabled: true,
+                  provider: local,
+                  onOutput: append,
+                })
+                return result.exitCode
+              }
+              const cmd = ChildProcess.make(sh, Shell.args(sh, input.command, cwd), {
                 cwd,
                 extendEnv: true,
                 env: { ...shellEnv.env, TERM: "dumb" },
@@ -564,16 +592,8 @@ const layer = Layer.effect(
                 forceKillAfter: "3 seconds",
               })
               const handle = yield* spawner.spawn(cmd)
-              yield* Stream.runForEach(Stream.decodeText(handle.all), (chunk) =>
-                Effect.gen(function* () {
-                  output += chunk
-                  if (part.state.status === "running") {
-                    part.state.metadata = { output }
-                    yield* sessions.updatePart(part)
-                  }
-                }),
-              )
-              yield* handle.exitCode
+              yield* Stream.runForEach(Stream.decodeText(handle.all), append)
+              return yield* handle.exitCode
             }).pipe(Effect.scoped, Effect.orDie),
           ).pipe(Effect.exit)
 
@@ -1353,6 +1373,26 @@ const layer = Layer.effect(
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
+    const completeShell = Effect.fn("SessionPrompt.completeShell")(function* (input: ShellCompletionInput) {
+      const ctx = yield* InstanceState.context
+      yield* sessions.get(input.sessionID)
+      const cfg = yield* config.get()
+      const sh = Shell.preferred(cfg.shell)
+      const enabled = cfg.experimental?.user_shell_cwd === true
+      const location = { target: "local", directory: ctx.directory }
+      const cwd = yield* userShell.current({ sessionID: input.sessionID, location, enabled })
+      const shellEnv = yield* plugin.trigger("shell.env", { cwd, sessionID: input.sessionID }, { env: {} })
+      return yield* userShell.complete({
+        sessionID: input.sessionID,
+        location,
+        input: input.input,
+        cursor: input.cursor,
+        environment: shellEnv.env,
+        enabled,
+        provider: UserShellLocal.provider(sh, fsys, spawner),
+      })
+    })
+
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
       yield* Effect.logInfo("command", {
         "session.id": input.sessionID,
@@ -1485,6 +1525,8 @@ const layer = Layer.effect(
       prompt,
       loop,
       shell,
+      completeShell,
+      resetShell: userShell.reset,
       command,
       resolvePromptParts,
     })
@@ -1532,6 +1574,27 @@ export const ShellInput = Schema.Struct({
   command: Schema.String,
 })
 export type ShellInput = Schema.Schema.Type<typeof ShellInput>
+
+export const ShellCompletionInput = Schema.Struct({
+  sessionID: SessionID,
+  input: Schema.String,
+  cursor: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+})
+export type ShellCompletionInput = Schema.Schema.Type<typeof ShellCompletionInput>
+
+export const ShellCompletionCandidate = Schema.Struct({
+  value: Schema.String,
+  display: Schema.String,
+  replacement: Schema.Struct({ start: Schema.Number, end: Schema.Number }),
+  kind: Schema.Literals(["command", "file", "directory", "alias", "function", "option", "argument"]),
+  description: Schema.optional(Schema.String),
+})
+export const ShellCompletionResult = Schema.Struct({
+  generation: Schema.Number,
+  stale: Schema.Boolean,
+  candidates: Schema.Array(ShellCompletionCandidate),
+})
+export type ShellCompletionResult = Schema.Schema.Type<typeof ShellCompletionResult>
 
 export const CommandInput = Schema.Struct({
   messageID: Schema.optional(MessageID),
@@ -1625,6 +1688,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Database.node,
+    UserShellRuntime.node,
   ],
 })
 

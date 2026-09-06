@@ -9,6 +9,7 @@ import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
 import { LocationEnvironment } from "../location-environment"
 import { LocationProcess } from "../location-process"
+import type { AppProcessError } from "../process"
 import { PermissionV2 } from "../permission"
 import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
@@ -56,7 +57,7 @@ const modelOutput = (output: Output) => {
   return `${warnings.trimStart()}${warnings ? "\n\n" : ""}Command exited with code ${output.exit}.`
 }
 
-const isTimeout = (error: AppProcess.AppProcessError) =>
+const isTimeout = (error: AppProcessError) =>
   error.cause instanceof Error && error.cause.message === "Timed out"
 
 /**

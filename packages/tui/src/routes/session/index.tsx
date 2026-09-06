@@ -81,6 +81,13 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
+import { sessionRenameMetadata } from "../../command-toolkit/upstream-session"
+import {
+  installSessionRenameOverride,
+  parseSessionRenameOverride,
+  SESSION_RENAME_DIRECT_SETTING,
+} from "../../command-toolkit/session-rename"
+import { reportOverrideDiagnostic } from "../../command-toolkit/experimental-settings"
 
 addDefaultParsers(parsers.parsers)
 
@@ -352,6 +359,22 @@ export function Session() {
   }
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
+  const renameOverride = createMemo(() =>
+    installSessionRenameOverride({
+      enabled: kv.get(SESSION_RENAME_DIRECT_SETTING, false),
+      upstream: async () => {
+        dialog.replace(() => <DialogSessionRename session={route.sessionID} />)
+      },
+      rename: async (title) => {
+        await sdk.client.session.update({ sessionID: route.sessionID, title })
+      },
+      warning: (warning) => {
+        console.warn("Upstream command override unavailable", warning)
+        toast.show({ message: "Rename override unavailable; using OpenCode behavior", variant: "warning" })
+      },
+    }),
+  )
+  createEffect(() => reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic()))
   const renderer = useRenderer()
 
   event.on("session.status", (evt) => {
@@ -504,15 +527,8 @@ export function Session() {
       },
     },
     {
-      title: "Rename session",
-      value: "session.rename",
-      category: "Session",
-      slash: {
-        name: "rename",
-      },
-      run: () => {
-        dialog.replace(() => <DialogSessionRename session={route.sessionID} />)
-      },
+      ...sessionRenameMetadata,
+      run: () => renameOverride().execute({ title: "" }),
     },
     {
       title: "Jump to message",
@@ -1323,6 +1339,18 @@ export function Session() {
                       visible={visible()}
                       ref={bind}
                       disabled={disabled()}
+                      onBuiltinSlash={async (input) => {
+                        if (!kv.get(SESSION_RENAME_DIRECT_SETTING, false)) return false
+                        const parsed = parseSessionRenameOverride(input)
+                        if (parsed.status === "not-match") return false
+                        if (parsed.status === "invalid") {
+                          toast.show({ message: parsed.message, variant: "warning" })
+                          return true
+                        }
+                        await renameOverride().execute(parsed.input)
+                        reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic())
+                        return true
+                      }}
                       onSubmit={() => {
                         toBottom()
                       }}

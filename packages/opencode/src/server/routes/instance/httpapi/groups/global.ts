@@ -11,6 +11,7 @@ import { described } from "./metadata"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
 import { SyncDevice } from "@opencode-ai/core/sync/device"
+import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -81,6 +82,8 @@ export const GlobalPaths = {
   syncEnabled: "/global/sync/enabled",
   syncStatus: "/global/sync/status",
   syncNow: "/global/sync/now",
+  syncSessions: "/global/sync/sessions",
+  syncHydrate: "/global/sync/hydrate",
   syncDevices: "/global/sync/devices",
   syncBindings: "/global/sync/bindings",
   syncRecovery: "/global/sync/recovery-key",
@@ -147,6 +150,15 @@ export const GlobalApi = HttpApi.make("global").add(
       }),
       HttpApiEndpoint.post("syncNow", GlobalPaths.syncNow, {
         success: Schema.Boolean,
+        error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.get("syncSessions", GlobalPaths.syncSessions, {
+        success: Schema.Array(SyncMetadata.Item),
+        error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.post("syncHydrate", GlobalPaths.syncHydrate, {
+        payload: SyncControl.HydrateInput,
+        success: SyncControl.HydrateResult,
         error: HttpApiError.ServiceUnavailable,
       }),
       HttpApiEndpoint.get("syncDevices", GlobalPaths.syncDevices, {

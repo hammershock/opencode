@@ -18,6 +18,19 @@ import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middl
 import { testEffect } from "../lib/effect"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
+import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
+
+const remoteSession = SyncMetadata.Item.make({
+  sessionID: "ses_remote",
+  title: "Remote session",
+  ownerDeviceID: "device_remote",
+  targetLabel: "lab",
+  directory: "/workspace",
+  revision: 1,
+  updatedAt: 1,
+  sourceDeviceID: "device_remote",
+  availability: "metadata-only",
+})
 
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(RootHttpApi).pipe(
@@ -45,6 +58,8 @@ const apiLayer = HttpRouter.serve(
         Effect.succeed(
           SyncControl.Status.make({ configured: false, enabled: false, locked: false, outbox: 0, cursors: {} }),
         ),
+      sessions: () => Effect.succeed([remoteSession]),
+      hydrate: (input) => Effect.succeed(SyncControl.HydrateResult.make({ ...input, availability: "ready" })),
     }),
   ),
   Layer.provide(
@@ -70,6 +85,21 @@ describe("global HttpApi", () => {
         outbox: 0,
         cursors: {},
       })
+    }),
+  )
+
+  it.live("lists metadata-only sessions and hydrates a selected session", () =>
+    Effect.gen(function* () {
+      const sessions = yield* HttpClientRequest.get(GlobalPaths.syncSessions).pipe(HttpClient.execute)
+      expect(sessions.status).toBe(200)
+      expect(yield* sessions.json).toEqual([remoteSession])
+
+      const hydrate = yield* HttpClientRequest.post(GlobalPaths.syncHydrate).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ sessionID: remoteSession.sessionID }),
+        HttpClient.execute,
+      )
+      expect(hydrate.status).toBe(200)
+      expect(yield* hydrate.json).toEqual({ sessionID: remoteSession.sessionID, availability: "ready" })
     }),
   )
 

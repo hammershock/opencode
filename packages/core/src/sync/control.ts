@@ -45,6 +45,8 @@ export const BindingUpdate = Schema.Struct({
   targetID: Schema.optional(Schema.NonEmptyString),
 })
 export const Recovery = Schema.Struct({ recoveryString: Schema.NonEmptyString })
+export const HydrateInput = Schema.Struct({ sessionID: Schema.NonEmptyString })
+export const HydrateResult = Schema.Struct({ sessionID: Schema.NonEmptyString, availability: SyncMetadata.Availability })
 
 export class ControlError extends Schema.TaggedErrorClass<ControlError>()("SyncControlError", {
   kind: Schema.Literals(["unconfigured", "locked", "provider", "storage"]),
@@ -58,6 +60,10 @@ export interface Interface {
   readonly updateDevice: (input: typeof DeviceUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
   readonly updateBinding: (input: typeof BindingUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
   readonly exportKey: () => Effect.Effect<typeof Recovery.Type, ControlError>
+  /** Index remote heads without downloading their complete Session histories. */
+  readonly sessions: () => Effect.Effect<readonly SyncMetadata.Item[], ControlError>
+  /** Hydrates the selected metadata-only Session before it is opened locally. */
+  readonly hydrate: (input: typeof HydrateInput.Type) => Effect.Effect<typeof HydrateResult.Type, ControlError>
 }
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncControl") {}
 
@@ -106,7 +112,8 @@ const layer = Layer.effect(
         rootKey,
         provider,
         store,
-        projector: (deviceID) => SessionSync.projector(events, deviceID),
+        projector: (deviceID) =>
+          SessionSync.projector(events, deviceID, ({ sessionID }) => metadata.availability(sessionID, "conflict")),
         metadata: () =>
           sessionDB
             .select()
@@ -241,7 +248,63 @@ const layer = Layer.effect(
         ),
       }
     })
-    return { status, now, enable, devices: deviceState, updateDevice, updateBinding, exportKey }
+    const availabilityRaw = Effect.fn("SyncControl.sessionAvailability")(function* () {
+      const [indexed, local, deviceState] = yield* Effect.all([
+        metadata.list(),
+        sessionDB.select({ id: SessionTable.id }).from(SessionTable).all(),
+        Effect.tryPromise({ try: () => devices.read(), catch: () => new ControlError({ kind: "storage" }) }),
+      ])
+      const localIDs = new Set(local.map((item) => String(item.id)))
+      return yield* Effect.forEach(indexed, (item) => {
+        // A portable label is intentionally all that crosses devices. It is
+        // unresolved until this device explicitly binds it to one of its own
+        // targets; neither an SSH config nor a target ID is synced.
+        const next: SyncMetadata.Availability =
+          item.availability === "conflict"
+            ? "conflict"
+            : item.targetLabel && !deviceState.bindings[item.targetLabel]
+              ? "unresolved"
+              : localIDs.has(item.sessionID)
+                ? "ready"
+                : item.availability === "hydrating" || item.availability === "partial"
+                  ? item.availability
+                  : "metadata-only"
+        return next === item.availability
+          ? Effect.succeed(item)
+          : metadata.availability(item.sessionID, next).pipe(Effect.as({ ...item, availability: next }))
+      })
+    })
+    const availability = () => availabilityRaw().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+    const sessions = Effect.fn("SyncControl.sessions")(function* () {
+      const runtime = yield* load()
+      // Do not call now(): its hydration phase would defeat metadata-first
+      // browsing. Selecting one of these rows calls hydrate below.
+      yield* runtime.pull().pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      lastSuccessAt = Date.now()
+      lastError = undefined
+      return yield* availability()
+    })
+    const hydrateRaw = Effect.fn("SyncControl.hydrate")(function* (input: typeof HydrateInput.Type) {
+      const runtime = yield* load()
+      const known = (yield* metadata.list()).find((item) => item.sessionID === input.sessionID)
+      if (!known) return yield* new ControlError({ kind: "storage" })
+      yield* metadata.availability(input.sessionID, "hydrating")
+      const result = yield* runtime.hydrate().pipe(
+        Effect.andThen(availability()),
+        Effect.map((items) => items.find((item) => item.sessionID === input.sessionID)),
+        Effect.catch(() =>
+          metadata.availability(input.sessionID, "partial").pipe(
+            Effect.andThen(Effect.fail(new ControlError({ kind: "provider" }))),
+          ),
+        ),
+      )
+      lastSuccessAt = Date.now()
+      lastError = undefined
+      return HydrateResult.make({ sessionID: input.sessionID, availability: result?.availability ?? "partial" })
+    })
+    const hydrate = (input: typeof HydrateInput.Type) =>
+      hydrateRaw(input).pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+    return { status, now, enable, devices: deviceState, updateDevice, updateBinding, exportKey, sessions, hydrate }
   }),
 )
 

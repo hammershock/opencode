@@ -155,6 +155,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
         ),
       )
+      .handle("syncSessions", () =>
+        syncControl.sessions().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+      )
+      .handle("syncHydrate", (ctx) =>
+        syncControl.hydrate(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+      )
       .handle("syncDevices", () =>
         syncControl.devices().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
       )

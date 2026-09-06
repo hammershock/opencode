@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm"
 import { makeGlobalNode } from "../effect/app-node"
 import { SyncDatabase } from "./database"
 import { SyncRuntime } from "./runtime"
+import { NonNegativeInt } from "../schema"
 
 export const Availability = Schema.Literals([
   "metadata-only",
@@ -15,7 +16,19 @@ export const Availability = Schema.Literals([
   "unresolved",
 ])
 export type Availability = typeof Availability.Type
-export type Item = SyncRuntime.Metadata & { readonly sourceDeviceID: string; readonly availability: Availability }
+export const Item = Schema.Struct({
+  sessionID: Schema.NonEmptyString,
+  title: Schema.String,
+  ownerDeviceID: Schema.NonEmptyString,
+  targetLabel: Schema.optional(Schema.String),
+  directory: Schema.String,
+  revision: NonNegativeInt,
+  updatedAt: NonNegativeInt,
+  deleted: Schema.optional(Schema.Boolean),
+  sourceDeviceID: Schema.NonEmptyString,
+  availability: Availability,
+})
+export type Item = typeof Item.Type
 
 export interface Interface {
   readonly apply: (deviceID: string, values: readonly SyncRuntime.Metadata[]) => Effect.Effect<void, unknown>

@@ -367,6 +367,13 @@ export function DialogSessionList() {
               })
               return
             }
+            if (result.data.availability === "conflict") {
+              toast.show({
+                title: "Opened a conflict copy",
+                message: "The remote history diverged. Review this session before making further changes.",
+                variant: "error",
+              })
+            }
           } catch (err) {
             await refetchSyncedSessions()
             toast.show({ title: "Failed to download session", message: errorMessage(err), variant: "error" })

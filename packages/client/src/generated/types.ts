@@ -269,6 +269,7 @@ export type SessionsListOutput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     }
+    readonly locationRevision?: number
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -356,6 +357,7 @@ export type SessionsCreateOutput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     }
+    readonly locationRevision?: number
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -399,6 +401,7 @@ export type SessionsGetOutput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     }
+    readonly locationRevision?: number
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -3219,6 +3222,141 @@ export type TargetsListOutput = {
     readonly offset?: number | undefined
   }>
   readonly valid: boolean
+}
+
+export type TargetsResolveSessionInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type TargetsResolveSessionOutput =
+  | {
+      readonly status: "resolved"
+      readonly location: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly target?: {
+        readonly id: string
+        readonly status: "unverified"
+        readonly name: string
+        readonly transport: "ssh"
+        readonly connection:
+          | { readonly type: "ssh-config"; readonly host: string }
+          | {
+              readonly type: "manual"
+              readonly host: string
+              readonly user: string
+              readonly port: number | "Infinity" | "-Infinity" | "NaN"
+              readonly identityFile?: string | null
+            }
+        readonly defaultDirectory?: string | null
+        readonly workspaceRoots: ReadonlyArray<string>
+        readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | null
+      } | null
+    }
+  | {
+      readonly status: "missing_local_target"
+      readonly location: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly missingTargetID: string
+      readonly lastKnownTargetName?: string | null
+      readonly referencedSessionIDs: ReadonlyArray<string>
+    }
+  | {
+      readonly status: "unbound_portable_target"
+      readonly portableTargetLabel: string
+      readonly directory: string
+      readonly referencedSessionIDs: ReadonlyArray<string>
+    }
+  | {
+      readonly status: "target_unavailable"
+      readonly location: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly target: {
+        readonly id: string
+        readonly status: "unverified"
+        readonly name: string
+        readonly transport: "ssh"
+        readonly connection:
+          | { readonly type: "ssh-config"; readonly host: string }
+          | {
+              readonly type: "manual"
+              readonly host: string
+              readonly user: string
+              readonly port: number | "Infinity" | "-Infinity" | "NaN"
+              readonly identityFile?: string | null
+            }
+        readonly defaultDirectory?: string | null
+        readonly workspaceRoots: ReadonlyArray<string>
+        readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | null
+      }
+      readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+      readonly message: string
+    }
+
+export type TargetsBindingListOutput = {
+  readonly revision: string
+  readonly bindings: { readonly [x: string]: string }
+}
+
+export type TargetsBindPortableInput = {
+  readonly portableTargetLabel: { readonly portableTargetLabel: string }["portableTargetLabel"]
+  readonly targetID: {
+    readonly targetID: string
+    readonly expectedRevision: string
+    readonly expectedSessionIDs: ReadonlyArray<string>
+  }["targetID"]
+  readonly expectedRevision: {
+    readonly targetID: string
+    readonly expectedRevision: string
+    readonly expectedSessionIDs: ReadonlyArray<string>
+  }["expectedRevision"]
+  readonly expectedSessionIDs: {
+    readonly targetID: string
+    readonly expectedRevision: string
+    readonly expectedSessionIDs: ReadonlyArray<string>
+  }["expectedSessionIDs"]
+}
+
+export type TargetsBindPortableOutput = {
+  readonly revision: string
+  readonly bindings: { readonly [x: string]: string }
+}
+
+export type TargetsRebindSessionInput = {
+  readonly sessionID: { readonly sessionID: string }["sessionID"]
+  readonly expectedRevision: {
+    readonly expectedRevision: number | "Infinity" | "-Infinity" | "NaN"
+    readonly destination: {
+      readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+      readonly directory: string
+      readonly workspaceID?: string
+      readonly lastKnownTargetName?: string
+    }
+  }["expectedRevision"]
+  readonly destination: {
+    readonly expectedRevision: number | "Infinity" | "-Infinity" | "NaN"
+    readonly destination: {
+      readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+      readonly directory: string
+      readonly workspaceID?: string
+      readonly lastKnownTargetName?: string
+    }
+  }["destination"]
+}
+
+export type TargetsRebindSessionOutput = {
+  readonly status: "unchanged" | "rebound"
+  readonly revision: number
+  readonly warnings: ReadonlyArray<string>
 }
 
 export type TargetsCreateInput = {

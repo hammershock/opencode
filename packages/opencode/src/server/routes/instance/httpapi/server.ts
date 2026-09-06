@@ -63,6 +63,7 @@ import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProjectCopy } from "@opencode-ai/core/project/copy"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
+import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -272,6 +273,7 @@ const app = LayerNode.group([
   ProjectCopy.node,
   PtyTicket.node,
   TargetRegistry.node,
+  TargetBindingRegistry.node,
 ])
 
 export function createRoutes(

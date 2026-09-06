@@ -4461,6 +4461,7 @@ export type SessionV2Info = {
   }
   title: string
   location: LocationRef
+  locationRevision?: number
   subpath?: string
   revert?: RevertState
 }
@@ -6685,6 +6686,97 @@ export type ReferenceInfo = {
 
 export type ProjectCopyCopy = {
   directory: string
+}
+
+export type SessionLocationRebindingResolution =
+  | {
+      status: "resolved"
+      location: LocationRef
+      target?: {
+        id: string
+        status: "unverified"
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }
+    }
+  | {
+      status: "missing_local_target"
+      location: LocationRef
+      missingTargetID: string
+      lastKnownTargetName?: string
+      referencedSessionIDs: Array<string>
+    }
+  | {
+      status: "unbound_portable_target"
+      portableTargetLabel: string
+      directory: string
+      referencedSessionIDs: Array<string>
+    }
+  | {
+      status: "target_unavailable"
+      location: LocationRef
+      target: {
+        id: string
+        status: "unverified"
+        name: string
+        transport: "ssh"
+        connection:
+          | {
+              type: "ssh-config"
+              host: string
+            }
+          | {
+              type: "manual"
+              host: string
+              user: string
+              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              identityFile?: string
+            }
+        defaultDirectory?: string
+        workspaceRoots: Array<string>
+        command?: {
+          program: string
+          args: Array<string>
+        }
+      }
+      stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+      message: string
+    }
+
+export type SessionLocationRebindingPortableBindingSnapshot = {
+  revision: string
+  bindings: {
+    [key: string]: string
+  }
+}
+
+export type SessionLocationRebindingRebindInput = {
+  expectedRevision: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  destination: LocationRef
+}
+
+export type SessionLocationRebindingRebindResult = {
+  status: "unchanged" | "rebound"
+  revision: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  warnings: Array<string>
 }
 
 export type EventModelsDevRefreshed = {
@@ -14397,6 +14489,197 @@ export type V2TargetCreateResponses = {
 }
 
 export type V2TargetCreateResponse = V2TargetCreateResponses[keyof V2TargetCreateResponses]
+
+export type V2SessionLocationResolveData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/target-resolution"
+}
+
+export type V2SessionLocationResolveErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SessionLocationResolveError = V2SessionLocationResolveErrors[keyof V2SessionLocationResolveErrors]
+
+export type V2SessionLocationResolveResponses = {
+  /**
+   * SessionLocationRebinding.Resolution
+   */
+  200: SessionLocationRebindingResolution
+}
+
+export type V2SessionLocationResolveResponse =
+  V2SessionLocationResolveResponses[keyof V2SessionLocationResolveResponses]
+
+export type V2TargetBindingListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/target-binding"
+}
+
+export type V2TargetBindingListErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetBindingListError = V2TargetBindingListErrors[keyof V2TargetBindingListErrors]
+
+export type V2TargetBindingListResponses = {
+  /**
+   * SessionLocationRebinding.PortableBindingSnapshot
+   */
+  200: SessionLocationRebindingPortableBindingSnapshot
+}
+
+export type V2TargetBindingListResponse = V2TargetBindingListResponses[keyof V2TargetBindingListResponses]
+
+export type V2TargetBindingBindData = {
+  body: {
+    targetID: string
+    expectedRevision: string
+    expectedSessionIDs: Array<string>
+  }
+  path: {
+    portableTargetLabel: string
+  }
+  query?: never
+  url: "/api/target-binding/{portableTargetLabel}"
+}
+
+export type V2TargetBindingBindErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetBindingBindError = V2TargetBindingBindErrors[keyof V2TargetBindingBindErrors]
+
+export type V2TargetBindingBindResponses = {
+  /**
+   * SessionLocationRebinding.PortableBindingSnapshot
+   */
+  200: SessionLocationRebindingPortableBindingSnapshot
+}
+
+export type V2TargetBindingBindResponse = V2TargetBindingBindResponses[keyof V2TargetBindingBindResponses]
+
+export type V2SessionLocationRebindData = {
+  body: SessionLocationRebindingRebindInput
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/location/rebind"
+}
+
+export type V2SessionLocationRebindErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SessionLocationRebindError = V2SessionLocationRebindErrors[keyof V2SessionLocationRebindErrors]
+
+export type V2SessionLocationRebindResponses = {
+  /**
+   * SessionLocationRebinding.RebindResult
+   */
+  200: SessionLocationRebindingRebindResult
+}
+
+export type V2SessionLocationRebindResponse = V2SessionLocationRebindResponses[keyof V2SessionLocationRebindResponses]
 
 export type V2TargetRemoveData = {
   body: {

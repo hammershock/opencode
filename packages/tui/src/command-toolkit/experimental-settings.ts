@@ -11,6 +11,7 @@ export type ExperimentalCommandSetting = {
 }
 
 export const SESSION_EXIT_TO_HOME_SETTING = "experimental.commands.exit_to_home"
+export const SESSION_FORCE_REBIND_SETTING = "experimental.session.force_rebind"
 
 export const experimentalCommandSettings = [
   {
@@ -32,6 +33,13 @@ export const experimentalCommandSettings = [
     key: TARGET_MANAGER_SETTING,
     title: "Session target manager",
     description: "Enable /target and /target add without changing the current Session location",
+    defaultValue: false,
+  },
+  {
+    id: "fork.session.force-rebind",
+    key: SESSION_FORCE_REBIND_SETTING,
+    title: "Force Session Location rebind",
+    description: "Allow an idle Session to move to another target and directory (not recommended)",
     defaultValue: false,
   },
 ] as const satisfies readonly ExperimentalCommandSetting[]

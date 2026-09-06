@@ -1,4 +1,7 @@
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
+import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
+import { SessionLocationRebinding } from "@opencode-ai/core/session-location-rebinding"
+import { SessionV2 } from "@opencode-ai/core/session"
 import {
   ConflictError,
   ForbiddenError,
@@ -36,6 +39,8 @@ function mapDomainError(cause: unknown) {
 export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handlers) =>
   Effect.gen(function* () {
     const target = yield* TargetRegistry.Service
+    const bindings = yield* TargetBindingRegistry.Service
+    const sessions = yield* SessionV2.Service
     return handlers
       .handle("target.list", () => read(target.load))
       .handle("target.create", (ctx) => invoke(() => target.create(ctx.payload.input, ctx.payload.expectedRevision)))
@@ -58,6 +63,65 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
       .handle("target.legacy.preview", () => read(target.previewLegacyImport))
       .handle("target.legacy.import", (ctx) =>
         invoke(() => target.importLegacy(ctx.payload.sourceRevision, ctx.payload.expectedRevision)),
+      )
+      .handle("target.resolveSession", (ctx) =>
+        invoke(async () => {
+          const session = await Effect.runPromise(sessions.get(ctx.params.sessionID))
+          const snapshot = await target.load()
+          const bindingSnapshot = await bindings.load()
+          return SessionLocationRebinding.resolve({
+            sessionID: session.id,
+            location: session.location,
+            targets: snapshot.targets,
+            bindings: bindingSnapshot.bindings,
+            referencedSessions: async (reference) => {
+              const all = await Effect.runPromise(sessions.list())
+              return all
+                .filter((item) => {
+                  if (reference.targetID)
+                    return item.location.target.type === "rexd" && item.location.target.targetID === reference.targetID
+                  return item.location.lastKnownTargetName === reference.label
+                })
+                .map((item) => item.id)
+            },
+            probe: async (definition) => target.prepare(definition.id),
+          })
+        }),
+      )
+      .handle("target.bindingList", () =>
+        invoke(async () => {
+          const snapshot = await bindings.load()
+          return { revision: snapshot.revision, bindings: Object.fromEntries(snapshot.bindings) }
+        }),
+      )
+      .handle("target.bindPortable", (ctx) =>
+        invoke(async () => {
+          const all = await Effect.runPromise(sessions.list())
+          const actual = all
+            .filter((item) => item.location.lastKnownTargetName === ctx.params.portableTargetLabel)
+            .map((item) => item.id)
+            .sort()
+          const expected = [...new Set(ctx.payload.expectedSessionIDs)].sort()
+          if (actual.length !== expected.length || actual.some((id, index) => id !== expected[index]))
+            throw new Error("Portable target recovery scope changed; review the affected Sessions again")
+          const prepared = await target.prepare(ctx.payload.targetID)
+          if (prepared.status !== "ready") throw new Error(`${prepared.stage}: ${prepared.message}`)
+          const snapshot = await bindings.bind(
+            ctx.params.portableTargetLabel,
+            ctx.payload.targetID,
+            ctx.payload.expectedRevision,
+          )
+          return { revision: snapshot.revision, bindings: Object.fromEntries(snapshot.bindings) }
+        }),
+      )
+      .handle("target.rebindSession", (ctx) =>
+        sessions
+          .rebindLocation({ sessionID: ctx.params.sessionID, ...ctx.payload })
+          .pipe(
+            Effect.mapError(
+              (cause) => new InvalidRequestError({ message: cause.message, kind: "session_location_rebind" }),
+            ),
+          ),
       )
   }),
 )

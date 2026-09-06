@@ -17,6 +17,9 @@ import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
 import { useEvent } from "../context/event"
 import { sessionListLocation, sessionListMatches, type SessionListLocationRecord } from "./session-list-location"
+import { DialogSessionLocationRecovery, forceRebindSession } from "./dialog-session-location-recovery"
+import { useKV } from "../context/kv"
+import { SESSION_FORCE_REBIND_SETTING } from "../command-toolkit/experimental-settings"
 
 type SessionListFilter = { scope?: "project"; path?: string }
 
@@ -49,6 +52,7 @@ export function DialogSessionList() {
   const { theme } = useTheme()
   const sdk = useSDK()
   const event = useEvent()
+  const kv = useKV()
   const local = useLocal()
   const toast = useToast()
   const [toDelete, setToDelete] = createSignal<string>()
@@ -282,13 +286,48 @@ export function DialogSessionList() {
         setToDelete(undefined)
       }}
       onSelect={(option) => {
-        route.navigate({
-          type: "session",
-          sessionID: option.value,
-        })
-        dialog.clear()
+        void sdk.client.v2.sessionLocation
+          .resolve({ sessionID: option.value }, { throwOnError: true })
+          .then((result) => {
+            const resolution = result.data
+            if (resolution.status === "resolved") {
+              route.navigate({ type: "session", sessionID: option.value })
+              dialog.clear()
+              return
+            }
+            dialog.replace(() => <DialogSessionLocationRecovery sessionID={option.value} resolution={resolution} />)
+          })
+          .catch((cause) =>
+            toast.show({ title: "Session target resolution failed", message: errorMessage(cause), variant: "error" }),
+          )
       }}
       actions={[
+        ...(kv.get(SESSION_FORCE_REBIND_SETTING, false)
+          ? [
+              {
+                command: "session.location.rebind",
+                title: "force rebind (experimental)",
+                onTrigger: (option: { value: string }) => {
+                  const session = sessions().find((item) => item.id === option.value)
+                  if (!session) return
+                  void sdk.client.v2.session
+                    .get({ sessionID: session.id }, { throwOnError: true })
+                    .then((current) =>
+                      forceRebindSession({
+                        dialog,
+                        sdk,
+                        sessionID: session.id,
+                        expectedRevision: current.data.data.locationRevision ?? 0,
+                      }),
+                    )
+                    .then(() => sync.session.refresh())
+                    .catch((cause) =>
+                      toast.show({ title: "Location rebind failed", message: errorMessage(cause), variant: "error" }),
+                    )
+                },
+              },
+            ]
+          : []),
         {
           command: "session.pin.toggle",
           title: "pin/unpin",

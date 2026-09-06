@@ -1,5 +1,7 @@
 import { Location } from "@opencode-ai/schema/location"
 import { Target } from "@opencode-ai/schema/target"
+import { SessionLocationRebinding } from "@opencode-ai/schema/session-location-rebinding"
+import { SessionID } from "@opencode-ai/schema/session-id"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { ConflictError, ForbiddenError, InvalidRequestError, TargetNotFoundError, UnknownError } from "../errors"
@@ -11,6 +13,47 @@ export const TargetGroup = HttpApiGroup.make("server.target")
   .add(
     HttpApiEndpoint.get("target.list", "/api/target", { success: Target.Snapshot, error: UnknownError }).annotateMerge(
       OpenApi.annotations({ identifier: "v2.target.list", summary: "List device-local execution targets" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.get("target.resolveSession", "/api/session/:sessionID/target-resolution", {
+      params: { sessionID: SessionID },
+      success: SessionLocationRebinding.Resolution,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.sessionLocation.resolve", summary: "Resolve a Session execution target" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.get("target.bindingList", "/api/target-binding", {
+      success: SessionLocationRebinding.PortableBindingSnapshot,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.targetBinding.list", summary: "List device-local portable bindings" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.put("target.bindPortable", "/api/target-binding/:portableTargetLabel", {
+      params: { portableTargetLabel: Schema.String },
+      payload: Schema.Struct({
+        targetID: Location.TargetID,
+        expectedRevision: Schema.String,
+        expectedSessionIDs: Schema.Array(SessionID),
+      }),
+      success: SessionLocationRebinding.PortableBindingSnapshot,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.targetBinding.bind", summary: "Explicitly bind a portable target label" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.post("target.rebindSession", "/api/session/:sessionID/location/rebind", {
+      params: { sessionID: SessionID },
+      payload: SessionLocationRebinding.RebindInput,
+      success: SessionLocationRebinding.RebindResult,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.sessionLocation.rebind", summary: "Force rebind one idle Session" }),
     ),
   )
   .add(

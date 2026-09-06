@@ -158,6 +158,148 @@ describe("Session location rebind transaction", () => {
   })
 })
 
+describe("Session recovery safety", () => {
+  const input = {
+    name: "gpu",
+    transport: "ssh" as const,
+    connection: { type: "ssh-config" as const, host: "gpu" },
+    workspaceRoots: ["/work"],
+  }
+
+  test("read-only unresolved Sessions deny every location-dependent operation", () => {
+    expect(SessionLocationRebinding.permits("read-only", "history.read")).toBe(true)
+    expect(SessionLocationRebinding.permits("read-only", "metadata.read")).toBe(true)
+    for (const operation of [
+      "prompt",
+      "user_shell",
+      "agent_tool",
+      "terminal",
+      "filesystem",
+      "location_mutation",
+    ] as const) {
+      expect(SessionLocationRebinding.permits("read-only", operation)).toBe(false)
+    }
+  })
+
+  test("restores the exact missing ID for the confirmed batch without changing Session locations", async () => {
+    const second = SessionSchema.ID.make("ses_second")
+    const calls: string[] = []
+    const recovery = SessionLocationRebinding.makeRecovery({
+      referencedSessions: async () => [sessionID, second],
+      validateTargetInput: async () => {
+        calls.push("target.validate")
+      },
+      restoreMissingTarget: async (request) => {
+        calls.push(`restore:${request.targetID}`)
+        return definition(request.targetID, request.target.name)
+      },
+      validateSessionLocation: async (id) => {
+        calls.push(`session.validate:${id}`)
+        if (id === second) throw new Error("directory missing")
+      },
+      setPortableBinding: async () => ({ revision: "next" }),
+      readPortableBindingRevision: async () => "binding",
+      publishGlobalDeletion: async () => {},
+      removeLocalProjection: async () => {},
+    })
+    const result = await recovery.restoreMissing({
+      targetID,
+      target: input,
+      expectedSessionIDs: [second, sessionID],
+      expectedRegistryRevision: "registry",
+      locations: new Map([
+        [sessionID, remote],
+        [second, Location.Ref.make({ ...remote, directory: AbsolutePath.make("/missing") })],
+      ]),
+    })
+    expect(result.target.id).toBe(targetID)
+    expect(result.resolvedSessionIDs).toEqual([sessionID])
+    expect(result.failedSessionIDs).toEqual([second])
+    expect(calls).toEqual([
+      "target.validate",
+      `restore:${targetID}`,
+      `session.validate:${sessionID}`,
+      `session.validate:${second}`,
+    ])
+  })
+
+  test("rejects a changed recovery batch before mutation", async () => {
+    let changed = false
+    const recovery = SessionLocationRebinding.makeRecovery({
+      referencedSessions: async () => [sessionID, SessionSchema.ID.make("ses_new")],
+      validateTargetInput: async () => {},
+      restoreMissingTarget: async () => {
+        changed = true
+        return definition(targetID, "gpu")
+      },
+      validateSessionLocation: async () => {},
+      setPortableBinding: async () => ({ revision: "next" }),
+      readPortableBindingRevision: async () => "binding",
+      publishGlobalDeletion: async () => {},
+      removeLocalProjection: async () => {},
+    })
+    await expect(
+      recovery.restoreMissing({
+        targetID,
+        target: input,
+        expectedSessionIDs: [sessionID],
+        expectedRegistryRevision: "registry",
+        locations: new Map([[sessionID, remote]]),
+      }),
+    ).rejects.toMatchObject({ _tag: "SessionLocationRebinding.RecoveryScopeChangedError" })
+    expect(changed).toBe(false)
+  })
+
+  test("validates a portable batch before publishing one device-local binding", async () => {
+    const calls: string[] = []
+    const recovery = SessionLocationRebinding.makeRecovery({
+      referencedSessions: async () => [sessionID],
+      validateTargetInput: async () => {},
+      restoreMissingTarget: async () => definition(targetID, "gpu"),
+      validateSessionLocation: async () => {
+        calls.push("validate")
+      },
+      setPortableBinding: async () => {
+        calls.push("bind")
+        return { revision: "next" }
+      },
+      readPortableBindingRevision: async () => "current",
+      publishGlobalDeletion: async () => {},
+      removeLocalProjection: async () => {},
+    })
+    expect(
+      await recovery.bindPortable({
+        portableTargetLabel: "lab-gpu",
+        targetID,
+        expectedSessionIDs: [sessionID],
+        expectedBindingRevision: "current",
+        locations: new Map([[sessionID, remote]]),
+      }),
+    ).toEqual({ revision: "next", resolvedSessionIDs: [sessionID] })
+    expect(calls).toEqual(["validate", "bind"])
+  })
+
+  test("publishes a global tombstone before removing the local projection", async () => {
+    const calls: string[] = []
+    const recovery = SessionLocationRebinding.makeRecovery({
+      referencedSessions: async () => [],
+      validateTargetInput: async () => {},
+      restoreMissingTarget: async () => definition(targetID, "gpu"),
+      validateSessionLocation: async () => {},
+      setPortableBinding: async () => ({ revision: "next" }),
+      readPortableBindingRevision: async () => "current",
+      publishGlobalDeletion: async () => {
+        calls.push("tombstone")
+      },
+      removeLocalProjection: async () => {
+        calls.push("projection")
+      },
+    })
+    await recovery.deleteGlobally(sessionID)
+    expect(calls).toEqual(["tombstone", "projection"])
+  })
+})
+
 function definition(id: Location.TargetID, name: string) {
   return {
     id,

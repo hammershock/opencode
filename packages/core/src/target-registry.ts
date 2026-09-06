@@ -9,6 +9,8 @@ import { Global } from "./global"
 import { Location } from "./location"
 import { Flock } from "./util/flock"
 import { makeGlobalNode } from "./effect/app-node"
+import { Database } from "./database/database"
+import { SessionTable } from "./session/sql"
 
 export type SshConfigConnection = {
   readonly type: "ssh-config"
@@ -268,13 +270,34 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const global = yield* Global.Service
+    const { db } = yield* Database.Service
     return Service.of(
-      make({ directory: global.config, legacyFile: path.join(global.home, ".config", "rexd", "targets.json") }),
+      make({
+        directory: global.config,
+        legacyFile: path.join(global.home, ".config", "rexd", "targets.json"),
+        restoreAuthorizer: {
+          authorize: async (targetID, referencedSessionIDs) => {
+            const rows = await Effect.runPromise(
+              db.select({ id: SessionTable.id, target: SessionTable.target }).from(SessionTable),
+            )
+            const actual = rows
+              .filter((row) => row.target?.type === "rexd" && row.target.targetID === targetID)
+              .map((row) => row.id)
+              .sort()
+            const expected = [...new Set(referencedSessionIDs)].sort()
+            return (
+              actual.length > 0 &&
+              actual.length === expected.length &&
+              actual.every((id, index) => id === expected[index])
+            )
+          },
+        },
+      }),
     )
   }),
 )
 
-export const node = makeGlobalNode({ service: Service, layer, deps: [Global.node] })
+export const node = makeGlobalNode({ service: Service, layer, deps: [Global.node, Database.node] })
 
 async function read(filepath: string): Promise<Snapshot> {
   const text = await readText(filepath)

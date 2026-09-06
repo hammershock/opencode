@@ -94,6 +94,7 @@ import { environmentCommands, type EnvironmentCommandContext } from "../../comma
 import { targetCommand, TARGET_MANAGER_SETTING, type TargetCommandContext } from "../../command-toolkit/target"
 import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
 import { useTargetManager } from "../../component/target-manager"
+import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
 
 addDefaultParsers(parsers.parsers)
 
@@ -197,6 +198,7 @@ export function Session() {
   }
   const pluginRuntime = usePluginRuntime()
   const route = useRouteData("session")
+  const [locationAccessReady, setLocationAccessReady] = createSignal(route.accessMode === "read-only")
   const { navigate } = useRoute()
   const sync = useSync()
   const event = useEvent()
@@ -259,7 +261,10 @@ export function Session() {
     return children().flatMap((x) => sync.data.question[x.id] ?? [])
   })
   const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
-  const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
+  const disabled = createMemo(
+    () =>
+      !locationAccessReady() || route.accessMode === "read-only" || permissions().length > 0 || questions().length > 0,
+  )
 
   const pending = createMemo(() => {
     const completed = messages().findLastIndex((message) => message.role === "assistant" && message.time.completed)
@@ -374,6 +379,22 @@ export function Session() {
   }
   const keymap = useOpencodeKeymap()
   const dialog = useDialog()
+  onMount(() => {
+    if (route.accessMode === "read-only") return
+    void sdk.client.v2.sessionLocation
+      .resolve({ sessionID: route.sessionID }, { throwOnError: true })
+      .then((result) => {
+        const resolution = result.data
+        if (resolution.status === "resolved") {
+          setLocationAccessReady(true)
+          return
+        }
+        dialog.replace(() => <DialogSessionLocationRecovery sessionID={route.sessionID} resolution={resolution} />)
+      })
+      .catch((cause) =>
+        toast.show({ title: "Session target resolution failed", message: errorMessage(cause), variant: "error" }),
+      )
+  })
   const renameOverride = createMemo(() =>
     installSessionRenameOverride({
       enabled: kv.get(SESSION_RENAME_DIRECT_SETTING, false),
@@ -1411,6 +1432,21 @@ export function Session() {
                 </For>
               </scrollbox>
               <box flexShrink={0}>
+                <Show when={route.accessMode === "read-only"}>
+                  <box
+                    paddingLeft={2}
+                    paddingRight={2}
+                    paddingTop={1}
+                    paddingBottom={1}
+                    border={["top"]}
+                    borderColor={theme.warning}
+                  >
+                    <text fg={theme.warning}>
+                      Read-only · Session target is unresolved ({route.resolution ?? "unavailable"}). Prompt, Shell,
+                      tools, Terminal and file access are disabled. Open /sessions to resolve it.
+                    </text>
+                  </box>
+                </Show>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt
                     request={permissions()[0]}

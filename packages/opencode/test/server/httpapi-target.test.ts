@@ -7,6 +7,7 @@ import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 
 const context = Context.empty() as Context.Context<unknown>
 const file = path.join(Global.Path.config, "targets.jsonc")
+const bindingFile = path.join(Global.Path.config, "target-bindings.json")
 
 function request(route: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
@@ -24,6 +25,7 @@ const input = {
 
 afterEach(async () => {
   await fs.rm(file, { force: true })
+  await fs.rm(bindingFile, { force: true })
 })
 
 describe("target registry HttpApi", () => {
@@ -96,5 +98,11 @@ describe("target registry HttpApi", () => {
     const preview = await request("/api/target/legacy/import")
     expect(preview.status).toBe(200)
     expect(await preview.json()).toMatchObject({ candidates: [], diagnostics: [] })
+  })
+
+  test("exposes an empty device-local portable binding registry", async () => {
+    const response = await request("/api/target-binding")
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ bindings: {} })
   })
 })

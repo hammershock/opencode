@@ -1,7 +1,7 @@
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
-import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
+import { DateTime, Effect, Layer, Schema, Context, Stream, Semaphore } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
 import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
@@ -37,6 +37,9 @@ import { SessionRevert } from "./session/revert"
 import { Revert } from "@opencode-ai/schema/revert"
 import { FSUtil } from "./fs-util"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
+import { Pty } from "./pty"
+import { PermissionV2 } from "./permission"
+import { QuestionV2 } from "./question"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -105,6 +108,9 @@ export class PromptConflictError extends Schema.TaggedErrorClass<PromptConflictE
   sessionID: SessionSchema.ID,
   messageID: SessionMessage.ID,
 }) {}
+export class LocationRebindError extends Schema.TaggedErrorClass<LocationRebindError>()("Session.LocationRebindError", {
+  message: Schema.String,
+}) {}
 export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 
@@ -168,6 +174,14 @@ export interface Interface {
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly rebindLocation: (input: {
+    readonly sessionID: SessionSchema.ID
+    readonly expectedRevision: number
+    readonly destination: Location.Ref
+  }) => Effect.Effect<
+    { readonly status: "unchanged" | "rebound"; readonly revision: number; readonly warnings: readonly string[] },
+    NotFoundError | LocationRebindError
+  >
   readonly revert: {
     readonly stage: (input: {
       sessionID: SessionSchema.ID
@@ -192,6 +206,21 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
+    const locationMutation = yield* Semaphore.make(1)
+    const locationBlockers = (sessionID: SessionSchema.ID, ref: Location.Ref) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* locations.contextEffect(ref)
+          const pty = Context.get(context, Pty.Service)
+          const permissions = Context.get(context, PermissionV2.Service)
+          const questions = Context.get(context, QuestionV2.Service)
+          const blockers: string[] = []
+          if ((yield* pty.list()).some((item) => item.status === "running")) blockers.push("terminal_pty")
+          if ((yield* permissions.forSession(sessionID)).length) blockers.push("permission")
+          if ((yield* questions.list()).some((item) => item.sessionID === sessionID)) blockers.push("question")
+          return blockers
+        }),
+      )
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
     const decode = (row: typeof SessionMessageTable.$inferSelect) =>
       decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(
@@ -262,6 +291,62 @@ const layer = Layer.effect(
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         return yield* result.get(sessionID).pipe(Effect.orDie)
       }),
+      rebindLocation: Effect.fn("V2Session.rebindLocation")((input) =>
+        locationMutation.withPermits(1)(
+          Effect.gen(function* () {
+            const before = yield* store.get(input.sessionID)
+            if (!before) return yield* new NotFoundError({ sessionID: input.sessionID })
+            if (before.locationRevision !== input.expectedRevision)
+              return yield* new LocationRebindError({
+                message: `Location revision changed: expected ${input.expectedRevision}, actual ${before.locationRevision}`,
+              })
+            if (
+              before.location.directory === input.destination.directory &&
+              before.location.workspaceID === input.destination.workspaceID &&
+              JSON.stringify(before.location.target) === JSON.stringify(input.destination.target)
+            )
+              return { status: "unchanged" as const, revision: before.locationRevision, warnings: [] }
+            const active = yield* execution.active
+            if (active.has(input.sessionID))
+              return yield* new LocationRebindError({ message: "Session has an active Agent turn" })
+            const blockers = yield* locationBlockers(input.sessionID, before.location)
+            if (blockers.length)
+              return yield* new LocationRebindError({ message: `Session is not idle: ${blockers.join(", ")}` })
+
+            // Materializing every Location-scoped service validates the candidate without
+            // mutating Session state. The scoped lease is released if validation fails.
+            yield* Effect.scoped(locations.contextEffect(input.destination))
+            const current = yield* store.get(input.sessionID)
+            if (!current) return yield* new NotFoundError({ sessionID: input.sessionID })
+            if (current.locationRevision !== input.expectedRevision)
+              return yield* new LocationRebindError({ message: "Location revision changed during validation" })
+            if ((yield* execution.active).has(input.sessionID))
+              return yield* new LocationRebindError({ message: "Session became active during validation" })
+            const finalBlockers = yield* locationBlockers(input.sessionID, current.location)
+            if (finalBlockers.length)
+              return yield* new LocationRebindError({
+                message: `Session became non-idle during validation: ${finalBlockers.join(", ")}`,
+              })
+            const revision = input.expectedRevision + 1
+            yield* events.publish(SessionEvent.LocationRebound, {
+              sessionID: input.sessionID,
+              timestamp: DateTime.makeUnsafe(Date.now()),
+              previous: current.location,
+              location: input.destination,
+              revision,
+            })
+            const warnings: string[] = []
+            yield* locations.invalidate(current.location).pipe(
+              Effect.catch((cause) =>
+                Effect.sync(() => {
+                  warnings.push(`Old Location cleanup failed: ${String(cause)}`)
+                }),
+              ),
+            )
+            return { status: "rebound" as const, revision, warnings }
+          }),
+        ),
+      ),
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })

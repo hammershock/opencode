@@ -113,6 +113,13 @@ import type {
   ProjectCopiesRefreshInput,
   ProjectCopiesRefreshOutput,
   TargetsListOutput,
+  TargetsResolveSessionInput,
+  TargetsResolveSessionOutput,
+  TargetsBindingListOutput,
+  TargetsBindPortableInput,
+  TargetsBindPortableOutput,
+  TargetsRebindSessionInput,
+  TargetsRebindSessionOutput,
   TargetsCreateInput,
   TargetsCreateOutput,
   TargetsUpdateInput,
@@ -1015,6 +1022,56 @@ export function make(options: ClientOptions) {
       list: (requestOptions?: RequestOptions) =>
         request<TargetsListOutput>(
           { method: "GET", path: `/api/target`, successStatus: 200, declaredStatuses: [500, 401, 400], empty: false },
+          requestOptions,
+        ),
+      resolveSession: (input: TargetsResolveSessionInput, requestOptions?: RequestOptions) =>
+        request<TargetsResolveSessionOutput>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/target-resolution`,
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      bindingList: (requestOptions?: RequestOptions) =>
+        request<TargetsBindingListOutput>(
+          {
+            method: "GET",
+            path: `/api/target-binding`,
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      bindPortable: (input: TargetsBindPortableInput, requestOptions?: RequestOptions) =>
+        request<TargetsBindPortableOutput>(
+          {
+            method: "PUT",
+            path: `/api/target-binding/${encodeURIComponent(input.portableTargetLabel)}`,
+            body: {
+              targetID: input["targetID"],
+              expectedRevision: input["expectedRevision"],
+              expectedSessionIDs: input["expectedSessionIDs"],
+            },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      rebindSession: (input: TargetsRebindSessionInput, requestOptions?: RequestOptions) =>
+        request<TargetsRebindSessionOutput>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/location/rebind`,
+            body: { expectedRevision: input["expectedRevision"], destination: input["destination"] },
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
           requestOptions,
         ),
       create: (input: TargetsCreateInput, requestOptions?: RequestOptions) =>

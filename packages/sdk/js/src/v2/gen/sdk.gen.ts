@@ -199,6 +199,7 @@ import type {
   SessionInitResponses,
   SessionListErrors,
   SessionListResponses,
+  SessionLocationRebindingRebindInput,
   SessionMessageErrors,
   SessionMessageResponses,
   SessionMessagesErrors,
@@ -363,6 +364,10 @@ import type {
   V2SessionInterruptResponses,
   V2SessionListErrors,
   V2SessionListResponses,
+  V2SessionLocationRebindErrors,
+  V2SessionLocationRebindResponses,
+  V2SessionLocationResolveErrors,
+  V2SessionLocationResolveResponses,
   V2SessionMessageErrors,
   V2SessionMessageResponses,
   V2SessionMessagesErrors,
@@ -397,6 +402,10 @@ import type {
   V2SessionWaitResponses,
   V2SkillListErrors,
   V2SkillListResponses,
+  V2TargetBindingBindErrors,
+  V2TargetBindingBindResponses,
+  V2TargetBindingListErrors,
+  V2TargetBindingListResponses,
   V2TargetCreateErrors,
   V2TargetCreateResponses,
   V2TargetLegacyImportErrors,
@@ -7396,6 +7405,115 @@ export class Target extends HeyApiClient {
   }
 }
 
+export class SessionLocation extends HeyApiClient {
+  /**
+   * Resolve a Session execution target
+   */
+  public resolve<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).get<
+      V2SessionLocationResolveResponses,
+      V2SessionLocationResolveErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/target-resolution",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Force rebind one idle Session
+   */
+  public rebind<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      sessionLocationRebindingRebindInput: SessionLocationRebindingRebindInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { key: "sessionLocationRebindingRebindInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2SessionLocationRebindResponses,
+      V2SessionLocationRebindErrors,
+      ThrowOnError
+    >({
+      url: "/api/session/{sessionID}/location/rebind",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class TargetBinding extends HeyApiClient {
+  /**
+   * List device-local portable bindings
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2TargetBindingListResponses, V2TargetBindingListErrors, ThrowOnError>({
+      url: "/api/target-binding",
+      ...options,
+    })
+  }
+
+  /**
+   * Explicitly bind a portable target label
+   */
+  public bind<ThrowOnError extends boolean = false>(
+    parameters: {
+      portableTargetLabel: string
+      targetID?: string
+      expectedRevision?: string
+      expectedSessionIDs?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "portableTargetLabel" },
+            { in: "body", key: "targetID" },
+            { in: "body", key: "expectedRevision" },
+            { in: "body", key: "expectedSessionIDs" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<V2TargetBindingBindResponses, V2TargetBindingBindErrors, ThrowOnError>({
+      url: "/api/target-binding/{portableTargetLabel}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Environment extends HeyApiClient {
   /**
    * List location environment metadata
@@ -7595,6 +7713,16 @@ export class V2 extends HeyApiClient {
   private _target?: Target
   get target(): Target {
     return (this._target ??= new Target({ client: this.client }))
+  }
+
+  private _sessionLocation?: SessionLocation
+  get sessionLocation(): SessionLocation {
+    return (this._sessionLocation ??= new SessionLocation({ client: this.client }))
+  }
+
+  private _targetBinding?: TargetBinding
+  get targetBinding(): TargetBinding {
+    return (this._targetBinding ??= new TargetBinding({ client: this.client }))
   }
 
   private _environment?: Environment

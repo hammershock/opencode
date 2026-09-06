@@ -146,4 +146,3 @@ PortableSessionLocation {
 7. cleanup failure 不回滚已提交 Location，并产生可诊断 warning。
 8. 同步开启时只发送 portable label/directory/revision，不发送 target ID、SSH 配置或凭据。
 9. 未绑定 portable label 的设备保持 unresolved，不自动使用 local 或同名 target。
-

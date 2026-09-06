@@ -1,17 +1,17 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, createResource, Match, Show, Switch } from "solid-js"
+import { createMemo, Match, Show, Switch } from "solid-js"
 import { abbreviateHome } from "../../runtime"
 import { useTuiPaths } from "../../context/runtime"
 import { useHomeSessionDestination, type HomeSessionTarget } from "../../routes/home/session-destination"
 import { useDialog } from "../../ui/dialog"
 import { DialogSelect } from "../../ui/dialog-select"
-import { DialogConfirm } from "../../ui/dialog-confirm"
 import { useSDK } from "../../context/sdk"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { DialogLocationDirectory } from "../../component/dialog-location-directory"
-import { targetWizard, type TargetDefinition } from "../../component/target-wizard"
+import type { TargetDefinition } from "../../component/target-wizard"
+import { useTargetManager } from "../../component/target-manager"
 
 const id = "internal:home-footer"
 
@@ -22,10 +22,8 @@ function Directory(props: { api: TuiPluginApi }) {
   const dialog = useDialog()
   const sdk = useSDK()
   const toast = useToast()
-  const [targets, targetsControl] = createResource(async () => {
-    const result = await sdk.client.v2.target.list({ throwOnError: true })
-    return result.data
-  })
+  const targetManager = useTargetManager()
+  const targets = targetManager.targets
   const dir = createMemo(() => {
     const selected = destination?.destination()
     if (!selected || selected.type === "new") return
@@ -79,97 +77,6 @@ function Directory(props: { api: TuiPluginApi }) {
     })()
   }
 
-  const save = (current?: TargetDefinition) => {
-    void (async () => {
-      const snapshot = targets()
-      if (!snapshot) return
-      const input = await targetWizard(dialog, current)
-      if (!input) return
-      try {
-        const result = current
-          ? await sdk.client.v2.target.update(
-              { targetID: current.id, input, expectedRevision: snapshot.revision },
-              { throwOnError: true },
-            )
-          : await sdk.client.v2.target.create({ input, expectedRevision: snapshot.revision }, { throwOnError: true })
-        await targetsControl.refetch()
-        const tested = await sdk.client.v2.target.test({ targetID: result.data.target.id }, { throwOnError: true })
-        toast.show({
-          title: result.data.target.name,
-          message:
-            tested.data.status === "ready"
-              ? "Target verified"
-              : `Saved unverified · ${tested.data.stage}: ${tested.data.message}`,
-          variant: tested.data.status === "ready" ? "success" : "warning",
-        })
-        openTargets()
-      } catch (error) {
-        toast.show({ title: "Target save failed", message: errorMessage(error), variant: "error" })
-      }
-    })()
-  }
-
-  const manage = (target: TargetDefinition) => {
-    dialog.replace(() => (
-      <DialogSelect
-        title={target.name}
-        options={[
-          { title: "Test connection", value: "test" as const },
-          { title: "Edit or rename", value: "edit" as const },
-          { title: "Remove target", value: "remove" as const },
-        ]}
-        onSelect={(option) => {
-          if (option.value === "edit") return save(target)
-          if (option.value === "test") {
-            void sdk.client.v2.target
-              .test({ targetID: target.id }, { throwOnError: true })
-              .then((result) =>
-                toast.show({
-                  title: target.name,
-                  message: result.data.status === "ready" ? "Target ready" : `${result.data.stage}: ${result.data.message}`,
-                  variant: result.data.status === "ready" ? "success" : "warning",
-                }),
-              )
-              .catch((error) => toast.show({ message: errorMessage(error), variant: "error" }))
-            return
-          }
-          void (async () => {
-            const confirmed = await DialogConfirm.show(
-              dialog,
-              "Remove target",
-              `Remove ${target.name} globally from this device? Referencing Sessions are preserved as unresolved.`,
-            )
-            if (!confirmed || !targets()) return
-            await sdk.client.v2.target.remove(
-              { targetID: target.id, expectedRevision: targets()!.revision },
-              { throwOnError: true },
-            )
-            await targetsControl.refetch()
-            openManager()
-          })().catch((error) => toast.show({ message: errorMessage(error), variant: "error" }))
-        }}
-      />
-    ))
-  }
-
-  const openManager = () => {
-    dialog.replace(() => (
-      <DialogSelect
-        title="Manage targets"
-        options={[
-          { title: "Add target…", value: undefined, category: "Actions" },
-          ...(targets()?.targets ?? []).map((target) => ({
-            title: target.name,
-            description: target.connection.host,
-            value: target as TargetDefinition,
-            category: "Configured targets",
-          })),
-        ]}
-        onSelect={(option) => (option.value ? manage(option.value) : save())}
-      />
-    ))
-  }
-
   const openTargets = () => {
     dialog.replace(() => (
       <DialogSelect
@@ -186,7 +93,7 @@ function Directory(props: { api: TuiPluginApi }) {
           { title: "Manage targets…", value: "manage" as const, category: "Actions" },
         ]}
         onSelect={(option) => {
-          if (option.value === "manage") return openManager()
+          if (option.value === "manage") return targetManager.open()
           if (option.value === "local") {
             destination?.setTarget({ type: "local" })
             destination?.setDestination({ type: "directory", directory: paths.cwd, subdirectory: false })

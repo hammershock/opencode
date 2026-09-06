@@ -90,6 +90,8 @@ import {
 import { reportOverrideDiagnostic } from "../../command-toolkit/experimental-settings"
 import { createCommandHost } from "../../command-toolkit/host"
 import { environmentCommands, type EnvironmentCommandContext } from "../../command-toolkit/environment"
+import { targetCommand, TARGET_MANAGER_SETTING, type TargetCommandContext } from "../../command-toolkit/target"
+import { useTargetManager } from "../../component/target-manager"
 
 addDefaultParsers(parsers.parsers)
 
@@ -460,9 +462,13 @@ export function Session() {
   }
 
   const local = useLocal()
+  const targetManager = useTargetManager()
   const coreCommandHost = createMemo(() =>
-    createCommandHost<EnvironmentCommandContext>({
-      register: (registry) => environmentCommands.forEach((command) => registry.register(command)),
+    createCommandHost<EnvironmentCommandContext & TargetCommandContext>({
+      register: (registry) => {
+        environmentCommands.forEach((command) => registry.register(command))
+        registry.register(targetCommand)
+      },
       context: () => {
         const current = location()
         const queryLocation = current
@@ -485,6 +491,8 @@ export function Session() {
           sessionID: route.sessionID,
           location: current,
           abortSignal: new AbortController().signal,
+          targetManagerEnabled: kv.get(TARGET_MANAGER_SETTING, false),
+          openTargetManager: targetManager.open,
           confirm: async (request) => Boolean(await DialogConfirm.show(dialog, request.title, request.message)),
           environment: {
             list: () => metadata("list"),

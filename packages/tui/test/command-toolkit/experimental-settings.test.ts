@@ -9,6 +9,11 @@ describe("experimental command settings", () => {
         key: "experimental.commands.rename_direct",
         defaultValue: false,
       }),
+      expect.objectContaining({
+        id: "fork.target.manage",
+        key: "experimental.commands.target_manager",
+        defaultValue: false,
+      }),
     ])
     expect(new Set(experimentalCommandSettings.map((setting) => setting.id)).size).toBe(
       experimentalCommandSettings.length,

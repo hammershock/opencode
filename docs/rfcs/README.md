@@ -6,7 +6,7 @@ RFC（Request for Comments）用于记录本 fork 中影响多个模块或核心
 | ------------------------------------- | ---------------------------- | ----- |
 | [0001](0001-shell-execution-scope.md) | Execution Scope Model        | Draft |
 | [0002](0002-rexd-remote-execution.md) | Rexd Remote Execution        | Draft |
-| [0003](0003-command-effects.md)       | Slash Command Governance     | Draft |
+| [0003](0003-command-effects.md)       | Core Command Toolkit         | Draft |
 | [0004](0004-user-shell-session.md)    | User Shell Session           | Draft |
 | [0005](0005-location-environment.md)  | Location Environment Loading | Draft |
 

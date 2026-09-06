@@ -80,12 +80,12 @@ Session Location
 
 ## 下游 RFC
 
-| RFC      | 职责                                                                 |
-| -------- | -------------------------------------------------------------------- |
-| RFC-0002 | 扩展 Session Location，使工作区执行可由本地或 Rexd target 提供       |
-| RFC-0003 | 定义命令 action、Session 记录、模型上下文投影和 Agent 调用之间的关系 |
-| RFC-0004 | 定义一次性/持久 User Shell、完整补全、生命周期和失败恢复             |
-| RFC-0005 | 定义 Location `.env` 来源、覆盖、刷新、安全边界和 `/env` 命令        |
+| RFC      | 职责                                                             |
+| -------- | ---------------------------------------------------------------- |
+| RFC-0002 | 扩展 Session Location，使工作区执行可由本地或 Rexd target 提供   |
+| RFC-0003 | 为 Core 开发和下游 fork 提供 command toolkit，并隔离上游兼容边界 |
+| RFC-0004 | 定义一次性/持久 User Shell、完整补全、生命周期和失败恢复         |
+| RFC-0005 | 定义 Location `.env` 来源、覆盖、刷新、安全边界和 `/env` 命令    |
 
 这些 RFC 可以分别讨论和实现，但不得违反本 RFC 的隔离与 Location 边界。
 

@@ -1,6 +1,6 @@
 ---
 id: 0003
-title: Slash Command Governance and Compatibility
+title: Core Command Toolkit and Upstream Compatibility
 status: draft
 authors:
   - hammershock
@@ -13,23 +13,48 @@ supersedes: []
 superseded-by: []
 ---
 
-# RFC-0003：Slash Command 治理与兼容框架
+# RFC-0003：Core Command 工具集与上游兼容
 
 ## 摘要
 
-为 OpenCode 建立统一的 slash command 管理与执行框架，替代在 prompt 组件中按字符串硬编码复杂命令的做法。框架统一命令身份、分层路径、参数解析、来源、发现、冲突、配置、权限声明和执行契约，但不要求 UI action、Core operation、Agent prompt 和复合 workflow 使用同一种底层 handler。
+为本仓库的核心功能开发提供一套规范化 command toolkit，使维护者和下游 fork 可以实现可发现、可组合、可测试的 slash command，而无需修改 prompt、autocomplete 或 command palette 等通用 UI 组件。工具集统一命令身份、分层路径、参数解析、来源、发现、冲突、配置、权限声明、执行上下文、生命周期和结果契约，但不要求 UI action、Core operation、Agent prompt 和复合 workflow 使用同一种底层 handler。
 
-新框架必须全面兼容对应上游 OpenCode 版本中已有的命令来源和公开插件接口。未经显式迁移的外部 command、MCP prompt、Skill 和插件命令保持上游行为，不因本 fork 的内部规范化而改变是否写入 Session、是否进入模型上下文或是否调用 Agent。
+工具集主要服务于本仓库新增的 Core 功能及希望复用它的下游 fork，不要求外部插件、MCP、Skill 或普通 custom command 采用新接口。新框架必须兼容对应上游 OpenCode 版本中已有的命令来源和公开插件接口；未经显式迁移的外部命令保持上游行为，不因本 fork 的内部规范化而改变是否写入 Session、是否进入模型上下文或是否调用 Agent。
+
+对于未来 upstream 版本，本 RFC 采用隔离适配、能力探测和兼容测试降低升级成本。它不对尚未发布、无法预知的未来 API 承诺绝对兼容；每次同步 upstream 时必须重新验证兼容矩阵。
+
+## 定位与使用者
+
+Command toolkit 的直接使用者是：
+
+- 本仓库中实现 Rexd、Location environment、同步等 Core 功能的开发者；
+- 后续维护本 fork 的 Agent 和人类贡献者；
+- 希望在自己的 fork 中增加一等 Core command、但不希望侵入通用 UI 的下游维护者。
+
+外部插件作者仍以对应 upstream 发布的 plugin API 为默认契约。只有主动检测并采用本 fork 扩展能力的插件，才直接使用新 toolkit 的公开扩展部分。
+
+工具集至少应提供：
+
+- command definition 与 registry；
+- 单段和分层 command path 的统一解析；
+- 参数 schema、帮助和补全接入点；
+- provenance、shadowing 和冲突诊断；
+- client/server execution context；
+- confirmation、capability、取消、失败和 outcome 基础设施；
+- Core services 调用约定；
+- 上游来源 adapter；
+- 面向 Core command 和下游 fork 的测试 harness。
 
 ## 必须满足的约束
 
 1. 旧归档中把 `/env`、`/target`、`/cd`、`/sync` 等命令直接写入 prompt 提交函数的方式不得复用。
-2. 新增命令必须通过统一 registry 注册，不允许修改通用输入组件来识别某个具体命令。
+2. 本仓库新增的 Core command 必须通过 toolkit 的统一 registry 注册，不允许修改通用输入组件来识别某个具体命令。
 3. 一个命令可以编排多个有条件的步骤，不能被压缩成单一 `kind` 或几项可任意组合的布尔属性。
-4. 对应上游版本支持的所有命令来源、调用入口、公开类型和默认冲突语义必须保持兼容。
+4. 对应上游版本支持的所有外部命令来源、调用入口、公开类型和默认冲突语义必须保持兼容。
 5. Fork 扩展采用增量、可探测、可版本化的 API；外部插件不采用扩展时继续走兼容适配器。
 6. 模型调用、Session 写入和上下文投影由 workflow 实际调用的受控服务决定，不能由用户在配置中任意改写。
 7. 框架必须显示并保留命令 provenance，不能把外部内容伪装成 Core 内建命令。
+8. toolkit 的可复用部分不能依赖某个具体 fork feature；Rexd、environment 和 sync 只能作为消费者。
 
 ## 动机
 
@@ -42,7 +67,7 @@ OpenCode 当前把多种机制都呈现为 `/name`：
 - TUI 插件通过公开 API 注册的 command；
 - 插件对 command 或执行前 parts 的 transform/hook。
 
-它们共享输入语法，但不是同一种执行机制，也不具有相同信任边界。统一框架的目的不是抹平差异，而是让维护者能够用同一套规则发现、审查、配置和调用它们。
+它们共享输入语法，但不是同一种执行机制，也不具有相同信任边界。toolkit 的目的不是接管或抹平所有外部实现，而是为 Core 开发提供稳定积木，并用 adapter 将既有来源投影到统一的发现和冲突管理平面。
 
 旧归档中的 `/env init` 进一步说明命令可能是复合 workflow：
 
@@ -58,14 +83,16 @@ OpenCode 当前把多种机制都呈现为 `/name`：
 
 ## 设计原则
 
-### 1. 统一管理平面，不强制统一执行位置
+### 1. Core-first toolkit，不强制统一执行位置
 
-框架分成两层：
+toolkit 分成两层：
 
 - definition plane：统一描述身份、路径、参数、来源、展示、兼容模式、声明能力和 executor placement；
 - execution plane：由受信任的 handler 使用 Core services 编排实际 workflow。
 
 客户端 UI action 可以保留客户端 handler；涉及 Location、Session 或持久状态的 operation 应进入共享 Core/Server service；Agent prompt 通过 Session prompt service 提交。统一 registry 不意味着把这些代码塞进同一进程或同一种回调。
+
+本仓库和下游 fork 的新 Core command 使用完整 definition/execution API。外部来源只需提供其 upstream 契约已有的信息，由 adapter 生成兼容视图；adapter 不得假装外部命令拥有它没有声明的精细能力。
 
 ### 2. 效果属于步骤，不属于命令标签
 
@@ -177,7 +204,14 @@ legacy-plugin(pluginID, version)
 
 Slash command 本身不是新的信任边界；它只暴露已经被加载的来源所拥有的行为。
 
-## 上游兼容层
+## 上游兼容边界
+
+兼容分为两个目标：
+
+- 向后兼容：为当前所跟随 upstream 版本已经支持的插件、配置、MCP、Skill 和客户端保留行为；
+- 上游演进兼容：把 fork 扩展限制在 toolkit 和 adapter 内，通过 feature detection、版本范围及 conformance tests 降低后续同步成本。
+
+“上游演进兼容”不意味着自动理解未来新增的任意 API。未知来源或字段应尽可能由原 upstream 路径透传；如果无法安全透传，必须明确报告不支持，不能猜测语义。
 
 ### 兼容来源
 
@@ -216,7 +250,7 @@ Slash command 本身不是新的信任边界；它只暴露已经被加载的来
 3. 否则新增版本化 endpoint/capability negotiation；
 4. 经过弃用周期后才能移除 legacy adapter。
 
-Fork-aware 插件可以 feature-detect 新 command API；普通上游插件不需要识别本 fork。
+Fork-aware 插件或下游 fork 可以 feature-detect 新 command API；普通上游插件不需要识别本 fork。
 
 ## 用户可配置边界
 
@@ -275,9 +309,9 @@ completed | cancelled | failed | unknown
 
 以 `/env init` 为例，模板创建、Agent 编辑和 reload 的精确失败语义由 RFC-0005 决定；command framework 只提供可表达、可等待和可测试这些阶段的基础契约。
 
-## 维护规范
+## Core 与下游 Fork 维护规范
 
-新增或修改 slash command 的 PR 必须回答：
+本仓库或采用 toolkit 的下游 fork 新增、修改 slash command 时，PR 必须回答：
 
 1. 稳定 `id`、用户 path、aliases 和 provenance 是什么？
 2. 是叶子命令还是 group？参数如何解析和补全？
@@ -322,7 +356,7 @@ completed | cancelled | failed | unknown
 
 1. 通用 prompt/UI 组件中不再包含 fork-specific 命令字符串分支。
 2. `/env init` 等复合命令可以通过可测试 workflow 表达条件步骤和 finalize。
-3. 上游所有既有命令来源均通过兼容 fixture。
+3. 当前兼容矩阵中的上游命令来源均通过兼容 fixture。
 4. 未适配本 fork 的代表性上游插件可以正常加载并保持原行为。
 5. 现有 command API 和生成 SDK 不发生未经版本化的破坏性变化。
 6. UI 可以显示生效命令的 provenance，并诊断 shadowing。
@@ -333,6 +367,7 @@ completed | cancelled | failed | unknown
 
 - 在第一阶段设计声明式 workflow DSL；
 - 让所有命令在同一进程执行；
+- 强迫外部插件、MCP、Skill 或普通 custom command 迁移到 toolkit；
 - 沙箱化任意第三方插件；
 - 允许用户任意重写外部插件 handler；
 - 在本 RFC 中定义 `/env`、Rexd 或同步功能的业务规则；
@@ -347,3 +382,4 @@ completed | cancelled | failed | unknown
 3. capability token 是静态审查信息，还是同时用于 runtime service gating；
 4. 新命令详情通过扩展 endpoint 还是新的版本化 endpoint 暴露；
 5. 对 legacy plugin command 可以安全推断到什么程度，哪些必须保持 opaque。
+6. toolkit 的哪些部分保持内部 API，哪些部分稳定后作为下游 fork/插件扩展 API 发布。

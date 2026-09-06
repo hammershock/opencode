@@ -1,7 +1,7 @@
 ---
 id: 0001
 title: Execution Scope Model
-status: draft
+status: accepted
 authors:
   - hammershock
 created: 2026-09-06
@@ -75,6 +75,19 @@ Session Location
 3. User Shell 中的 `cd` 不修改 Session Location，因此不会隐式改变 Agent、文件浏览器或新 Terminal 的默认工作目录。
 4. User Shell 命令及结果可以进入 Session 和后续 Agent 上下文；Terminal 输入输出默认不进入。
 5. 本地和远程 Location 必须提供一致的上层 scope 语义。
+
+## 已接受的默认兼容行为
+
+本 RFC 接受时明确冻结以下默认行为。后续实验性功能只能通过显式开关提供，不能改变这些默认值：
+
+| Execution scope       | 默认行为                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| Terminal panel        | 保持 upstream 的独立 PTY 行为；输入和输出不写入 Session，也不提供给 Agent 上下文    |
+| Agent tool execution  | 保持 upstream 的一次性、隔离执行；不继承 User Shell 的可变状态                      |
+| User Shell scope      | 保持 upstream 的一次性 Shell 行为；每条命令创建独立进程                             |
+| User Shell transcript | 保持现有 `!command` 语义，命令及结构化结果写入 Session，并可由后续 Agent 上下文读取 |
+
+因此，“Terminal 不进入上下文”和“User Shell 结果可进入上下文”是有意的产品差异，不应被统一执行基础设施抹平。RFC-0004 可以增加实验性的持久 User Shell，但关闭实验开关时必须完全回到本表所述行为。
 
 隔离 Agent 与 User Shell 可以保持工具调用可复现、可重试和可并发，并避免 alias、function、交互程序或后台 job 隐式改变 Agent 命令的含义。
 

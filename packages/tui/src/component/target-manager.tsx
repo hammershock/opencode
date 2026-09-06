@@ -1,4 +1,4 @@
-import { createResource } from "solid-js"
+import { createResource, Match, Switch } from "solid-js"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
 import { DialogConfirm } from "../ui/dialog-confirm"
@@ -6,6 +6,29 @@ import { useSDK } from "../context/sdk"
 import { useToast } from "../ui/toast"
 import { errorMessage } from "../util/error"
 import { targetWizard, type TargetDefinition } from "./target-wizard"
+import { useTheme } from "../context/theme"
+
+export type TargetHealthState = "checking" | "ready" | "unavailable" | "invalid"
+
+export function TargetHealth(props: { state: TargetHealthState }) {
+  const { theme } = useTheme()
+  return (
+    <Switch>
+      <Match when={props.state === "checking"}>
+        <span style={{ fg: theme.warning }}>◐ checking</span>
+      </Match>
+      <Match when={props.state === "ready"}>
+        <span style={{ fg: theme.success }}>● ready</span>
+      </Match>
+      <Match when={props.state === "unavailable"}>
+        <span style={{ fg: theme.error }}>● unavailable</span>
+      </Match>
+      <Match when={props.state === "invalid"}>
+        <span style={{ fg: theme.error }}>● invalid</span>
+      </Match>
+    </Switch>
+  )
+}
 
 export function useTargetManager() {
   const dialog = useDialog()
@@ -28,11 +51,11 @@ export function useTargetManager() {
       ),
   )
 
-  const status = (targetID: string) => {
-    if (health.loading) return "◐ checking"
+  const state = (targetID: string): TargetHealthState => {
+    if (health.loading) return "checking"
     const result = health()?.[targetID]
-    if (!result) return "● unavailable"
-    return result.status === "ready" ? "● ready" : `● ${result.status}`
+    if (!result) return "unavailable"
+    return result.status
   }
 
   const detail = (targetID: string) => {
@@ -136,7 +159,8 @@ export function useTargetManager() {
           ...(targets()?.targets ?? []).map((target) => ({
             title: target.name,
             description: target.connection.host,
-            details: [status(target.id), detail(target.id)].filter((item): item is string => Boolean(item)),
+            footer: <TargetHealth state={state(target.id)} />,
+            details: [detail(target.id)].filter((item): item is string => Boolean(item)),
             value: target as TargetDefinition,
             category: "Configured targets",
           })),
@@ -149,7 +173,7 @@ export function useTargetManager() {
   return {
     targets,
     health,
-    status,
+    state,
     detail,
     refetch: async () => {
       await controls.refetch()

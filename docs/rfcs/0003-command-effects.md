@@ -49,10 +49,18 @@ Command toolkit 的直接使用者是：
 
 以下 command family 必须使用本 toolkit 注册和实现，不得各自在输入组件中增加解析分支：
 
-- RFC-0002 的 `/target`；
-- RFC-0005 的 `/env`；
-- 后续同步 RFC 的 `/sync`；
-- RFC-0006 中经确认的 upstream built-in command overrides。
+| Command family         | 基础职责                   | 业务规格归属     |
+| ---------------------- | -------------------------- | ---------------- |
+| `/target`、`/cd`       | 选择执行 target 和工作目录 | RFC-0002         |
+| `/env`                 | 管理 location environment  | RFC-0005         |
+| `/sync`、`/devices`    | 管理跨设备同步和设备       | 后续同步 RFC     |
+| `/permissions`         | 查看或切换权限交互策略     | 后续权限 RFC     |
+| `/expand`、`/collapse` | 展开或收起截断的命令输出   | 后续显示交互 RFC |
+| `/delete`              | 确认并删除当前 Session     | 后续 Session RFC |
+
+这些都是本仓库提供的基础 Core 能力。列入本表只确认其身份、基础职责和 toolkit 接入要求，不代表接受旧归档中的具体实现，也不替代各功能 RFC 对状态、权限、持久化、同步和失败语义的定义。
+
+RFC-0006 中经确认的 upstream built-in command override 也必须使用 toolkit，但它们保留 upstream identity，不归类为本仓库新增的 Core command。
 
 各功能 RFC 负责定义自己的业务流程、权限、失败和验收语义；RFC-0003 只提供共同基础设施和维护约束。其他新 Core command 默认也应使用 toolkit，除非其 RFC 明确说明无法使用的技术原因。
 
@@ -60,7 +68,7 @@ Command toolkit 的直接使用者是：
 
 ## 必须满足的约束
 
-1. 旧归档中把 `/env`、`/target`、`/cd`、`/sync` 等命令直接写入 prompt 提交函数的方式不得复用。
+1. 旧归档中把 `/env`、`/target`、`/cd`、`/sync`、`/permissions`、`/delete` 等命令直接写入 prompt 提交函数的方式不得复用。
 2. 本仓库新增的 Core command 必须通过 toolkit 的统一 registry 注册，不允许修改通用输入组件来识别某个具体命令。
 3. 一个命令可以编排多个有条件的步骤，不能被压缩成单一 `kind` 或几项可任意组合的布尔属性。
 4. 对应上游版本支持的所有外部命令来源、调用入口、公开类型和默认冲突语义必须保持兼容。

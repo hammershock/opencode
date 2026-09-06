@@ -209,18 +209,20 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 - 模型专用默认值必须来自统一 model metadata/config，不能在 TUI command 中硬编码 model ID；
 - 是否保留这一调整需要在本 RFC 接受前确认。
 
-## 旧归档中的新增命令
+## 本仓库新增的基础 Core command
 
-以下命令不是当前 upstream baseline 的内建命令，因此不属于 override：
+以下 command family 不是当前 upstream baseline 的内建命令，因此不属于 override。它们与 `/target`、`/env`、`/sync` 一样，是本仓库计划提供的基础 Core command：
 
-- `/target`、`/cd`；
-- `/env`；
-- `/sync`、`/devices`；
-- `/permissions`；
-- `/expand`、`/collapse`；
-- `/delete`。
+| Command family         | 从旧归档恢复的基础职责                       |
+| ---------------------- | -------------------------------------------- |
+| `/target`、`/cd`       | 选择执行 target 和工作目录                   |
+| `/env`                 | 管理 location environment                    |
+| `/sync`、`/devices`    | 管理跨设备同步和设备                         |
+| `/permissions`         | 在按规则询问与自动批准等权限交互策略之间切换 |
+| `/expand`、`/collapse` | 展开或收起截断的命令输出                     |
+| `/delete`              | 二次确认后删除当前 Session                   |
 
-它们必须作为新的 Core command 通过 RFC-0003 toolkit 实现，并分别归属对应功能 RFC。不能为了复用旧逻辑而把它们登记为 upstream built-in adjustment。
+这些命令必须通过 RFC-0003 toolkit 注册和实现，并分别由对应功能 RFC 规定完整业务语义。列入此处不表示接受旧归档的耦合方式：例如 `/delete` 不直接实现同步墓碑，`/permissions` 不在 prompt submit 中切换本地状态，`/expand` 也不应依赖命令字符串特判。不能为了复用旧逻辑而把它们登记为 upstream built-in adjustment。
 
 ## 默认兼容策略
 

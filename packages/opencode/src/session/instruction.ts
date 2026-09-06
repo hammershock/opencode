@@ -40,6 +40,7 @@ export interface Interface {
     messages: SessionV1.WithParts[],
     filepath: string,
     messageID: MessageID,
+    filesystem?: FSUtil.Interface,
   ) => Effect.Effect<{ filepath: string; content: string }[], FSUtil.Error>
 }
 
@@ -181,8 +182,9 @@ const layer: Layer.Layer<
       messages: SessionV1.WithParts[],
       filepath: string,
       messageID: MessageID,
+      filesystem: FSUtil.Interface = fs,
     ) {
-      const sys = yield* systemPaths()
+      const sys = yield* systemPaths(filesystem)
       const already = extract(messages)
       const results: { filepath: string; content: string }[] = []
       const s = yield* InstanceState.get(state)
@@ -193,7 +195,7 @@ const layer: Layer.Layer<
 
       // Walk upward from the file being read and attach nearby instruction files once per message.
       while (current.startsWith(root) && current !== root) {
-        const found = yield* find(current)
+        const found = yield* find(current, filesystem)
         if (!found || found === target || sys.has(found) || already.has(found)) {
           current = path.dirname(current)
           continue
@@ -210,7 +212,7 @@ const layer: Layer.Layer<
         }
 
         set.add(found)
-        const content = yield* read(found)
+        const content = yield* read(found, filesystem)
         if (content) {
           results.push({ filepath: found, content: `Instructions from: ${found}\n${content}` })
         }

@@ -16,6 +16,8 @@ import { Truncate } from "@/tool/truncate"
 import { Plugin } from "@/plugin"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Effect, Layer, Schema } from "effect"
+import { ToolDefinition, ToolOutput } from "@opencode-ai/llm"
+import type { ToolRegistry as LocationToolRegistry } from "@opencode-ai/core/tool/registry"
 import { testEffect } from "../lib/effect"
 
 const callID = "call-test"
@@ -163,5 +165,61 @@ it.effect("preserves running tool start time across metadata updates", () =>
     if (state.state.status === "running") {
       expect(state.state.time.start).toBe(100)
     }
+  }),
+)
+
+it.effect("remote location materialization replaces the legacy execution tool", () =>
+  Effect.gen(function* () {
+    const calls: string[] = []
+    const processor = {
+      message: {
+        id: messageID,
+        sessionID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        agent: "build",
+        mode: "build",
+        path: { cwd: "/controller-does-not-have-this", root: "/controller-does-not-have-this" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ModelV2.ID.make("test-model"),
+        providerID: ProviderV2.ID.make("test"),
+        time: { created: 1 },
+      } satisfies SessionV1.Assistant,
+      updateToolCall: () => Effect.die("unused"),
+      completeToolCall: () => Effect.void,
+    } satisfies Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
+    const locationTools: LocationToolRegistry.Materialization = {
+      definitions: [
+        ToolDefinition.make({
+          name: "bash",
+          description: "remote bash",
+          inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+        }),
+      ],
+      settle: (input) =>
+        Effect.sync(() => {
+          calls.push(String((input.call.input as { command: string }).command))
+          const output = ToolOutput.make({}, [{ type: "text", text: "remote-only-output" }])
+          return { result: { type: "text" as const, value: "remote-only-output" }, output }
+        }),
+    }
+    const tools = yield* SessionTools.resolve({
+      agent,
+      model,
+      session: { id: sessionID, permission: [] } as unknown as Session.Info,
+      processor,
+      bypassAgentCheck: false,
+      messages: [],
+      promptOps: {} as never,
+      locationTools,
+    })
+    const execute = tools.bash.execute
+    if (!execute) throw new Error("bash tool is missing execute")
+    const output = yield* Effect.promise(() =>
+      execute({ command: "pwd" }, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }),
+    )
+    expect(calls).toEqual(["pwd"])
+    expect(output).toMatchObject({ output: "remote-only-output", metadata: { locationBound: true } })
   }),
 )

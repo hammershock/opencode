@@ -4,7 +4,7 @@ import { FileSystem } from "@opencode-ai/core/filesystem"
 import { FileSystemSearch } from "@opencode-ai/core/filesystem/search"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { RelativePath } from "@opencode-ai/core/schema"
-import { Effect, Layer } from "effect"
+import { Effect, FileSystem as PlatformFileSystem, Layer, Option } from "effect"
 import fuzzysort from "fuzzysort"
 import { RexdFiles } from "./location-files"
 import { RexdLocationSession } from "./location-session"
@@ -64,6 +64,131 @@ export function rexdFilesystemNodes(
     layer: Layer.effect(FileSystemSearch.Service, make.pipe(Effect.map((value) => value.search))),
     deps: [session],
   })
+  const legacy = makeLocationNode({
+    service: FSUtil.Service,
+    layer: Layer.effect(
+      FSUtil.Service,
+      Effect.gen(function* () {
+        const lease = yield* RexdLocationSession
+        const files = new RexdFiles(targetID, lease)
+        const unsupported =
+          (method: string) =>
+          (..._args: unknown[]) =>
+            Effect.die(new Error(`Remote filesystem operation is not supported: ${method}`))
+        const absolute = (value: string) => files.resolve(value, directory)
+        const stat = (value: string) =>
+          Effect.promise(async () => {
+            const item = await files.stat(value, directory)
+            if (!item.exists) throw new Error(`Remote path does not exist: ${absolute(value)}`)
+            return {
+              type:
+                item.type === "dir"
+                  ? ("Directory" as const)
+                  : item.type === "symlink"
+                    ? ("SymbolicLink" as const)
+                    : ("File" as const),
+              mtime: item.mtime == null ? Option.none() : Option.some(new Date(item.mtime)),
+              atime: Option.none(),
+              birthtime: Option.none(),
+              dev: 0,
+              ino: Option.none(),
+              mode: 0,
+              nlink: Option.none(),
+              uid: Option.none(),
+              gid: Option.none(),
+              rdev: Option.none(),
+              size: PlatformFileSystem.Size(0),
+              blksize: Option.none(),
+              blocks: Option.none(),
+            }
+          })
+        const entries = (value: string) =>
+          Effect.promise(() => files.list(value, directory)).pipe(
+            Effect.map((items) =>
+              items.map((item) => ({
+                name: item.name,
+                type:
+                  item.type === "dir"
+                    ? ("directory" as const)
+                    : item.type === "file"
+                      ? ("file" as const)
+                      : item.type === "symlink"
+                        ? ("symlink" as const)
+                        : ("other" as const),
+              })),
+            ),
+          )
+        const read = (value: string) =>
+          Effect.promise(() => files.read(value, directory)).pipe(Effect.map((x) => x.content))
+        const write = (value: string, content: Uint8Array) =>
+          Effect.promise(() => files.write(value, directory, content))
+        const ensure = (value: string) =>
+          Effect.promise(() =>
+            runRexdProcess(lease, {
+              argv: ["mkdir", "-p", "--", absolute(value)],
+              shell: false,
+              cwd: directory,
+              timeout: "30 seconds",
+              maxOutputBytes: 64 * 1024,
+            }).then((result) => {
+              if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8"))
+            }),
+          )
+        const methods: Partial<FSUtil.Interface> = {
+          resolve: (value) => Effect.succeed(absolute(value)),
+          realPath: (value) => stat(value).pipe(Effect.as(absolute(value))),
+          exists: (value) => Effect.promise(() => files.stat(value, directory)).pipe(Effect.map((x) => x.exists)),
+          existsSafe: (value) =>
+            Effect.promise(() => files.stat(value, directory)).pipe(
+              Effect.map((x) => x.exists),
+              Effect.orElseSucceed(() => false),
+            ),
+          isDir: (value) =>
+            Effect.promise(() => files.stat(value, directory)).pipe(
+              Effect.map((x) => x.type === "dir"),
+              Effect.orElseSucceed(() => false),
+            ),
+          isFile: (value) =>
+            Effect.promise(() => files.stat(value, directory)).pipe(
+              Effect.map((x) => x.type === "file"),
+              Effect.orElseSucceed(() => false),
+            ),
+          stat,
+          readFile: read,
+          readFileString: (value) => read(value).pipe(Effect.map((x) => Buffer.from(x).toString("utf8"))),
+          readFileStringSafe: (value) =>
+            read(value).pipe(
+              Effect.map((x) => Buffer.from(x).toString("utf8")),
+              Effect.orElseSucceed(() => undefined),
+            ),
+          writeFile: write,
+          writeFileString: (value, content) => write(value, Buffer.from(content)),
+          writeWithDirs: (value, content) => write(value, typeof content === "string" ? Buffer.from(content) : content),
+          ensureDir: ensure,
+          makeDirectory: (value) => ensure(value),
+          readDirectory: (value) => entries(value).pipe(Effect.map((items) => items.map((item) => item.name))),
+          readDirectoryEntries: entries,
+          glob: (pattern, options) =>
+            Effect.promise(() => files.glob(pattern, options?.cwd ?? directory).then((x) => [...x])),
+          globMatch: (pattern, value) => new Bun.Glob(pattern).match(value),
+          findUp: (target, start, stop) => upward(files, target, start, stop),
+          globUp: (pattern, start, stop) => upwardGlob(files, pattern, start, stop),
+          up: (input) =>
+            Effect.forEach(input.targets, (target) => upward(files, target, input.start, input.stop)).pipe(
+              Effect.map((x) => x.flat()),
+            ),
+        }
+        return FSUtil.Service.of(
+          new Proxy(methods as FSUtil.Interface, {
+            get(target, property) {
+              return Reflect.get(target, property) ?? unsupported(String(property))
+            },
+          }),
+        )
+      }),
+    ),
+    deps: [session],
+  })
   return [
     search,
     makeLocationNode({
@@ -71,7 +196,35 @@ export function rexdFilesystemNodes(
       layer: Layer.effect(FileSystem.Service, make.pipe(Effect.map((value) => value.filesystem))),
       deps: [session, search],
     }),
+    legacy,
   ] as const
+}
+
+function upward(files: RexdFiles, target: string, start: string, stop?: string) {
+  return Effect.promise(async () => {
+    const result: string[] = []
+    let current = files.resolve(start, start)
+    while (true) {
+      const candidate = path.posix.join(current, target)
+      if ((await files.stat(candidate, current)).exists) result.push(candidate)
+      if (current === stop || current === "/") break
+      current = path.posix.dirname(current)
+    }
+    return result
+  })
+}
+
+function upwardGlob(files: RexdFiles, pattern: string, start: string, stop?: string) {
+  return Effect.promise(async () => {
+    const result: string[] = []
+    let current = files.resolve(start, start)
+    while (true) {
+      result.push(...(await files.glob(pattern, current)))
+      if (current === stop || current === "/") break
+      current = path.posix.dirname(current)
+    }
+    return result
+  })
 }
 
 export function remoteGrep(

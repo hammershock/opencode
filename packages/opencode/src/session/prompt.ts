@@ -63,6 +63,7 @@ import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
+import { ToolRegistry as LocationToolRegistry } from "@opencode-ai/core/tool/registry"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { Reference } from "@opencode-ai/core/reference"
 
@@ -1125,6 +1126,9 @@ const layer = Layer.effect(
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
         const loopLocation = yield* sessionLocation(sessionID)
         const locationLayer = locations.get(loopLocation)
+        const locationTools = yield* LocationToolRegistry.Service.pipe(Effect.provide(locationLayer))
+        const locationToolMaterialization =
+          loopLocation.target.type === "rexd" ? yield* locationTools.materialize() : undefined
         const locationRegistry = yield* ToolRegistry.Service.pipe(
           Effect.provide(locationLayer),
           Effect.provideService(FSUtil.Service, fsys),
@@ -1293,6 +1297,7 @@ const layer = Layer.effect(
               bypassAgentCheck,
               messages: msgs,
               promptOps,
+              locationTools: locationToolMaterialization,
             }).pipe(
               Effect.provideService(Plugin.Service, plugin),
               Effect.provideService(Permission.Service, permission),

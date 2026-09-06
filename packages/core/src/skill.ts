@@ -129,4 +129,4 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer, deps: [SkillDiscovery.node, FSUtil.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [SkillDiscovery.node, FSUtil.locationNode] })

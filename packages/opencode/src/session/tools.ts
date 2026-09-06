@@ -23,6 +23,11 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { ToolRegistry as LocationToolRegistry } from "@opencode-ai/core/tool/registry"
+import { SessionSchema } from "@opencode-ai/core/session/schema"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { AgentV2 } from "@opencode-ai/core/agent"
+import { ToolCallPart } from "@opencode-ai/llm"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -46,6 +51,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   bypassAgentCheck: boolean
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
+  locationTools?: LocationToolRegistry.Materialization
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -131,6 +137,48 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         )
       },
     })
+  }
+
+  // The v1 conversation runner remains responsible for message lifecycle and
+  // plugin compatibility. For execution-location built-ins, however, use the
+  // canonical location registry so no controller filesystem/process captured
+  // by the legacy registry can leak into a remote Session.
+  if (input.locationTools) {
+    const names = new Set(["bash", "read", "write", "edit", "apply_patch", "grep"])
+    for (const definition of input.locationTools.definitions) {
+      if (!names.has(definition.name)) continue
+      const schema = ProviderTransform.schema(input.model, definition.inputSchema)
+      tools[definition.name] = tool({
+        description: definition.description,
+        inputSchema: jsonSchema(schema),
+        execute(args, options) {
+          return run.promise(
+            input
+              .locationTools!.settle({
+                sessionID: SessionSchema.ID.make(input.session.id),
+                agent: AgentV2.ID.make(input.agent.name),
+                assistantMessageID: SessionMessage.ID.make(input.processor.message.id),
+                call: ToolCallPart.make({ id: options.toolCallId, name: definition.name, input: args }),
+              })
+              .pipe(
+                Effect.flatMap((settlement) => {
+                  if (settlement.result.type === "error") return Effect.die(new Error(settlement.result.value))
+                  const output = settlement.output
+                  const text = output?.content
+                    .filter((part) => part.type === "text")
+                    .map((part) => part.text)
+                    .join("\n")
+                  return Effect.succeed({
+                    title: definition.name,
+                    output: text || JSON.stringify(output?.structured ?? settlement.result.value) || "(no output)",
+                    metadata: { locationBound: true, outputPaths: settlement.outputPaths },
+                  })
+                }),
+              ),
+          )
+        },
+      })
+    }
   }
 
   const hasMcpResourceServer = Object.values(yield* mcp.clients()).some(

@@ -204,7 +204,7 @@ export const node = makeLocationNode({
     ToolRegistry.node,
     LocationMutation.node,
     LocationEnvironment.node,
-    FSUtil.node,
+    FSUtil.locationNode,
     LocationProcess.node,
     Config.node,
     PermissionV2.node,

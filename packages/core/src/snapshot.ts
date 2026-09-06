@@ -232,7 +232,7 @@ export const locationLayer = layer.pipe(Layer.provideMerge(Config.locationLayer)
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Config.node, FSUtil.node, Git.node, Global.node, Location.node],
+  deps: [Config.node, FSUtil.locationNode, Git.node, Global.node, Location.node],
 })
 
 export const noopLayer = Layer.succeed(

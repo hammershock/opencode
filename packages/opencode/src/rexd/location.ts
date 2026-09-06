@@ -10,6 +10,7 @@ import { locationServices, type LocationProvider } from "@opencode-ai/core/locat
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Node } from "@opencode-ai/core/effect/app-node"
 import { ReadToolFileSystem } from "@opencode-ai/core/tool/read-filesystem"
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Pty } from "@opencode-ai/core/pty"
 import { Layer } from "effect"
 import { rexdFilesystemNodes } from "./location-filesystem"
@@ -35,6 +36,7 @@ export const rexdLocationProvider: LocationProvider = {
       [LocationFormatter.node, rexdFormatterNode(session)],
       [FileSystemSearch.node, filesystem[0]],
       [FileSystem.node, filesystem[1]],
+      [FSUtil.locationNode, filesystem[2]],
       [LocationProcess.node, rexdProcessNode(session)],
       [LocationMutation.node, mutation[0]],
       [FileMutation.node, mutation[1]],

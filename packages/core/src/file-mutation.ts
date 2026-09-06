@@ -193,7 +193,7 @@ function sameBytes(left: Uint8Array, right: Uint8Array) {
 
 export const locationLayer = layer
 
-export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.locationNode] })
 
 /**
  * Deferred until the corresponding V2 integrations exist.

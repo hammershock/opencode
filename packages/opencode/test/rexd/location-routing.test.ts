@@ -4,9 +4,14 @@ import { Location } from "@opencode-ai/core/location"
 import type { LocationProcess } from "@opencode-ai/core/location-process"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Effect } from "effect"
+import { Context, Layer } from "effect"
+import { FSUtil } from "@opencode-ai/core/fs-util"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import type { RexdLease } from "../../src/rexd/connection"
 import { RexdFiles } from "../../src/rexd/location-files"
 import { remoteGrep } from "../../src/rexd/location-filesystem"
+import { rexdFilesystemNodes } from "../../src/rexd/location-filesystem"
+import { rexdSessionNode, RexdLocationSession } from "../../src/rexd/location-session"
 import { runRexdProcess } from "../../src/rexd/location-process"
 import { probeTarget } from "../../src/rexd/target-registry"
 import { makeProvider as makeUserShellProvider } from "../../src/session/user-shell-location"
@@ -202,6 +207,26 @@ describe("Rexd Location routing contract", () => {
     expect(String(matches[0]?.entry.path)).toBe("src/a.ts")
     expect(calls.some((call) => call.method === "fs.read")).toBe(false)
     expect(calls.find((call) => call.method === "exec.start")?.params).toMatchObject({ shell: false })
+  })
+
+  test("location FS boots and resolves a remote-only path without controller fallback", async () => {
+    const remoteRoot = `/remote-only-${crypto.randomUUID()}`
+    expect(await Bun.file(remoteRoot).exists()).toBe(false)
+    const { lease, calls } = processLease((method, params) => {
+      if (method === "fs.stat")
+        return { path: params.path, exists: true, type: params.path === remoteRoot ? "dir" : "file", mtime: 1 }
+      return undefined
+    })
+    lease.handshake.workspaceRoots = [remoteRoot]
+    const ref = Location.Ref.make({ target: { type: "rexd", targetID }, directory: AbsolutePath.make(remoteRoot) })
+    const session = rexdSessionNode(ref)
+    const fsNode = rexdFilesystemNodes(session, targetID, remoteRoot)[2]
+    const testLayer = LayerNode.compile(fsNode, [[session, Layer.succeed(RexdLocationSession, lease)]])
+    const context = await Effect.runPromise(Effect.scoped(Layer.build(testLayer)))
+    const fs = Context.get(context, FSUtil.Service)
+    expect(await Effect.runPromise(fs.realPath(remoteRoot))).toBe(remoteRoot)
+    expect(calls).toContainEqual({ method: "fs.stat", params: expect.objectContaining({ path: remoteRoot }) })
+    expect(await Bun.file(remoteRoot).exists()).toBe(false)
   })
 
   test("user shell delegates execution and completion to location services", async () => {

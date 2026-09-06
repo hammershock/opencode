@@ -114,5 +114,5 @@ const baseLayer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer: baseLayer,
-  deps: [FSUtil.node, Location.node, FileSystemSearch.node],
+  deps: [FSUtil.locationNode, Location.node, FileSystemSearch.node],
 })

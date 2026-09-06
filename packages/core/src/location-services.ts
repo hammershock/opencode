@@ -7,6 +7,7 @@ import { Config } from "./config"
 import { LayerNode } from "./effect/layer-node"
 import { Node } from "./effect/app-node"
 import { FileMutation } from "./file-mutation"
+import { FSUtil } from "./fs-util"
 import { FileSystem } from "./filesystem"
 import { FileSystemSearch } from "./filesystem/search"
 import { Watcher } from "./filesystem/watcher"
@@ -44,6 +45,7 @@ export { LocationServiceMap } from "./location-service-map"
 
 export const locationServices = LayerNode.group([
   Location.node,
+  FSUtil.locationNode,
   Policy.node,
   Config.node,
   AgentV2.node,

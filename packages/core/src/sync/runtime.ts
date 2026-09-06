@@ -25,6 +25,7 @@ export type Metadata = typeof Metadata.Type
 export const Head = Schema.Struct({
   version: Schema.Literal(1),
   deviceID: SyncEvent.DeviceID,
+  deviceName: Schema.NonEmptyString,
   generation: NonNegativeInt,
   acknowledged: Schema.Record(Schema.String, NonNegativeInt),
   metadata: Schema.Array(Metadata),
@@ -45,13 +46,16 @@ export interface MetadataProjector {
 }
 
 export function make(input: {
-  readonly config: { readonly deviceID: SyncEvent.DeviceID; readonly enabled: boolean }
+  readonly config: { readonly deviceID: SyncEvent.DeviceID; readonly deviceName?: string; readonly enabled: boolean }
   readonly rootKey: Uint8Array
   readonly provider: SyncProvider.Adapter
   readonly store: SyncEventStore.Interface
   readonly projector: SyncEvent.Projector<SyncEventStore.Transaction>
   readonly metadata: () => Effect.Effect<readonly Metadata[], unknown>
   readonly metadataProjector: MetadataProjector
+  readonly acknowledged?: () => Effect.Effect<Readonly<Record<string, number>>, unknown>
+  readonly revoked?: () => Effect.Effect<readonly SyncEvent.DeviceID[], unknown>
+  readonly deviceProjector?: (head: Head) => Effect.Effect<void, unknown>
   readonly now?: () => number
   readonly owner?: string
 }) {
@@ -86,10 +90,11 @@ export function make(input: {
       const head: Head = {
         version: 1,
         deviceID: input.config.deviceID,
+        deviceName: input.config.deviceName ?? String(input.config.deviceID),
         generation,
-        acknowledged: {},
+        acknowledged: input.acknowledged ? await Effect.runPromise(input.acknowledged()) : {},
         metadata,
-        revoked: [],
+        revoked: input.revoked ? [...(await Effect.runPromise(input.revoked()))] : [],
       }
       const path = headPath(input.config.deviceID)
       const bytes = await encrypt("metadata", input.rootKey, headContext(input.config.deviceID, path), head)
@@ -137,6 +142,7 @@ export function make(input: {
         .sort((a, b) => String(a.deviceID).localeCompare(String(b.deviceID)))
       for (const head of indexedHeads) {
         if (revoked.has(head.deviceID)) continue
+        if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
         await Effect.runPromise(input.metadataProjector.apply(head.metadata))
       }
       status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }

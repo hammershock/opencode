@@ -36,7 +36,7 @@ superseded-by: []
 ## 环境模型与路径
 
 ```text
-Location 基础环境
+目标 Location provider 的基础进程环境
   -> <Location HOME>/.config/opencode/.env
   -> <Session Location directory>/.env
   -> 调用方显式 process environment
@@ -48,7 +48,11 @@ Location 基础环境
 - 用户级：`<Location user home>/.config/opencode/.env`；
 - 工作目录级：`<Session Location directory>/.env`。
 
-用户级路径不受项目配置覆盖。本地 Location 使用本机用户 HOME，远程 Location 使用握手与环境探测确认的远端用户 HOME；控制设备的用户级 `.env` 不得隐式转发到远端。
+用户级路径不受项目配置覆盖。本地 Location 使用本机用户 HOME，远程 Location 使用握手与环境探测确认的远端用户 HOME；控制设备的基础环境和用户级 `.env` 不得隐式转发到远端。
+
+基础进程环境始终来自实际 target：local 使用本地 process provider 的环境，Rexd 使用远端 daemon/exec provider 在目标机器继承和报告的环境。构造 snapshot 和执行命令时使用裸、非登录、非交互 Shell，不执行 `/etc/profile`、用户 profile、`.bashrc`、`.zshrc` 或其他 startup files。需要额外变量时使用用户级或项目级 `.env`，不能依赖启动脚本的副作用。
+
+RFC-0004 的 completion helper 可以为生成原生候选单独加载目标机器的 completion/startup 配置，但该隔离 helper 的环境变化不能回流到本 snapshot。
 
 统一解析器采用严格 dotenv 语义：支持注释、单双引号、转义、空值和规范化换行，不支持变量插值、`export` shell 语句、command substitution、`source`、function 或其他代码。`$VAR` 和 `${VAR}` 保持普通字符串。不同执行面不得各自解析文件。
 
@@ -101,11 +105,12 @@ Location 基础环境
 ## 验收条件
 
 1. 实验开关默认关闭并持久化为设备级用户偏好；关闭时保持 upstream 环境行为。
-2. local 与 Rexd Location 使用相同的路径、解析、优先级和 generation contract，远端加载不会读取控制设备文件。
-3. 严格 dotenv parser 覆盖引号、转义、注释、空值、CRLF、字面量 `$VAR` 和所有拒绝执行的 Shell 语法。
-4. Session runtime 激活与 `/env reload` 的原子发布、解析失败回滚和并发 generation 均有测试。
-5. Agent/User Shell、Terminal、LSP、formatter 和 task 新进程继承当前 snapshot；provider、认证和同步进程不继承。
-6. reload 后已有 Terminal 保持运行并标记 stale，restart 后使用新 generation。
-7. `/env list` 默认不泄露值；临时 reveal 的确认、关闭清理、日志和 Session 隔离有测试。
-8. `/env init` 对缺失、已存在、Agent 取消、编辑失败、解析失败和成功 reload 均满足规定事务。
-9. 环境值不进入 Session、模型上下文、同步 payload、普通日志或错误对象。
+2. local 与 Rexd Location 使用相同的路径、解析、优先级和 generation contract；远端基础环境和两个 `.env` 来源均在 target 上解析，不读取或转发控制设备环境。
+3. 命令环境使用裸、非登录、非交互 Shell，不执行 startup files；completion helper 的隔离环境不能污染 snapshot。
+4. 严格 dotenv parser 覆盖引号、转义、注释、空值、CRLF、字面量 `$VAR` 和所有拒绝执行的 Shell 语法。
+5. Session runtime 激活与 `/env reload` 的原子发布、解析失败回滚和并发 generation 均有测试。
+6. Agent/User Shell、Terminal、LSP、formatter 和 task 新进程继承当前 snapshot；provider、认证和同步进程不继承。
+7. reload 后已有 Terminal 保持运行并标记 stale，restart 后使用新 generation。
+8. `/env list` 默认不泄露值；临时 reveal 的确认、关闭清理、日志和 Session 隔离有测试。
+9. `/env init` 对缺失、已存在、Agent 取消、编辑失败、解析失败和成功 reload 均满足规定事务。
+10. 环境值不进入 Session、模型上下文、同步 payload、普通日志或错误对象。

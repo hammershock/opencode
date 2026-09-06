@@ -33,7 +33,7 @@ superseded-by: []
 
 - 保持一个常驻或可恢复的 Shell 进程；
 - 跨 OpenCode 重启恢复 User Shell cwd；
-- 继承前一条命令创建的变量、functions、aliases、Shell options、virtual environment 或 jobs；
+- 继承前一条命令创建的变量、functions、aliases、Shell options、virtual environment 或 jobs；这不排除每条命令重新注入 RFC-0005 的 Location EnvironmentSnapshot；
 - 让 Agent、Terminal panel 或文件浏览器跟随 User Shell `cd`；
 - 支持需要持续 stdin、全屏界面或后台 job 管理的交互程序；
 - 定义 `.env` 来源与刷新语义。
@@ -76,6 +76,8 @@ UserShellRuntimeState {
 
 Location process contract 应返回独立的 `finalCwd` control result；该值不能作为用户输出文本或依靠固定、可伪造的普通 stdout marker 暴露给上层。local provider 可以使用受限 control channel；Rexd adapter 可以使用带每次执行随机 nonce 的私有 control frame，并在写入 Session 前剥离。未来 Rexd 若提供结构化 final cwd，应优先使用协议字段。
 
+每条命令使用对应 target 上的裸、非登录、非交互 Shell，并重新注入 RFC-0005 当前 generation 的 EnvironmentSnapshot。远程命令的基础环境、用户级 `.env` 和项目 `.env` 均在远程 target 上解析；不得继承控制设备环境，也不得为构造命令环境执行目标机器的 Shell startup files。
+
 更新 cwd 必须满足：
 
 - final cwd 是对应 target 上规范化后的绝对路径；
@@ -88,7 +90,7 @@ Location process contract 应返回独立的 `finalCwd` control result；该值�
 
 ## 状态继承边界
 
-继承的唯一可变状态是 cwd。下一条命令会重新构造 Shell 和基础环境，因此：
+从上一条 User Shell 命令继承的唯一可变状态是 cwd。下一条命令会重新构造裸 Shell，并注入目标 Location 当前 EnvironmentSnapshot，因此：
 
 - `export FOO=bar` 不影响下一条命令；
 - `source venv/bin/activate` 不保持 virtual environment；
@@ -100,7 +102,7 @@ Location process contract 应返回独立的 `finalCwd` control result；该值�
 
 ## Completion
 
-完整补全仍是必需功能，但只针对每次请求重新构造的 Shell 环境。至少覆盖：
+完整补全仍是必需功能，但只针对每次请求重新构造的 Shell 环境。补全 helper 为发现 alias、function 和原生 completion 可以在隔离进程中加载目标用户的 completion/startup 配置；该进程仅生成候选，其环境修改不得进入 EnvironmentSnapshot 或后续命令。至少覆盖：
 
 - 当前 User Shell runtime cwd 下的文件和目录；
 - 当前基础环境 `PATH` 中的可执行命令；

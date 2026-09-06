@@ -117,7 +117,17 @@ export class SshTransport implements Transport {
     this.#data.clear()
     this.#close.clear()
     this.child.stdin.end()
-    if (this.child.exitCode === null && !this.child.killed) this.child.kill("SIGTERM")
+    if (this.child.exitCode !== null) return
+    if (!this.child.killed) this.child.kill("SIGTERM")
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.child.exitCode === null) this.child.kill("SIGKILL")
+      }, 1_000)
+      this.child.once("close", () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
   }
 
   #finish(error: RexdError) {

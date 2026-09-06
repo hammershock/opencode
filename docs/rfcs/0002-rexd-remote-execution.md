@@ -21,7 +21,7 @@ superseded-by: []
 
 Rexd 是 OpenCode 内建的远程执行实现，不作为 OpenCode 插件加载。远程 target 通过 SSH 连接并使用 Rexd；连接失败时不得静默回退到本机执行。
 
-本 RFC 只扩展执行 scope，使现有执行能力可以由本地或远程 Location 提供。Shell 是否持久、用户 Shell 与 Agent Shell 是否共享状态、补全及环境继承语义由 RFC-0001 定义，不属于本 RFC。
+本 RFC 只扩展执行 scope，使现有执行能力可以由本地或远程 Location 提供。用户与 Agent 的隔离边界由 RFC-0001 定义；User Shell 持久化与补全由 RFC-0004 定义；环境加载由 RFC-0005 定义。这些功能的具体实现不属于本 RFC。
 
 ## 背景
 
@@ -33,7 +33,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 
 1. 远程执行是 OpenCode Core 可以表达和路由的执行位置，不依赖插件。
 2. Rexd 作为内建远程执行后端，通过 SSH 为远程 target 提供服务。
-3. 同一会话的用户 Shell 命令与 Agent 工作区工具都以同一个 Session Location 为执行 scope；运行期间是否共享可变 Shell 状态由 RFC-0001 定义。
+3. 同一会话的用户 Shell 命令与 Agent 工作区工具都以同一个 Session Location 为执行 scope；二者按照 RFC-0001 保持可变 Shell 状态隔离。
 4. QuickStart 页面允许用户在发送第一条 prompt 前选择：
    - 本地或已配置的远程 target；
    - 所选 target 上的工作目录。
@@ -66,7 +66,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
    - Rexd 目录通过该 target 查询，不使用本机文件系统结果。
 5. 用户提交第一条 prompt。
 6. OpenCode 先验证 target 可连接且目录存在，再用该 Location 创建会话并提交 prompt。
-7. 此后该会话中的用户 Shell 命令和 Agent 工作区工具都在同一 Location 执行；两者是否共享同一个 Shell 状态由 RFC-0001 决定。
+7. 此后该会话中的用户 Shell 命令和 Agent 工作区工具都在同一 Location 执行，但不共享同一个 Shell 进程或可变状态。
 
 如果 target 连接或目录验证失败，QuickStart 保留用户尚未提交的 prompt 和选择，不创建会话，也不回退到本地执行。
 
@@ -207,7 +207,7 @@ gpu-server · /data/project
 
 - 用户 Shell 命令使用 Session Location。
 - Agent 工作区工具使用 Session Location。
-- 遵守 RFC-0001 已确定的用户/Agent Shell 隔离与状态语义。
+- 遵守 RFC-0001 已确定的用户/Agent Shell 隔离语义；持久 Shell 与补全遵守 RFC-0004。
 - 删除或禁止绕过 Location 的远程专用分支。
 
 ### 阶段四：QuickStart

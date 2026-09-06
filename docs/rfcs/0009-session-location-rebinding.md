@@ -63,7 +63,9 @@ Session 打开前，Core 将 Location 解析为以下状态之一：
 1. 使用 target 配置向导重新填写连接信息；保存时恢复 Session 已引用的原 target ID，而不是生成另一个 ID；该受限操作必须明确列出会同时恢复的所有引用 Session；
 2. 在实验性 rebind 开启时，把当前 Session 显式重绑定到一个已有 target。
 
-恢复原 ID 只修复设备本地 registry，不产生 Location revision，也不改变 Session directory。保存后仍必须重新执行连接、Rexd、workspace root、目录和 RFC-0005 环境验证；验证失败时 Session 继续 unresolved。普通 target 创建流程不得任意指定或复用 ID，只有针对当前缺失引用的恢复 transaction 可以执行该操作。
+如果该 Session 曾参与 RFC-0010 同步，云端保存的 portable target name/label 可以作为向导中的名称、机器用途和工作位置参考；它不包含 SSH 连接信息，也不能自动选择 host、credential 或已有本地 target。
+
+恢复原 ID 只修复设备本地 registry，不产生 Location revision，也不改变 Session directory。它是 registry 级修复：本设备上引用同一缺失 target ID 的 Session 形成一个恢复批次，验证成功后可以一起恢复 resolved。向导必须在保存前列出该批次。保存后仍必须重新执行连接、Rexd、workspace root、各 Session directory 和 RFC-0005 环境验证；某个 Session 的目录或环境验证失败时，该 Session 单独保持 unresolved，不能让整个 registry 修复回滚。普通 target 创建流程不得任意指定或复用 ID，只有针对当前缺失引用的恢复 transaction 可以执行该操作。
 
 ### 解析云端 portable target
 
@@ -97,6 +99,8 @@ binding 是设备本地映射，不修改云端 Session Location revision，也�
 7. 返回 Session，并展示已从旧 Location 切换到新 Location 的本地控制面通知；不创建对话消息。
 
 如果新 target 或目录与旧 Location 完全相同，操作返回 unchanged，不增加 revision，也不重建 runtime。
+
+强制 rebind 的 mutation scope 永远是请求中的单个 `sessionID`。它不得修改 target definition、portable label binding 或其他引用旧/新 target 的 Session，也不得以“同一 target”为条件向一批 Session 广播 Location 变更。RFC-0010 启用时，只同步这个 Session 自己的新 Location revision。
 
 ## Domain transaction
 
@@ -143,7 +147,7 @@ local destination 不执行 SSH/Rexd 步骤，但必须进行相同的目录和�
 
 ## 同步语义
 
-同步关闭时，rebind 只修改当前设备的 Session Location。RFC-0010 启用时，domain event 还产生新的可移植 Location revision：
+同步关闭时，rebind 只修改当前设备上的该 Session Location。RFC-0010 启用时，domain event 还为该 Session 产生新的可移植 Location revision：
 
 ```text
 PortableSessionLocation {
@@ -185,3 +189,4 @@ PortableSessionLocation {
 9. 未绑定 portable label 的设备保持 unresolved，不自动使用 local 或同名 target。
 10. 恢复被移除 target 的原 ID 和建立 portable label binding 都不产生 Location revision，并且在恢复执行前完成完整 Location 验证。
 11. 恢复向导在影响多个 Session 时展示影响范围；普通 target CRUD 不能任意复用缺失 ID。
+12. registry 级恢复可以批量恢复同一缺失 target ID 的 Session；强制 rebind 只修改一个 Session，不修改 registry/binding 或其他 Session，同步开启时也只发布该 Session 的 Location revision。

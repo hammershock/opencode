@@ -51,7 +51,8 @@ Command toolkit 的直接使用者是：
 
 - RFC-0002 的 `/target`；
 - RFC-0005 的 `/env`；
-- 后续同步 RFC 的 `/sync`。
+- 后续同步 RFC 的 `/sync`；
+- RFC-0006 中经确认的 upstream built-in command overrides。
 
 各功能 RFC 负责定义自己的业务流程、权限、失败和验收语义；RFC-0003 只提供共同基础设施和维护约束。其他新 Core command 默认也应使用 toolkit，除非其 RFC 明确说明无法使用的技术原因。
 

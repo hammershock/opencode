@@ -1,5 +1,5 @@
 ---
-id: 0002
+id: 0001
 title: Shell Execution Scope
 status: draft
 authors:
@@ -11,13 +11,13 @@ supersedes: []
 superseded-by: []
 ---
 
-# RFC-0002：Shell 执行 Scope
+# RFC-0001：Shell 执行 Scope
 
 ## 摘要
 
 为 OpenCode 增加一个可在 UI panel 中启用或关闭的实验性 Shell enhancement。它首先解决用户 Shell 命令彼此独立、不能继承 `cwd` 和其他 Shell 状态的问题，并为补全、环境继承以及用户 Shell 与 Agent Shell 的关系定义边界。
 
-本 RFC 不决定命令运行在本地还是远程。执行位置由 Session Location 提供；RFC-0001 只负责把同一个执行 scope 扩展到 Rexd target。
+本 RFC 不决定命令运行在本地还是远程。执行位置由 Session Location 提供；RFC-0002 只负责把同一个执行 scope 扩展到 Rexd target。
 
 ## 当前行为
 

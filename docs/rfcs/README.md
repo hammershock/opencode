@@ -4,8 +4,8 @@ RFC（Request for Comments）用于记录本 fork 中影响多个模块或核心
 
 | ID                                    | 标题                  | 状态  |
 | ------------------------------------- | --------------------- | ----- |
-| [0001](0001-rexd-remote-execution.md) | Rexd Remote Execution | Draft |
-| [0002](0002-shell-execution-scope.md) | Shell Execution Scope | Draft |
+| [0001](0001-shell-execution-scope.md) | Shell Execution Scope | Draft |
+| [0002](0002-rexd-remote-execution.md) | Rexd Remote Execution | Draft |
 
 ## 状态
 

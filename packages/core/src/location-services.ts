@@ -109,23 +109,40 @@ export function buildLocationServiceMap(
   const indexed = new Map(providers.map((provider) => [provider.target, provider]))
   return Layer.effect(
     LocationServiceMap.Service,
-    LayerMap.make(
-      (ref: Location.Ref) => {
-        const provider = indexed.get(ref.target.type)
-        if (!provider) throw new LocationServiceMap.ProviderUnavailableError({ target: ref.target.type })
-        return provider.build(ref, replacements).pipe(
-          Layer.tap(() =>
-            Effect.logInfo("booting location services", {
-              target: ref.target,
-              directory: ref.directory,
-              workspaceID: ref.workspaceID,
-            }),
-          ),
-        )
-      },
-      { idleTimeToLive: "60 minutes" },
+    Effect.map(
+      LayerMap.make(
+        (ref: Location.Ref) => {
+          const provider = indexed.get(ref.target.type)
+          if (!provider) throw new LocationServiceMap.ProviderUnavailableError({ target: ref.target.type })
+          return provider.build(ref, replacements).pipe(
+            Layer.tap(() =>
+              Effect.logInfo("booting location services", {
+                target: ref.target,
+                directory: ref.directory,
+                workspaceID: ref.workspaceID,
+              }),
+            ),
+          )
+        },
+        { idleTimeToLive: "60 minutes" },
+      ),
+      (locations) => ({
+        ...locations,
+        get: (ref: Location.Ref) => locations.get(canonicalRef(ref)),
+        contextEffect: (ref: Location.Ref) => locations.contextEffect(canonicalRef(ref)),
+        invalidate: (ref: Location.Ref) => locations.invalidate(canonicalRef(ref)),
+      }),
     ),
   )
+}
+
+function canonicalRef(ref: Location.Ref): Location.Ref {
+  return Location.Ref.make({
+    target: ref.target,
+    directory: ref.directory,
+    ...(ref.workspaceID === undefined ? {} : { workspaceID: ref.workspaceID }),
+    ...(ref.lastKnownTargetName === undefined ? {} : { lastKnownTargetName: ref.lastKnownTargetName }),
+  })
 }
 
 function buildLocalLocation(ref: Location.Ref, replacements: LayerNode.Replacements) {

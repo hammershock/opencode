@@ -13,6 +13,7 @@ import {
 } from "../middleware/workspace-routing"
 import { PtyForbiddenError, PtyNotFoundError } from "../errors"
 import { described } from "./metadata"
+import { LocationMiddleware } from "@opencode-ai/server/location"
 
 const root = "/pty"
 export const Params = Schema.Struct({ ptyID: PtyID })
@@ -139,6 +140,7 @@ export const PtyApi = HttpApi.make("pty")
         ),
       )
       .annotateMerge(OpenApi.annotations({ title: "pty", description: "Experimental HttpApi PTY routes." }))
+      .middleware(LocationMiddleware)
       .middleware(InstanceContextMiddleware)
       .middleware(WorkspaceRoutingMiddleware)
       .middleware(Authorization),
@@ -181,6 +183,7 @@ export const PtyConnectApi = HttpApi.make("pty-connect").add(
       ),
     )
     .annotateMerge(OpenApi.annotations({ title: "pty", description: "PTY websocket route." }))
+    .middleware(LocationMiddleware)
     .middleware(InstanceContextMiddleware)
     .middleware(WorkspaceRoutingMiddleware)
     .middleware(PtyConnectAuthorization),

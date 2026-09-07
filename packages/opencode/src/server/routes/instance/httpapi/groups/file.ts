@@ -11,6 +11,7 @@ import {
   WorkspaceRoutingQueryFields,
 } from "../middleware/workspace-routing"
 import { described } from "./metadata"
+import { LocationMiddleware } from "@opencode-ai/server/location"
 
 export const FileQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
@@ -172,6 +173,7 @@ export const FileApi = HttpApi.make("file")
           description: "Experimental HttpApi file routes.",
         }),
       )
+      .middleware(LocationMiddleware)
       .middleware(InstanceContextMiddleware)
       .middleware(WorkspaceRoutingMiddleware)
       .middleware(Authorization),

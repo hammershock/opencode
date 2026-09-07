@@ -70,16 +70,20 @@ Session domain 持久化可选的 `syncSpaceID`。缺少该字段表示未归属
 
 账户下的每个 space 至少具有随机稳定 ID、用户可见名称、协议版本、编码模式和成员摘要。规则如下：
 
+- OAuth 登录只建立百度账户连接并发现 space catalog，不创建、加入或激活任何 space；用户必须在登录完成后显式创建或进入一个 space；
 - 一台设备同时至多一个 active space；切换必须先停止旧空间调度、释放 lease，再原子更新 active identity；
 - active 只控制后台 upload/pull 和新 Session 的默认归属，不改变已有 Session ownership；
+- `Switch` 只改变 active space；旧空间的本机 membership/binding、space key、outbox、cursor 和 Session ownership 全部保留，且不会转投新空间；
 - 同一账户下各空间可列出摘要，但只有 active space 可以拉取 cloud-only Session metadata；
 - 不支持的协议版本只显示只读摘要和兼容性诊断，不能加入、写入、删除或尝试降级；
-- 切换或退出空间不会删除本机已经物化的 Session，也不会把它们上传到新空间；
+- `Leave on this device` 只针对所选 space：停止其本机调度，移除本机 membership/binding、space key 和该空间的本地同步状态，并将其已物化 Session 转为未归属；本地 Session 和云端 space 均不删除，也不会把 Session 上传到另一个 active space；
 - 删除 space 是账户范围的破坏性操作，写入永久、单调的 space deletion marker。任何设备的旧 catalog、head、outbox 或缓存都不能复活该空间。
 
 ## 百度 OAuth 产品流程
 
 百度 v1 使用 OpenCode 产品注册的 OAuth client。TUI setup 只提供清晰的 `Connect Baidu Netdisk` 流程：打开或展示授权地址、接收授权结果、校验账户，然后将 refresh/access credential 写入系统安全存储。普通用户不填写 AppKey、SecretKey，不粘贴 token，也不选择外部应用登录态。
+
+授权优先使用本机 loopback callback。无法自动回调时可以展示并复制授权 URL，再由用户粘贴授权码；该 installed-app fallback 只允许百度协议要求的精确 literal `oob` redirect。除明确的 loopback 与 `oob` 两种情况外，redirect 必须是 HTTPS，不能接受任意 HTTP URL、自定义 scheme 或调用方提供的其他非 HTTPS redirect。
 
 - macOS 使用 Keychain；
 - WSL 使用宿主 Windows PasswordVault；
@@ -89,11 +93,21 @@ Session domain 持久化可选的 `syncSpaceID`。缺少该字段表示未归属
 
 旧 OpenCode 原型的 Keychain/PasswordVault 登录态只用于自动化与真实设备兼容测试，以证明 adapter 可以复现既有账户场景。正式产品不得发现、迁移或复用旧 identity，也不得扫描浏览器、百度客户端、CloudDrive、`netdisk` CLI 或其他应用登录态。测试必须显式注入精确 legacy fixture identity，且不得把 secret 或机器 identity 写入仓库、日志或截图。
 
+登录与进入 space 是两个独立的产品步骤。OAuth 成功后界面显示账户和可发现的空间，但保持 `activeSpaceID` 未设置，直到用户显式创建或进入空间。重新登录也不得根据旧 catalog、同名空间或本地 Session 自动选择 active space。
+
+账户退出和完整移除是不同操作：
+
+- `Log out` 停止调度、清除 active selection 并移除本设备的百度 credential，但保留本地 space catalog、密钥、同步状态、outbox 和 Session ownership，以便同一账户重新授权并显式重新进入后恢复；
+- `Remove sync from this device` 对本机已知的所有 space 执行本地 leave，停止全部调度，清除百度 credential、全部 membership/binding、space key、catalog、outbox、cursor、cache 和同步设置，并将本地已经物化的 Session 变为未归属；云端 space、全局删除 marker 和其他设备不受影响；
+- 两种操作都不得删除本地 Session；完整移除是破坏本机恢复材料的操作，必须确认并说明加密空间可能需要 recovery key 才能再次进入。
+
 ## 可选端到端加密
 
 创建 space 时用户可以开启端到端加密；默认关闭，创建后编码模式不可原地切换。需要改变模式时创建新 space，并通过未来另行定义的显式 export/import 或 copy workflow 迁移，不得在原路径混放两种编码。
 
 未加密 space 使用带版本的 canonical envelope、内容摘要和对象路径绑定来检测损坏，但不承诺对百度存储隐藏 Session 内容。UI 必须在创建前明确说明这一点，状态页持续显示 `Encryption: Off`，不能用锁形符号或含糊文案暗示加密。
+
+未加密 space 不生成、不请求、导入或保存 root key/recovery key；OAuth credential 只授权 provider 访问，不能被当作内容加密密钥。编码模式写入 space descriptor，创建后不可变。
 
 加密 space 使用运行时审计过的 AES-256-GCM、HKDF-SHA256、HMAC-SHA256 和系统 CSPRNG：
 
@@ -138,7 +152,7 @@ Core 只依赖该 contract。百度 adapter 负责 OAuth、分页、precreate、
 ## 增量、索引与调度
 
 - owned Session mutation 与对应 space-scoped outbox 原子提交，再异步上传；上传成功并更新本设备 head 后才清除 outbox；
-- enabled 时约每 30 秒同步 active space；启动、网络恢复和 `/sync now` 也触发，相同方向请求合并；
+- enabled 时按用户级配置对 active space 调度；v1 只提供 30 秒、1 分钟、5 分钟三个 interval preset，默认 30 秒；启动、网络恢复和 `/sync now` 也触发，相同方向请求合并；
 - upload 与 pull 使用按 space、device、方向隔离的跨进程 lease 和 TTL；
 - pull 的对象验证、事件回放、冲突分支和 projection 全部提交后，才原子推进该 space 的 cursor；
 - 首次加入 active space 先获取 Session metadata projection，使 `/sessions` 可以搜索，再按需或限流后台 hydration；
@@ -147,7 +161,9 @@ Core 只依赖该 contract。百度 adapter 负责 OAuth、分页、precreate、
 
 ## Session scope 与 TUI
 
-`/sync` 打开统一的 TUI 管理面板，并提供 connect/disconnect account、create/join/switch/delete space、enable/disable、sync now、status，以及加密空间的 export/import recovery key。`/devices` 只管理 active space 的设备和 portable target binding。所有操作是 RFC-0003 控制面效果，不进入 Session 或模型上下文。
+`/sync`、command palette 中的 `Sync settings` 和 QuickStart 的同步设置入口必须打开同一个 TUI workflow，不得各自实现状态机或确认逻辑。该 workflow 提供 connect/logout/remove account、create/enter/switch/leave/delete space、enable/disable、interval、sync now、status，以及加密空间的 export/import recovery key。`/devices` 深链到同一 workflow 的 active-space Devices 子视图；返回时回到同一个 Sync settings overview，而不是另一套设备管理面板。所有操作是 RFC-0003 控制面效果，不进入 Session 或模型上下文。
+
+成功创建、进入或切换 active space 后，如果本机存在未归属 Session，workflow 对该次显式激活至多显示一次批量提示：`Add all` 或 `No`。它不逐个询问，不在启动、后台同步、重新打开面板或定时调度时主动弹出。`No` 保持全部 Session 未归属；overview 保留显式的 `Add unassigned Sessions...` action，用户可稍后重新发起。确认只处理提示时列出的、提交时仍未归属的 Session；期间新建或已改变归属的 Session 不被意外纳入。归属操作必须通过 Session domain workflow 产生初始 outbox，不能由 TUI 直接修改字段。
 
 `/sessions` 在搜索框之外固定显示两个独立筛选维度：
 
@@ -218,3 +234,6 @@ tombstone 对同一 space ID 与 Session ID 组合永久、单调地占优。删
 10. portable label 未绑定时保持 unresolved；绑定后通过 RFC-0002 验证才能执行，连接详情从未上传。
 11. 同步失败、locked 或 disabled 时本地 Session 使用仍可用，原所属空间 outbox 保留可恢复状态。
 12. TUI 命令只使用 toolkit 和 Sync service；Web/Desktop 不暴露未验收的同步产品入口。
+13. OAuth 成功不自动进入空间；`/sync`、command palette 和 QuickStart 共用一个 workflow，`/devices` 只深链到其中的 Devices 子视图。
+14. 30 秒、1 分钟、5 分钟 interval 均可选择且默认 30 秒；logout 保留本地同步身份与恢复状态，Switch 只改变 active，单空间 Leave 只移除该空间的本机状态和 ownership，完整移除对所有空间执行本地移除并清除 auth/state；三者均保留本地 Session。
+15. 未归属 Session 只在显式 active-space transition 后至多批量提示一次；拒绝、后台调度和重新打开面板不会隐式归属或反复弹窗。

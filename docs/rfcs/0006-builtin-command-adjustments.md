@@ -202,11 +202,14 @@ Scope:  [Current Sync Space] All
 
 - `Filter` 选择已有的 Session 属性筛选方式；`Cwd` 按执行目录筛选，`All` 不施加该维度的约束；
 - `Scope` 选择 `Current Sync Space` 或 `All`。前者只显示归属于当前 active sync space 的 Session，不包含未归属 Session；后者显示本机已经持有的所有空间归属 Session 和未归属 Session；
+- 未配置 active sync space 时，默认的 `Current Sync Space` 视图退化为 `All`，显示本机 Session，不能因为没有同步空间而得到空列表；
 - `Scope: All` 不查询非当前空间的 cloud-only metadata，不隐式加入、激活或切换任何同步空间；
 - `Tab` 只在两行筛选器之间移动焦点，左右方向键改变当前行的值；搜索框仍是独立焦点和独立过滤条件；
 - 筛选只影响当前列表视图，不改变 Session ownership、active sync space、同步配置或 durable Session 数据。
 
 `/sessions` 还可以承载 RFC-0009 定义的实验性 `Force rebind location...` 管理操作。该入口默认隐藏，只在设备级实验设置开启时显示，并必须标注为不推荐。Location 校验、空闲检查、事务提交、运行时重建和同步 revision 全部属于 RFC-0009 domain workflow，不在 Session list 组件中实现。
+
+Session 列表中的 Location 和同步视图是一等产品功能，始终增量扩展 upstream `/sessions` 打开的同一个 dialog，不属于实验性 slash-command override。只有高风险的单 Session 强制 rebind action 受实验开关控制。
 
 ### `/models` 与 provider usage
 

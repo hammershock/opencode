@@ -31,6 +31,18 @@ describe("Session list location presentation", () => {
     expect(sessionListLocation(session).label).toBe("gpu-lab · /srv/repo · macbook")
   })
 
+  test("presents and searches cloud-only portable target and source device metadata", () => {
+    const session = {
+      title: "Synced",
+      directory: "/srv/cloud-project",
+      targetLabel: "gpu-cloud",
+      sourceDeviceID: "device-windows",
+    }
+    expect(sessionListLocation(session).label).toBe("gpu-cloud · /srv/cloud-project · device-windows")
+    expect(sessionListMatches(session, "gpu-cloud")).toBe(true)
+    expect(sessionListMatches(session, "device-windows")).toBe(true)
+  })
+
   test.each([
     ["missing_local_target", "unresolved"],
     ["unbound_portable_target", "unresolved"],

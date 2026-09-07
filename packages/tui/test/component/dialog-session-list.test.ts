@@ -86,10 +86,11 @@ describe("dialog session list", () => {
     expect(sessionInDialogSyncScope(active, "current", "active")).toBe(true)
     expect(sessionInDialogSyncScope(inactive, "current", "active")).toBe(false)
     expect(sessionInDialogSyncScope(unassigned, "current", "active")).toBe(false)
-    expect(sessionInDialogSyncScope(active, "current")).toBe(false)
+    expect(sessionInDialogSyncScope(active, "current")).toBe(true)
+    expect(sessionInDialogSyncScope(unassigned, "current")).toBe(true)
     expect(includeCloudSessionInDialogScope("current", "active")).toBe(true)
     expect(includeCloudSessionInDialogScope("current")).toBe(false)
-    expect(includeCloudSessionInDialogScope("all", "active")).toBe(false)
+    expect(includeCloudSessionInDialogScope("all", "active")).toBe(true)
     expect(
       [active, inactive, unassigned].filter((session) => sessionInDialogSyncScope(session, "all", "active")),
     ).toHaveLength(3)

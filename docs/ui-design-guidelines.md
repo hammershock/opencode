@@ -18,6 +18,8 @@ This document defines the normative interaction and presentation rules for fork-
 - A row should normally contain one primary label, one optional muted description and one status. Put verbose errors, paths or instructions in a focused footer or detail view.
 - Prefer a symbol plus a stable text label over prose-only status or icon-only meaning. Symbols aid scanning; labels remain the accessible contract.
 - Preserve panel geometry while asynchronous state changes. Loading must not reorder rows or replace the user's selection.
+- Give every single-line row an explicit width budget and test it at the supported narrow, default and wide terminal widths. Reserve gutters and fixed right-side status before allocating identity text.
+- Unfocused rows never auto-scroll. Truncate their variable text deterministically; when a user-visible identity is genuinely longer than its budget, the selected or mouse-focused row may cycle horizontally so the complete value remains inspectable.
 - Use two rows only when the controls represent independent dimensions. For `/sessions`, the required controls are exactly:
 
   ```text

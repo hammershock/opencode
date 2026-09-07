@@ -1,4 +1,6 @@
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
+import { useTerminalDimensions } from "@opentui/solid"
+import { TextAttributes } from "@opentui/core"
 import { useLocal } from "../context/local"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
 import { DialogSelect } from "../ui/dialog-select"
@@ -10,14 +12,20 @@ import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
 import {
   formatTime,
+  fitText,
   load,
   meterDetails,
+  modelFavoriteDescription,
+  modelFooterWidth,
+  modelTitleWidth,
   orderedMeters,
+  providerHeaderWidths,
   status as usageStatus,
   type Meter,
   type Result,
 } from "../provider-usage"
 import { useSDK } from "../context/sdk"
+import { useTheme } from "../context/theme"
 
 function providerID(value: unknown) {
   if (!value || typeof value !== "object" || !("providerID" in value)) return
@@ -29,9 +37,26 @@ export function DialogModel(props: { providerID?: string }) {
   const sync = useSync()
   const dialog = useDialog()
   const sdk = useSDK()
+  const dimensions = useTerminalDimensions()
+  const { theme } = useTheme()
   const [query, setQuery] = createSignal("")
   const [usage, setUsage] = createSignal<Record<string, Result>>({})
   const requests = new Map<string, AbortController>()
+
+  onMount(() => dialog.setSize("xlarge"))
+
+  function usageHeader(providerID: string, title: string) {
+    return (
+      <box flexDirection="row" justifyContent="space-between" width="100%" paddingRight={3}>
+        <text fg={theme.accent} attributes={TextAttributes.BOLD} wrapMode="none">
+          {fitText(title, providerHeaderWidths(dimensions().width, title).title)}
+        </text>
+        <text fg={theme.textMuted} wrapMode="none">
+          {usageStatus(usage()[providerID], providerHeaderWidths(dimensions().width, title).usage)}
+        </text>
+      </box>
+    )
+  }
 
   function queryUsage(providerID: string, refresh = false) {
     requests.get(providerID)?.abort()
@@ -80,19 +105,21 @@ export function DialogModel(props: { providerID?: string }) {
         if (!provider) return []
         const model = provider.models[item.modelID]
         if (!model) return []
+        const footer = model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined
         return [
           {
             key: item,
             value: { providerID: provider.id, modelID: model.id },
             title: model.name ?? item.modelID,
-            description: provider.name,
             category,
+            categoryView: usageHeader(provider.id, category),
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
-            footer: connected()
-              ? usageStatus(usage()[provider.id])
-              : model.cost?.input === 0 && provider.id === "opencode"
-                ? "Free"
-                : undefined,
+            footer,
+            footerWidth: footer ? Bun.stringWidth(footer) : undefined,
+            titleWidth: modelTitleWidth(dimensions().width, {
+              footerWidth: footer ? Bun.stringWidth(footer) : undefined,
+            }),
+            inspectTitle: true,
             onSelect: () => {
               onSelect(provider.id, model.id)
             },
@@ -106,12 +133,12 @@ export function DialogModel(props: { providerID?: string }) {
       if (!provider) return []
       return toOptions([item], `Favorites · ${provider.name}`)
     })
-    const recentOptions = toOptions(
-      recents.filter(
-        (item) => !favorites.some((fav) => fav.providerID === item.providerID && fav.modelID === item.modelID),
-      ),
-      "Recent",
-    )
+    const recentOptions = recents.flatMap((item) => {
+      if (favorites.some((fav) => fav.providerID === item.providerID && fav.modelID === item.modelID)) return []
+      const provider = sync.data.provider.find((provider) => provider.id === item.providerID)
+      if (!provider) return []
+      return toOptions([item], `Recent · ${provider.name}`)
+    })
 
     const providerOptions = pipe(
       sync.data.provider,
@@ -125,24 +152,35 @@ export function DialogModel(props: { providerID?: string }) {
           entries(),
           filter(([_, info]) => info.status !== "deprecated"),
           filter(([_, info]) => (props.providerID ? info.providerID === props.providerID : true)),
-          map(([model, info]) => ({
-            value: { providerID: provider.id, modelID: model },
-            title: info.name ?? model,
-            releaseDate: info.release_date,
-            description: favorites.some((item) => item.providerID === provider.id && item.modelID === model)
-              ? "(Favorite)"
-              : undefined,
-            category: connected() ? provider.name : undefined,
-            disabled: provider.id === "opencode" && model.includes("-nano"),
-            footer: connected()
-              ? usageStatus(usage()[provider.id])
-              : info.cost?.input === 0 && provider.id === "opencode"
-                ? "Free"
-                : undefined,
-            onSelect() {
-              onSelect(provider.id, model)
-            },
-          })),
+          map(([model, info]) => {
+            const description = favorites.some((item) => item.providerID === provider.id && item.modelID === model)
+              ? modelFavoriteDescription(dimensions().width)
+              : undefined
+            const footer = info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined
+            const flatFooterWidth = connected() ? modelFooterWidth(dimensions().width) : undefined
+            return {
+              value: { providerID: provider.id, modelID: model },
+              title: info.name ?? model,
+              releaseDate: info.release_date,
+              description,
+              category: connected() ? provider.name : undefined,
+              categoryView: connected() ? usageHeader(provider.id, provider.name) : undefined,
+              disabled: provider.id === "opencode" && model.includes("-nano"),
+              footer,
+              footerWidth: footer ? Bun.stringWidth(footer) : undefined,
+              flatFooter: connected() ? provider.name : undefined,
+              flatFooterWidth,
+              inspectFooter: true,
+              titleWidth: modelTitleWidth(dimensions().width, {
+                footerWidth: needle ? flatFooterWidth : footer ? Bun.stringWidth(footer) : undefined,
+                description,
+              }),
+              inspectTitle: true,
+              onSelect() {
+                onSelect(provider.id, model)
+              },
+            }
+          }),
           filter((option) => {
             if (!showSections) return true
             if (

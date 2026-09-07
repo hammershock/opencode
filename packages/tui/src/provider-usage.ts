@@ -79,21 +79,65 @@ export function summary(result: Result | undefined, selected?: string[], maxWidt
   return truncateParts(values, maxWidth === undefined ? undefined : maxWidth - suffix.length) + suffix
 }
 
-export function status(result: Result | undefined) {
-  if (!result) return "◐ loading"
-  if (result.status === "unsupported") return "! unsupported"
-  if (result.status === "unauthenticated") return "! not signed in"
-  if (result.status === "error") return "× unavailable"
-  const first = summary(
-    result,
-    result.snapshot
-      ? orderedMeters(result.snapshot.meters)
-          .slice(0, 1)
-          .map((x) => x.id)
-      : [],
+export function status(result: Result | undefined, maxWidth?: number) {
+  const value = (() => {
+    if (!result) return "◐ loading"
+    if (result.status === "unsupported") return "! unsupported"
+    if (result.status === "unauthenticated") return "! not signed in"
+    if (result.status === "error") return "× unavailable"
+    const marker = result.status === "stale" ? "! " : "● "
+    const first = summary(
+      result,
+      result.snapshot
+        ? orderedMeters(result.snapshot.meters)
+            .slice(0, 1)
+            .map((x) => x.id)
+        : [],
+      maxWidth === undefined ? undefined : Math.max(0, maxWidth - marker.length),
+    )
+    if (result.status === "stale") return `${marker}${first ?? "usage"}`
+    return `${marker}${first ?? "available"}`
+  })()
+  return maxWidth === undefined ? value : fitText(value, maxWidth)
+}
+
+export function modelDialogWidth(terminalWidth: number) {
+  return Math.min(116, Math.max(1, terminalWidth - 2))
+}
+
+export function modelFooterWidth(terminalWidth: number) {
+  return Math.max(8, Math.min(28, Math.floor(modelDialogWidth(terminalWidth) * 0.3)))
+}
+
+export function modelFavoriteDescription(terminalWidth: number) {
+  return modelDialogWidth(terminalWidth) >= 60 ? "(Favorite)" : undefined
+}
+
+export function modelTitleWidth(
+  terminalWidth: number,
+  trailing?: { readonly footerWidth?: number; readonly description?: string },
+) {
+  const footer = trailing?.footerWidth ? trailing.footerWidth + 1 : 0
+  const description = trailing?.description ? Bun.stringWidth(trailing.description) + 1 : 0
+  return Math.max(8, modelDialogWidth(terminalWidth) - 12 - footer - description)
+}
+
+export function providerHeaderWidths(terminalWidth: number, providerName: string) {
+  const available = Math.max(8, modelDialogWidth(terminalWidth) - 10)
+  const title = Math.min(Bun.stringWidth(providerName), Math.max(4, Math.floor(available * 0.55)))
+  return { title, usage: Math.max(4, available - title - 1) }
+}
+
+export function fitText(value: string, width: number) {
+  if (width <= 0) return ""
+  if (Bun.stringWidth(value) <= width) return value
+  if (width === 1) return "…"
+  return (
+    [...value].reduce((result, character) => {
+      if (Bun.stringWidth(result + character) >= width) return result
+      return result + character
+    }, "") + "…"
   )
-  if (result.status === "stale") return `! ${first ?? "usage"}`
-  return `● ${first ?? "available"}`
 }
 
 export function meterDetails(meter: Meter) {

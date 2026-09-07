@@ -38,6 +38,15 @@ export interface MacosBackend {
   readonly remove: (service: string, account: string) => void | Promise<void>
 }
 
+type CachedRead = {
+  readonly generation: number
+  readonly value: string | undefined
+}
+
+const macosReads = new WeakMap<MacosBackend, Map<string, CachedRead>>()
+const macosPending = new WeakMap<MacosBackend, Map<string, Promise<string | undefined>>>()
+const macosGenerations = new WeakMap<MacosBackend, Map<string, number>>()
+
 export class SecureStoreUnavailableError extends Error {
   override readonly name = "SyncSecureStore.UnavailableError"
 }
@@ -144,21 +153,56 @@ async function detectService(
 }
 
 export function macos(service = SERVICE, backend: MacosBackend = macosKeychain): Store {
+  const reads = cacheFor(macosReads, backend)
+  const pending = cacheFor(macosPending, backend)
+  const generations = cacheFor(macosGenerations, backend)
+  const key = (account: string) => `${service}\0${account}`
   return {
     platform: "macos-keychain",
     async get(account) {
       validateAccount(account)
-      return backend.get(service, account)
+      const id = key(account)
+      const generation = generations.get(id) ?? 0
+      const cached = reads.get(id)
+      if (cached?.generation === generation) return cached.value
+      const active = pending.get(id)
+      if (active) return active
+      const operation = Promise.resolve(backend.get(service, account)).then((value) => {
+        if ((generations.get(id) ?? 0) === generation) reads.set(id, { generation, value })
+        return value
+      })
+      pending.set(id, operation)
+      try {
+        return await operation
+      } finally {
+        if (pending.get(id) === operation) pending.delete(id)
+      }
     },
     async set(account, secret) {
       validateAccount(account)
+      const id = key(account)
       await backend.set(service, account, secret)
+      const generation = (generations.get(id) ?? 0) + 1
+      generations.set(id, generation)
+      reads.set(id, { generation, value: secret })
     },
     async remove(account) {
       validateAccount(account)
+      const id = key(account)
       await backend.remove(service, account)
+      const generation = (generations.get(id) ?? 0) + 1
+      generations.set(id, generation)
+      reads.set(id, { generation, value: undefined })
     },
   }
+}
+
+function cacheFor<K extends object, V>(cache: WeakMap<K, Map<string, V>>, owner: K) {
+  const existing = cache.get(owner)
+  if (existing) return existing
+  const created = new Map<string, V>()
+  cache.set(owner, created)
+  return created
 }
 
 const macosKeychain: MacosBackend = {

@@ -144,7 +144,11 @@ export function buildSyncOverviewRows(model: SyncSettingsViewModel): Row[] {
       description: model.activeSpace ? spaceSummary(model.activeSpace) : "Create or enter a space",
       status: model.activeSpace ? syncStatus(model.activeSpace.state) : "! attention",
     },
-    { title: "Sync now", status: syncStatus(model.state) },
+    {
+      title: "Sync now",
+      description: model.activeSpace ? undefined : "Select a space first",
+      status: model.activeSpace ? syncStatus(model.state) : "! unavailable",
+    },
     { title: "Auto sync", status: model.enabled ? "● on" : "● off" },
     { title: "Interval", status: intervalLabel(model.interval) },
     { title: "Spaces", status: String(model.spaces.length) },
@@ -228,6 +232,10 @@ async function selectOverview(
     return showSpaces(dialog, model, actions)
   }
   if (value === "sync") {
+    if (!current.activeSpace) {
+      await actions.discoverSpaces()
+      return showSpaces(dialog, model, actions)
+    }
     await actions.syncNow()
     await showAssignUnassignedSessions(dialog, {
       sessionIDs: model().unassigned,

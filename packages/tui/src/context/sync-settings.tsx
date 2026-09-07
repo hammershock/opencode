@@ -25,6 +25,7 @@ import {
 const DISMISSED_UNASSIGNED = "sync_unassigned_dismissed"
 
 type OpenView = "overview" | "devices"
+type ActiveTransfer = Exclude<EventSyncTransferUpdated["properties"]["progress"], { state: "idle" }>
 
 const initial: SyncSettingsViewModel = {
   account: { state: "disconnected", oauth: { state: "idle" } },
@@ -72,7 +73,23 @@ const INCOMPATIBLE_LOCAL_STATE_MESSAGE = SyncSetup.INCOMPATIBLE_LOCAL_STATE_MESS
 export function syncOperationFailure(error: unknown) {
   if (hasMissingApp(error, 0)) return MISSING_APP_MESSAGE
   if (hasSetupKind(error, "incompatible-local-state", 0)) return INCOMPATIBLE_LOCAL_STATE_MESSAGE
+  if (hasSetupKind(error, "unconfigured", 0)) return "Select a sync space first"
+  if (hasSetupKind(error, "locked", 0)) return "Import the recovery key for the active space"
+  const stage = syncFailureStage(error, 0)
+  if (stage) return `Sync failed during ${stage}`
   return "Sync operation failed"
+}
+
+const SYNC_FAILURE_STAGES = new Set(["attachment", "segment", "head", "pull", "hydrate", "collect"])
+
+function syncFailureStage(value: unknown, depth: number): string | undefined {
+  if (depth > 4 || !value || typeof value !== "object") return
+  const record = value as Record<string, unknown>
+  if (typeof record.stage === "string" && SYNC_FAILURE_STAGES.has(record.stage)) return record.stage
+  for (const item of [record.data, record.error, record.cause, record.body, record.diagnostic]) {
+    const stage = syncFailureStage(item, depth + 1)
+    if (stage) return stage
+  }
 }
 
 function hasSetupKind(value: unknown, kind: string, depth: number): boolean {
@@ -149,7 +166,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     const dialog = useDialog()
     const toast = useToast()
     const [model, setModel] = createSignal(initial)
-    const [transfer, setTransfer] = createSignal<EventSyncTransferUpdated["properties"]["progress"]>()
+    const [transfer, setTransfer] = createSignal<ActiveTransfer>()
     let discovered: GlobalSyncDiscoverResponse["spaces"] = []
     let oauth:
       | {
@@ -160,7 +177,8 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       | undefined
     let loopback: ReturnType<typeof createLoopbackCallback> | undefined
     let bindingRevision = ""
-    let remoteRefresh: Promise<void> | undefined
+    let remoteGeneration = 0
+    let remoteAbort: AbortController | undefined
 
     const unsubscribe = sdk.event.on("event", (event) => {
       if (event.payload.type === "server.connected") {
@@ -175,6 +193,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     onCleanup(() => {
       loopback?.close()
       unsubscribe()
+      remoteAbort?.abort()
     })
 
     type LocalState = GlobalSyncStateResponse | null | undefined
@@ -189,7 +208,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         return
       }
       const previous = new Map(model().spaces.map((space) => [space.id, space]))
-      const spaces = state.spaces.map((item): SyncSpace => {
+      const local = state.spaces.map((item): SyncSpace => {
         const cached = previous.get(item.descriptor.namespaceID)
         const active = state.activeSpaceID === item.descriptor.namespaceID
         return {
@@ -205,6 +224,27 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
           state: state.enabled ? "idle" : "off",
         }
       })
+      const localIDs = new Set(local.map((space) => space.id))
+      const spaces = [
+        ...local,
+        ...discovered
+          .filter((item) => !localIDs.has(item.descriptor.namespaceID))
+          .map(
+            (item) =>
+              previous.get(item.descriptor.namespaceID) ??
+              ({
+                id: item.descriptor.namespaceID,
+                name: item.descriptor.name,
+                supported: item.status === "compatible",
+                protocol: `${item.descriptor.protocol.major}.${item.descriptor.protocol.minor}`,
+                encryption: item.descriptor.encryption === "none" ? "off" : "encrypted",
+                updatedAt: new Date(item.descriptor.updatedAt).toLocaleString(),
+                membership: "available",
+                state: state.enabled ? "idle" : "off",
+                detail: item.status === "unsupported" ? "Unsupported protocol" : undefined,
+              } satisfies SyncSpace),
+          ),
+      ]
       setModel((current) => ({
         ...current,
         account: state.account
@@ -238,10 +278,14 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     const refresh = async (discover = false, notify = false) => {
       const state = await refreshLocal(notify)
       if (!state?.account) return
-      if (remoteRefresh) return remoteRefresh
+      remoteAbort?.abort()
+      const controller = new AbortController()
+      remoteAbort = controller
+      const generation = ++remoteGeneration
       setModel((current) => ({ ...current, remote: "checking", detail: undefined }))
 
-      remoteRefresh = withSyncRefreshTimeout(async (signal) => {
+      const current = withSyncRefreshTimeout(async (timeoutSignal) => {
+        const signal = AbortSignal.any([controller.signal, timeoutSignal])
         const status = await sdk.client.global.syncStatus({ throwOnError: true, signal }).then(
           (result) => result.data,
           () => undefined,
@@ -295,6 +339,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
               )
             : [],
         ])
+        if (generation !== remoteGeneration) return
         if (discovery) discovered = discovery.spaces
         if (bindingResult) bindingRevision = bindingResult.revision
         const local = new Map(state.spaces.map((item) => [item.descriptor.namespaceID, item]))
@@ -378,14 +423,17 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         if (attention && notify) toast.show({ message: "Some sync information is unavailable", variant: "warning" })
       })
         .catch(() => {
+          if (generation !== remoteGeneration) return
           const detail = "Sync status is unavailable"
           setModel((current) => ({ ...current, state: "attention", remote: "unavailable", detail }))
           if (notify) toast.show({ message: detail, variant: "warning" })
         })
         .finally(() => {
-          remoteRefresh = undefined
+          if (generation === remoteGeneration) {
+            remoteAbort = undefined
+          }
         })
-      return remoteRefresh
+      return current
     }
 
     const completeOAuth = async (
@@ -501,6 +549,10 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         await completeOAuth({ type: "manual", code })
       },
       syncNow: async () => {
+        if (!model().activeSpace) {
+          await refresh(true)
+          if (!model().activeSpace) return
+        }
         setModel((current) => ({ ...current, state: "syncing" }))
         await mutate(() => sdk.client.global.syncNow({ throwOnError: true }))
       },

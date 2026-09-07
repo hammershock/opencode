@@ -411,6 +411,12 @@ const layer = Layer.effect(
 
         const global = Object.keys(authEnv).length ? yield* loadGlobal(authEnv) : yield* getGlobal()
         yield* merge(Global.Path.config, global, "global")
+        const retired = yield* Effect.promise(() => ConfigCommand.retireLegacy(Global.Path.config))
+        yield* Effect.forEach(retired, (item) =>
+          item.error
+            ? Effect.logWarning("failed to retire legacy generated command", { path: item.source })
+            : Effect.logInfo("retired legacy generated command", { path: item.source, backup: item.backup }),
+        )
 
         if (Flag.OPENCODE_CONFIG) {
           yield* merge(Flag.OPENCODE_CONFIG, yield* loadFile(Flag.OPENCODE_CONFIG, authEnv))

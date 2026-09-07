@@ -47,6 +47,7 @@ const apiLayer = HttpRouter.serve(
   ),
   Layer.provide(
     Layer.mock(SyncControl.Service)({
+      join: () => Effect.die("not implemented"),
       status: () =>
         Effect.succeed(
           SyncControl.Status.make({

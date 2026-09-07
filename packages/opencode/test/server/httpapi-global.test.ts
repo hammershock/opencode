@@ -101,7 +101,7 @@ const makeApiLayer = (
         logout: () => Effect.succeed(syncState),
         discover: () => Effect.succeed({ spaces: [{ status: "compatible", descriptor }], deletions: [] }),
         create: () => Effect.succeed({ state: syncState, descriptor }),
-        join: () => Effect.succeed(syncState),
+        join: () => Effect.die("Sync join must be orchestrated by SyncControl"),
         activate: () => Effect.succeed(syncState),
         leave: () => Effect.succeed(syncState),
         setEnabled: () => Effect.succeed(syncState),
@@ -112,6 +112,7 @@ const makeApiLayer = (
     ),
     Layer.provide(
       Layer.mock(SyncControl.Service)({
+        join: () => Effect.succeed(syncState),
         now,
         status: () =>
           Effect.succeed(

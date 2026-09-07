@@ -1077,6 +1077,30 @@ Nested command template`,
   }),
 )
 
+it.instance("retires an exact legacy global command before normal discovery", () =>
+  withGlobalConfig({}, ({ dir }) =>
+    Effect.gen(function* () {
+      const source = path.join(dir, "commands", "sync.md")
+      yield* FSUtil.use.writeWithDirs(
+        source,
+        `---
+description: Configure and manage cloud session sync
+---
+
+__OPENCODE_REXD_SYNC__ $ARGUMENTS
+`,
+      )
+
+      const config = yield* Config.use.get()
+      expect(config.command?.sync).toBeUndefined()
+      expect(yield* FSUtil.use.existsSafe(source)).toBe(false)
+      expect(
+        (yield* FSUtil.use.readDirectory(path.dirname(source))).some((item) => item.endsWith(".disabled.bak")),
+      ).toBe(true)
+    }),
+  ),
+)
+
 it.instance("updates config and writes to file", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance

@@ -64,6 +64,32 @@ export function captureOwned(
   })
 }
 
+/** Idempotently copies a Session's committed durable history into one space outbox. */
+export function backfill(
+  db: Database.Interface["db"],
+  store: SyncEventStore.Interface,
+  sessionID: string,
+  spaceID: string,
+) {
+  return Effect.gen(function* () {
+    let after = -1
+    while (true) {
+      const page = yield* EventV2.readAggregate(db, {
+        aggregateID: sessionID,
+        after,
+        limit: 256,
+        manifest: SessionDurable,
+      })
+      yield* Effect.forEach(page.events, (event) => capture(store.scope(spaceID), event as DurablePayload), {
+        discard: true,
+      })
+      const last = page.events.at(-1)
+      if (!page.hasMore || !last?.durable) break
+      after = last.durable.seq
+    }
+  })
+}
+
 /** Converts an event to the compact attachment-aware wire representation. */
 export async function externalize(
   event: SyncEvent.Envelope,
@@ -247,28 +273,9 @@ export const captureLayer = Layer.effectDiscard(
     // owned durable history after the live subscriber starts closes the crash
     // window between a committed Session event and its asynchronous capture.
     // Enqueue is idempotent by event ID, so overlap with the live stream is safe.
-    yield* Effect.forEach(
-      yield* ownership.list(),
-      (item) =>
-        Effect.gen(function* () {
-          let after = -1
-          while (true) {
-            const page = yield* EventV2.readAggregate(db, {
-              aggregateID: item.sessionID,
-              after,
-              limit: 256,
-              manifest: SessionDurable,
-            })
-            yield* Effect.forEach(page.events, (event) => capture(store.scope(item.spaceID), event as DurablePayload), {
-              discard: true,
-            })
-            const last = page.events.at(-1)
-            if (!page.hasMore || !last?.durable) break
-            after = last.durable.seq
-          }
-        }),
-      { discard: true },
-    )
+    yield* Effect.forEach(yield* ownership.list(), (item) => backfill(db, store, item.sessionID, item.spaceID), {
+      discard: true,
+    })
   }),
 )
 

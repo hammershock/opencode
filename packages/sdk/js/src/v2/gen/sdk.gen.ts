@@ -87,32 +87,50 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
-  GlobalSyncAuthorizeErrors,
-  GlobalSyncAuthorizeResponses,
+  GlobalSyncActivateErrors,
+  GlobalSyncActivateResponses,
   GlobalSyncBindingUpdateErrors,
   GlobalSyncBindingUpdateResponses,
-  GlobalSyncCompleteErrors,
-  GlobalSyncCompleteResponses,
+  GlobalSyncCreateErrors,
+  GlobalSyncCreateResponses,
+  GlobalSyncDeleteErrors,
+  GlobalSyncDeleteResponses,
   GlobalSyncDevicesErrors,
   GlobalSyncDevicesResponses,
   GlobalSyncDeviceUpdateErrors,
   GlobalSyncDeviceUpdateResponses,
+  GlobalSyncDiscoverErrors,
+  GlobalSyncDiscoverResponses,
   GlobalSyncEnabledErrors,
   GlobalSyncEnabledResponses,
   GlobalSyncHydrateErrors,
   GlobalSyncHydrateResponses,
+  GlobalSyncInitializeErrors,
+  GlobalSyncInitializeResponses,
+  GlobalSyncIntervalErrors,
+  GlobalSyncIntervalResponses,
+  GlobalSyncJoinErrors,
+  GlobalSyncJoinResponses,
+  GlobalSyncLeaveErrors,
+  GlobalSyncLeaveResponses,
+  GlobalSyncLogoutErrors,
+  GlobalSyncLogoutResponses,
   GlobalSyncNowErrors,
   GlobalSyncNowResponses,
+  GlobalSyncOAuthBeginErrors,
+  GlobalSyncOAuthBeginResponses,
+  GlobalSyncOAuthCompleteErrors,
+  GlobalSyncOAuthCompleteResponses,
+  GlobalSyncOAuthSwitchAccountErrors,
+  GlobalSyncOAuthSwitchAccountResponses,
   GlobalSyncRecoveryExportErrors,
   GlobalSyncRecoveryExportResponses,
-  GlobalSyncResetErrors,
-  GlobalSyncResetResponses,
-  GlobalSyncReuseLegacyErrors,
-  GlobalSyncReuseLegacyResponses,
+  GlobalSyncRemoveErrors,
+  GlobalSyncRemoveResponses,
   GlobalSyncSessionsErrors,
   GlobalSyncSessionsResponses,
-  GlobalSyncSetupErrors,
-  GlobalSyncSetupResponses,
+  GlobalSyncStateErrors,
+  GlobalSyncStateResponses,
   GlobalSyncStatusErrors,
   GlobalSyncStatusResponses,
   GlobalUpgradeErrors,
@@ -1416,73 +1434,26 @@ export class Global extends HeyApiClient {
     })
   }
 
-  public syncSetup<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
-    return (options?.client ?? this.client).get<GlobalSyncSetupResponses, GlobalSyncSetupErrors, ThrowOnError>({
-      url: "/global/sync/setup",
+  public syncState<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalSyncStateResponses, GlobalSyncStateErrors, ThrowOnError>({
+      url: "/global/sync/state",
       ...options,
     })
   }
 
-  public syncAuthorize<ThrowOnError extends boolean = false>(
+  public syncInitialize<ThrowOnError extends boolean = false>(
     parameters?: {
-      appKey?: string
-      secretKey?: string
       deviceName?: string
-      recoveryString?: string
-      redirectURI?: string
-      resetExisting?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "body", key: "appKey" },
-            { in: "body", key: "secretKey" },
-            { in: "body", key: "deviceName" },
-            { in: "body", key: "recoveryString" },
-            { in: "body", key: "redirectURI" },
-            { in: "body", key: "resetExisting" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<GlobalSyncAuthorizeResponses, GlobalSyncAuthorizeErrors, ThrowOnError>(
-      {
-        url: "/global/sync/setup/authorize",
-        ...options,
-        ...params,
-        headers: {
-          "Content-Type": "application/json",
-          ...options?.headers,
-          ...params.headers,
-        },
-      },
-    )
-  }
-
-  public syncComplete<ThrowOnError extends boolean = false>(
-    parameters?: {
-      attemptID?: string
-      code?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "body", key: "attemptID" },
-            { in: "body", key: "code" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).post<GlobalSyncCompleteResponses, GlobalSyncCompleteErrors, ThrowOnError>({
-      url: "/global/sync/setup/complete",
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "deviceName" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalSyncInitializeResponses,
+      GlobalSyncInitializeErrors,
+      ThrowOnError
+    >({
+      url: "/global/sync/initialize",
       ...options,
       ...params,
       headers: {
@@ -1493,11 +1464,10 @@ export class Global extends HeyApiClient {
     })
   }
 
-  public syncReuseLegacy<ThrowOnError extends boolean = false>(
+  public syncOAuthBegin<ThrowOnError extends boolean = false>(
     parameters?: {
-      deviceName?: string
-      recoveryString?: string
-      resetExisting?: boolean
+      redirectURI?: string
+      completion?: "loopback" | "manual"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1506,19 +1476,214 @@ export class Global extends HeyApiClient {
       [
         {
           args: [
-            { in: "body", key: "deviceName" },
-            { in: "body", key: "recoveryString" },
-            { in: "body", key: "resetExisting" },
+            { in: "body", key: "redirectURI" },
+            { in: "body", key: "completion" },
           ],
         },
       ],
     )
     return (options?.client ?? this.client).post<
-      GlobalSyncReuseLegacyResponses,
-      GlobalSyncReuseLegacyErrors,
+      GlobalSyncOAuthBeginResponses,
+      GlobalSyncOAuthBeginErrors,
       ThrowOnError
     >({
-      url: "/global/sync/setup/reuse-legacy",
+      url: "/global/sync/oauth/begin",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncOAuthComplete<ThrowOnError extends boolean = false>(
+    parameters?: {
+      attemptID?: string
+      response?:
+        | {
+            type: "loopback"
+            callbackURL: string
+          }
+        | {
+            type: "manual"
+            code: string
+          }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "attemptID" },
+            { in: "body", key: "response" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      GlobalSyncOAuthCompleteResponses,
+      GlobalSyncOAuthCompleteErrors,
+      ThrowOnError
+    >({
+      url: "/global/sync/oauth/complete",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncOAuthSwitchAccount<ThrowOnError extends boolean = false>(
+    parameters?: {
+      attemptID?: string
+      response?:
+        | {
+            type: "loopback"
+            callbackURL: string
+          }
+        | {
+            type: "manual"
+            code: string
+          }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "attemptID" },
+            { in: "body", key: "response" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      GlobalSyncOAuthSwitchAccountResponses,
+      GlobalSyncOAuthSwitchAccountErrors,
+      ThrowOnError
+    >({
+      url: "/global/sync/oauth/switch-account",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncLogout<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<GlobalSyncLogoutResponses, GlobalSyncLogoutErrors, ThrowOnError>({
+      url: "/global/sync/logout",
+      ...options,
+    })
+  }
+
+  public syncDiscover<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<GlobalSyncDiscoverResponses, GlobalSyncDiscoverErrors, ThrowOnError>({
+      url: "/global/sync/spaces",
+      ...options,
+    })
+  }
+
+  public syncCreate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      name?: string
+      encryption?: "none" | "aes-256-gcm"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "name" },
+            { in: "body", key: "encryption" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalSyncCreateResponses, GlobalSyncCreateErrors, ThrowOnError>({
+      url: "/global/sync/spaces",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncJoin<ThrowOnError extends boolean = false>(
+    parameters?: {
+      namespaceID?: string
+      recoveryString?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "namespaceID" },
+            { in: "body", key: "recoveryString" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalSyncJoinResponses, GlobalSyncJoinErrors, ThrowOnError>({
+      url: "/global/sync/spaces/join",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncActivate<ThrowOnError extends boolean = false>(
+    parameters?: {
+      namespaceID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "namespaceID" }] }])
+    return (options?.client ?? this.client).post<GlobalSyncActivateResponses, GlobalSyncActivateErrors, ThrowOnError>({
+      url: "/global/sync/spaces/activate",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncLeave<ThrowOnError extends boolean = false>(
+    parameters?: {
+      namespaceID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "namespaceID" }] }])
+    return (options?.client ?? this.client).post<GlobalSyncLeaveResponses, GlobalSyncLeaveErrors, ThrowOnError>({
+      url: "/global/sync/spaces/leave",
       ...options,
       ...params,
       headers: {
@@ -1545,6 +1710,46 @@ export class Global extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  public syncInterval<ThrowOnError extends boolean = false>(
+    parameters?: {
+      intervalSeconds?: 30 | 60 | 300
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "intervalSeconds" }] }])
+    return (options?.client ?? this.client).patch<GlobalSyncIntervalResponses, GlobalSyncIntervalErrors, ThrowOnError>({
+      url: "/global/sync/interval",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  public syncDelete<ThrowOnError extends boolean = false>(
+    parameters: {
+      namespaceID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "namespaceID" }] }])
+    return (options?.client ?? this.client).delete<GlobalSyncDeleteResponses, GlobalSyncDeleteErrors, ThrowOnError>({
+      url: "/global/sync/spaces/{namespaceID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  public syncRemove<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).delete<GlobalSyncRemoveResponses, GlobalSyncRemoveErrors, ThrowOnError>({
+      url: "/global/sync/device",
+      ...options,
     })
   }
 
@@ -1671,13 +1876,6 @@ export class Global extends HeyApiClient {
       GlobalSyncRecoveryExportErrors,
       ThrowOnError
     >({ url: "/global/sync/recovery-key", ...options })
-  }
-
-  public syncReset<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
-    return (options?.client ?? this.client).post<GlobalSyncResetResponses, GlobalSyncResetErrors, ThrowOnError>({
-      url: "/global/sync/reset",
-      ...options,
-    })
   }
 
   /**

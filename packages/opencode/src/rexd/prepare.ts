@@ -133,30 +133,9 @@ function installScript(input: {
   url: string
   roots: readonly string[]
 }) {
-  const binaryDirectory = input.binary.slice(0, input.binary.lastIndexOf("/"))
-  const managedDirectory = binaryDirectory.slice(0, binaryDirectory.lastIndexOf("/"))
-  const configDirectory = input.config.slice(0, input.config.lastIndexOf("/"))
-  const rootConfig = input.roots.map((root) => `[[security.allowed_roots]]\npath = ${tomlString(root)}`).join("\n\n")
-  const config = `[server]\nstdio = true\nhttp_listen = ""\nlog_level = "info"\n\n[limits]\ndefault_timeout_ms = 30000\nhard_timeout_ms = 300000\nmax_output_bytes = 1048576\nmax_file_read_bytes = 1048576\nmax_processes_per_session = 8\nmax_concurrent_sessions = 16\n\n[security]\nallow_shell = true\n\n${rootConfig}\n\n[audit]\nenabled = false\n`
-  return `set -eu
-binary=${shellQuote(input.binary)}
-config=${shellQuote(input.config)}
-marker="$binary.sha256"
-lock=${shellQuote(`${binaryDirectory}.lock`)}
-temporary=""
-owned=0
-cleanup() { [ -n "$temporary" ] && rm -rf "$temporary"; [ "$owned" -eq 1 ] && rmdir "$lock" 2>/dev/null || true; }
-trap cleanup EXIT HUP INT TERM
-mkdir -p ${shellQuote(managedDirectory)} ${shellQuote(configDirectory)}
-attempt=0
-while ! mkdir "$lock" 2>/dev/null; do
-  attempt=$((attempt + 1))
-  [ "$attempt" -lt 100 ] || { echo "OPENCODE_REXD_PHASE=install lock timeout" >&2; exit 71; }
-  sleep 0.1
-done
-owned=1
-mkdir -p ${shellQuote(binaryDirectory)}
-installed=0
+  return transactionScript(
+    input,
+    `installed=0
 if [ ! -x "$binary" ] || [ ! -f "$marker" ] || [ "$(cat "$marker")" != ${shellQuote(input.checksum)} ]; then
   command -v curl >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=download curl unavailable" >&2; exit 72; }
   command -v tar >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install tar unavailable" >&2; exit 73; }
@@ -166,20 +145,17 @@ if [ ! -x "$binary" ] || [ ! -f "$marker" ] || [ "$(cat "$marker")" != ${shellQu
   actual="$(sha256sum "$temporary/${input.artifact}" | cut -d' ' -f1)"
   [ "$actual" = ${shellQuote(input.checksum)} ] || { echo "OPENCODE_REXD_PHASE=checksum mismatch" >&2; exit 76; }
   tar -xzf "$temporary/${input.artifact}" -C "$temporary" || { echo "OPENCODE_REXD_PHASE=install extract failed" >&2; exit 77; }
-  install -m 0755 "$temporary/${input.artifact.slice(0, -".tar.gz".length)}" "$temporary/rexd.next"
-  mv "$temporary/rexd.next" "$binary"
-  printf '%s' ${shellQuote(input.checksum)} >"$temporary/marker.next"
-  chmod 0600 "$temporary/marker.next"
-  mv "$temporary/marker.next" "$marker"
+  install -m 0755 "$temporary/${input.artifact.slice(0, -".tar.gz".length)}" "$binary_next" || { echo "OPENCODE_REXD_PHASE=install binary staging failed" >&2; exit 77; }
+  printf '%s' ${shellQuote(input.checksum)} >"$marker_next" || { echo "OPENCODE_REXD_PHASE=install marker staging failed" >&2; exit 77; }
+  chmod 0600 "$marker_next" || { echo "OPENCODE_REXD_PHASE=install marker staging failed" >&2; exit 77; }
   installed=1
+else
+  cp -p "$binary" "$binary_next" || { echo "OPENCODE_REXD_PHASE=install binary staging failed" >&2; exit 77; }
+  cp -p "$marker" "$marker_next" || { echo "OPENCODE_REXD_PHASE=install marker staging failed" >&2; exit 77; }
 fi
-cat >"$config.next" <<'OPENCODE_REXD_CONFIG'
-${config}OPENCODE_REXD_CONFIG
-chmod 0600 "$config.next"
-mv "$config.next" "$config"
-"$binary" -h >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install binary invalid" >&2; exit 78; }
-[ "$installed" -eq 1 ] && printf 'installed\n' || printf 'ready\n'
-`
+`,
+    `[ "$installed" -eq 1 ] && printf 'installed\\n' || printf 'ready\\n'`,
+  )
 }
 
 function uploadScript(input: {
@@ -189,6 +165,28 @@ function uploadScript(input: {
   checksum: string
   roots: readonly string[]
 }) {
+  return transactionScript(
+    input,
+    `temporary="$(mktemp -d)"
+cat >"$temporary/${input.artifact}"
+command -v tar >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install tar unavailable" >&2; exit 73; }
+command -v sha256sum >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=checksum sha256sum unavailable" >&2; exit 74; }
+actual="$(sha256sum "$temporary/${input.artifact}" | cut -d' ' -f1)"
+[ "$actual" = ${shellQuote(input.checksum)} ] || { echo "OPENCODE_REXD_PHASE=checksum mismatch" >&2; exit 76; }
+tar -xzf "$temporary/${input.artifact}" -C "$temporary" || { echo "OPENCODE_REXD_PHASE=install extract failed" >&2; exit 77; }
+install -m 0755 "$temporary/${input.artifact.slice(0, -".tar.gz".length)}" "$binary_next" || { echo "OPENCODE_REXD_PHASE=install binary staging failed" >&2; exit 77; }
+printf '%s' ${shellQuote(input.checksum)} >"$marker_next" || { echo "OPENCODE_REXD_PHASE=install marker staging failed" >&2; exit 77; }
+chmod 0600 "$marker_next" || { echo "OPENCODE_REXD_PHASE=install marker staging failed" >&2; exit 77; }
+`,
+    `printf 'installed\\n'`,
+  )
+}
+
+function transactionScript(
+  input: { binary: string; config: string; checksum: string; roots: readonly string[] },
+  stageBinary: string,
+  status: string,
+) {
   const binaryDirectory = input.binary.slice(0, input.binary.lastIndexOf("/"))
   const managedDirectory = binaryDirectory.slice(0, binaryDirectory.lastIndexOf("/"))
   const configDirectory = input.config.slice(0, input.config.lastIndexOf("/"))
@@ -201,8 +199,40 @@ marker="$binary.sha256"
 lock=${shellQuote(`${binaryDirectory}.lock`)}
 temporary=""
 owned=0
-cleanup() { [ -n "$temporary" ] && rm -rf "$temporary"; [ "$owned" -eq 1 ] && rmdir "$lock" 2>/dev/null || true; }
-trap cleanup EXIT HUP INT TERM
+transaction=0
+committed=0
+binary_had=0
+marker_had=0
+config_had=0
+binary_next="$binary.next.$$"
+marker_next="$marker.next.$$"
+config_next="$config.next.$$"
+binary_previous="$binary.previous.$$"
+marker_previous="$marker.previous.$$"
+config_previous="$config.previous.$$"
+rollback() {
+  [ "$transaction" -eq 1 ] || return 0
+  rollback_failed=0
+  rm -f "$binary" "$marker" "$config" || rollback_failed=1
+  [ "$binary_had" -eq 0 ] || mv "$binary_previous" "$binary" || rollback_failed=1
+  [ "$marker_had" -eq 0 ] || mv "$marker_previous" "$marker" || rollback_failed=1
+  [ "$config_had" -eq 0 ] || mv "$config_previous" "$config" || rollback_failed=1
+  transaction=0
+  [ "$rollback_failed" -eq 0 ] || echo "OPENCODE_REXD_PHASE=install rollback failed" >&2
+}
+cleanup() {
+  code=$?
+  trap - EXIT HUP INT TERM
+  [ "$committed" -eq 1 ] || rollback
+  rm -f "$binary_next" "$marker_next" "$config_next" "$binary_previous" "$marker_previous" "$config_previous"
+  [ -z "$temporary" ] || rm -rf "$temporary"
+  [ "$owned" -eq 0 ] || rmdir "$lock" 2>/dev/null || true
+  exit "$code"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 mkdir -p ${shellQuote(managedDirectory)} ${shellQuote(configDirectory)}
 attempt=0
 while ! mkdir "$lock" 2>/dev/null; do
@@ -211,25 +241,22 @@ while ! mkdir "$lock" 2>/dev/null; do
   sleep 0.1
 done
 owned=1
-temporary="$(mktemp -d)"
-cat >"$temporary/${input.artifact}"
-command -v tar >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install tar unavailable" >&2; exit 73; }
-command -v sha256sum >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=checksum sha256sum unavailable" >&2; exit 74; }
-actual="$(sha256sum "$temporary/${input.artifact}" | cut -d' ' -f1)"
-[ "$actual" = ${shellQuote(input.checksum)} ] || { echo "OPENCODE_REXD_PHASE=checksum mismatch" >&2; exit 76; }
-tar -xzf "$temporary/${input.artifact}" -C "$temporary" || { echo "OPENCODE_REXD_PHASE=install extract failed" >&2; exit 77; }
 mkdir -p ${shellQuote(binaryDirectory)}
-install -m 0755 "$temporary/${input.artifact.slice(0, -".tar.gz".length)}" "$temporary/rexd.next"
-mv "$temporary/rexd.next" "$binary"
-printf '%s' ${shellQuote(input.checksum)} >"$temporary/marker.next"
-chmod 0600 "$temporary/marker.next"
-mv "$temporary/marker.next" "$marker"
-cat >"$config.next" <<'OPENCODE_REXD_CONFIG'
+${stageBinary}cat >"$config_next" <<'OPENCODE_REXD_CONFIG' || { echo "OPENCODE_REXD_PHASE=install config staging failed" >&2; exit 77; }
 ${config}OPENCODE_REXD_CONFIG
-chmod 0600 "$config.next"
-mv "$config.next" "$config"
-"$binary" -h >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install binary invalid" >&2; exit 78; }
-printf 'installed\n'
+chmod 0600 "$config_next" || { echo "OPENCODE_REXD_PHASE=install config staging failed" >&2; exit 77; }
+"$binary_next" -h >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install binary invalid" >&2; exit 78; }
+transaction=1
+if [ -e "$binary" ]; then mv "$binary" "$binary_previous" || { echo "OPENCODE_REXD_PHASE=install commit failed" >&2; exit 79; }; binary_had=1; fi
+if [ -e "$marker" ]; then mv "$marker" "$marker_previous" || { echo "OPENCODE_REXD_PHASE=install commit failed" >&2; exit 79; }; marker_had=1; fi
+if [ -e "$config" ]; then mv "$config" "$config_previous" || { echo "OPENCODE_REXD_PHASE=install commit failed" >&2; exit 79; }; config_had=1; fi
+mv "$binary_next" "$binary" || { echo "OPENCODE_REXD_PHASE=install commit failed" >&2; exit 79; }
+mv "$marker_next" "$marker" || { echo "OPENCODE_REXD_PHASE=install commit failed" >&2; exit 79; }
+mv "$config_next" "$config" || { echo "OPENCODE_REXD_PHASE=install commit failed" >&2; exit 79; }
+committed=1
+transaction=0
+rm -f "$binary_previous" "$marker_previous" "$config_previous"
+${status}
 `
 }
 

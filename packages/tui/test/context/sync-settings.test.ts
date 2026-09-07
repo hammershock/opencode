@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { createLoopbackCallback, syncOperationFailure, unassignedFingerprint } from "../../src/context/sync-settings"
+import {
+  createLoopbackCallback,
+  syncOperationFailure,
+  unassignedFingerprint,
+  withSyncRefreshTimeout,
+} from "../../src/context/sync-settings"
 
 describe("sync settings deployment errors", () => {
   test("maps a missing product app to an actionable message without credential terminology", () => {
@@ -52,5 +57,20 @@ describe("unassigned Session prompt identity", () => {
       unassignedFingerprint("space-a", ["session-a", "session-b"]),
     )
     expect(unassignedFingerprint("space-a", ["session-a"])).not.toBe(unassignedFingerprint("space-b", ["session-a"]))
+  })
+})
+
+describe("sync settings remote refresh", () => {
+  test("bounds a hung provider request and aborts its signal", async () => {
+    let signal: AbortSignal | undefined
+    const started = performance.now()
+    await expect(
+      withSyncRefreshTimeout((current) => {
+        signal = current
+        return new Promise(() => undefined)
+      }, 20),
+    ).rejects.toThrow("Sync refresh timed out")
+    expect(signal?.aborted).toBe(true)
+    expect(performance.now() - started).toBeLessThan(250)
   })
 })

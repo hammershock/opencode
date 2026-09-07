@@ -48,6 +48,7 @@ export type SyncSettingsViewModel = {
   enabled: boolean
   interval: SyncInterval
   state: SyncState
+  remote: "idle" | "checking" | "ready" | "unavailable"
   detail?: string
   activeSpace?: SyncSpace
   spaces: readonly SyncSpace[]
@@ -106,6 +107,13 @@ export function syncStatus(state: SyncState) {
   return "● off"
 }
 
+export function syncRemoteStatus(state: SyncSettingsViewModel["remote"]) {
+  if (state === "checking") return "◐ checking"
+  if (state === "unavailable") return "! unavailable"
+  if (state === "ready") return "● ready"
+  return "○ not checked"
+}
+
 export function maskRecoveryKey(value: string) {
   return value.length <= 4 ? "••••" : `•••• ${value.slice(-4)}`
 }
@@ -122,6 +130,15 @@ export function buildSyncOverviewRows(model: SyncSettingsViewModel): Row[] {
   }
   return [
     { title: model.account.maskedAccount, description: "Baidu Netdisk", status: "● connected" },
+    {
+      title:
+        model.remote === "unavailable"
+          ? "Retry cloud status"
+          : model.remote === "idle"
+            ? "Check cloud status"
+            : "Cloud status",
+      status: syncRemoteStatus(model.remote),
+    },
     {
       title: model.activeSpace?.name ?? "No active space",
       description: model.activeSpace ? spaceSummary(model.activeSpace) : "Create or enter a space",
@@ -168,20 +185,24 @@ export function showSyncSettings(
   actions: SyncSettingsActions,
 ) {
   const open = () => showSyncSettings(dialog, model, actions)
-  const rows = buildSyncOverviewRows(model())
-  const values = model().account.state === "disconnected" ? disconnectedValues(model()) : connectedValues(model())
-  dialog.replace(() => (
-    <DialogSelect
-      title="Sync settings"
-      options={rows.map((row, index) => ({
-        ...row,
-        footer: row.status,
-        value: values[index]!,
-      }))}
-      footer={model().detail ? <text>{model().detail}</text> : undefined}
-      onSelect={(option) => void selectOverview(option.value, dialog, model, actions, open).catch(actions.onError)}
-    />
-  ))
+  const Content = () => {
+    const rows = () => buildSyncOverviewRows(model())
+    const values = () =>
+      model().account.state === "disconnected" ? disconnectedValues(model()) : connectedValues(model())
+    return (
+      <DialogSelect
+        title="Sync settings"
+        options={rows().map((row, index) => ({
+          ...row,
+          footer: row.status,
+          value: values()[index]!,
+        }))}
+        footer={model().detail ? <text>{model().detail}</text> : undefined}
+        onSelect={(option) => void selectOverview(option.value, dialog, model, actions, open).catch(actions.onError)}
+      />
+    )
+  }
+  dialog.replace(() => <Content />)
 }
 
 async function selectOverview(
@@ -201,6 +222,7 @@ async function selectOverview(
     if (code?.trim()) await actions.submitOAuthCode(code.trim())
   }
   if (value === "account") return showAccount(dialog, actions, open)
+  if (value === "refresh") await actions.discoverSpaces()
   if (value === "active") {
     await actions.discoverSpaces()
     return showSpaces(dialog, model, actions)
@@ -449,32 +471,34 @@ export function showSyncDevices(
   actions: SyncSettingsActions,
 ) {
   const open = () => showSyncDevices(dialog, model, actions)
-  const devices = model().devices
-  const rows = buildDeviceRows(devices)
-  dialog.replace(() => (
-    <DialogSelect<{ type: "device"; device: SyncDevice } | { type: "bindings" }>
-      title="Devices"
-      options={[
-        ...devices.map((device, index) => ({
-          ...rows[index]!,
-          footer: rows[index]!.status,
-          value: { type: "device" as const, device },
-          category: "Devices",
-        })),
-        {
-          title: "Target bindings",
-          footer: String(model().bindings.length),
-          value: { type: "bindings" as const },
-          category: "Location",
-        },
-      ]}
-      footer={<text>Current device cannot revoke itself.</text>}
-      onSelect={(option) => {
-        if (option.value.type === "bindings") return showBindings(dialog, model, actions, open)
-        showDeviceActions(dialog, option.value.device, actions, open)
-      }}
-    />
-  ))
+  const Content = () => {
+    const rows = () => buildDeviceRows(model().devices)
+    return (
+      <DialogSelect<{ type: "device"; device: SyncDevice } | { type: "bindings" }>
+        title="Devices"
+        options={[
+          ...model().devices.map((device, index) => ({
+            ...rows()[index]!,
+            footer: rows()[index]!.status,
+            value: { type: "device" as const, device },
+            category: "Devices",
+          })),
+          {
+            title: "Target bindings",
+            footer: String(model().bindings.length),
+            value: { type: "bindings" as const },
+            category: "Location",
+          },
+        ]}
+        footer={<text>{syncRemoteStatus(model().remote)}</text>}
+        onSelect={(option) => {
+          if (option.value.type === "bindings") return showBindings(dialog, model, actions, open)
+          showDeviceActions(dialog, option.value.device, actions, open)
+        }}
+      />
+    )
+  }
+  dialog.replace(() => <Content />)
 }
 
 function showDeviceActions(dialog: DialogContext, device: SyncDevice, actions: SyncSettingsActions, open: () => void) {
@@ -619,6 +643,7 @@ function disconnectedValues(model: SyncSettingsViewModel) {
 function connectedValues(model: SyncSettingsViewModel) {
   return [
     "account",
+    "refresh",
     "active",
     "sync",
     "enabled",

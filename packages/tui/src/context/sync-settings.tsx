@@ -1,8 +1,9 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
-import type { GlobalSyncDiscoverResponse } from "@opencode-ai/sdk/v2"
+import type { GlobalSyncDiscoverResponse, GlobalSyncStateResponse } from "@opencode-ai/sdk/v2"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
+import { SyncSpace as SyncSpaceProtocol } from "@opencode-ai/core/sync/space"
 import { hostname } from "node:os"
 import openBrowser from "open"
 import { createSimpleContext } from "./helper"
@@ -30,11 +31,35 @@ const initial: SyncSettingsViewModel = {
   enabled: false,
   interval: 30,
   state: "off",
+  remote: "idle",
   spaces: [],
   devices: [],
   bindings: [],
   pending: 0,
   unassigned: [],
+}
+
+export const SYNC_REMOTE_REFRESH_TIMEOUT = 8_000
+
+export async function withSyncRefreshTimeout<A>(
+  run: (signal: AbortSignal) => Promise<A>,
+  timeout = SYNC_REMOTE_REFRESH_TIMEOUT,
+) {
+  const controller = new AbortController()
+  let timer: Timer | undefined
+  try {
+    return await Promise.race([
+      run(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(new Error("Sync refresh timed out"))
+        }, timeout)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export function unassignedFingerprint(spaceID: string, sessionIDs: readonly string[]) {
@@ -134,154 +159,219 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       | undefined
     let loopback: ReturnType<typeof createLoopbackCallback> | undefined
     let bindingRevision = ""
+    let remoteRefresh: Promise<void> | undefined
 
     onCleanup(() => loopback?.close())
 
-    const refresh = async (discover = false, notify = false) => {
-      const stateResult = await sdk.client.global.syncState({ throwOnError: true }).then(
-        (result) => ({ state: result.data, error: undefined }),
-        (error) => ({ state: undefined, error }),
-      )
-      const state = stateResult.state
-      const status = await sdk.client.global.syncStatus({ throwOnError: true }).then(
-        (result) => result.data,
-        () => undefined,
-      )
+    type LocalState = GlobalSyncStateResponse | null | undefined
+
+    const applyLocal = (state: LocalState) => {
       if (!state) {
-        const detail = stateResult.error ? syncOperationFailure(stateResult.error) : undefined
         setModel((current) => ({
           ...initial,
-          account: current.account,
-          state: detail || status ? "attention" : "off",
-          detail,
+          account: current.account.state === "disconnected" ? current.account : initial.account,
+          remote: "idle",
         }))
-        if (notify && (detail || !status))
-          toast.show({ message: detail ?? "Sync status is unavailable", variant: "warning" })
         return
       }
-      const authenticated = Boolean(status?.authenticated)
-      let attention = status === undefined
-      if (discover && authenticated) {
-        const result = await sdk.client.global.syncDiscover({ throwOnError: true }).then(
-          (value) => value.data,
-          () => undefined,
-        )
-        if (result) discovered = result.spaces
-        else attention = true
-      }
-      const activeSessions = state.activeSpaceID
-        ? await sdk.client.global.syncSessions({ throwOnError: true }).then(
-            (result) => result.data,
-            () => {
-              attention = true
-              return []
-            },
-          )
-        : []
-      const deviceResult = state.activeSpaceID
-        ? await sdk.client.global.syncDevices({ throwOnError: true }).then(
-            (result) => result.data,
-            () => {
-              attention = true
-              return undefined
-            },
-          )
-        : undefined
-      const bindingResult = authenticated
-        ? await sdk.client.v2.targetBinding.list({ throwOnError: true }).then(
-            (result) => result.data,
-            () => {
-              attention = true
-              return undefined
-            },
-          )
-        : undefined
-      if (bindingResult) bindingRevision = bindingResult.revision
-      const unassigned = authenticated
-        ? await sdk.client.global.syncUnassigned({ throwOnError: true }).then(
-            (result) => result.data,
-            () => {
-              attention = true
-              return []
-            },
-          )
-        : []
-      const local = new Map(state.spaces.map((item) => [item.descriptor.namespaceID, item]))
-      const catalog = new Map(discovered.map((item) => [item.descriptor.namespaceID, item]))
-      state.spaces.forEach((item) => {
-        if (!catalog.has(item.descriptor.namespaceID))
-          catalog.set(item.descriptor.namespaceID, { status: "compatible", descriptor: item.descriptor })
-      })
-      const spaces = Array.from(catalog.values()).map((item): SyncSpace => {
-        const binding = local.get(item.descriptor.namespaceID)
+      const previous = new Map(model().spaces.map((space) => [space.id, space]))
+      const spaces = state.spaces.map((item): SyncSpace => {
+        const cached = previous.get(item.descriptor.namespaceID)
         const active = state.activeSpaceID === item.descriptor.namespaceID
         return {
           id: item.descriptor.namespaceID,
           name: item.descriptor.name,
-          supported: item.status === "compatible",
+          supported: SyncSpaceProtocol.compatible(item.descriptor.protocol),
           protocol: `${item.descriptor.protocol.major}.${item.descriptor.protocol.minor}`,
           encryption: item.descriptor.encryption === "none" ? "off" : "encrypted",
           updatedAt: new Date(item.descriptor.updatedAt).toLocaleString(),
-          devices: active ? deviceResult?.devices.length : undefined,
-          sessions: active ? activeSessions.length : undefined,
-          membership: active ? "active" : binding ? "joined" : "available",
-          state: active
-            ? status?.locked
-              ? "locked"
-              : status?.error
-                ? "attention"
-                : "idle"
-            : state.enabled
-              ? "idle"
-              : "off",
-          detail: item.status === "unsupported" ? "Unsupported protocol" : undefined,
+          devices: cached?.devices ?? item.descriptor.summary.devices,
+          sessions: cached?.sessions ?? item.descriptor.summary.sessions,
+          membership: active ? "active" : "joined",
+          state: state.enabled ? "idle" : "off",
         }
       })
-      const bindingSessions = activeSessions.reduce((result, session) => {
-        if (!session.targetLabel) return result
-        const current = result.get(session.targetLabel) ?? []
-        result.set(session.targetLabel, [...current, session.sessionID])
-        return result
-      }, new Map<string, string[]>())
-      Object.keys(bindingResult?.bindings ?? {}).forEach((label) => {
-        if (!bindingSessions.has(label)) bindingSessions.set(label, [])
-      })
-      const stateName = status?.locked
-        ? "locked"
-        : status?.error || attention
-          ? "attention"
-          : state.enabled
-            ? "idle"
-            : "off"
-      setModel({
-        account:
-          authenticated && status?.account
-            ? { state: "connected", maskedAccount: status.account.maskedDisplay }
-            : model().account.state === "disconnected"
-              ? model().account
-              : initial.account,
+      setModel((current) => ({
+        ...current,
+        account: state.account
+          ? { state: "connected", maskedAccount: state.account.maskedDisplay }
+          : current.account.state === "disconnected"
+            ? current.account
+            : initial.account,
         enabled: state.enabled,
         interval: state.intervalSeconds,
-        state: stateName,
-        detail: status?.error ?? (attention ? "Some sync information is unavailable" : undefined),
-        activeSpace: spaces.find((item) => item.id === state.activeSpaceID),
+        state: state.enabled ? "idle" : "off",
+        activeSpace: spaces.find((space) => space.id === state.activeSpaceID),
         spaces,
-        devices:
-          deviceResult?.devices.map((device) => ({
-            id: device.id,
-            name: device.name,
-            current: device.id === state.deviceID,
-            state: device.revoked ? "revoked" : "ready",
-          })) ?? [],
-        bindings: Array.from(bindingSessions).map(([label, sessionIDs]) => ({
-          label,
-          targetID: bindingResult?.bindings[label],
-          sessionIDs,
-        })),
-        pending: status?.outbox ?? 0,
-        unassigned,
+      }))
+    }
+
+    const refreshLocal = async (notify = false) => {
+      const result = await sdk.client.global.syncState({ throwOnError: true }).then(
+        (value) => ({ state: value.data as LocalState, error: undefined }),
+        (error) => ({ state: undefined, error }),
+      )
+      if (result.error) {
+        const detail = syncOperationFailure(result.error)
+        setModel((current) => ({ ...current, state: "attention", remote: "unavailable", detail }))
+        if (notify) toast.show({ message: detail, variant: "warning" })
+        return undefined
+      }
+      applyLocal(result.state)
+      return result.state
+    }
+
+    const refresh = async (discover = false, notify = false) => {
+      const state = await refreshLocal(notify)
+      if (!state?.account) return
+      if (remoteRefresh) return remoteRefresh
+      setModel((current) => ({ ...current, remote: "checking", detail: undefined }))
+
+      remoteRefresh = withSyncRefreshTimeout(async (signal) => {
+        const status = await sdk.client.global.syncStatus({ throwOnError: true, signal }).then(
+          (result) => result.data,
+          () => undefined,
+        )
+        const authenticated = Boolean(status?.authenticated)
+        let attention = status === undefined
+        const [discovery, activeSessions, deviceResult, bindingResult, unassigned] = await Promise.all([
+          discover && authenticated
+            ? sdk.client.global.syncDiscover({ throwOnError: true, signal }).then(
+                (value) => value.data,
+                () => {
+                  attention = true
+                  return undefined
+                },
+              )
+            : undefined,
+          state.activeSpaceID
+            ? sdk.client.global.syncSessions({ throwOnError: true, signal }).then(
+                (result) => result.data,
+                () => {
+                  attention = true
+                  return []
+                },
+              )
+            : [],
+          state.activeSpaceID
+            ? sdk.client.global.syncDevices({ throwOnError: true, signal }).then(
+                (result) => result.data,
+                () => {
+                  attention = true
+                  return undefined
+                },
+              )
+            : undefined,
+          authenticated
+            ? sdk.client.v2.targetBinding.list({ throwOnError: true, signal }).then(
+                (result) => result.data,
+                () => {
+                  attention = true
+                  return undefined
+                },
+              )
+            : undefined,
+          authenticated
+            ? sdk.client.global.syncUnassigned({ throwOnError: true, signal }).then(
+                (result) => result.data,
+                () => {
+                  attention = true
+                  return []
+                },
+              )
+            : [],
+        ])
+        if (discovery) discovered = discovery.spaces
+        if (bindingResult) bindingRevision = bindingResult.revision
+        const local = new Map(state.spaces.map((item) => [item.descriptor.namespaceID, item]))
+        const catalog = new Map(discovered.map((item) => [item.descriptor.namespaceID, item]))
+        state.spaces.forEach((item) => {
+          if (!catalog.has(item.descriptor.namespaceID))
+            catalog.set(item.descriptor.namespaceID, { status: "compatible", descriptor: item.descriptor })
+        })
+        const spaces = Array.from(catalog.values()).map((item): SyncSpace => {
+          const binding = local.get(item.descriptor.namespaceID)
+          const active = state.activeSpaceID === item.descriptor.namespaceID
+          return {
+            id: item.descriptor.namespaceID,
+            name: item.descriptor.name,
+            supported: item.status === "compatible",
+            protocol: `${item.descriptor.protocol.major}.${item.descriptor.protocol.minor}`,
+            encryption: item.descriptor.encryption === "none" ? "off" : "encrypted",
+            updatedAt: new Date(item.descriptor.updatedAt).toLocaleString(),
+            devices: active ? deviceResult?.devices.length : undefined,
+            sessions: active ? activeSessions.length : undefined,
+            membership: active ? "active" : binding ? "joined" : "available",
+            state: active
+              ? status?.locked
+                ? "locked"
+                : status?.error
+                  ? "attention"
+                  : "idle"
+              : state.enabled
+                ? "idle"
+                : "off",
+            detail: item.status === "unsupported" ? "Unsupported protocol" : undefined,
+          }
+        })
+        const bindingSessions = activeSessions.reduce((result, session) => {
+          if (!session.targetLabel) return result
+          const current = result.get(session.targetLabel) ?? []
+          result.set(session.targetLabel, [...current, session.sessionID])
+          return result
+        }, new Map<string, string[]>())
+        Object.keys(bindingResult?.bindings ?? {}).forEach((label) => {
+          if (!bindingSessions.has(label)) bindingSessions.set(label, [])
+        })
+        const stateName = status?.locked
+          ? "locked"
+          : status?.error || attention
+            ? "attention"
+            : state.enabled
+              ? "idle"
+              : "off"
+        setModel({
+          account:
+            status && !authenticated
+              ? initial.account
+              : state.account
+                ? { state: "connected", maskedAccount: state.account.maskedDisplay }
+                : model().account.state === "disconnected"
+                  ? model().account
+                  : initial.account,
+          enabled: state.enabled,
+          interval: state.intervalSeconds,
+          state: stateName,
+          remote: attention ? "unavailable" : "ready",
+          detail: status?.error ?? (attention ? "Some sync information is unavailable" : undefined),
+          activeSpace: spaces.find((item) => item.id === state.activeSpaceID),
+          spaces,
+          devices:
+            deviceResult?.devices.map((device) => ({
+              id: device.id,
+              name: device.name,
+              current: device.id === state.deviceID,
+              state: device.revoked ? "revoked" : "ready",
+            })) ?? [],
+          bindings: Array.from(bindingSessions).map(([label, sessionIDs]) => ({
+            label,
+            targetID: bindingResult?.bindings[label],
+            sessionIDs,
+          })),
+          pending: status?.outbox ?? 0,
+          unassigned,
+        })
+        if (attention && notify) toast.show({ message: "Some sync information is unavailable", variant: "warning" })
       })
-      if (attention && notify) toast.show({ message: "Some sync information is unavailable", variant: "warning" })
+        .catch(() => {
+          const detail = "Sync status is unavailable"
+          setModel((current) => ({ ...current, state: "attention", remote: "unavailable", detail }))
+          if (notify) toast.show({ message: detail, variant: "warning" })
+        })
+        .finally(() => {
+          remoteRefresh = undefined
+        })
+      return remoteRefresh
     }
 
     const completeOAuth = async (
@@ -381,6 +471,10 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       await effect()
       await refresh(discover, true)
     }
+    const mutateLocal = async (effect: () => Promise<unknown>) => {
+      await effect()
+      await refreshLocal(true)
+    }
 
     const actions: SyncSettingsActions = {
       connect: beginOAuth,
@@ -396,9 +490,9 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         setModel((current) => ({ ...current, state: "syncing" }))
         await mutate(() => sdk.client.global.syncNow({ throwOnError: true }))
       },
-      setEnabled: (enabled) => mutate(() => sdk.client.global.syncEnabled({ enabled }, { throwOnError: true })),
+      setEnabled: (enabled) => mutateLocal(() => sdk.client.global.syncEnabled({ enabled }, { throwOnError: true })),
       setInterval: (intervalSeconds) =>
-        mutate(() => sdk.client.global.syncInterval({ intervalSeconds }, { throwOnError: true })),
+        mutateLocal(() => sdk.client.global.syncInterval({ intervalSeconds }, { throwOnError: true })),
       discoverSpaces: () => refresh(true),
       createSpace: async (input) => {
         const result = await sdk.client.global.syncCreate(
@@ -507,21 +601,16 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       showSyncSettings(dialog, model, actions)
     }
 
-    onMount(() => void refresh())
+    onMount(() => void refreshLocal())
 
     return {
       model,
       status: () => syncStatus(model().state),
       async open(view: OpenView = "overview") {
-        try {
-          await refresh(true, true)
-          if (view === "overview") await assignPrompt(false)
-          render(view)
-          return "completed" as const
-        } catch (error) {
-          actions.onError(error)
-          return "failed" as const
-        }
+        render(view)
+        if (view === "devices") void refresh(true, true)
+        else void refreshLocal(true)
+        return "completed" as const
       },
       refresh,
     }

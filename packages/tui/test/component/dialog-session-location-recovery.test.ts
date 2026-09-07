@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import {
+  allowsRecoveryRebind,
   portableBindingRequest,
   portableTargetIsUnbound,
+  recoveryScopeOptions,
   resolutionDescription,
 } from "../../src/component/dialog-session-location-recovery"
 
@@ -53,5 +55,49 @@ describe("Session Location recovery", () => {
         message: "missing",
       }),
     ).toBe("directory · missing")
+  })
+
+  test("lists every affected Session title and full ID", () => {
+    expect(
+      recoveryScopeOptions([
+        { id: "ses_first", title: "First" },
+        { id: "ses_second", title: "Second" },
+      ]),
+    ).toEqual([
+      {
+        title: "First",
+        description: "ses_first",
+        value: { type: "session", id: "ses_first" },
+        category: "Affected Sessions",
+      },
+      {
+        title: "Second",
+        description: "ses_second",
+        value: { type: "session", id: "ses_second" },
+        category: "Affected Sessions",
+      },
+      { title: "Continue", value: { type: "continue" }, category: "Action" },
+    ])
+  })
+
+  test("gates force rebind for every unresolved reason", () => {
+    const unavailable = {
+      status: "target_unavailable" as const,
+      location: { target: { type: "local" as const }, directory: "/work" },
+      target: {
+        id: "target",
+        status: "unverified" as const,
+        name: "gpu",
+        transport: "ssh" as const,
+        connection: { type: "ssh-config" as const, host: "gpu" },
+        workspaceRoots: ["/"],
+      },
+      stage: "directory" as const,
+      message: "missing",
+    }
+    expect(allowsRecoveryRebind(unavailable, false)).toBe(false)
+    expect(allowsRecoveryRebind(unavailable, true)).toBe(true)
+    expect(allowsRecoveryRebind({ status: "resolution_failed", message: "failed" }, true)).toBe(true)
+    expect(allowsRecoveryRebind({ status: "resolved", location: unavailable.location }, true)).toBe(false)
   })
 })

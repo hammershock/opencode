@@ -158,8 +158,10 @@ Core 只依赖该 contract。百度 adapter 负责 OAuth、分页、precreate、
 - owned Session mutation 与对应 space-scoped outbox 原子提交，再异步上传；上传成功并更新本设备 head 后才清除 outbox；
 - enabled 时按用户级配置对 active space 调度；v1 只提供 30 秒、1 分钟、5 分钟三个 interval preset，默认 30 秒；启动、网络恢复和 `/sync now` 也触发，相同方向请求合并；
 - upload 与 pull 使用按 space、device、方向隔离的跨进程 lease 和 TTL；
+- 每个 device head 携带该设备已知的最小永久 Session deletion set。任何上传都必须先索引远端 head、吸收并投影其中的删除事实，再处理本机 outbox；因此离线旧设备不能先发布陈旧 metadata 再得知删除；
 - pull 的对象验证、事件回放、冲突分支和 projection 全部提交后，才原子推进该 space 的 cursor；
 - 首次加入 active space 先获取 Session metadata projection，使 `/sessions` 可以搜索，再按需或限流后台 hydration；
+- metadata-only 索引先应用 head 中的 deletion set，再合并并过滤 Session metadata；不允许为了维持 metadata-first 浏览而暂时展示已被其他设备永久删除的 Session；
 - 非 active space 只使用本机已有摘要和已物化数据，不后台访问其 cloud-only metadata；
 - 未归属 Session 永远不进入任何后台 outbox。
 
@@ -187,6 +189,8 @@ Session 行只用稳定、简短的文字和统一状态符号表达 `metadata-o
 同步中的 `/delete` 对 Session 所属空间始终是全设备删除：本地删除与 durable tombstone/outbox 一起提交；其他设备拉取后删除 projection 和已物化内容。同步 disabled、space 非 active 或离线时，删除仍留在其原空间 outbox，只有该空间再次 active 并可同步时传播。它绝不能转投当前其他 active space。
 
 tombstone 对同一 space ID 与 Session ID 组合永久、单调地占优。删除后的旧 segment、离线迟交 event、旧 outbox、旧 head、hydration 和重装缓存均不得复活 Session。Session ID 不在空间内复用；恢复内容只能 fork 为新 ID。
+
+本机吸收远端 deletion set 时，先在同步数据库提交永久 marker 并清除尚未封装的同 Session outbox，再以幂等方式删除 Session projection。跨数据库投影若中途崩溃，下一次 head 索引必须重复投影删除；不能因为 marker 已存在而跳过恢复。
 
 所有未撤销设备 ack 后可以回收 payload 和冗余 tombstone object，但必须在该空间的 deletion set 永久保留最小 marker。撤销设备只改变成员与 ack 语义。加密 space 若要排除已持有 key 的设备，必须全局删除旧 space 并创建使用新 key 的空间。
 

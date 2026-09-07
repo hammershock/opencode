@@ -43,6 +43,9 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
   let sealed: SyncEvent.Segment | undefined
   const cursors = new Map<string, number>()
   const applied: SyncEvent.Envelope[] = []
+  const deletions = (operations ?? [])
+    .filter((operation): operation is typeof operation & { kind: "tombstone" } => operation.kind === "tombstone")
+    .map((operation) => operation.tombstone)
   const service = {
     enqueue: () => Effect.void,
     delete: () => Effect.void,
@@ -74,6 +77,14 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
         cursors.set(segment.deviceID, segment.generation)
       }),
     pendingApply: () => Effect.succeed([]),
+    deletions: () => Effect.succeed(deletions),
+    absorbDeletions: (items: readonly SyncEvent.Tombstone[], projector: SyncEvent.DurableProjector) =>
+      Effect.gen(function* () {
+        for (const item of items) {
+          if (!deletions.some((known) => known.sessionID === item.sessionID)) deletions.push(item)
+          yield* projector.delete(item)
+        }
+      }),
     acquire: () => Effect.succeed(true),
     renew: () => Effect.succeed(true),
     release: () => Effect.void,
@@ -308,5 +319,81 @@ describe("SyncRuntime", () => {
     })
     await Effect.runPromise(runtime.upload())
     expect(collected[0]).toMatchObject({ liveObjectIDs: new Set(), allActiveDevicesAcknowledged: true })
+  })
+
+  test("prevents a stale device from resurrecting deleted metadata for a third device", async () => {
+    const remote = provider()
+    const codec = SyncCodec.plaintext()
+    const sessionID = "deleted-session"
+    const tombstone = SyncEvent.Tombstone.make({ id: "delete-on-a", sessionID, deletedAt: 2 })
+    const deviceA = store(SyncEvent.DeviceID.make("a"), undefined, [{ kind: "tombstone", tombstone }])
+    const runtimeA = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("a"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceA.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(runtimeA.upload())
+
+    const stale = SyncEvent.Envelope.make({
+      id: "stale-on-b",
+      aggregateID: sessionID,
+      seq: 0,
+      type: "session.created",
+      data: { title: "must not return" },
+    })
+    const deviceB = store(SyncEvent.DeviceID.make("b"), stale)
+    let visibleOnB = true
+    const runtimeB = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("b"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceB.service,
+      projector: {
+        project: () => Effect.void,
+        delete: () => Effect.sync(() => void (visibleOnB = false)),
+      },
+      metadata: () =>
+        Effect.succeed(
+          visibleOnB
+            ? [
+                {
+                  sessionID,
+                  title: "must not return",
+                  ownerDeviceID: "b",
+                  directory: "/stale",
+                  revision: 1,
+                  updatedAt: 1,
+                },
+              ]
+            : [],
+        ),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(runtimeB.upload())
+    expect(visibleOnB).toBeFalse()
+
+    const deviceC = store(SyncEvent.DeviceID.make("c"))
+    const visibleOnC: SyncRuntime.Metadata[] = []
+    let deletedOnC = false
+    const runtimeC = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("c"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceC.service,
+      projector: {
+        project: () => Effect.void,
+        delete: () => Effect.sync(() => void (deletedOnC = true)),
+      },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: (items) => Effect.sync(() => void visibleOnC.push(...items)) },
+    })
+    await Effect.runPromise(runtimeC.pull())
+    expect(deletedOnC).toBeTrue()
+    expect(visibleOnC.some((item) => item.sessionID === sessionID)).toBeFalse()
+    expect(deviceC.applied).toEqual([])
   })
 })

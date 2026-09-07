@@ -41,6 +41,11 @@ export interface Interface {
     projector: SyncEvent.DurableProjector,
   ) => Effect.Effect<void, unknown>
   readonly pendingApply: () => Effect.Effect<ReadonlyArray<SyncEvent.Segment>, unknown>
+  readonly deletions: () => Effect.Effect<ReadonlyArray<SyncEvent.Tombstone>, unknown>
+  readonly absorbDeletions: (
+    tombstones: readonly SyncEvent.Tombstone[],
+    projector: SyncEvent.DurableProjector,
+  ) => Effect.Effect<void, unknown>
   readonly acquire: (name: string, owner: string, ttl: number, now?: number) => Effect.Effect<boolean, unknown>
   readonly renew: (name: string, owner: string, ttl: number, now?: number) => Effect.Effect<boolean, unknown>
   readonly release: (name: string, owner: string) => Effect.Effect<void, unknown>
@@ -293,6 +298,49 @@ export const layer = Layer.effect(
         return rows.map((row) => decodeSegment(row.payload))
       })
 
+      const deletions = Effect.fn("SyncEventStore.deletions")(function* () {
+        const rows = yield* db.all<OutboxRow>(sql`
+          SELECT marker AS payload FROM sync_deletion_set
+          WHERE space_id = ${spaceID} ORDER BY session_id
+        `)
+        return rows.map((row) => decodeTombstone(row.payload))
+      })
+
+      const absorbDeletions = Effect.fn("SyncEventStore.absorbDeletions")(function* (
+        tombstones: readonly SyncEvent.Tombstone[],
+        projector: SyncEvent.DurableProjector,
+      ) {
+        yield* db.transaction(
+          (tx) =>
+            Effect.forEach(
+              tombstones,
+              (tombstone) => {
+                const marker = canonical(tombstone)
+                return Effect.all(
+                  [
+                    tx.run(sql`
+                      INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
+                      VALUES (${tombstone.sessionID}, ${marker}, ${tombstone.deletedAt}, ${spaceID})
+                      ON CONFLICT(space_id, session_id) DO NOTHING
+                    `),
+                    tx.run(sql`
+                      DELETE FROM sync_event_outbox
+                      WHERE aggregate_id = ${tombstone.sessionID} AND segment_id IS NULL AND space_id = ${spaceID}
+                    `),
+                  ],
+                  { discard: true },
+                )
+              },
+              { discard: true },
+            ),
+          { behavior: "immediate" },
+        )
+        // The durable projector can live in a different database. Repeating
+        // this idempotent deletion repairs a crash between the monotonic fact
+        // above and removal of the local Session projection.
+        yield* Effect.forEach(tombstones, (tombstone) => projector.delete(tombstone), { discard: true })
+      })
+
       const applyDurable = Effect.fn("SyncEventStore.applyDurable")(function* (
         segment: SyncEvent.Segment,
         projector: SyncEvent.DurableProjector,
@@ -472,6 +520,8 @@ export const layer = Layer.effect(
         apply,
         applyDurable,
         pendingApply,
+        deletions,
+        absorbDeletions,
         acquire,
         renew,
         release,

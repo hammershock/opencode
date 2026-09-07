@@ -30,6 +30,7 @@ export const Head = Schema.Struct({
   generation: NonNegativeInt,
   acknowledged: Schema.Record(Schema.String, NonNegativeInt),
   metadata: Schema.Array(Metadata),
+  deletions: Schema.Array(SyncEvent.Tombstone).pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   revoked: Schema.Array(SyncEvent.DeviceID),
 })
 export type Head = typeof Head.Type
@@ -132,6 +133,7 @@ export function make(input: {
         generation,
         acknowledged: input.acknowledged ? await Effect.runPromise(input.acknowledged()) : {},
         metadata,
+        deletions: await Effect.runPromise(input.store.deletions()),
         revoked: input.revoked ? [...(await Effect.runPromise(input.revoked()))] : [],
       }
       localHead = head
@@ -183,8 +185,19 @@ export function make(input: {
       for (const head of indexedHeads) {
         if (revoked.has(head.deviceID)) continue
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
-        await Effect.runPromise(input.metadataProjector.apply(head.metadata, head.deviceID))
       }
+      const advertised = new Map(
+        indexedHeads.flatMap((head) => head.deletions).map((item) => [item.sessionID, item] as const),
+      )
+      await Effect.runPromise(input.store.absorbDeletions([...advertised.values()], projector(input.config.deviceID)))
+      const deleted = new Set((await Effect.runPromise(input.store.deletions())).map((item) => item.sessionID))
+      for (const head of indexedHeads)
+        await Effect.runPromise(
+          input.metadataProjector.apply(
+            head.metadata.filter((item) => !deleted.has(item.sessionID)),
+            head.deviceID,
+          ),
+        )
       await collectAttachments(signal)
       status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }
     } catch (cause) {
@@ -241,6 +254,7 @@ export function make(input: {
       generation,
       acknowledged: input.acknowledged ? await Effect.runPromise(input.acknowledged()) : {},
       metadata: [],
+      deletions: await Effect.runPromise(input.store.deletions()),
       revoked: [],
     }
     const active = [local, ...indexedHeads]
@@ -297,15 +311,20 @@ export function make(input: {
   return {
     status: () => status,
     enable: (enabled: boolean) => void (status = { ...status, enabled }),
-    upload: (signal?: AbortSignal) => Effect.tryPromise(() => coalesce("upload", signal)),
+    upload: (signal?: AbortSignal) =>
+      Effect.tryPromise(async () => {
+        await coalesce("pull", signal)
+        await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
+        await coalesce("upload", signal)
+      }),
     pull: (signal?: AbortSignal) => Effect.tryPromise(() => coalesce("pull", signal)),
     hydrate: (signal?: AbortSignal) =>
       Effect.tryPromise(() => (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))),
     now: (signal?: AbortSignal) =>
       Effect.tryPromise(async () => {
-        await coalesce("upload", signal)
         await coalesce("pull", signal)
         await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
+        await coalesce("upload", signal)
       }),
   }
 }

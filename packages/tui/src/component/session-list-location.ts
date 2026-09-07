@@ -1,3 +1,5 @@
+import { Locale } from "../util/locale"
+
 export type SessionListLocationRecord = {
   directory: string
   location?: {
@@ -8,6 +10,7 @@ export type SessionListLocationRecord = {
   target?: string | { type?: string; name?: string; targetName?: string; targetID?: string }
   targetName?: string
   targetLabel?: string
+  portableTargetLabel?: string
   lastKnownTargetName?: string
   locationStatus?: string
   device?: string
@@ -19,7 +22,7 @@ export type SessionListLocationRecord = {
 
 export type SessionListLocation = {
   directory: string
-  target?: string
+  target: string
   device?: string
   status?: "unresolved" | "unavailable"
   label: string
@@ -30,14 +33,19 @@ const nonempty = (value: unknown) => (typeof value === "string" && value.trim() 
 
 export function sessionListLocation(session: SessionListLocationRecord): SessionListLocation {
   const targetValue = session.location?.target ?? session.target
-  const target =
+  const recordedTarget =
+    nonempty(session.targetLabel) ??
+    nonempty(session.portableTargetLabel) ??
     nonempty(session.lastKnownTargetName) ??
     nonempty(session.targetName) ??
-    nonempty(session.targetLabel) ??
     (typeof targetValue === "object"
-      ? (nonempty(targetValue.name) ?? nonempty(targetValue.targetName) ?? nonempty(targetValue.targetID))
+      ? (nonempty(targetValue.name) ?? nonempty(targetValue.targetName))
       : nonempty(targetValue))
-  const local = typeof targetValue === "object" && targetValue.type === "local"
+  const local =
+    (typeof targetValue === "object" && targetValue.type === "local") ||
+    targetValue === "local" ||
+    (targetValue === undefined && recordedTarget === undefined)
+  const target = local ? "local" : (recordedTarget ?? "remote")
   const directory = nonempty(session.location?.directory) ?? session.directory
   const device =
     nonempty(session.deviceName) ??
@@ -58,16 +66,36 @@ export function sessionListLocation(session: SessionListLocationRecord): Session
       : rawStatus === "unavailable" || rawStatus === "target_unavailable"
         ? "unavailable"
         : undefined
-  const location = target && !local ? `${target} · ${directory}` : directory
-  const statusLabel = status ? ` · ${status}` : ""
-  const deviceLabel = device ? ` · ${device}` : ""
   return {
     directory,
-    target: target && !local ? target : undefined,
+    target,
     device,
     status,
-    label: `${location}${deviceLabel}${statusLabel}`,
+    label: `${target} · ${directory}`,
     search: [target, directory, device, status].filter(Boolean).join(" ").toLowerCase(),
+  }
+}
+
+export function sessionListFooter(location: SessionListLocation, syncStatus: string | undefined, maxWidth: number) {
+  const syncState = syncStatus?.replace(/^[●◐!×]\s*/, "")
+  const status = location.status
+    ? syncState && syncState !== location.status
+      ? `! ${location.status}/${syncState}`
+      : `! ${location.status}`
+    : (syncStatus ?? "")
+  const width = Math.max(1, Math.floor(maxWidth))
+  const detail = [location.label, location.device].filter(Boolean).join(" · ")
+  const text = (() => {
+    if (!status) return truncateMiddle(detail, width)
+    if (status.length >= width) return truncateLeft(status, width)
+    const available = width - status.length - 3
+    if (available < 1) return truncateLeft(status, width)
+    return `${truncateMiddle(detail, available)} · ${status}`
+  })()
+  return {
+    text,
+    full: [location.label, location.device, status].filter(Boolean).join(" · "),
+    status,
   }
 }
 
@@ -75,4 +103,14 @@ export function sessionListMatches(session: SessionListLocationRecord & { title:
   const needle = query.trim().toLowerCase()
   if (!needle) return true
   return `${session.title.toLowerCase()} ${sessionListLocation(session).search}`.includes(needle)
+}
+
+function truncateMiddle(value: string, width: number) {
+  if (width === 1 && value.length > 1) return "…"
+  return Locale.truncateMiddle(value, width)
+}
+
+function truncateLeft(value: string, width: number) {
+  if (width === 1 && value.length > 1) return "…"
+  return Locale.truncateLeft(value, width)
 }

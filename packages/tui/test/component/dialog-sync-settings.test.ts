@@ -57,6 +57,18 @@ describe("Sync Settings presentation", () => {
     )
   })
 
+  test("makes an unconfigured manual sync actionable instead of looking runnable", () => {
+    expect(buildSyncOverviewRows({ ...connected, activeSpace: undefined })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "Sync now",
+          description: "Select a space first",
+          status: "! unavailable",
+        }),
+      ]),
+    )
+  })
+
   test("shows OAuth progress and manual fallback without client credentials", () => {
     const rows = buildSyncOverviewRows({
       ...connected,

@@ -11,7 +11,10 @@ describe("SessionSync", () => {
   test("keeps the application available when startup recovery fails", async () => {
     const layer = SessionSync.captureLayer.pipe(
       Layer.provide([
-        Layer.mock(EventV2.Service, { all: () => Stream.empty }),
+        Layer.mock(EventV2.Service, {
+          all: () => Stream.empty,
+          listen: () => Effect.succeed(Effect.void),
+        }),
         Layer.mock(SyncEventStore.Service, {
           scope: () => {
             throw new Error("unexpected scoped store access")

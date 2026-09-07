@@ -18,12 +18,19 @@ import {
 } from "@/server/shared/pty-ticket"
 import { Effect, Layer, Option, Queue, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InstanceHttpApi } from "../api"
 import * as ApiError from "../errors"
 import { CursorQuery, PtyConnectApi } from "../groups/pty"
 import { WebSocketTracker } from "../websocket-tracker"
+import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
+
+const sameLocation = (left: Location.Ref, right: Location.Ref) =>
+  left.directory === right.directory &&
+  left.workspaceID === right.workspaceID &&
+  JSON.stringify(left.target) === JSON.stringify(right.target)
 
 function validOrigin(request: HttpServerRequest.HttpServerRequest, opts: CorsOptions | undefined) {
   return isAllowedRequestOrigin(request.headers.origin, request.headers.host, opts)
@@ -49,6 +56,8 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
     const cors = yield* CorsConfig
     const plugin = yield* Plugin.Service
     const locations = yield* LocationServiceMap.Service
+    const access = yield* SessionLocationAccess.Service
+    const activity = yield* SessionActivity.Service
     const unregister = registerDisposer((directory) =>
       Effect.runPromise(locations.invalidate(Location.Ref.make({ directory: AbsolutePath.make(directory) }))),
     )
@@ -69,18 +78,28 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
     })
 
     const create = Effect.fn("PtyHttpApi.create")(function* (ctx: { payload: typeof Pty.CreateInput.Type }) {
-      const cwd = ctx.payload.cwd || (yield* InstanceState.context).directory
-      const shell = yield* plugin.trigger("shell.env", { cwd }, { env: {} as Record<string, string> })
-      return yield* pty(
-        Pty.Service.use((service) =>
-          service.create({
-            ...ctx.payload,
-            args: ctx.payload.args ? [...ctx.payload.args] : undefined,
-            cwd,
-            env: { ...ctx.payload.env, ...shell.env },
-          }),
-        ),
-      )
+      const run = Effect.gen(function* () {
+        const active = yield* Location.Service
+        if (ctx.payload.sessionID) {
+          const resolution = yield* access
+            .require(ctx.payload.sessionID)
+            .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+          if (!sameLocation(resolution, Location.Ref.make(active))) return yield* new HttpApiError.BadRequest({})
+        }
+        const cwd = ctx.payload.cwd || (yield* InstanceState.context).directory
+        const shell = yield* plugin.trigger("shell.env", { cwd }, { env: {} as Record<string, string> })
+        return yield* pty(
+          Pty.Service.use((service) =>
+            service.create({
+              ...ctx.payload,
+              args: ctx.payload.args ? [...ctx.payload.args] : undefined,
+              cwd,
+              env: { ...ctx.payload.env, ...shell.env },
+            }),
+          ),
+        )
+      })
+      return yield* ctx.payload.sessionID ? activity.withActivity(ctx.payload.sessionID, "session_mutation", run) : run
     })
 
     const get = Effect.fn("PtyHttpApi.get")(function* (ctx: { params: { ptyID: PtyID } }) {

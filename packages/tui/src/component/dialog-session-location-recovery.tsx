@@ -135,6 +135,7 @@ export function resolutionDescription(resolution: TargetResolution) {
   if (resolution.status === "unbound_portable_target")
     return `Target not configured on this device · ${resolution.portableTargetLabel}`
   if (resolution.status === "target_unavailable") return `${resolution.stage} · ${resolution.message}`
+  if (resolution.status === "resolution_failed") return resolution.message
   return "Ready"
 }
 
@@ -161,7 +162,7 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
     const result = await sdk.client.v2.sessionLocation.resolve({ sessionID: props.sessionID }, { throwOnError: true })
     const next = result.data
     if (next.status === "resolved") {
-      route.navigate({ type: "session", sessionID: props.sessionID })
+      route.navigate({ type: "session", sessionID: props.sessionID, accessMode: "read-write" })
       dialog.clear()
       return
     }
@@ -247,7 +248,11 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
 
   const recoveryRebind = async () => {
     const current =
-      resolution.status === "unbound_portable_target" ? resolution.directory : resolution.location.directory
+      resolution.status === "unbound_portable_target"
+        ? resolution.directory
+        : "location" in resolution
+          ? resolution.location.directory
+          : paths.home
     await rebindOne({
       dialog,
       sdk,
@@ -302,6 +307,9 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
             value: "edit" as const,
           },
         ]
+      : []),
+    ...(resolution.status === "resolution_failed"
+      ? [{ title: "Retry validation", description: resolution.message, value: "retry" as const }]
       : []),
   ]
 

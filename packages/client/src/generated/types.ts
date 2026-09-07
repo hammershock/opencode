@@ -3163,7 +3163,16 @@ export type PtysCreateInput = {
         }
       | undefined
   }["location"]
+  readonly sessionID?: {
+    readonly sessionID?: string
+    readonly command?: string
+    readonly args?: ReadonlyArray<string>
+    readonly cwd?: string
+    readonly title?: string
+    readonly env?: { readonly [x: string]: string }
+  }["sessionID"]
   readonly command?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3171,6 +3180,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["command"]
   readonly args?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3178,6 +3188,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["args"]
   readonly cwd?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3185,6 +3196,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["cwd"]
   readonly title?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3192,6 +3204,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["title"]
   readonly env?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3572,6 +3585,7 @@ export type TargetsResolveSessionOutput =
       readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       readonly message: string
     }
+  | { readonly status: "resolution_failed"; readonly message: string }
 
 export type TargetsBindingListOutput = {
   readonly revision: string

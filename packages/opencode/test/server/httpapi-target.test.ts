@@ -185,4 +185,23 @@ describe("target registry HttpApi", () => {
     expect(stale.status).toBe(409)
     expect(await stale.json()).toMatchObject({ _tag: "ConflictError", resource: "target-bindings.json" })
   })
+
+  test("never silently overwrites an existing portable binding", async () => {
+    const original = crypto.randomUUID()
+    await fs.mkdir(path.dirname(bindingFile), { recursive: true })
+    await fs.writeFile(bindingFile, JSON.stringify({ version: 1, bindings: { "lab-gpu": original } }))
+    const listed = (await (await request("/api/target-binding")).json()) as { revision: string }
+
+    const response = await request("/api/target-binding/lab-gpu", {
+      method: "PUT",
+      body: JSON.stringify({
+        targetID: crypto.randomUUID(),
+        expectedRevision: listed.revision,
+        expectedSessionIDs: [],
+      }),
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ _tag: "ConflictError", resource: "lab-gpu" })
+    expect((await (await request("/api/target-binding")).json()).bindings).toEqual({ "lab-gpu": original })
+  })
 })

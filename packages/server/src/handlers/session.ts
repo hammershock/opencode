@@ -119,6 +119,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 }),
               ),
             ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
+                }),
+              ),
+            ),
           )
           return HttpApiSchema.NoContent.make()
         }),
@@ -132,6 +140,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 new SessionNotFoundError({
                   sessionID: error.sessionID,
                   message: `Session not found: ${error.sessionID}`,
+                }),
+              ),
+            ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
                 }),
               ),
             ),
@@ -263,6 +279,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   ),
                 )
               }),
+              Effect.catchTag("Session.OperationUnavailableError", (error) =>
+                Effect.fail(
+                  new InvalidRequestError({
+                    message: `Session ${error.operation} is not available`,
+                    kind: `session_${error.operation}`,
+                  }),
+                ),
+              ),
             ),
           }
         }),
@@ -292,6 +316,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 ),
               )
             }),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
+                }),
+              ),
+            ),
           )
           return HttpApiSchema.NoContent.make()
         }),
@@ -307,6 +339,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   sessionID: error.sessionID,
                   message: `Session not found: ${error.sessionID}`,
                 }),
+            ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
+                }),
+              ),
             ),
           )
           return HttpApiSchema.NoContent.make()

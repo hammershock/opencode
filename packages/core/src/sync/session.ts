@@ -12,6 +12,7 @@ import { Database } from "../database/database"
 import { SessionTable } from "../session/sql"
 import { SessionV2 } from "../session"
 import { SessionActivity } from "../session/activity"
+import { SessionLocationMutation } from "../session/location-mutation"
 import { eq, isNotNull } from "drizzle-orm"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 
@@ -144,6 +145,7 @@ export function projector(
   spaceID?: string,
   onOwned?: (sessionID: string, spaceID: string) => Effect.Effect<void, unknown>,
   activity?: SessionActivity.Interface,
+  locationMutation?: SessionLocationMutation.Interface,
 ): SyncEvent.DurableProjector {
   const siblings = new Map<string, string>()
   return {
@@ -197,14 +199,20 @@ export function projector(
         }
         yield* replayAs(events, hydrated, sibling, sourceDeviceID)
       })
-      return activity ? activity.withActivity(SessionV2.ID.make(event.aggregateID), "sync_replay", replay) : replay
+      const tracked = activity
+        ? activity.withActivity(SessionV2.ID.make(event.aggregateID), "sync_replay", replay)
+        : replay
+      return locationMutation ? locationMutation.withLock(tracked) : tracked
     },
     delete: (tombstone) => {
       const remove = Effect.gen(function* () {
         if (onDelete) yield* onDelete(tombstone.sessionID)
         yield* events.remove(tombstone.sessionID)
       })
-      return activity ? activity.withActivity(SessionV2.ID.make(tombstone.sessionID), "sync_replay", remove) : remove
+      const tracked = activity
+        ? activity.withActivity(SessionV2.ID.make(tombstone.sessionID), "sync_replay", remove)
+        : remove
+      return locationMutation ? locationMutation.withLock(tracked) : tracked
     },
   }
 }

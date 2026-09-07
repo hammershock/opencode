@@ -279,6 +279,41 @@ describe("Session recovery safety", () => {
     expect(calls).toEqual(["validate", "bind"])
   })
 
+  test("checks every portable Session for activity before and after validation", async () => {
+    const calls: string[] = []
+    let checks = 0
+    const recovery = SessionLocationRebinding.makeRecovery({
+      referencedSessions: async () => [sessionID],
+      validateTargetInput: async () => {},
+      restoreMissingTarget: async () => definition(targetID, "gpu"),
+      validateSessionLocation: async () => {
+        calls.push("validate")
+      },
+      assertSessionsIdle: async (ids) => {
+        calls.push(`idle:${ids.join(",")}`)
+        if (++checks === 2) throw new SessionLocationRebinding.SessionNotIdleError({ blockers: ["sync_replay"] })
+      },
+      setPortableBinding: async () => {
+        calls.push("bind")
+        return { revision: "next" }
+      },
+      readPortableBindingRevision: async () => "current",
+      publishGlobalDeletion: async () => {},
+      removeLocalProjection: async () => {},
+    })
+
+    await expect(
+      recovery.bindPortable({
+        portableTargetLabel: "lab-gpu",
+        targetID,
+        expectedSessionIDs: [sessionID],
+        expectedBindingRevision: "current",
+        locations: new Map([[sessionID, remote]]),
+      }),
+    ).rejects.toMatchObject({ _tag: "SessionLocationRebinding.SessionNotIdleError" })
+    expect(calls).toEqual([`idle:${sessionID}`, "validate", `idle:${sessionID}`])
+  })
+
   test("publishes a global tombstone before removing the local projection", async () => {
     const calls: string[] = []
     const recovery = SessionLocationRebinding.makeRecovery({

@@ -95,4 +95,24 @@ describe("SessionLocationAccess", () => {
     })
     expect(directories).toEqual([directory])
   })
+
+  test("turns resolver infrastructure failures into a formal read-only state", async () => {
+    const access = SessionLocationAccess.make(
+      adapter(session(remote), {
+        targets: [target],
+        probe: async () => {
+          throw new Error("registry unavailable")
+        },
+      }),
+    )
+
+    expect(await Effect.runPromise(access.resolve(sessionID))).toEqual({
+      status: "resolution_failed",
+      message: "Session Location resolution failed",
+    })
+    await expect(Effect.runPromise(access.require(sessionID))).rejects.toMatchObject({
+      _tag: "SessionLocationAccess.UnresolvedError",
+      status: "resolution_failed",
+    })
+  })
 })

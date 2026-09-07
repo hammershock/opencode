@@ -6819,6 +6819,10 @@ export type SessionLocationRebindingResolution =
       stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       message: string
     }
+  | {
+      status: "resolution_failed"
+      message: string
+    }
 
 export type SessionLocationRebindingPortableBindingSnapshot = {
   revision: string
@@ -10860,6 +10864,7 @@ export type PtyListResponse = PtyListResponses[keyof PtyListResponses]
 
 export type PtyCreateData = {
   body?: {
+    sessionID?: string
     command?: string
     args?: Array<string>
     cwd?: string
@@ -11677,9 +11682,13 @@ export type SessionDiffData = {
 
 export type SessionDiffErrors = {
   /**
-   * Bad request
+   * BadRequest | InvalidRequestError
    */
-  400: BadRequestError
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
 }
 
 export type SessionDiffError = SessionDiffErrors[keyof SessionDiffErrors]
@@ -15126,6 +15135,7 @@ export type V2PtyListResponse = V2PtyListResponses[keyof V2PtyListResponses]
 
 export type V2PtyCreateData = {
   body: {
+    sessionID?: string
     command?: string
     args?: Array<string>
     cwd?: string

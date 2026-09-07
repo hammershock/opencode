@@ -903,6 +903,7 @@ export function make(options: ClientOptions) {
             path: `/api/pty`,
             query: { location: input?.["location"] },
             body: {
+              sessionID: input?.["sessionID"],
               command: input?.["command"],
               args: input?.["args"],
               cwd: input?.["cwd"],
@@ -910,7 +911,7 @@ export function make(options: ClientOptions) {
               env: input?.["env"],
             },
             successStatus: 200,
-            declaredStatuses: [401, 400],
+            declaredStatuses: [400, 401],
             empty: false,
           },
           requestOptions,

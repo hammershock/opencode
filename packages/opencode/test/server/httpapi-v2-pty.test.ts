@@ -63,6 +63,34 @@ afterEach(async () => {
 })
 
 describe("v2 pty HttpApi", () => {
+  testPty("rejects a stale Session Location admission token before creating a PTY", async () => {
+    await using first = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using second = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    const createdSession = await request("/api/session", first.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: first.path } }),
+    })
+    expect(createdSession.status).toBe(200)
+    const sessionID = ((await createdSession.json()) as { data: { id: string } }).data.id
+
+    const stale = await request("/api/pty", second.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionID, command: "/usr/bin/env", args: ["sh", "-c", "exit 0"] }),
+    })
+    expect(stale.status).toBe(400)
+    expect(await stale.json()).toMatchObject({
+      _tag: "InvalidRequestError",
+      kind: "session_location_changed",
+    })
+    expect(
+      Schema.decodeUnknownSync(Location.response(Schema.Array(Pty.Info)))(
+        await (await request("/api/pty", second.path)).json(),
+      ).data,
+    ).toEqual([])
+  })
+
   testPty("serves location-wrapped PTY routes and retains exited sessions", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
 

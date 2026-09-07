@@ -41,6 +41,7 @@ import {
 import { PermissionNotFoundError } from "../errors"
 import * as SessionError from "./session-errors"
 import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -63,6 +64,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
     const locationAccess = yield* SessionLocationAccess.Service
+    const activity = yield* SessionActivity.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -94,6 +96,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       yield* requireSession(sessionID)
       yield* locationAccess.require(sessionID).pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
     })
+    const withLocationActivity = <A, E, R>(sessionID: SessionID, effect: Effect.Effect<A, E, R>) =>
+      activity.withActivity(sessionID, "session_mutation", effect)
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {
       return yield* requireSession(ctx.params.sessionID)
@@ -113,6 +117,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       query: typeof DiffQuery.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       return yield* summary.diff({ sessionID: ctx.params.sessionID, messageID: ctx.query.messageID })
     })
 
@@ -258,23 +263,26 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
-    const init = Effect.fn("SessionHttpApi.init")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof InitPayload.Type
-    }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc
-        .command({
-          sessionID: ctx.params.sessionID,
-          messageID: ctx.payload.messageID,
-          model: `${ctx.payload.providerID}/${ctx.payload.modelID}`,
-          command: Command.Default.INIT,
-          arguments: "",
-        })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
-      return true
-    })
+    const init = Effect.fn("SessionHttpApi.init")(
+      (ctx: { params: { sessionID: SessionID }; payload: typeof InitPayload.Type }) =>
+        withLocationActivity(
+          ctx.params.sessionID,
+          Effect.gen(function* () {
+            yield* requireWritableLocation(ctx.params.sessionID)
+            yield* requireSession(ctx.params.sessionID)
+            yield* promptSvc
+              .command({
+                sessionID: ctx.params.sessionID,
+                messageID: ctx.payload.messageID,
+                model: `${ctx.payload.providerID}/${ctx.payload.modelID}`,
+                command: Command.Default.INIT,
+                arguments: "",
+              })
+              .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+            return true
+          }),
+        ),
+    )
 
     // share/unshare errors aren't all client-induced — storage and network
     // failures from SessionShare are real possibilities. Map to a typed 500
@@ -295,53 +303,68 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* requireSession(ctx.params.sessionID)
     })
 
-    const summarize = Effect.fn("SessionHttpApi.summarize")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof SummarizePayload.Type
-    }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
-      const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
-      const defaultAgent = yield* agentSvc.defaultAgent()
-      const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
+    const summarize = Effect.fn("SessionHttpApi.summarize")(
+      (ctx: { params: { sessionID: SessionID }; payload: typeof SummarizePayload.Type }) =>
+        withLocationActivity(
+          ctx.params.sessionID,
+          Effect.gen(function* () {
+            yield* requireWritableLocation(ctx.params.sessionID)
+            yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
+            const messages = yield* SessionError.mapStorageNotFound(
+              session.messages({ sessionID: ctx.params.sessionID }),
+            )
+            const defaultAgent = yield* agentSvc.defaultAgent()
+            const currentAgent =
+              messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
 
-      yield* compactSvc.create({
-        sessionID: ctx.params.sessionID,
-        agent: currentAgent,
-        model: {
-          providerID: ctx.payload.providerID,
-          modelID: ctx.payload.modelID,
-        },
-        auto: ctx.payload.auto ?? false,
-      })
-      yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
-      return true
-    })
+            yield* compactSvc.create({
+              sessionID: ctx.params.sessionID,
+              agent: currentAgent,
+              model: {
+                providerID: ctx.payload.providerID,
+                modelID: ctx.payload.modelID,
+              },
+              auto: ctx.payload.auto ?? false,
+            })
+            yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
+            return true
+          }),
+        ),
+    )
 
-    const prompt = Effect.fn("SessionHttpApi.prompt")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof PromptPayload.Type
-    }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      const message = yield* promptSvc
-        .prompt({
-          ...ctx.payload,
-          sessionID: ctx.params.sessionID,
-        })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
-      return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
-        contentType: "application/json",
-      })
-    })
+    const prompt = Effect.fn("SessionHttpApi.prompt")(
+      (ctx: { params: { sessionID: SessionID }; payload: typeof PromptPayload.Type }) =>
+        withLocationActivity(
+          ctx.params.sessionID,
+          Effect.gen(function* () {
+            yield* requireWritableLocation(ctx.params.sessionID)
+            yield* requireSession(ctx.params.sessionID)
+            const message = yield* promptSvc
+              .prompt({
+                ...ctx.payload,
+                sessionID: ctx.params.sessionID,
+              })
+              .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+            return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
+              contentType: "application/json",
+            })
+          }),
+        ),
+    )
 
     const promptAsync = Effect.fn("SessionHttpApi.promptAsync")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+      const run = withLocationActivity(
+        ctx.params.sessionID,
+        Effect.gen(function* () {
+          yield* requireWritableLocation(ctx.params.sessionID)
+          yield* requireSession(ctx.params.sessionID)
+          yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID })
+        }),
+      )
+      yield* run.pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })
@@ -356,51 +379,68 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return HttpApiSchema.NoContent.make()
     })
 
-    const command = Effect.fn("SessionHttpApi.command")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof CommandPayload.Type
-    }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      return yield* promptSvc
-        .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
-    })
+    const command = Effect.fn("SessionHttpApi.command")(
+      (ctx: { params: { sessionID: SessionID }; payload: typeof CommandPayload.Type }) =>
+        withLocationActivity(
+          ctx.params.sessionID,
+          Effect.gen(function* () {
+            yield* requireWritableLocation(ctx.params.sessionID)
+            yield* requireSession(ctx.params.sessionID)
+            return yield* promptSvc
+              .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
+              .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+          }),
+        ),
+    )
 
-    const shell = Effect.fn("SessionHttpApi.shell")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof ShellPayload.Type
-    }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
-    })
+    const shell = Effect.fn("SessionHttpApi.shell")(
+      (ctx: { params: { sessionID: SessionID }; payload: typeof ShellPayload.Type }) =>
+        withLocationActivity(
+          ctx.params.sessionID,
+          Effect.gen(function* () {
+            yield* requireWritableLocation(ctx.params.sessionID)
+            yield* requireSession(ctx.params.sessionID)
+            return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
+          }),
+        ),
+    )
 
-    const shellCompletion = Effect.fn("SessionHttpApi.shellCompletion")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof ShellCompletionPayload.Type
-    }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      return yield* promptSvc
-        .completeShell({ ...ctx.payload, sessionID: ctx.params.sessionID })
-        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
-    })
+    const shellCompletion = Effect.fn("SessionHttpApi.shellCompletion")(
+      (ctx: { params: { sessionID: SessionID }; payload: typeof ShellCompletionPayload.Type }) =>
+        withLocationActivity(
+          ctx.params.sessionID,
+          Effect.gen(function* () {
+            yield* requireWritableLocation(ctx.params.sessionID)
+            yield* requireSession(ctx.params.sessionID)
+            return yield* promptSvc
+              .completeShell({ ...ctx.payload, sessionID: ctx.params.sessionID })
+              .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+          }),
+        ),
+    )
 
-    const revert = Effect.fn("SessionHttpApi.revert")(function* (ctx: {
-      params: { sessionID: SessionID }
-      payload: typeof RevertPayload.Type
-    }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(revertSvc.revert({ sessionID: ctx.params.sessionID, ...ctx.payload }))
-    })
+    const revert = Effect.fn("SessionHttpApi.revert")(
+      (ctx: { params: { sessionID: SessionID }; payload: typeof RevertPayload.Type }) =>
+        withLocationActivity(
+          ctx.params.sessionID,
+          Effect.gen(function* () {
+            yield* requireWritableLocation(ctx.params.sessionID)
+            yield* requireSession(ctx.params.sessionID)
+            return yield* SessionError.mapBusy(revertSvc.revert({ sessionID: ctx.params.sessionID, ...ctx.payload }))
+          }),
+        ),
+    )
 
-    const unrevert = Effect.fn("SessionHttpApi.unrevert")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireWritableLocation(ctx.params.sessionID)
-      yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID }))
-    })
+    const unrevert = Effect.fn("SessionHttpApi.unrevert")((ctx: { params: { sessionID: SessionID } }) =>
+      withLocationActivity(
+        ctx.params.sessionID,
+        Effect.gen(function* () {
+          yield* requireWritableLocation(ctx.params.sessionID)
+          yield* requireSession(ctx.params.sessionID)
+          return yield* SessionError.mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID }))
+        }),
+      ),
+    )
 
     const permissionRespond = Effect.fn("SessionHttpApi.permissionRespond")(function* (ctx: {
       params: { sessionID: SessionID; permissionID: PermissionV1.ID }

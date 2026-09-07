@@ -23,6 +23,7 @@ import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionMessage } from "@opencode-ai/core/session/message"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
@@ -48,6 +49,66 @@ const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const id = SessionV2.ID.create()
 
 describe("SessionV2.create", () => {
+  it.effect("guards direct Core mutators when the Session Location is unresolved", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const created = yield* session.create({
+        location: Location.Ref.make({
+          target: { type: "rexd", targetID: Location.TargetID.make("11111111-1111-4111-8111-111111111111") },
+          directory: AbsolutePath.make("/historical/worktree"),
+        }),
+      })
+      const unavailable = (effect: Effect.Effect<unknown, unknown>) =>
+        effect.pipe(
+          Effect.flip,
+          Effect.map((error) => (error as { _tag?: string })._tag),
+        )
+
+      expect(yield* unavailable(session.switchAgent({ sessionID: created.id, agent: "plan" }))).toBe(
+        "Session.OperationUnavailableError",
+      )
+      expect(
+        yield* unavailable(
+          session.switchModel({
+            sessionID: created.id,
+            model: ModelV2.Ref.make({ id: ModelV2.ID.make("sonnet"), providerID: ProviderV2.ID.anthropic }),
+          }),
+        ),
+      ).toBe("Session.OperationUnavailableError")
+      expect(
+        yield* unavailable(
+          session.revert.stage({
+            sessionID: created.id,
+            messageID: SessionMessage.ID.make("msg_unresolved_revert"),
+            files: false,
+          }),
+        ),
+      ).toBe("Session.OperationUnavailableError")
+    }),
+  )
+
+  it.effect("rebinds an unresolved Session without materializing its old Location", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const created = yield* session.create({
+        location: Location.Ref.make({
+          target: { type: "rexd", targetID: Location.TargetID.make("22222222-2222-4222-8222-222222222222") },
+          directory: AbsolutePath.make("/historical/worktree"),
+        }),
+      })
+      const destination = Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) })
+
+      expect(
+        yield* session.rebindLocation({
+          sessionID: created.id,
+          expectedRevision: created.locationRevision,
+          destination,
+        }),
+      ).toMatchObject({ status: "rebound", revision: created.locationRevision + 1 })
+      expect((yield* session.get(created.id)).location).toEqual(destination)
+    }),
+  )
+
   it.effect("creates a fresh projected session when the ID is omitted", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service

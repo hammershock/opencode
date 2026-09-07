@@ -4,6 +4,7 @@ import { ServerScope } from "@/utils/server-scope"
 let getWorkspaceTerminalCacheKey: typeof import("./terminal").getWorkspaceTerminalCacheKey
 let getLegacyTerminalStorageKeys: (dir: string, legacySessionID?: string) => string[]
 let migrateTerminalState: (value: unknown) => unknown
+let terminalAdmission: typeof import("./terminal").terminalAdmission
 
 beforeAll(async () => {
   mock.module("@solidjs/router", () => ({
@@ -22,6 +23,17 @@ beforeAll(async () => {
   getWorkspaceTerminalCacheKey = mod.getWorkspaceTerminalCacheKey
   getLegacyTerminalStorageKeys = mod.getLegacyTerminalStorageKeys
   migrateTerminalState = mod.migrateTerminalState
+  terminalAdmission = mod.terminalAdmission
+})
+
+describe("terminalAdmission", () => {
+  test("reads the current Session after a same-workspace route change", () => {
+    let sessionID = "session-one"
+    const current = () => sessionID
+    expect(terminalAdmission(current)).toEqual({ sessionID: "session-one" })
+    sessionID = "session-two"
+    expect(terminalAdmission(current)).toEqual({ sessionID: "session-two" })
+  })
 })
 
 describe("getWorkspaceTerminalCacheKey", () => {

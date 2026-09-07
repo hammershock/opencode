@@ -67,13 +67,12 @@ export function make(adapter: Adapter) {
           referencedSessions: adapter.referencedSessions,
           probe: adapter.probe,
         }),
-      catch: () =>
-        new UnresolvedError({
-          sessionID,
-          status: "resolution_failed",
-          message: "Session Location resolution failed",
-        }),
-    })
+      catch: (cause) => cause,
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed({ status: "resolution_failed" as const, message: "Session Location resolution failed" }),
+      ),
+    )
   })
 
   const require = Effect.fn("SessionLocationAccess.require")(function* (sessionID: SessionSchema.ID) {
@@ -88,7 +87,9 @@ export function make(adapter: Adapter) {
           ? resolution.message
           : resolution.status === "missing_local_target"
             ? "Session target is not configured on this device"
-            : "Portable Session target is not bound on this device",
+            : resolution.status === "unbound_portable_target"
+              ? "Portable Session target is not bound on this device"
+              : resolution.message,
     })
   })
 

@@ -42,6 +42,7 @@ import { webSearchProviderLabel } from "../../util/tool-display"
 import { Dynamic, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
 import { useEditorContext } from "../../context/editor"
+import { localEditorDirectory } from "../../util/session-location-access"
 import { openEditor } from "../../editor"
 import { useDialog } from "../../ui/dialog"
 import { DialogAlert } from "../../ui/dialog-alert"
@@ -313,6 +314,7 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+  const dialog = useDialog()
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -340,7 +342,23 @@ export function Session() {
           await sync.bootstrap({ fatal: false })
         } catch {}
       }
-      editor.reconnect(result.data.directory)
+      if (route.accessMode !== "read-only") {
+        const resolution = await sdk.client.v2.sessionLocation.resolve(
+          { sessionID: route.sessionID },
+          { throwOnError: true },
+        )
+        const locationResolution = resolution.data
+        if (locationResolution.status === "resolved") {
+          const editorDirectory = localEditorDirectory(locationResolution)
+          if (editorDirectory) editor.reconnect(editorDirectory)
+          navigate({ ...route, accessMode: "read-write", resolution: undefined })
+          setLocationAccessReady(true)
+        } else {
+          dialog.replace(() => (
+            <DialogSessionLocationRecovery sessionID={route.sessionID} resolution={locationResolution} />
+          ))
+        }
+      }
       await sync.session.sync(sessionID)
       if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)
     })().catch((error) => {
@@ -382,23 +400,6 @@ export function Session() {
     r.set(route.prompt)
   }
   const keymap = useOpencodeKeymap()
-  const dialog = useDialog()
-  onMount(() => {
-    if (route.accessMode === "read-only") return
-    void sdk.client.v2.sessionLocation
-      .resolve({ sessionID: route.sessionID }, { throwOnError: true })
-      .then((result) => {
-        const resolution = result.data
-        if (resolution.status === "resolved") {
-          setLocationAccessReady(true)
-          return
-        }
-        dialog.replace(() => <DialogSessionLocationRecovery sessionID={route.sessionID} resolution={resolution} />)
-      })
-      .catch((cause) =>
-        toast.show({ title: "Session target resolution failed", message: errorMessage(cause), variant: "error" }),
-      )
-  })
   const renameOverride = createMemo(() =>
     installSessionRenameOverride({
       enabled: kv.get(SESSION_RENAME_DIRECT_SETTING, false),

@@ -13,7 +13,7 @@ import { SessionTable } from "../session/sql"
 import { SessionV2 } from "../session"
 import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
-import { eq, isNotNull } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 
 type DurablePayload = {
@@ -24,6 +24,7 @@ type DurablePayload = {
 }
 
 export type PersistedOwnership = { readonly exists: true; readonly spaceID?: string } | { readonly exists: false }
+export type PersistedMembership = { readonly sessionID: string; readonly spaceID?: string; readonly assignedAt: number }
 
 /**
  * Captures the authoritative durable event stream. Deletion is translated to
@@ -107,6 +108,21 @@ export function backfill(
       after = last.durable.seq
     }
   })
+}
+
+/** Repairs the cross-database ownership index from every surviving Session row. */
+export function reconcileOwnership(
+  ownership: Pick<SyncOwnership.Interface, "assign" | "unassign">,
+  rows: readonly PersistedMembership[],
+) {
+  return Effect.forEach(
+    rows,
+    (row) =>
+      row.spaceID
+        ? ownership.assign(row.sessionID, row.spaceID, row.assignedAt)
+        : ownership.unassign(row.sessionID),
+    { discard: true },
+  )
 }
 
 /** Converts an event to the compact attachment-aware wire representation. */
@@ -296,6 +312,12 @@ export const captureLayer = Layer.effectDiscard(
               row ? { exists: true, ...(row.spaceID ? { spaceID: row.spaceID } : {}) } : { exists: false },
           ),
         )
+    // Subscribe before taking the recovery snapshot. Any commit racing startup
+    // is either observed live or appears in the subsequent durable backfill.
+    yield* events.all().pipe(
+      Stream.runForEach((event) => captureOwned(ownership, store, event as DurablePayload, Date.now(), persisted)),
+      Effect.forkScoped,
+    )
     const existing = yield* db
       .select({
         sessionID: SessionTable.id,
@@ -303,14 +325,14 @@ export const captureLayer = Layer.effectDiscard(
         assignedAt: SessionTable.time_created,
       })
       .from(SessionTable)
-      .where(isNotNull(SessionTable.sync_space_id))
       .all()
-    yield* Effect.forEach(existing, (item) => ownership.assign(item.sessionID, item.spaceID!, item.assignedAt), {
-      discard: true,
-    })
-    yield* events.all().pipe(
-      Stream.runForEach((event) => captureOwned(ownership, store, event as DurablePayload, Date.now(), persisted)),
-      Effect.forkScoped,
+    yield* reconcileOwnership(
+      ownership,
+      existing.map((item) => ({
+        sessionID: item.sessionID,
+        ...(item.spaceID ? { spaceID: item.spaceID } : {}),
+        assignedAt: item.assignedAt,
+      })),
     )
     // Session and sync outbox use separate SQLite databases. Replaying the
     // owned durable history after the live subscriber starts closes the crash

@@ -73,7 +73,7 @@ export function provider(
       spawner,
     )
     return {
-      candidates: unique([...paths, ...commands, ...native.candidates]).slice(0, 8),
+      candidates: unique([...paths, ...commands, ...native.candidates]),
       ...(native.degraded ? { degraded: native.degraded } : {}),
     }
   })
@@ -330,7 +330,11 @@ export function completionScript(shell: string, input: string, cursor: number) {
 }
 
 export function completionCommand(shell: string, input: string, cursor: number) {
-  return [quote(shell), ...bareArgs(shell, completionScript(shell, input, cursor)).map(quote)].join(" ")
+  return bareCommand(shell, completionScript(shell, input, cursor))
+}
+
+export function bareCommand(shell: string, command: string) {
+  return [quote(shell), ...bareArgs(shell, command).map(quote)].join(" ")
 }
 
 export function parseCompletionOutput(text: string, token: string, range: { start: number; end: number }) {

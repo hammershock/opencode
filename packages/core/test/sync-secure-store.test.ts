@@ -55,6 +55,67 @@ describe("SyncSecureStore", () => {
     if (!process.env.WSL_INTEROP) expect(calls[0]!.env?.WSL_INTEROP).toBe("/run/WSL/123_interop")
   })
 
+  test("replaces a stale inherited WSL interop before invoking PasswordVault", async () => {
+    const previous = process.env.WSL_INTEROP
+    process.env.WSL_INTEROP = "/run/WSL/stale_interop"
+    const calls: Array<{ stdin?: string; env?: Record<string, string> }> = []
+    const store = SyncSecureStore.windowsVault(
+      async (_command, stdin, env) => {
+        calls.push({ stdin, env })
+        return { exitCode: 0, stdout: "vault-value", stderr: "" }
+      },
+      async () => "/run/WSL/live_interop",
+    )
+    try {
+      expect(await store.get("space:key")).toBe("vault-value")
+      expect(calls).toHaveLength(1)
+      expect(calls[0]!.env).toEqual({ WSL_INTEROP: "/run/WSL/live_interop" })
+      expect(calls[0]!.stdin).not.toContain("stale_interop")
+    } finally {
+      if (previous === undefined) delete process.env.WSL_INTEROP
+      else process.env.WSL_INTEROP = previous
+    }
+  })
+
+  test("retries once when WSL interop changes after a transport failure", async () => {
+    const previous = process.env.WSL_INTEROP
+    process.env.WSL_INTEROP = "/run/WSL/old_interop"
+    const calls: Array<{ stdin?: string; env?: Record<string, string> }> = []
+    const discovered = ["/run/WSL/old_interop", "/run/WSL/new_interop"]
+    const store = SyncSecureStore.windowsVault(
+      async (_command, stdin, env) => {
+        calls.push({ stdin, env })
+        return calls.length === 1
+          ? { exitCode: 1, stdout: "", stderr: "transport failed" }
+          : { exitCode: 0, stdout: "vault-value", stderr: "" }
+      },
+      async () => discovered.shift(),
+    )
+    try {
+      expect(await store.get("space:key")).toBe("vault-value")
+      expect(calls).toHaveLength(2)
+      expect(calls[0]!.env).toEqual({})
+      expect(calls[1]!.env).toEqual({ WSL_INTEROP: "/run/WSL/new_interop" })
+      expect(calls[0]!.stdin).toBe(calls[1]!.stdin)
+    } finally {
+      if (previous === undefined) delete process.env.WSL_INTEROP
+      else process.env.WSL_INTEROP = previous
+    }
+  })
+
+  test("does not retry a semantic missing PasswordVault record", async () => {
+    let calls = 0
+    const store = SyncSecureStore.windowsVault(
+      async () => {
+        calls++
+        return { exitCode: 3, stdout: "", stderr: "" }
+      },
+      async () => `/run/WSL/${calls + 1}_interop`,
+    )
+    expect(await store.get("missing")).toBeUndefined()
+    expect(calls).toBe(1)
+  })
+
   test("maps missing records and redacts platform failures", async () => {
     const missing = SyncSecureStore.macos("test", {
       get: async () => undefined,

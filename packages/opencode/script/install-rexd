@@ -66,9 +66,38 @@ fi
 
 candidate="$INSTALL_DIR/.$APP.candidate.$$"
 candidate_manifest="$INSTALL_DIR/.$APP.candidate-manifest.$$"
+backup="$INSTALL_DIR/.$APP.backup.$$"
+backup_manifest="$INSTALL_DIR/.$APP.backup-manifest.$$"
+had_current=0
+had_current_manifest=0
+commit_started=0
+commit_complete=0
 
 cleanup() {
+  exit_code=$?
+  if [[ "$commit_started" -eq 1 && "$commit_complete" -eq 0 ]]; then
+    rollback_failed=0
+    if [[ "$had_current" -eq 1 ]]; then
+      mv -f "$backup" "$CURRENT" || rollback_failed=1
+    else
+      rm -f "$CURRENT" || rollback_failed=1
+    fi
+    if [[ "$had_current_manifest" -eq 1 ]]; then
+      mv -f "$backup_manifest" "$CURRENT_MANIFEST" || rollback_failed=1
+    else
+      rm -f "$CURRENT_MANIFEST" || rollback_failed=1
+    fi
+    if [[ "$rollback_failed" -ne 0 ]]; then
+      echo "Installation rollback failed; preserved backup paths: $backup $backup_manifest" >&2
+      exit_code=1
+    fi
+  fi
   rm -f "$candidate" "$candidate_manifest"
+  if [[ "$commit_complete" -eq 1 || "$commit_started" -eq 0 ]]; then
+    rm -f "$backup" "$backup_manifest"
+  fi
+  trap - EXIT
+  exit "$exit_code"
 }
 trap cleanup EXIT
 
@@ -81,8 +110,8 @@ if [[ -z "$candidate_version" ]]; then
 fi
 if [[ -n "$MANIFEST" ]]; then
   cp "$MANIFEST" "$candidate_manifest"
-  if ! grep -Fq '"entrypoint": "opencode-rexd"' "$candidate_manifest"; then
-    echo "Manifest does not describe the opencode-rexd entrypoint" >&2
+  if ! "$candidate" __deploy-verify-build-manifest < "$candidate_manifest"; then
+    echo "Build manifest is invalid; existing install was not changed" >&2
     exit 1
   fi
 fi
@@ -94,13 +123,32 @@ if [[ "$PROVISION_BAIDU_APP" -eq 1 ]]; then
   fi
 fi
 
+if [[ -e "$CURRENT" || -L "$CURRENT" ]]; then
+  cp -p "$CURRENT" "$backup"
+  had_current=1
+fi
+if [[ -e "$CURRENT_MANIFEST" || -L "$CURRENT_MANIFEST" ]]; then
+  cp -p "$CURRENT_MANIFEST" "$backup_manifest"
+  had_current_manifest=1
+fi
+
+commit_started=1
 mv "$candidate" "$CURRENT"
 if [[ -e "$candidate_manifest" ]]; then
   mv "$candidate_manifest" "$CURRENT_MANIFEST"
 else
   rm -f "$CURRENT_MANIFEST"
 fi
-"$CURRENT" --version >/dev/null
+installed_version=$("$CURRENT" --version)
+if [[ "$installed_version" != "$candidate_version" ]]; then
+  echo "Installed candidate smoke check failed; restoring previous install" >&2
+  exit 1
+fi
+if [[ -n "$MANIFEST" ]] && ! "$CURRENT" __deploy-verify-build-manifest < "$CURRENT_MANIFEST"; then
+  echo "Installed manifest smoke check failed; restoring previous install" >&2
+  exit 1
+fi
+commit_complete=1
 
 echo "Installed $CURRENT ($candidate_version)"
 echo "Add $INSTALL_DIR to PATH if it is not already present."

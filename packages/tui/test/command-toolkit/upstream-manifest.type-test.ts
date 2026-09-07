@@ -1,5 +1,5 @@
 import { defineUpstreamCommand, verifyUpstreamCommand } from "@opencode-ai/command-kit"
-import { currentUpstreamCommands } from "../../src/command-toolkit/upstream-current"
+import { currentUpstreamCommands } from "../../src/command-toolkit/upstream-current.gen"
 import { reviewedUpstreamCommands } from "../../src/command-toolkit/upstream-reviewed"
 
 verifyUpstreamCommand(reviewedUpstreamCommands.appExit, currentUpstreamCommands.appExit)

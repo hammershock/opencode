@@ -1,5 +1,5 @@
 import { verifyUpstreamCommand } from "@opencode-ai/command-kit"
-import { currentUpstreamCommands } from "./upstream-current"
+import { currentUpstreamCommands } from "./upstream-current.gen"
 import { reviewedUpstreamCommands } from "./upstream-reviewed"
 
 // Deliberately checked by TypeScript. Upstream registration drift must be

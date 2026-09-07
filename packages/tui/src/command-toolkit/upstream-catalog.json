@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "commands": {
+    "appExit": {
+      "sourceRef": "337fd144d2ba",
+      "contractVersion": 1,
+      "contract": {
+        "identity": "app.exit",
+        "host": "tui.app",
+        "path": ["exit"],
+        "aliases": [["quit"], ["q"]],
+        "title": "Exit the app",
+        "category": "System",
+        "availability": "all-routes",
+        "inputBoundary": "no-arguments"
+      }
+    },
+    "sessionRename": {
+      "sourceRef": "337fd144d2ba",
+      "contractVersion": 1,
+      "contract": {
+        "identity": "session.rename",
+        "host": "tui.session",
+        "path": ["rename"],
+        "aliases": [],
+        "title": "Rename session",
+        "category": "Session",
+        "availability": "session-route",
+        "inputBoundary": "no-arguments"
+      }
+    }
+  }
+}

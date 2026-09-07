@@ -972,6 +972,7 @@
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
+        "prettier": "3.6.2",
       },
     },
     "packages/ui": {

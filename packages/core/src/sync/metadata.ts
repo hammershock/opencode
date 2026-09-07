@@ -51,7 +51,13 @@ export const layer = Layer.effect(
           .all<{ payload: string; source_device: string; availability: Availability }>(
             sql`
         SELECT payload, source_device, availability FROM sync_session_metadata
-        WHERE space_id = ${spaceID} ORDER BY updated_at DESC, session_id
+        WHERE space_id = ${spaceID}
+          AND NOT EXISTS (
+            SELECT 1 FROM sync_deletion_set
+            WHERE sync_deletion_set.space_id = sync_session_metadata.space_id
+              AND sync_deletion_set.session_id = sync_session_metadata.session_id
+          )
+        ORDER BY updated_at DESC, session_id
       `,
           )
           .pipe(
@@ -70,7 +76,10 @@ export const layer = Layer.effect(
             (value) =>
               tx.run(sql`
         INSERT INTO sync_session_metadata (session_id, payload, source_device, revision, availability, updated_at, space_id)
-        VALUES (${value.sessionID}, ${JSON.stringify(value)}, ${deviceID}, ${value.revision}, 'metadata-only', ${value.updatedAt}, ${spaceID})
+        SELECT ${value.sessionID}, ${JSON.stringify(value)}, ${deviceID}, ${value.revision}, 'metadata-only', ${value.updatedAt}, ${spaceID}
+        WHERE NOT EXISTS (
+          SELECT 1 FROM sync_deletion_set WHERE session_id = ${value.sessionID} AND space_id = ${spaceID}
+        )
         ON CONFLICT(space_id, session_id) DO UPDATE SET
           payload = CASE WHEN excluded.revision > revision OR (excluded.revision = revision AND excluded.source_device < source_device) THEN excluded.payload ELSE payload END,
           source_device = CASE WHEN excluded.revision > revision OR (excluded.revision = revision AND excluded.source_device < source_device) THEN excluded.source_device ELSE source_device END,

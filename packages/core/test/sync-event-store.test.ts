@@ -336,6 +336,30 @@ describe("SyncEventStore", () => {
     )
   })
 
+  test("absorbs advertised deletions before stale local events can be sealed", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const tombstone = SyncEvent.Tombstone.make({ id: "remote-delete", sessionID: "session-a", deletedAt: 20 })
+        let projections = 0
+        const projector: SyncEvent.DurableProjector = {
+          project: () => Effect.void,
+          delete: () => Effect.sync(() => void projections++),
+        }
+        yield* store.enqueue(event("stale-local", 0), 10)
+        yield* store.absorbDeletions([tombstone], projector)
+        expect(yield* store.pending(10)).toEqual([])
+        expect(yield* store.seal(device, 10)).toBeUndefined()
+        expect(yield* store.deletions()).toEqual([tombstone])
+
+        // Reapplying the projection is intentional crash recovery across the
+        // sync and Session databases; delete implementations are idempotent.
+        yield* store.absorbDeletions([tombstone], projector)
+        expect(projections).toBe(2)
+      }),
+    )
+  })
+
   test("recovers a cross-database projection crash before advancing its cursor", async () => {
     await run(
       Effect.gen(function* () {

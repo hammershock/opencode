@@ -3,6 +3,7 @@ import path from "node:path"
 import { Effect, Layer } from "effect"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
+import { sql } from "drizzle-orm"
 import { tmpdir } from "./fixture/tmpdir"
 
 describe("SyncMetadata", () => {
@@ -35,6 +36,14 @@ describe("SyncMetadata", () => {
         ])
         expect((yield* metadata.list()).map((item) => item.sessionID)).toEqual(["s"])
         expect((yield* other.list()).map((item) => item.sessionID)).toEqual(["s"])
+
+        const database = (yield* SyncDatabase.Service).db
+        yield* database.run(sql`
+          INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
+          VALUES ('s', ${JSON.stringify({ id: "delete", sessionID: "s", deletedAt: 4 })}, 4, 'legacy')
+        `)
+        yield* metadata.apply("stale-device", [{ ...base, title: "resurrected", revision: 99, updatedAt: 99 }])
+        expect(yield* metadata.list()).toEqual([])
       }).pipe(Effect.scoped, Effect.provide(layers)),
     )
   })

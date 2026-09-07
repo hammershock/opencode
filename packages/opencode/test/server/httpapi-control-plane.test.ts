@@ -49,7 +49,15 @@ const apiLayer = HttpRouter.serve(
     Layer.mock(SyncControl.Service)({
       status: () =>
         Effect.succeed(
-          SyncControl.Status.make({ configured: false, enabled: false, locked: false, outbox: 0, cursors: {} }),
+          SyncControl.Status.make({
+            configured: false,
+            initialized: false,
+            authenticated: false,
+            enabled: false,
+            locked: false,
+            outbox: 0,
+            cursors: {},
+          }),
         ),
     }),
   ),

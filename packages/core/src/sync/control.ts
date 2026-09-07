@@ -136,11 +136,20 @@ const layer = Layer.effect(
       yield* clearSpace(namespaceID)
       return sessions
     })
-    const localState = yield* setup.state().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
-    const stale = yield* membership
-      .stale(new Set(localState?.spaces.map((item) => item.descriptor.namespaceID) ?? []))
-      .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
-    yield* Effect.forEach(stale, purgeSpace, { discard: true })
+    yield* setup
+      .state()
+      .pipe(
+        Effect.flatMap((state) =>
+          membership.stale(new Set(state?.spaces.map((item) => item.descriptor.namespaceID) ?? [])),
+        ),
+        Effect.flatMap((stale) => Effect.forEach(stale, purgeSpace, { discard: true })),
+        Effect.catch(() =>
+          Effect.sync(() => {
+            // Sync recovery must never make the local application unavailable.
+            lastError = "storage"
+          }),
+        ),
+      )
 
     const load = Effect.fn("SyncControl.load")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))

@@ -93,6 +93,10 @@ export function includeCloudSessionInDialogScope(scope: DialogSessionListFilters
   return activeSpaceID !== undefined
 }
 
+export function dialogSessionListScopeSelection(scope: DialogSessionListFilters["scope"]) {
+  return scope === "current" ? 0 : 1
+}
+
 export function syncAvailabilityLabel(availability: SyncAvailability) {
   return {
     "metadata-only": "◐ metadata-only",
@@ -430,7 +434,7 @@ export function DialogSessionList() {
           <SessionFilterRow
             title="Scope"
             values={["Current Sync Space", "All"]}
-            selected={filters().scope === "current" && syncScope()?.activeSpaceID !== undefined ? 0 : 1}
+            selected={dialogSessionListScopeSelection(filters().scope)}
             focused={filters().focus === "scope"}
           />
         </box>

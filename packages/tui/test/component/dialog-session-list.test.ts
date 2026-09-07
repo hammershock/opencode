@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   createDialogSessionListQuery,
+  dialogSessionListScopeSelection,
   dialogSessionListLocationFilter,
   includeCloudSessionInDialogScope,
   loadDialogSessionList,
@@ -95,5 +96,22 @@ describe("dialog session list", () => {
     expect(
       [active, inactive, unassigned].filter((session) => sessionInDialogSyncScope(session, "all", "active")),
     ).toHaveLength(3)
+  })
+
+  test("keeps the selected Scope independent from delayed sync-space discovery", () => {
+    const selected = { focus: "scope" as const, cwd: "cwd" as const, scope: "all" as const }
+    expect(dialogSessionListScopeSelection(selected.scope)).toBe(1)
+
+    // An active space arriving asynchronously changes the result set, not the
+    // user's dialog-local selection.
+    expect(sessionInDialogSyncScope({ syncSpaceID: "active" }, selected.scope)).toBe(true)
+    expect(sessionInDialogSyncScope({ syncSpaceID: "active" }, selected.scope, "active")).toBe(true)
+    expect(dialogSessionListScopeSelection(selected.scope)).toBe(1)
+
+    const current = { ...selected, scope: "current" as const }
+    expect(dialogSessionListScopeSelection(current.scope)).toBe(0)
+    expect(sessionInDialogSyncScope({}, current.scope)).toBe(true)
+    expect(sessionInDialogSyncScope({}, current.scope, "active")).toBe(false)
+    expect(dialogSessionListScopeSelection(current.scope)).toBe(0)
   })
 })

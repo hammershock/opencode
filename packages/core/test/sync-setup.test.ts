@@ -8,6 +8,13 @@ import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { tmpdir } from "./fixture/tmpdir"
 
 describe("SyncSetup lifecycle", () => {
+  test("preserves only the deployment-safe missing-app authentication reason", async () => {
+    await using tmp = await tmpdir()
+    const setup = SyncSetup.make({ configDirectory: tmp.path, store: store() })
+    await run(setup.initialize("Mac"))
+    await expect(run(setup.begin(manual))).rejects.toMatchObject({ kind: "missing-app" })
+  })
+
   test("reads config without secure storage and login survives restart without creating a space", async () => {
     await using tmp = await tmpdir()
     const secure = store()

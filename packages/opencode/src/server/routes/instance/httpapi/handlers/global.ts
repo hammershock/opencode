@@ -11,7 +11,7 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput } from "../groups/global"
+import { GlobalUpgradeInput, SyncMissingAppMessage, SyncSetupApiError } from "../groups/global"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { HttpApiError } from "effect/unstable/httpapi"
 import { SyncControl } from "@opencode-ai/core/sync/control"
@@ -92,7 +92,19 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const badSetup = <A>(effect: Effect.Effect<A, SyncSetup.SetupError>) =>
-      effect.pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+      effect.pipe(
+        Effect.mapError((error) =>
+          error.kind === "missing-app"
+            ? new SyncSetupApiError({
+                name: "SyncSetupError",
+                data: { kind: "missing-app", message: SyncMissingAppMessage },
+              })
+            : new SyncSetupApiError({
+                name: "SyncSetupError",
+                data: { kind: "bad-request", message: "Sync setup request failed" },
+              }),
+        ),
+      )
     const badControl = <A>(effect: Effect.Effect<A, SyncControl.ControlError>) =>
       effect.pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
     const stateAfter = (effect: Effect.Effect<void, SyncControl.ControlError>) =>

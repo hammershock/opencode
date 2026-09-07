@@ -29,6 +29,7 @@ import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
+import { DeployProvisionBaiduAppCommand } from "./cli/cmd/deploy-provision-baidu-app"
 
 const args = hideBin(process.argv)
 
@@ -78,6 +79,7 @@ const cli = yargs(args)
   })
   .usage("")
   .completion("completion", "generate shell completion script")
+  .command(DeployProvisionBaiduAppCommand)
   .command(AcpCommand)
   .command(McpCommand)
   .command(TuiThreadCommand)

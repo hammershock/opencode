@@ -46,7 +46,11 @@ describe("BaiduAuth", () => {
         redirectURI: "http://127.0.0.1:14567/oauth/callback",
         completion: "loopback",
       }),
-    ).rejects.toMatchObject({ kind: "missing-app" })
+    ).rejects.toMatchObject({
+      kind: "missing-app",
+      message:
+        "Baidu Netdisk is not enabled in this build. Reinstall an official opencode-rexd build or contact its distributor.",
+    })
     expect(store.values.size).toBe(0)
   })
 

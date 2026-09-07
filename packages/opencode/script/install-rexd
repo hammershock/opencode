@@ -5,15 +5,19 @@ APP=opencode-rexd
 INSTALL_DIR="${OPENCODE_REXD_INSTALL_DIR:-${HOME}/.local/bin}"
 BINARY=""
 MANIFEST=""
+PROVISION_BAIDU_APP=0
 usage() {
   cat <<EOF
 Install a local OpenCode Rexd build without replacing the upstream opencode command.
 
 Usage:
-  ./script/install-rexd --binary <path> [--manifest <path>] [--install-dir <path>]
+  ./script/install-rexd --binary <path> [--manifest <path>] [--install-dir <path>] [--provision-baidu-app]
 
 An existing opencode-rexd build is replaced. No compatibility copy or rollback
 entrypoint is retained.
+
+--provision-baidu-app reads the release credential JSON only from stdin and
+writes it to the platform secure store after validating the candidate.
 EOF
 }
 
@@ -30,6 +34,10 @@ while [[ $# -gt 0 ]]; do
     --install-dir)
       INSTALL_DIR="${2:-}"
       shift 2
+      ;;
+    --provision-baidu-app)
+      PROVISION_BAIDU_APP=1
+      shift
       ;;
     -h|--help)
       usage
@@ -75,6 +83,13 @@ if [[ -n "$MANIFEST" ]]; then
   cp "$MANIFEST" "$candidate_manifest"
   if ! grep -Fq '"entrypoint": "opencode-rexd"' "$candidate_manifest"; then
     echo "Manifest does not describe the opencode-rexd entrypoint" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$PROVISION_BAIDU_APP" -eq 1 ]]; then
+  if ! "$candidate" __deploy-provision-baidu-app; then
+    echo "Baidu OAuth application provisioning failed; existing install was not changed" >&2
     exit 1
   fi
 fi

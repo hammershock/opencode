@@ -2046,6 +2046,19 @@ export type EffectHttpApiErrorServiceUnavailable = {
   _tag: "ServiceUnavailable"
 }
 
+export type SyncSetupApiError = {
+  name: "SyncSetupError"
+  data:
+    | {
+        kind: "missing-app"
+        message: "Baidu Netdisk is not enabled in this build. Reinstall an official opencode-rexd build or contact its distributor."
+      }
+    | {
+        kind: "bad-request"
+        message: "Sync setup request failed"
+      }
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -6814,6 +6827,15 @@ export type SessionLocationRebindingPortableBindingSnapshot = {
   }
 }
 
+export type SessionLocationRebindingPortableBindingRecoveryResult = {
+  revision: string
+  bindings: {
+    [key: string]: string
+  }
+  resolvedSessionIDs: Array<string>
+  failedSessionIDs: Array<string>
+}
+
 export type SessionLocationRebindingRebindInput = {
   expectedRevision: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
   destination: LocationRef
@@ -6823,6 +6845,70 @@ export type SessionLocationRebindingRebindResult = {
   status: "unchanged" | "rebound"
   revision: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
   warnings: Array<string>
+}
+
+export type SessionLocationRebindingRestoreResult = {
+  target: {
+    id: string
+    status: "unverified"
+    name: string
+    transport: "ssh"
+    connection:
+      | {
+          type: "ssh-config"
+          host: string
+        }
+      | {
+          type: "manual"
+          host: string
+          user: string
+          port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          identityFile?: string
+        }
+    defaultDirectory?: string
+    workspaceRoots: Array<string>
+    command?: {
+      program: string
+      args: Array<string>
+    }
+  }
+  snapshot: {
+    path: string
+    revision: string
+    targets: Array<{
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }>
+    diagnostics: Array<{
+      severity: "error" | "warning"
+      path: string
+      message: string
+      offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+    valid: boolean
+  }
+  resolvedSessionIDs: Array<string>
+  failedSessionIDs: Array<string>
 }
 
 export type EventModelsDevRefreshed = {
@@ -8075,9 +8161,9 @@ export type GlobalSyncInitializeData = {
 
 export type GlobalSyncInitializeErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * SyncSetupApiError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: SyncSetupApiError | InvalidRequestError
 }
 
 export type GlobalSyncInitializeError = GlobalSyncInitializeErrors[keyof GlobalSyncInitializeErrors]
@@ -8138,9 +8224,9 @@ export type GlobalSyncOAuthBeginData = {
 
 export type GlobalSyncOAuthBeginErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * SyncSetupApiError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: SyncSetupApiError | InvalidRequestError
 }
 
 export type GlobalSyncOAuthBeginError = GlobalSyncOAuthBeginErrors[keyof GlobalSyncOAuthBeginErrors]
@@ -8178,9 +8264,9 @@ export type GlobalSyncOAuthCompleteData = {
 
 export type GlobalSyncOAuthCompleteErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * SyncSetupApiError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: SyncSetupApiError | InvalidRequestError
 }
 
 export type GlobalSyncOAuthCompleteError = GlobalSyncOAuthCompleteErrors[keyof GlobalSyncOAuthCompleteErrors]
@@ -8451,9 +8537,9 @@ export type GlobalSyncCreateData = {
 
 export type GlobalSyncCreateErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * SyncSetupApiError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: SyncSetupApiError | InvalidRequestError
 }
 
 export type GlobalSyncCreateError = GlobalSyncCreateErrors[keyof GlobalSyncCreateErrors]
@@ -8534,9 +8620,9 @@ export type GlobalSyncJoinData = {
 
 export type GlobalSyncJoinErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * SyncSetupApiError | InvalidRequestError
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: SyncSetupApiError | InvalidRequestError
 }
 
 export type GlobalSyncJoinError = GlobalSyncJoinErrors[keyof GlobalSyncJoinErrors]
@@ -13877,7 +13963,7 @@ export type V2SessionMessageErrors = {
   /**
    * SessionNotFoundError | MessageNotFoundError
    */
-  404: MessageNotFoundError | SessionNotFoundError
+  404: SessionNotFoundError | MessageNotFoundError
 }
 
 export type V2SessionMessageError = V2SessionMessageErrors[keyof V2SessionMessageErrors]
@@ -15715,9 +15801,9 @@ export type V2TargetCreateErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15822,9 +15908,9 @@ export type V2SessionLocationResolveErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15868,9 +15954,9 @@ export type V2TargetBindingListErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15918,9 +16004,9 @@ export type V2TargetBindingUnbindErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15969,9 +16055,9 @@ export type V2TargetBindingBindErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15986,9 +16072,9 @@ export type V2TargetBindingBindError = V2TargetBindingBindErrors[keyof V2TargetB
 
 export type V2TargetBindingBindResponses = {
   /**
-   * SessionLocationRebinding.PortableBindingSnapshot
+   * SessionLocationRebinding.PortableBindingRecoveryResult
    */
-  200: SessionLocationRebindingPortableBindingSnapshot
+  200: SessionLocationRebindingPortableBindingRecoveryResult
 }
 
 export type V2TargetBindingBindResponse = V2TargetBindingBindResponses[keyof V2TargetBindingBindResponses]
@@ -16016,9 +16102,9 @@ export type V2SessionLocationRebindErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16084,9 +16170,9 @@ export type V2TargetWizardInspectErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16157,9 +16243,9 @@ export type V2TargetWizardCompleteErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16210,9 +16296,9 @@ export type V2TargetRemoveErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16315,9 +16401,9 @@ export type V2TargetUpdateErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16447,9 +16533,9 @@ export type V2TargetRestoreErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16464,69 +16550,9 @@ export type V2TargetRestoreError = V2TargetRestoreErrors[keyof V2TargetRestoreEr
 
 export type V2TargetRestoreResponses = {
   /**
-   * Success
+   * SessionLocationRebinding.RestoreResult
    */
-  200: {
-    target: {
-      id: string
-      status: "unverified"
-      name: string
-      transport: "ssh"
-      connection:
-        | {
-            type: "ssh-config"
-            host: string
-          }
-        | {
-            type: "manual"
-            host: string
-            user: string
-            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-            identityFile?: string
-          }
-      defaultDirectory?: string
-      workspaceRoots: Array<string>
-      command?: {
-        program: string
-        args: Array<string>
-      }
-    }
-    snapshot: {
-      path: string
-      revision: string
-      targets: Array<{
-        id: string
-        status: "unverified"
-        name: string
-        transport: "ssh"
-        connection:
-          | {
-              type: "ssh-config"
-              host: string
-            }
-          | {
-              type: "manual"
-              host: string
-              user: string
-              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-              identityFile?: string
-            }
-        defaultDirectory?: string
-        workspaceRoots: Array<string>
-        command?: {
-          program: string
-          args: Array<string>
-        }
-      }>
-      diagnostics: Array<{
-        severity: "error" | "warning"
-        path: string
-        message: string
-        offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-      }>
-      valid: boolean
-    }
-  }
+  200: SessionLocationRebindingRestoreResult
 }
 
 export type V2TargetRestoreResponse = V2TargetRestoreResponses[keyof V2TargetRestoreResponses]
@@ -16554,9 +16580,9 @@ export type V2TargetTestErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16610,9 +16636,9 @@ export type V2TargetPrepareErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -16733,9 +16759,9 @@ export type V2TargetLegacyImportErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */

@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
 import type { GlobalSyncDiscoverResponse } from "@opencode-ai/sdk/v2"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
+import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 import { hostname } from "node:os"
 import openBrowser from "open"
 import { createSimpleContext } from "./helper"
@@ -37,6 +38,22 @@ const initial: SyncSettingsViewModel = {
 
 export function unassignedFingerprint(spaceID: string, sessionIDs: readonly string[]) {
   return `${spaceID}\n${sessionIDs.slice().sort().join("\n")}`
+}
+
+const MISSING_APP_MESSAGE = BaiduAuth.MISSING_APP_MESSAGE
+
+export function syncOperationFailure(error: unknown) {
+  return hasMissingApp(error, 0) ? MISSING_APP_MESSAGE : "Sync operation failed"
+}
+
+function hasMissingApp(value: unknown, depth: number): boolean {
+  if (depth > 4) return false
+  if (typeof value === "string") return value === "missing-app" || value.includes(MISSING_APP_MESSAGE)
+  if (!value || typeof value !== "object") return false
+  const record = value as Record<string, unknown>
+  return [record.kind, record.code, record.message, record.data, record.error, record.cause, record.body].some((item) =>
+    hasMissingApp(item, depth + 1),
+  )
 }
 
 export function createLoopbackCallback(timeout = 120_000) {
@@ -458,9 +475,10 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         await refresh()
       },
       promptUnassigned: assignPrompt,
-      onError: () => {
-        setModel((current) => ({ ...current, state: "attention", detail: "Sync operation failed" }))
-        toast.show({ message: "Sync operation failed", variant: "error" })
+      onError: (error) => {
+        const message = syncOperationFailure(error)
+        setModel((current) => ({ ...current, state: "attention", detail: message }))
+        toast.show({ message, variant: "error" })
         void refresh(true)
       },
     }

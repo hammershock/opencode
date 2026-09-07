@@ -26,6 +26,7 @@ import { SyncAttachment } from "./attachment"
 import { SyncOwnership } from "./ownership"
 import { SyncCodec } from "./codec"
 import { SyncMembership } from "./membership"
+import { SyncProvider } from "./provider"
 import { SyncState } from "./state"
 import { TargetBindingRegistry } from "../target-binding-registry"
 import { SessionActivity } from "../session/activity"
@@ -100,6 +101,7 @@ export interface Interface {
   readonly unassigned: () => Effect.Effect<readonly string[], ControlError>
   readonly logout: () => Effect.Effect<void, ControlError>
   readonly switchAccount: (input: SyncSetup.CompleteInput) => Effect.Effect<SyncState.State, ControlError>
+  readonly join: (input: SyncSetup.JoinInput) => Effect.Effect<SyncState.State, SyncSetup.SetupError>
   readonly devices: () => Effect.Effect<SyncDevice.State, ControlError>
   readonly updateDevice: (input: typeof DeviceUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
   readonly exportKey: () => Effect.Effect<typeof Recovery.Type, ControlError>
@@ -110,8 +112,18 @@ export interface Interface {
 }
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncControl") {}
 
-const layer = Layer.effect(
-  Service,
+export type LayerOptions = {
+  readonly secureStore?: () => Promise<SyncSecureStore.Store>
+  readonly provider?: (input: {
+    readonly store: SyncSecureStore.Store
+    readonly deviceID: string
+    readonly remoteRoot: string
+  }) => SyncProvider.Adapter
+}
+
+export const layerWith = (input: LayerOptions = {}) => Layer.effect(Service, make(input))
+
+const make = (input: LayerOptions) =>
   Effect.gen(function* () {
     const setup = yield* SyncSetup.Service
     const eventStore = yield* SyncEventStore.Service
@@ -164,7 +176,7 @@ const layer = Layer.effect(
       const identity = `${config.namespaceID}:${config.deviceID}:${config.encryption}`
       if (engine && engineIdentity === identity) return engine
       const secure = yield* Effect.tryPromise({
-        try: () => SyncSecureStore.detect(),
+        try: () => (input.secureStore ?? SyncSecureStore.detect)(),
         catch: () => new ControlError({ kind: "locked" }),
       })
       const credential = yield* Effect.tryPromise({
@@ -173,7 +185,9 @@ const layer = Layer.effect(
       })
       if (!credential) return yield* new ControlError({ kind: "locked" })
       const codec = yield* codecFor(config, secure)
-      const provider = BaiduSyncProvider.adapter({ store: secure, deviceID: config.deviceID, root: config.remoteRoot })
+      const provider = input.provider
+        ? input.provider({ store: secure, deviceID: config.deviceID, remoteRoot: config.remoteRoot })
+        : BaiduSyncProvider.adapter({ store: secure, deviceID: config.deviceID, root: config.remoteRoot })
       const attachment = SyncAttachment.make({ codec, namespaceID: config.namespaceID, provider })
       engine = SyncRuntime.make({
         config: {
@@ -436,6 +450,20 @@ const layer = Layer.effect(
       scheduler?.stop()
       return state
     })
+    const join = Effect.fn("SyncControl.join")(function* (input: SyncSetup.JoinInput) {
+      const previous = yield* setup.config()
+      const state = yield* setup.join(input)
+      const active = SyncState.active(state)
+      if (
+        previous?.namespaceID === input.namespaceID &&
+        previous.encryption === "aes-256-gcm" &&
+        active?.namespaceID === input.namespaceID
+      ) {
+        engine = undefined
+        restartScheduler(active)
+      }
+      return state
+    })
     const deviceState = () =>
       setup.config().pipe(
         Effect.mapError(() => new ControlError({ kind: "storage" })),
@@ -563,14 +591,16 @@ const layer = Layer.effect(
       unassigned,
       logout,
       switchAccount,
+      join,
       devices: deviceState,
       updateDevice,
       exportKey,
       sessions,
       hydrate,
     }
-  }),
-)
+  })
+
+const layer = layerWith()
 
 export const node = makeGlobalNode({
   service: Service,

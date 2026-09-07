@@ -884,6 +884,7 @@ test("direct footer keeps slash autocomplete separate from User Shell completion
       { text: "/rev", parts: [], mode: "shell" },
     ])
     expect(app.captureCharFrame()).toContain("SHELL")
+    expect(app.captureCharFrame()).toContain("interactive: Terminal")
   } finally {
     app.cleanup()
   }

@@ -1845,6 +1845,7 @@ export function Prompt(props: PromptProps) {
                   <text fg={theme.text}>
                     {shellExitShortcut()} <span style={{ fg: theme.textMuted }}>exit shell mode</span>
                   </text>
+                  <text fg={theme.textMuted}>interactive: Terminal panel</text>
                 </Match>
               </Switch>
             </box>

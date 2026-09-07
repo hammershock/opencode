@@ -614,6 +614,9 @@ const layer = Layer.effect(
                 provider: selected,
                 onOutput: append,
               })
+              if (result.timedOut) {
+                yield* append(`\n\n<metadata>\n${UserShellRuntime.TIMEOUT_GUIDANCE}\n</metadata>`)
+              }
               return result.exitCode
             }).pipe(Effect.scoped, Effect.orDie),
           ).pipe(Effect.exit)

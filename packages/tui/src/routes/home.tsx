@@ -30,6 +30,10 @@ const placeholder = {
   shell: ["ls -la", "git status", "pwd"],
 }
 
+export function openQuickStartSync(open: (view: "overview") => Promise<unknown> | unknown) {
+  return open("overview")
+}
+
 export function Home() {
   const pluginRuntime = usePluginRuntime()
   const sync = useSync()
@@ -150,7 +154,9 @@ export function Home() {
           </pluginRuntime.Slot>
         </box>
         <box width="100%" maxWidth={promptMaxWidth()} justifyContent="flex-end" flexShrink={0}>
-          <text fg={syncColor()}>Sync {syncSettings.status()}</text>
+          <text fg={syncColor()} onMouseUp={() => void openQuickStartSync(syncSettings.open)}>
+            Sync {syncSettings.status()}
+          </text>
         </box>
         <pluginRuntime.Slot name="home_bottom" />
         <box flexGrow={1} minHeight={0} />

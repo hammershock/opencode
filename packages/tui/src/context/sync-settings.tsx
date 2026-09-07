@@ -1,5 +1,5 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
-import type { GlobalSyncDiscoverResponse, GlobalSyncStateResponse } from "@opencode-ai/sdk/v2"
+import type { EventSyncTransferUpdated, GlobalSyncDiscoverResponse, GlobalSyncStateResponse } from "@opencode-ai/sdk/v2"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
@@ -149,6 +149,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     const dialog = useDialog()
     const toast = useToast()
     const [model, setModel] = createSignal(initial)
+    const [transfer, setTransfer] = createSignal<EventSyncTransferUpdated["properties"]["progress"]>()
     let discovered: GlobalSyncDiscoverResponse["spaces"] = []
     let oauth:
       | {
@@ -161,7 +162,20 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     let bindingRevision = ""
     let remoteRefresh: Promise<void> | undefined
 
-    onCleanup(() => loopback?.close())
+    const unsubscribe = sdk.event.on("event", (event) => {
+      if (event.payload.type === "server.connected") {
+        setTransfer(undefined)
+        return
+      }
+      if (event.payload.type !== "sync.transfer.updated") return
+      const progress = event.payload.properties.progress
+      setTransfer(progress.state === "active" ? progress : undefined)
+    })
+
+    onCleanup(() => {
+      loopback?.close()
+      unsubscribe()
+    })
 
     type LocalState = GlobalSyncStateResponse | null | undefined
 
@@ -605,6 +619,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
 
     return {
       model,
+      transfer,
       status: () => syncStatus(model().state),
       async open(view: OpenView = "overview") {
         render(view)

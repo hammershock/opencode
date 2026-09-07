@@ -5,6 +5,7 @@ import { SyncChunk } from "./chunk"
 import { SyncCrypto } from "./crypto"
 import { SyncProvider } from "./provider"
 import { SyncCodec } from "./codec"
+import { SyncTransfer } from "./transfer"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true })
@@ -86,6 +87,7 @@ export function make(input: {
   readonly codec?: SyncCodec.Interface
   readonly namespaceID: string
   readonly provider: SyncProvider.Adapter
+  readonly transfer?: SyncTransfer.Observer
 }): Interface {
   const codec = input.codec ?? (input.rootKey ? SyncCodec.encrypted(input.rootKey) : undefined)
   if (!codec) throw new Error("SyncAttachment requires a codec or root key")
@@ -118,7 +120,10 @@ export function make(input: {
       }
       if (await verify()) return
       try {
-        await input.provider.uploadAtomic(path, await seal(path, type, plaintext), { type: "absent" }, signal)
+        const bytes = await seal(path, type, plaintext)
+        await input.transfer?.start("upload", "attachments")
+        await input.provider.uploadAtomic(path, bytes, { type: "absent" }, signal)
+        await input.transfer?.complete("upload", "attachments", bytes.length)
       } catch (cause) {
         if (!(cause instanceof SyncProvider.ProviderError) || cause.kind !== "conflict" || !(await verify()))
           throw cause
@@ -143,7 +148,9 @@ export function make(input: {
     const path = manifestPath(objectID, codec.suffix)
     const info = await input.provider.stat(path, signal)
     if (!info) throw new SyncChunk.InvalidChunkError("Attachment manifest is missing")
+    await input.transfer?.start("download", "attachments")
     const downloaded = await input.provider.download(path, info.version, signal)
+    await input.transfer?.complete("download", "attachments", downloaded.bytes.length)
     const manifest = Schema.decodeUnknownSync(SyncChunk.Manifest)(
       JSON.parse(decoder.decode(await open(path, "manifest", downloaded.bytes))),
     )
@@ -154,7 +161,10 @@ export function make(input: {
         const path = chunkPath(id, codec.suffix)
         const info = await input.provider.stat(path, signal)
         if (!info) throw new SyncChunk.InvalidChunkError("Attachment chunk is missing")
-        return open(path, "chunk", (await input.provider.download(path, info.version, signal)).bytes)
+        await input.transfer?.start("download", "attachments")
+        const downloaded = await input.provider.download(path, info.version, signal)
+        await input.transfer?.complete("download", "attachments", downloaded.bytes.length)
+        return open(path, "chunk", downloaded.bytes)
       },
     })
   }

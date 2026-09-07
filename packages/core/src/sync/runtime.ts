@@ -7,6 +7,7 @@ import { SyncEventStore } from "./event-store"
 import { SyncProvider } from "./provider"
 import { NonNegativeInt } from "../schema"
 import { SyncCodec } from "./codec"
+import { SyncTransfer } from "./transfer"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true })
@@ -99,6 +100,7 @@ export function make(input: {
   readonly revoked?: () => Effect.Effect<readonly SyncEvent.DeviceID[], unknown>
   readonly deviceProjector?: (head: Head) => Effect.Effect<void, unknown>
   readonly attachment?: AttachmentPipeline
+  readonly transfer?: SyncTransfer.Observer
   readonly now?: () => number
   readonly owner?: string
 }) {
@@ -138,7 +140,9 @@ export function make(input: {
         const bytes = await encode(codec, "event", segmentContext(segment.deviceID, segment.generation, path), wire)
         const existing = await input.provider.stat(path, signal)
         if (existing) {
+          await input.transfer?.start("download", "sessions")
           const downloaded = await input.provider.download(path, existing.version, signal)
+          await input.transfer?.complete("download", "sessions", downloaded.bytes.length)
           const committed = await decode(
             (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
             codec,
@@ -147,7 +151,11 @@ export function make(input: {
             downloaded.bytes,
           )
           if (JSON.stringify(committed) !== JSON.stringify(wire)) throw new Error("Remote segment conflict")
-        } else await input.provider.uploadAtomic(path, bytes, { type: "absent" }, signal)
+        } else {
+          await input.transfer?.start("upload", "sessions")
+          await input.provider.uploadAtomic(path, bytes, { type: "absent" }, signal)
+          await input.transfer?.complete("upload", "sessions", bytes.length)
+        }
         await Effect.runPromise(input.store.acknowledge(segment.id))
       }
       const generation = await Effect.runPromise(input.store.head(input.config.deviceID))
@@ -252,7 +260,9 @@ export function make(input: {
           const path = segmentPath(head.deviceID, generation, codec.suffix)
           const object = await input.provider.stat(path, signal)
           if (!object) throw new Error("Remote sync segment is missing")
+          await input.transfer?.start("download", "sessions")
           const downloaded = await input.provider.download(path, object.version, signal)
+          await input.transfer?.complete("download", "sessions", downloaded.bytes.length)
           const segment = await decode(
             (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
             codec,
@@ -335,25 +345,32 @@ export function make(input: {
     if (direction === "upload") return (uploadFlight ??= uploadOnce(signal).finally(() => (uploadFlight = undefined)))
     return (pullFlight ??= pullOnce(signal).finally(() => (pullFlight = undefined)))
   }
+  const settle = (run: () => Promise<void>) => run().finally(() => input.transfer?.finish())
 
   return {
     status: () => status,
     enable: (enabled: boolean) => void (status = { ...status, enabled }),
     upload: (signal?: AbortSignal) =>
-      Effect.tryPromise(async () => {
-        await coalesce("pull", signal)
-        await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
-        await coalesce("upload", signal)
-      }),
-    pull: (signal?: AbortSignal) => Effect.tryPromise(() => coalesce("pull", signal)),
+      Effect.tryPromise(() =>
+        settle(async () => {
+          await coalesce("pull", signal)
+          await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
+          await coalesce("upload", signal)
+        }),
+      ),
+    pull: (signal?: AbortSignal) => Effect.tryPromise(() => settle(() => coalesce("pull", signal))),
     hydrate: (signal?: AbortSignal) =>
-      Effect.tryPromise(() => (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))),
+      Effect.tryPromise(() =>
+        settle(() => (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))),
+      ),
     now: (signal?: AbortSignal) =>
-      Effect.tryPromise(async () => {
-        await coalesce("pull", signal)
-        await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
-        await coalesce("upload", signal)
-      }),
+      Effect.tryPromise(() =>
+        settle(async () => {
+          await coalesce("pull", signal)
+          await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
+          await coalesce("upload", signal)
+        }),
+      ),
   }
 }
 

@@ -27,9 +27,11 @@ import { SyncOwnership } from "./ownership"
 import { SyncCodec } from "./codec"
 import { SyncMembership } from "./membership"
 import { SyncState } from "./state"
+import { SyncTransfer } from "./transfer"
 import { TargetBindingRegistry } from "../target-binding-registry"
 import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
+import { SyncTransferEvent } from "@opencode-ai/schema/sync-transfer-event"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -174,7 +176,10 @@ const layer = Layer.effect(
       if (!credential) return yield* new ControlError({ kind: "locked" })
       const codec = yield* codecFor(config, secure)
       const provider = BaiduSyncProvider.adapter({ store: secure, deviceID: config.deviceID, root: config.remoteRoot })
-      const attachment = SyncAttachment.make({ codec, namespaceID: config.namespaceID, provider })
+      const transfer = SyncTransfer.make((progress) =>
+        Effect.runPromise(events.publish(SyncTransferEvent.Updated, { progress })).then(() => undefined),
+      )
+      const attachment = SyncAttachment.make({ codec, namespaceID: config.namespaceID, provider, transfer })
       engine = SyncRuntime.make({
         config: {
           deviceID: SyncEvent.DeviceID.make(config.deviceID),
@@ -183,6 +188,7 @@ const layer = Layer.effect(
         },
         codec,
         provider,
+        transfer,
         store,
         projector: (deviceID) =>
           SessionSync.projector(

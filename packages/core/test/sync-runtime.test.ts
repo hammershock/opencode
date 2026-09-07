@@ -7,6 +7,8 @@ import { SyncRuntime } from "@opencode-ai/core/sync/runtime"
 import { SyncCodec } from "@opencode-ai/core/sync/codec"
 import { SyncAttachment } from "@opencode-ai/core/sync/attachment"
 import { SessionSync } from "@opencode-ai/core/sync/session"
+import { SyncTransfer } from "@opencode-ai/core/sync/transfer"
+import type { SyncTransferEvent } from "@opencode-ai/schema/sync-transfer-event"
 
 function provider() {
   const files = new Map<string, { bytes: Uint8Array; version: number }>()
@@ -106,6 +108,7 @@ describe("SyncRuntime", () => {
       data: { title: "visible title" },
     })
     const local = store(id, event)
+    const progress: SyncTransferEvent.Progress[] = []
     const runtime = SyncRuntime.make({
       config: { deviceID: id, enabled: true },
       codec: SyncCodec.plaintext(),
@@ -114,9 +117,34 @@ describe("SyncRuntime", () => {
       projector: { project: () => Effect.void, delete: () => Effect.void },
       metadata: () => Effect.succeed([]),
       metadataProjector: { apply: () => Effect.void },
+      transfer: SyncTransfer.make(async (value) => void progress.push(value)),
     })
     await Effect.runPromise(runtime.upload())
     expect([...remote.files.keys()].some((item) => item.endsWith(".json"))).toBeTrue()
+    expect(progress).toEqual([
+      { state: "active", direction: "upload", phase: "sessions" },
+      expect.objectContaining({ state: "active", direction: "upload", phase: "sessions", items: 1 }),
+      { state: "idle" },
+    ])
+  })
+
+  test("does not report routine head-only polling as a transfer", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("quiet")
+    const progress: SyncTransferEvent.Progress[] = []
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: store(id).service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+      transfer: SyncTransfer.make(async (value) => void progress.push(value)),
+    })
+
+    await Effect.runPromise(runtime.now())
+    expect(progress).toEqual([])
   })
 
   test("uploads encrypted heads and segments, then hydrates metadata and events", async () => {

@@ -70,6 +70,7 @@ export type Event =
   | EventQuestionV2Replied
   | EventQuestionV2Rejected
   | EventTodoUpdated
+  | EventSyncTransferUpdated
   | EventLspUpdated
   | EventPermissionAsked
   | EventPermissionReplied
@@ -1395,6 +1396,23 @@ export type GlobalEvent = {
         properties: {
           sessionID: string
           todos: Array<Todo>
+        }
+      }
+    | {
+        id: string
+        type: "sync.transfer.updated"
+        properties: {
+          progress:
+            | {
+                state: "idle"
+              }
+            | {
+                state: "active"
+                direction: "upload" | "download"
+                phase: "sessions" | "attachments"
+                items?: number
+                bytes?: number
+              }
         }
       }
     | {
@@ -3052,6 +3070,7 @@ export type V2Event =
   | QuestionV2Replied
   | QuestionV2Rejected
   | TodoUpdated
+  | SyncTransferUpdated
   | LspUpdated
   | PermissionAsked
   | PermissionReplied
@@ -5918,6 +5937,33 @@ export type TodoUpdated = {
   }
 }
 
+export type SyncTransferUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "sync.transfer.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    progress:
+      | {
+          state: "idle"
+        }
+      | {
+          state: "active"
+          direction: "upload" | "download"
+          phase: "sessions" | "attachments"
+          items?: number
+          bytes?: number
+        }
+  }
+}
+
 export type LspUpdated = {
   id: string
   metadata?: {
@@ -7278,6 +7324,24 @@ export type EventTodoUpdated = {
   properties: {
     sessionID: string
     todos: Array<Todo>
+  }
+}
+
+export type EventSyncTransferUpdated = {
+  id: string
+  type: "sync.transfer.updated"
+  properties: {
+    progress:
+      | {
+          state: "idle"
+        }
+      | {
+          state: "active"
+          direction: "upload" | "download"
+          phase: "sessions" | "attachments"
+          items?: number
+          bytes?: number
+        }
   }
 }
 

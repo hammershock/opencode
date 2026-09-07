@@ -125,7 +125,7 @@ async function completeRoots(
   return {
     value: value.slice(0, start) + leading + result.value,
     cursor: start + leading.length + result.cursor,
-    candidates: result.candidates,
+    candidates: result.candidates.map((candidate) => value.slice(0, start) + leading + candidate),
   }
 }
 

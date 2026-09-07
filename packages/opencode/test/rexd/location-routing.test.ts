@@ -286,6 +286,58 @@ describe("Rexd Location routing contract", () => {
     expect(completion.map((item) => item.value)).toEqual(["remote.txt", "remote-dir/"])
   })
 
+  test("remote user shell loads native completion on the target", async () => {
+    const executed: string[] = []
+    const process = {
+      runShell: (command: string) =>
+        Effect.sync(() => {
+          executed.push(command)
+          const output = Buffer.from("__OPENCODE_NATIVE__\t--format=json\n")
+          return {
+            command,
+            exitCode: 0,
+            output,
+            stdout: output,
+            stderr: Buffer.alloc(0),
+            outputTruncated: false,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          }
+        }),
+    } as LocationProcess.Interface
+    const filesystem = FileSystem.Service.of({
+      list: () => Effect.succeed([]),
+      find: () => Effect.succeed([]),
+      glob: () => Effect.succeed([]),
+      grep: () => Effect.succeed([]),
+      read: () => Effect.die("not used"),
+      directoryStatus: () => Effect.die("not used"),
+      ensureDirectory: () => Effect.die("not used"),
+    })
+    const location = Location.Service.of({
+      target: { type: "rexd", targetID },
+      directory: AbsolutePath.make("/workspace"),
+      workspaceID: "workspace" as never,
+      project: { id: "project" as never, directory: AbsolutePath.make("/workspace") },
+    })
+    const shell = makeUserShellProvider(process, filesystem, location)
+    const completion = await Effect.runPromise(
+      shell.complete({
+        input: "git --fo",
+        cursor: 8,
+        cwd: "/workspace",
+        environment: { SHELL: "/bin/bash" },
+      }),
+    )
+    expect(executed[0]).toContain("/bin/bash")
+    expect(completion).toContainEqual({
+      value: "--format=json",
+      display: "--format=json",
+      replacement: { start: 4, end: 8 },
+      kind: "option",
+    })
+  })
+
   test("target probe reports protocol stage without leaking a thrown failure", async () => {
     const target = {
       id: targetID,

@@ -1,7 +1,7 @@
 import { TextareaRenderable, TextAttributes } from "@opentui/core"
 import { useTheme } from "../context/theme"
 import { useDialog, type DialogContext } from "./dialog"
-import { Show, createEffect, createSignal, onMount, type JSX } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onMount, type JSX } from "solid-js"
 import { Spinner } from "../component/spinner"
 import { useTuiConfig } from "../config"
 import { useBindings, useCommandShortcut } from "../keymap"
@@ -28,9 +28,9 @@ export type DialogPromptProps = {
   onCancel?: () => void
 }
 
-export function compactPromptCandidates(candidates: string[], limit = 12) {
-  if (candidates.length <= limit) return candidates
-  return [...candidates.slice(0, limit - 1), `… ${candidates.length - limit + 1} more matches`]
+export function promptCandidateWindow(candidates: string[], selected: number, limit = 8) {
+  const start = Math.max(0, Math.min(selected - limit + 1, candidates.length - limit))
+  return { start, items: candidates.slice(start, start + limit) }
 }
 
 export function DialogPrompt(props: DialogPromptProps) {
@@ -41,13 +41,23 @@ export function DialogPrompt(props: DialogPromptProps) {
   const [textareaTarget, setTextareaTarget] = createSignal<TextareaRenderable>()
   const [completing, setCompleting] = createSignal(false)
   const [candidates, setCandidates] = createSignal<string[]>([])
-  const visibleCandidates = () => compactPromptCandidates(candidates())
+  const [selected, setSelected] = createSignal(0)
+  const visibleCandidates = createMemo(() => promptCandidateWindow(candidates(), selected()))
   let textarea: TextareaRenderable
   let completedValue: string | undefined
 
   function confirm() {
     if (props.busy) return
+    if (candidates().length) return apply(candidates()[selected()]!)
     props.onConfirm?.(textarea.plainText)
+  }
+
+  function apply(value: string) {
+    completedValue = value
+    textarea.setText(value)
+    textarea.cursorOffset = Bun.stringWidth(value)
+    setCandidates([])
+    setSelected(0)
   }
 
   async function complete() {
@@ -55,12 +65,9 @@ export function DialogPrompt(props: DialogPromptProps) {
     setCompleting(true)
     const result = await props.complete(textarea.plainText, textarea.cursorOffset).finally(() => setCompleting(false))
     if (!result) return setCandidates([])
-    if (result.value !== textarea.plainText) {
-      completedValue = result.value
-      textarea.setText(result.value)
-      textarea.cursorOffset = result.cursor
-    }
+    if (result.candidates.length === 1) return apply(result.candidates[0]!)
     setCandidates(result.candidates)
+    setSelected(0)
   }
 
   useBindings(() => ({
@@ -78,7 +85,39 @@ export function DialogPrompt(props: DialogPromptProps) {
     ],
     bindings: [
       ...tuiConfig.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
-      ...(props.complete ? [{ key: "tab", desc: "Complete path", group: "Dialog", cmd: complete }] : []),
+      ...(props.complete
+        ? [
+            { key: "tab", desc: "Complete path", group: "Dialog", cmd: complete },
+            {
+              key: "up",
+              desc: "Previous completion",
+              group: "Dialog",
+              cmd: () => {
+                if (!candidates().length) return false
+                setSelected((selected() - 1 + candidates().length) % candidates().length)
+              },
+            },
+            {
+              key: "down",
+              desc: "Next completion",
+              group: "Dialog",
+              cmd: () => {
+                if (!candidates().length) return false
+                setSelected((selected() + 1) % candidates().length)
+              },
+            },
+            {
+              key: "escape",
+              desc: "Close completions",
+              group: "Dialog",
+              cmd: () => {
+                if (!candidates().length) return false
+                setCandidates([])
+                setSelected(0)
+              },
+            },
+          ]
+        : []),
     ],
   }))
 
@@ -149,9 +188,19 @@ export function DialogPrompt(props: DialogPromptProps) {
           <Spinner color={theme.textMuted}>Reading directories…</Spinner>
         </Show>
         <Show when={candidates().length > 0}>
-          <text fg={theme.textMuted} wrapMode="word">
-            {visibleCandidates().join("\n")}
-          </text>
+          <box flexDirection="column">
+            <For each={visibleCandidates().items}>
+              {(candidate, index) => (
+                <text fg={visibleCandidates().start + index() === selected() ? theme.primary : theme.textMuted}>
+                  {visibleCandidates().start + index() === selected() ? "› " : "  "}
+                  {candidate}
+                </text>
+              )}
+            </For>
+            <text fg={theme.textMuted}>
+              {selected() + 1}/{candidates().length}
+            </text>
+          </box>
         </Show>
       </box>
       <box paddingBottom={1} gap={1} flexDirection="row">

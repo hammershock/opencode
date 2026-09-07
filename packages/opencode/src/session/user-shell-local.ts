@@ -133,12 +133,12 @@ function unquote(input: string) {
   return input.replaceAll(/\\(.)/g, "$1")
 }
 
-function encoded(value: string) {
+export function encodeCompletionValue(value: string) {
   return /[\s'"\\]/.test(value) ? value.replaceAll(/([\s'"\\])/g, "\\$1") : value
 }
 
 function item(value: string, range: { start: number; end: number }, kind: CompletionKind): CompletionCandidate {
-  return { value: encoded(value), display: value, replacement: range, kind }
+  return { value: encodeCompletionValue(value), display: value, replacement: range, kind }
 }
 
 function pathCandidates(cwd: string, token: string, range: { start: number; end: number }, fs: FSUtil.Interface) {
@@ -181,14 +181,8 @@ function nameCandidates(
 ) {
   if (token.includes("/")) return Effect.succeed([])
   const name = Shell.name(shell)
-  const discovery =
-    name === "zsh"
-      ? `print -r -- __OPENCODE_ALIAS__; print -rl -- \${(k)aliases}; print -r -- __OPENCODE_FUNCTION__; print -rl -- \${(k)functions}; print -r -- __OPENCODE_COMMAND__; print -rl -- \${(k)commands}`
-      : name === "bash"
-        ? `printf '%s\\n' __OPENCODE_ALIAS__; compgen -A alias; printf '%s\\n' __OPENCODE_FUNCTION__; compgen -A function; printf '%s\\n' __OPENCODE_COMMAND__; compgen -A command`
-        : `printf '%s\\n' __OPENCODE_COMMAND__; command -v -a 2>/dev/null`
-  const native = name === "bash" ? bashCompletion(input, cursor) : name === "zsh" ? zshCompletion(input, cursor) : ""
-  const args = name === "zsh" || name === "bash" ? ["-ic", `${discovery}; ${native}`] : ["-c", discovery]
+  const script = completionScript(shell, input, cursor)
+  const args = name === "zsh" || name === "bash" ? ["-ic", script] : ["-c", script]
   const command = ChildProcess.make(shell, args, {
     cwd,
     extendEnv: true,
@@ -201,30 +195,51 @@ function nameCandidates(
     const handle = yield* spawner.spawn(command)
     const text = yield* Stream.decodeText(handle.stdout).pipe(Stream.mkString)
     yield* handle.exitCode
-    let kind: CompletionKind = "command"
-    return text.split(/\r?\n/).flatMap((candidate) => {
-      if (candidate.startsWith("__OPENCODE_NATIVE__\t"))
-        return [nativeItem(candidate.slice("__OPENCODE_NATIVE__\t".length), range)]
-      if (candidate === "__OPENCODE_ALIAS__") {
-        kind = "alias"
-        return []
-      }
-      if (candidate === "__OPENCODE_FUNCTION__") {
-        kind = "function"
-        return []
-      }
-      if (candidate === "__OPENCODE_COMMAND__") {
-        kind = "command"
-        return []
-      }
-      return candidate.startsWith(token) ? [item(candidate, range, kind)] : []
-    })
+    return parseCompletionOutput(text, token, range)
   }).pipe(
     Effect.scoped,
     Effect.timeoutOption(Duration.millis(1500)),
     Effect.map(Option.getOrElse(() => [])),
     Effect.catch(() => Effect.succeed([])),
   )
+}
+
+export function completionScript(shell: string, input: string, cursor: number) {
+  const name = Shell.name(shell)
+  const discovery =
+    name === "zsh"
+      ? `print -r -- __OPENCODE_ALIAS__; print -rl -- \${(k)aliases}; print -r -- __OPENCODE_FUNCTION__; print -rl -- \${(k)functions}; print -r -- __OPENCODE_COMMAND__; print -rl -- \${(k)commands}`
+      : name === "bash"
+        ? `printf '%s\\n' __OPENCODE_ALIAS__; compgen -A alias; printf '%s\\n' __OPENCODE_FUNCTION__; compgen -A function; printf '%s\\n' __OPENCODE_COMMAND__; compgen -A command`
+        : `printf '%s\\n' __OPENCODE_COMMAND__; command -v -a 2>/dev/null`
+  const native = name === "bash" ? bashCompletion(input, cursor) : name === "zsh" ? zshCompletion(input, cursor) : ""
+  return `${discovery}; ${native}`
+}
+
+export function completionCommand(shell: string, input: string, cursor: number) {
+  const mode = Shell.name(shell) === "bash" || Shell.name(shell) === "zsh" ? "-ic" : "-c"
+  return `${quote(shell)} ${mode} ${quote(completionScript(shell, input, cursor))}`
+}
+
+export function parseCompletionOutput(text: string, token: string, range: { start: number; end: number }) {
+  let kind: CompletionKind = "command"
+  return text.split(/\r?\n/).flatMap((candidate) => {
+    if (candidate.startsWith("__OPENCODE_NATIVE__\t"))
+      return [nativeItem(candidate.slice("__OPENCODE_NATIVE__\t".length), range)]
+    if (candidate === "__OPENCODE_ALIAS__") {
+      kind = "alias"
+      return []
+    }
+    if (candidate === "__OPENCODE_FUNCTION__") {
+      kind = "function"
+      return []
+    }
+    if (candidate === "__OPENCODE_COMMAND__") {
+      kind = "command"
+      return []
+    }
+    return candidate.startsWith(token) ? [item(candidate, range, kind)] : []
+  })
 }
 
 function bashCompletion(input: string, cursor: number) {

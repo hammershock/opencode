@@ -39,6 +39,47 @@ describe("SessionSync", () => {
     expect(enqueued).toEqual(["owned", "owned"])
   })
 
+  test("an explicit persisted unassignment overrides stale ownership but a deleted row still routes its tombstone", async () => {
+    const spaces: string[] = []
+    const deleted: string[] = []
+    const store = {
+      scope: (spaceID: string) => {
+        spaces.push(spaceID)
+        return store
+      },
+      enqueue: () => Effect.void,
+      delete: (value: SyncEvent.Tombstone) => Effect.sync(() => void deleted.push(value.sessionID)),
+    } as any
+    const owner = {
+      assign: () => Effect.void,
+      get: () => Effect.succeed({ spaceID: "old-space" }),
+    }
+    const updated = {
+      id: "updated",
+      type: "session.updated",
+      durable: { aggregateID: "session", seq: 2, version: 1 },
+      data: { sessionID: "session" },
+    }
+    await Effect.runPromise(
+      SessionSync.captureOwned(owner as any, store, updated, 10, () =>
+        Effect.succeed({ exists: true } as const),
+      ),
+    )
+    expect(spaces).toEqual([])
+
+    await Effect.runPromise(
+      SessionSync.captureOwned(
+        owner as any,
+        store,
+        { ...updated, id: "deleted", type: "session.deleted", durable: { ...updated.durable, seq: 3 } },
+        11,
+        () => Effect.succeed({ exists: false } as const),
+      ),
+    )
+    expect(spaces).toEqual(["old-space"])
+    expect(deleted).toEqual(["session"])
+  })
+
   test("captures ordinary durable events and maps deletion to a permanent tombstone", async () => {
     const calls: unknown[] = []
     const store = {

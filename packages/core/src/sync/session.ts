@@ -10,7 +10,8 @@ import { makeGlobalNode } from "../effect/app-node"
 import { SyncOwnership } from "./ownership"
 import { Database } from "../database/database"
 import { SessionTable } from "../session/sql"
-import { isNotNull } from "drizzle-orm"
+import { SessionV2 } from "../session"
+import { eq, isNotNull } from "drizzle-orm"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 
 type DurablePayload = {
@@ -19,6 +20,10 @@ type DurablePayload = {
   readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
   readonly data: Record<string, unknown>
 }
+
+export type PersistedOwnership =
+  | { readonly exists: true; readonly spaceID?: string }
+  | { readonly exists: false }
 
 /**
  * Captures the authoritative durable event stream. Deletion is translated to
@@ -53,12 +58,26 @@ export function captureOwned(
   store: SyncEventStore.Interface,
   payload: DurablePayload,
   createdAt = Date.now(),
+  persisted?: (sessionID: string) => Effect.Effect<PersistedOwnership, unknown>,
 ) {
   return Effect.gen(function* () {
     if (!payload.durable) return
     const createdSpaceID = sessionCreatedSpace(payload)
     if (createdSpaceID) yield* ownership.assign(payload.durable.aggregateID, createdSpaceID, createdAt)
-    const owned = createdSpaceID ? { spaceID: createdSpaceID } : yield* ownership.get(payload.durable.aggregateID)
+    const current = createdSpaceID || !persisted ? undefined : yield* persisted(payload.durable.aggregateID)
+    // A surviving Session row is the canonical live membership record. In
+    // particular, an explicit NULL must override a stale cross-database
+    // ownership row left behind by a crash during Leave/Remove.
+    if (current?.exists && !current.spaceID) return
+    if (current?.exists && current.spaceID)
+      yield* ownership.assign(payload.durable.aggregateID, current.spaceID, createdAt)
+    // Once a deleted Session row is gone, durable ownership remains necessary
+    // to route its final deletion event/tombstone to the original space.
+    const owned = createdSpaceID
+      ? { spaceID: createdSpaceID }
+      : current?.exists
+        ? { spaceID: current.spaceID! }
+        : yield* ownership.get(payload.durable.aggregateID)
     if (!owned) return
     yield* capture(store.scope(owned.spaceID), payload, createdAt)
   })
@@ -253,6 +272,19 @@ export const captureLayer = Layer.effectDiscard(
     const store = yield* SyncEventStore.Service
     const ownership = yield* SyncOwnership.Service
     const db = (yield* Database.Service).db
+    const persisted = (sessionID: string) =>
+      db
+        .select({ spaceID: SessionTable.sync_space_id })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, SessionV2.ID.make(sessionID)))
+        .get()
+        .pipe(
+          Effect.map((row): PersistedOwnership =>
+            row
+              ? { exists: true, ...(row.spaceID ? { spaceID: row.spaceID } : {}) }
+              : { exists: false },
+          ),
+        )
     const existing = yield* db
       .select({
         sessionID: SessionTable.id,
@@ -266,7 +298,7 @@ export const captureLayer = Layer.effectDiscard(
       discard: true,
     })
     yield* events.all().pipe(
-      Stream.runForEach((event) => captureOwned(ownership, store, event as DurablePayload)),
+      Stream.runForEach((event) => captureOwned(ownership, store, event as DurablePayload, Date.now(), persisted)),
       Effect.forkScoped,
     )
     // Session and sync outbox use separate SQLite databases. Replaying the

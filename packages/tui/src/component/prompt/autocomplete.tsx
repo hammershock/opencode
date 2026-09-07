@@ -56,9 +56,21 @@ function extractLineRange(input: string) {
   }
 }
 
+export function shellStringOffset(text: string, width: number) {
+  let offset = 0
+  let current = 0
+  for (const char of text) {
+    if (current + Bun.stringWidth(char) > width) break
+    current += Bun.stringWidth(char)
+    offset += char.length
+  }
+  return offset
+}
+
 export type AutocompleteRef = {
   onInput: (value: string) => void
-  visible: false | "@" | "/"
+  completeShell: () => Promise<void>
+  visible: false | "@" | "/" | "shell"
 }
 
 export type AutocompleteOption = {
@@ -74,6 +86,7 @@ export type AutocompleteOption = {
 
 export function Autocomplete(props: {
   value: string
+  shell: () => boolean
   sessionID?: string
   setPrompt: (input: (prompt: PromptInfo) => void) => void
   setExtmark: (partIndex: number, extmarkId: number) => void
@@ -103,6 +116,8 @@ export function Autocomplete(props: {
     visible: false as AutocompleteRef["visible"],
     input: "keyboard" as "keyboard" | "mouse",
   })
+  const [shellOptions, setShellOptions] = createSignal<AutocompleteOption[]>([])
+  let shellGeneration = 0
 
   const [positionTick, setPositionTick] = createSignal(0)
 
@@ -474,6 +489,7 @@ export function Autocomplete(props: {
   })
 
   const options = createMemo((prev: AutocompleteOption[] | undefined) => {
+    if (store.visible === "shell") return shellOptions()
     const filesValue = files()
     const referenceMatchValue = referenceMatch()
     const agentsValue = agents()
@@ -658,6 +674,7 @@ export function Autocomplete(props: {
       })
     }
     setStore("visible", false)
+    setShellOptions([])
   }
 
   onMount(() => {
@@ -673,7 +690,57 @@ export function Autocomplete(props: {
       get visible() {
         return store.visible
       },
+      async completeShell() {
+        if (!props.sessionID) return
+        const input = props.input()
+        const generation = ++shellGeneration
+        const current = location()
+        const result = await sdk.client.session
+          .shellCompletion(
+            {
+              sessionID: props.sessionID,
+              input: input.plainText,
+              cursor: shellStringOffset(input.plainText, input.cursorOffset),
+              directory: current?.directory,
+              workspace: current?.workspaceID,
+            },
+            { throwOnError: true },
+          )
+          .then((response) => response.data)
+          .catch(() => undefined)
+        if (!result || generation !== shellGeneration || result.stale) return
+        const apply = (candidate: (typeof result.candidates)[number]) => {
+          const before = input.plainText.slice(0, Number(candidate.replacement.start))
+          input.setText(before + candidate.value + input.plainText.slice(Number(candidate.replacement.end)))
+          input.cursorOffset = Bun.stringWidth(before + candidate.value)
+          props.setPrompt((draft) => {
+            draft.input = input.plainText
+          })
+        }
+        if (result.candidates.length === 1) {
+          apply(result.candidates[0]!)
+          hide()
+          return
+        }
+        setShellOptions(
+          result.candidates.map((candidate) => ({
+            display: candidate.display,
+            description: candidate.description ?? candidate.kind,
+            value: candidate.value,
+            onSelect: () => apply(candidate),
+          })),
+        )
+        setStore({ visible: result.candidates.length ? "shell" : false, selected: 0, input: "keyboard" })
+      },
       onInput(value) {
+        if (props.shell()) {
+          if (store.visible && store.visible !== "shell") hide()
+          return
+        }
+        if (store.visible === "shell") {
+          hide()
+          return
+        }
         if (store.visible) {
           if (
             // Typed text before the trigger
@@ -711,9 +778,9 @@ export function Autocomplete(props: {
 
   const height = createMemo(() => {
     const count = options().length || 1
-    if (!store.visible) return Math.min(10, count)
+    if (!store.visible) return Math.min(8, count)
     positionTick()
-    return Math.min(10, count, Math.max(1, props.anchor().y))
+    return Math.min(8, count, Math.max(1, props.anchor().y))
   })
 
   let scroll: ScrollBoxRenderable
@@ -776,6 +843,13 @@ export function Autocomplete(props: {
           )}
         </Index>
       </scrollbox>
+      <Show when={options().length > 0}>
+        <box backgroundColor={theme.backgroundMenu} paddingLeft={1} paddingRight={1} alignItems="flex-end">
+          <text fg={theme.textMuted}>
+            {store.selected + 1}/{options().length}
+          </text>
+        </box>
+      </Show>
     </box>
   )
 }

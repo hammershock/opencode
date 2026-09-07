@@ -899,6 +899,20 @@ export function Prompt(props: PromptProps) {
     }
   })
 
+  useBindings(() => ({
+    target: inputTarget,
+    enabled: inputTarget() !== undefined && !props.disabled && store.mode === "shell" && !auto()?.visible,
+    priority: 1,
+    bindings: [
+      {
+        key: "tab",
+        desc: "Complete shell input",
+        group: "Prompt",
+        cmd: () => void auto()?.completeShell(),
+      },
+    ],
+  }))
+
   useBindings(() => {
     return {
       target: inputTarget,
@@ -1807,6 +1821,7 @@ export function Prompt(props: PromptProps) {
       </box>
       <Autocomplete
         sessionID={props.sessionID}
+        shell={() => store.mode === "shell"}
         ref={(r) => {
           setAuto(() => r)
         }}

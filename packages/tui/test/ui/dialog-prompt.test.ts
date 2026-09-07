@@ -1,17 +1,24 @@
 import { describe, expect, test } from "bun:test"
-import { compactPromptCandidates } from "../../src/ui/dialog-prompt"
+import { promptCandidateWindow } from "../../src/ui/dialog-prompt"
+import { shellStringOffset } from "../../src/component/prompt/autocomplete"
 
 describe("prompt completion candidates", () => {
   test("keeps short candidate lists one item per line", () => {
-    expect(compactPromptCandidates(["/home/a/", "/home/b/"])).toEqual(["/home/a/", "/home/b/"])
+    expect(promptCandidateWindow(["/home/a/", "/home/b/"], 0)).toEqual({
+      start: 0,
+      items: ["/home/a/", "/home/b/"],
+    })
   })
 
-  test("collapses candidate lists that would fill the prompt", () => {
+  test("keeps an eight-row window around the selected candidate", () => {
     const candidates = Array.from({ length: 20 }, (_, index) => `/home/project-${index}/`)
-    const visible = compactPromptCandidates(candidates)
+    const visible = promptCandidateWindow(candidates, 11)
 
-    expect(visible).toHaveLength(12)
-    expect(visible.slice(0, 11)).toEqual(candidates.slice(0, 11))
-    expect(visible[11]).toBe("… 9 more matches")
+    expect(visible.start).toBe(4)
+    expect(visible.items).toEqual(candidates.slice(4, 12))
+  })
+
+  test("converts the visual shell cursor before requesting completion", () => {
+    expect(shellStringOffset("echo 目录/x", Bun.stringWidth("echo 目录"))).toBe("echo 目录".length)
   })
 })

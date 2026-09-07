@@ -4,6 +4,7 @@ import { LocationProcess } from "@opencode-ai/core/location-process"
 import { Location } from "@opencode-ai/core/location"
 import { RelativePath } from "@opencode-ai/core/schema"
 import { Duration, Effect } from "effect"
+import { Shell } from "@opencode-ai/core/shell"
 import { UserShellLocal } from "./user-shell-local"
 import type { CompletionCandidate, Provider } from "./user-shell-runtime"
 
@@ -46,19 +47,37 @@ export function makeProvider(
       const entries = yield* filesystem
         .list({ path: RelativePath.make(path.posix.relative(location.directory, path.posix.resolve(input.cwd, base))) })
         .pipe(Effect.catch(() => Effect.succeed([])))
-      return entries
+      const paths = entries
         .filter((entry) => path.posix.basename(entry.path).startsWith(prefix))
         .map(
           (entry): CompletionCandidate => ({
-            value:
+            value: UserShellLocal.encodeCompletionValue(
               (base === "." ? "" : `${base}/`) +
-              path.posix.basename(entry.path) +
-              (entry.type === "directory" ? "/" : ""),
+                path.posix.basename(entry.path) +
+                (entry.type === "directory" ? "/" : ""),
+            ),
             display: path.posix.basename(entry.path),
             replacement: range,
             kind: entry.type,
           }),
         )
+      if (token.includes("/")) return paths
+      const shell = input.environment.SHELL ?? "/bin/sh"
+      if (Shell.name(shell) !== "bash" && Shell.name(shell) !== "zsh") return paths
+      const result = yield* process
+        .runShell(UserShellLocal.completionCommand(shell, input.input, input.cursor), {
+          cwd: input.cwd,
+          shell: "/bin/sh",
+          env: { ...input.environment, TERM: "dumb" },
+          timeout: Duration.millis(1500),
+          maxOutputBytes: 512 * 1024,
+          signal: input.signal,
+        })
+        .pipe(Effect.catch(() => Effect.void))
+      const names = result ? UserShellLocal.parseCompletionOutput(result.stdout.toString("utf8"), token, range) : []
+      return [...new Map([...paths, ...names].map((candidate) => [candidate.value, candidate])).values()].toSorted(
+        (a, b) => a.display.localeCompare(b.display),
+      )
     })
   return { execute, validateDirectory, complete } satisfies Provider
 }

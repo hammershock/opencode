@@ -314,11 +314,11 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                   <ThemeProvider mode={mode}>
                                                     <LocalProvider>
                                                       <PromptStashProvider>
-                                                        <DialogProvider>
-                                                          <SyncSettingsProvider>
-                                                            <FrecencyProvider>
-                                                              <PromptHistoryProvider>
-                                                                <PromptRefProvider>
+                                                        <PromptRefProvider>
+                                                          <DialogProvider>
+                                                            <SyncSettingsProvider>
+                                                              <FrecencyProvider>
+                                                                <PromptHistoryProvider>
                                                                   <EditorContextProvider>
                                                                     <LocationProvider>
                                                                       <App
@@ -327,11 +327,11 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                                       />
                                                                     </LocationProvider>
                                                                   </EditorContextProvider>
-                                                                </PromptRefProvider>
-                                                              </PromptHistoryProvider>
-                                                            </FrecencyProvider>
-                                                          </SyncSettingsProvider>
-                                                        </DialogProvider>
+                                                                </PromptHistoryProvider>
+                                                              </FrecencyProvider>
+                                                            </SyncSettingsProvider>
+                                                          </DialogProvider>
+                                                        </PromptRefProvider>
                                                       </PromptStashProvider>
                                                     </LocalProvider>
                                                   </ThemeProvider>

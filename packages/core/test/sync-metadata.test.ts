@@ -25,7 +25,7 @@ describe("SyncMetadata", () => {
         const other = metadata.scope("other-space")
         yield* other.apply("device-b", [
           {
-            sessionID: "other",
+            sessionID: "s",
             title: "other",
             ownerDeviceID: "device-b",
             directory: "/other",
@@ -34,7 +34,7 @@ describe("SyncMetadata", () => {
           },
         ])
         expect((yield* metadata.list()).map((item) => item.sessionID)).toEqual(["s"])
-        expect((yield* other.list()).map((item) => item.sessionID)).toEqual(["other"])
+        expect((yield* other.list()).map((item) => item.sessionID)).toEqual(["s"])
       }).pipe(Effect.scoped, Effect.provide(layers)),
     )
   })

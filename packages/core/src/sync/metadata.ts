@@ -70,7 +70,7 @@ export const layer = Layer.effect(
               tx.run(sql`
         INSERT INTO sync_session_metadata (session_id, payload, source_device, revision, availability, updated_at, space_id)
         VALUES (${value.sessionID}, ${JSON.stringify(value)}, ${deviceID}, ${value.revision}, 'metadata-only', ${value.updatedAt}, ${spaceID})
-        ON CONFLICT(session_id) DO UPDATE SET
+        ON CONFLICT(space_id, session_id) DO UPDATE SET
           payload = CASE WHEN excluded.revision > revision OR (excluded.revision = revision AND excluded.source_device < source_device) THEN excluded.payload ELSE payload END,
           source_device = CASE WHEN excluded.revision > revision OR (excluded.revision = revision AND excluded.source_device < source_device) THEN excluded.source_device ELSE source_device END,
           revision = MAX(revision, excluded.revision),

@@ -78,7 +78,7 @@ export const layer = Layer.effect(
               yield* tx.run(sql`
               INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind, space_id)
               VALUES (${event.id}, ${event.aggregateID}, ${event.seq}, ${payload}, ${createdAt}, 'event', ${spaceID})
-              ON CONFLICT(event_id) DO NOTHING
+              ON CONFLICT(space_id, event_id) DO NOTHING
             `)
               const stored = yield* tx.get<OutboxRow>(sql`
               SELECT payload FROM sync_event_outbox WHERE event_id = ${event.id} AND space_id = ${spaceID}
@@ -105,7 +105,7 @@ export const layer = Layer.effect(
               yield* tx.run(sql`
               INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind, space_id)
               VALUES (${tombstone.id}, ${tombstone.sessionID}, 0, ${payload}, ${createdAt}, 'tombstone', ${spaceID})
-              ON CONFLICT(event_id) DO NOTHING
+              ON CONFLICT(space_id, event_id) DO NOTHING
             `)
               const stored = yield* tx.get<OperationRow>(sql`
               SELECT payload, kind FROM sync_event_outbox WHERE event_id = ${tombstone.id} AND space_id = ${spaceID}
@@ -115,7 +115,7 @@ export const layer = Layer.effect(
               yield* tx.run(sql`
               INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
               VALUES (${tombstone.sessionID}, ${payload}, ${tombstone.deletedAt}, ${spaceID})
-              ON CONFLICT(session_id) DO NOTHING
+              ON CONFLICT(space_id, session_id) DO NOTHING
             `)
             }),
           { behavior: "immediate" },
@@ -197,7 +197,7 @@ export const layer = Layer.effect(
             yield* tx.run(sql`
             INSERT INTO sync_event_head (device_id, generation, space_id)
             SELECT device_id, generation, space_id FROM sync_event_segment WHERE id = ${segmentID} AND space_id = ${spaceID}
-            ON CONFLICT(device_id) DO UPDATE SET generation = MAX(generation, excluded.generation)
+            ON CONFLICT(space_id, device_id) DO UPDATE SET generation = MAX(generation, excluded.generation)
           `)
             yield* tx.run(sql`DELETE FROM sync_event_outbox WHERE segment_id = ${segmentID} AND space_id = ${spaceID}`)
           }),
@@ -258,7 +258,7 @@ export const layer = Layer.effect(
                   yield* tx.run(sql`
                   INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
                   VALUES (${operation.tombstone.sessionID}, ${marker}, ${operation.tombstone.deletedAt}, ${spaceID})
-                  ON CONFLICT(session_id) DO NOTHING
+                  ON CONFLICT(space_id, session_id) DO NOTHING
                 `)
                   yield* projector.delete(tx, operation.tombstone)
                 } else {
@@ -279,7 +279,7 @@ export const layer = Layer.effect(
               yield* tx.run(sql`
               INSERT INTO sync_event_cursor (device_id, cursor, space_id)
               VALUES (${segment.deviceID}, ${segment.generation}, ${spaceID})
-              ON CONFLICT(device_id) DO UPDATE SET cursor = excluded.cursor
+              ON CONFLICT(space_id, device_id) DO UPDATE SET cursor = excluded.cursor
             `)
             }),
           { behavior: "immediate" },
@@ -344,7 +344,7 @@ export const layer = Layer.effect(
                   yield* tx.run(sql`
                   INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
                   VALUES (${operation.tombstone.sessionID}, ${marker}, ${operation.tombstone.deletedAt}, ${spaceID})
-                  ON CONFLICT(session_id) DO NOTHING
+                  ON CONFLICT(space_id, session_id) DO NOTHING
                 `)
                 }
               }
@@ -393,7 +393,7 @@ export const layer = Layer.effect(
                 yield* tx.run(sql`
                 INSERT INTO sync_remote_event (device_id, event_id, fingerprint, space_id)
                 VALUES (${segment.deviceID}, ${operationID(operation)}, ${operationFingerprint(operation)}, ${spaceID})
-                ON CONFLICT(device_id, event_id) DO NOTHING
+                ON CONFLICT(space_id, device_id, event_id) DO NOTHING
               `)
               }
               yield* tx.run(sql`
@@ -403,7 +403,7 @@ export const layer = Layer.effect(
               yield* tx.run(sql`
               INSERT INTO sync_event_cursor (device_id, cursor, space_id)
               VALUES (${segment.deviceID}, ${segment.generation}, ${spaceID})
-              ON CONFLICT(device_id) DO UPDATE SET cursor = excluded.cursor
+              ON CONFLICT(space_id, device_id) DO UPDATE SET cursor = excluded.cursor
             `)
               yield* tx.run(sql`
               DELETE FROM sync_apply_journal

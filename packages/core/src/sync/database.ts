@@ -18,7 +18,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncDatabase") {}
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 const layer = Layer.effect(
   Service,
@@ -53,6 +53,10 @@ const layer = Layer.effect(
           if ((current?.version ?? 1) < 5) {
             yield* Effect.forEach(schemaV5, (statement) => tx.run(statement), { discard: true })
             yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (5)`)
+          }
+          if ((current?.version ?? 1) < 6) {
+            yield* Effect.forEach(schemaV6, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (6)`)
           }
         }),
       { behavior: "immediate" },
@@ -140,4 +144,114 @@ const schemaV5 = [
   sql`CREATE INDEX sync_event_segment_space_idx ON sync_event_segment(space_id, device_id, generation)`,
   sql`CREATE INDEX sync_event_cursor_space_idx ON sync_event_cursor(space_id, device_id)`,
   sql`CREATE INDEX sync_session_space_space_idx ON sync_session_space(space_id, session_id)`,
+]
+
+// v5 added space_id filters without changing the legacy global keys. Rebuild the
+// scoped tables so the same device, generation, event, or Session can exist in
+// independent spaces. All statements run in the database migration transaction.
+const schemaV6 = [
+  sql`DROP TRIGGER IF EXISTS sync_event_segment_immutable`,
+  sql`DROP INDEX IF EXISTS sync_event_outbox_space_idx`,
+  sql`DROP INDEX IF EXISTS sync_event_segment_space_idx`,
+  sql`DROP INDEX IF EXISTS sync_event_cursor_space_idx`,
+
+  sql`ALTER TABLE sync_event_outbox RENAME TO sync_event_outbox_v5`,
+  sql`CREATE TABLE sync_event_outbox (
+    event_id TEXT NOT NULL, aggregate_id TEXT NOT NULL, seq INTEGER NOT NULL,
+    payload TEXT NOT NULL, created_at INTEGER NOT NULL, segment_id TEXT,
+    kind TEXT NOT NULL DEFAULT 'event', space_id TEXT NOT NULL DEFAULT 'legacy',
+    PRIMARY KEY(space_id, event_id)
+  )`,
+  sql`INSERT INTO sync_event_outbox
+    (event_id, aggregate_id, seq, payload, created_at, segment_id, kind, space_id)
+    SELECT event_id, aggregate_id, seq, payload, created_at, segment_id, kind, space_id
+    FROM sync_event_outbox_v5`,
+  sql`DROP TABLE sync_event_outbox_v5`,
+
+  sql`ALTER TABLE sync_event_segment RENAME TO sync_event_segment_v5`,
+  sql`CREATE TABLE sync_event_segment (
+    id TEXT NOT NULL, device_id TEXT NOT NULL, generation INTEGER NOT NULL,
+    payload TEXT NOT NULL, created_at INTEGER NOT NULL, acknowledged_at INTEGER,
+    space_id TEXT NOT NULL DEFAULT 'legacy',
+    PRIMARY KEY(space_id, id), UNIQUE(space_id, device_id, generation)
+  )`,
+  sql`INSERT INTO sync_event_segment
+    (id, device_id, generation, payload, created_at, acknowledged_at, space_id)
+    SELECT id, device_id, generation, payload, created_at, acknowledged_at, space_id
+    FROM sync_event_segment_v5`,
+  sql`DROP TABLE sync_event_segment_v5`,
+
+  sql`ALTER TABLE sync_event_head RENAME TO sync_event_head_v5`,
+  sql`CREATE TABLE sync_event_head (
+    device_id TEXT NOT NULL, generation INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy',
+    PRIMARY KEY(space_id, device_id)
+  )`,
+  sql`INSERT INTO sync_event_head (device_id, generation, space_id)
+    SELECT device_id, generation, space_id FROM sync_event_head_v5`,
+  sql`DROP TABLE sync_event_head_v5`,
+
+  sql`ALTER TABLE sync_event_cursor RENAME TO sync_event_cursor_v5`,
+  sql`CREATE TABLE sync_event_cursor (
+    device_id TEXT NOT NULL, cursor INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy',
+    PRIMARY KEY(space_id, device_id)
+  )`,
+  sql`INSERT INTO sync_event_cursor (device_id, cursor, space_id)
+    SELECT device_id, cursor, space_id FROM sync_event_cursor_v5`,
+  sql`DROP TABLE sync_event_cursor_v5`,
+
+  sql`ALTER TABLE sync_remote_segment RENAME TO sync_remote_segment_v5`,
+  sql`CREATE TABLE sync_remote_segment (
+    device_id TEXT NOT NULL, generation INTEGER NOT NULL, payload TEXT NOT NULL,
+    space_id TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY(space_id, device_id, generation)
+  )`,
+  sql`INSERT INTO sync_remote_segment (device_id, generation, payload, space_id)
+    SELECT device_id, generation, payload, space_id FROM sync_remote_segment_v5`,
+  sql`DROP TABLE sync_remote_segment_v5`,
+
+  sql`ALTER TABLE sync_remote_event RENAME TO sync_remote_event_v5`,
+  sql`CREATE TABLE sync_remote_event (
+    device_id TEXT NOT NULL, event_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+    space_id TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY(space_id, device_id, event_id)
+  )`,
+  sql`INSERT INTO sync_remote_event (device_id, event_id, fingerprint, space_id)
+    SELECT device_id, event_id, fingerprint, space_id FROM sync_remote_event_v5`,
+  sql`DROP TABLE sync_remote_event_v5`,
+
+  sql`ALTER TABLE sync_deletion_set RENAME TO sync_deletion_set_v5`,
+  sql`CREATE TABLE sync_deletion_set (
+    session_id TEXT NOT NULL, marker TEXT NOT NULL, deleted_at INTEGER NOT NULL,
+    space_id TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY(space_id, session_id)
+  )`,
+  sql`INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
+    SELECT session_id, marker, deleted_at, space_id FROM sync_deletion_set_v5`,
+  sql`DROP TABLE sync_deletion_set_v5`,
+
+  sql`ALTER TABLE sync_apply_journal RENAME TO sync_apply_journal_v5`,
+  sql`CREATE TABLE sync_apply_journal (
+    device_id TEXT NOT NULL, generation INTEGER NOT NULL, payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy',
+    PRIMARY KEY(space_id, device_id, generation)
+  )`,
+  sql`INSERT INTO sync_apply_journal (device_id, generation, payload, created_at, space_id)
+    SELECT device_id, generation, payload, created_at, space_id FROM sync_apply_journal_v5`,
+  sql`DROP TABLE sync_apply_journal_v5`,
+
+  sql`ALTER TABLE sync_session_metadata RENAME TO sync_session_metadata_v5`,
+  sql`CREATE TABLE sync_session_metadata (
+    session_id TEXT NOT NULL, payload TEXT NOT NULL, source_device TEXT NOT NULL,
+    revision INTEGER NOT NULL, availability TEXT NOT NULL, updated_at INTEGER NOT NULL,
+    space_id TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY(space_id, session_id)
+  )`,
+  sql`INSERT INTO sync_session_metadata
+    (session_id, payload, source_device, revision, availability, updated_at, space_id)
+    SELECT session_id, payload, source_device, revision, availability, updated_at, space_id
+    FROM sync_session_metadata_v5`,
+  sql`DROP TABLE sync_session_metadata_v5`,
+
+  sql`CREATE TRIGGER sync_event_segment_immutable
+    BEFORE UPDATE OF device_id, generation, payload, created_at, space_id ON sync_event_segment
+    BEGIN SELECT RAISE(ABORT, 'sync event segments are immutable'); END`,
+  sql`CREATE INDEX sync_event_outbox_space_idx ON sync_event_outbox(space_id, segment_id, created_at)`,
+  sql`CREATE INDEX sync_event_segment_space_idx ON sync_event_segment(space_id, device_id, generation)`,
+  sql`CREATE INDEX sync_event_cursor_space_idx ON sync_event_cursor(space_id, device_id)`,
 ]

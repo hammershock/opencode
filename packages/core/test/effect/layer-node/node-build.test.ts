@@ -14,6 +14,7 @@ class Value extends Context.Service<Value, { readonly value: string }>()("test/T
 class Result extends Context.Service<Result, { readonly value: string }>()("test/TagResult") {}
 class CycleA extends Context.Service<CycleA, {}>()("test/NodeBuildA") {}
 class CycleB extends Context.Service<CycleB, { readonly directory: AbsolutePath }>()("test/NodeBuildB") {}
+class Bootstrap extends Context.Service<Bootstrap, {}>()("test/NodeBuildBootstrap") {}
 
 describe("node build", () => {
   test("does not build a location service map when the graph does not require it", async () => {
@@ -29,6 +30,22 @@ describe("node build", () => {
     }).pipe(Effect.provide(layer))
 
     expect(await Effect.runPromise(program)).toBe("plain")
+  })
+
+  test("builds a location service map required by a replacement graph", () => {
+    const bootstrap = LayerNode.unbound(Bootstrap, Node.tags.values.global)
+    const implementation = Node.makeGlobalNode({
+      service: Bootstrap,
+      layer: Layer.succeed(Bootstrap, Bootstrap.of({})),
+      deps: [LocationServiceMap.node],
+    })
+    const result = Node.makeGlobalNode({
+      service: Result,
+      layer: Layer.succeed(Result, Result.of({ value: "replacement" })),
+      deps: [bootstrap],
+    })
+
+    expect(() => AppNodeBuilder.build(result, [[bootstrap, implementation]])).not.toThrow()
   })
 
   test("detects cycles through a replaced location service map", async () => {

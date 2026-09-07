@@ -72,7 +72,7 @@ export function encrypted(rootKey: Uint8Array): Interface {
 }
 
 async function digest(bytes: Uint8Array) {
-  return Buffer.from(await crypto.subtle.digest("SHA-256", bytes)).toString("base64url")
+  return Buffer.from(await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes))).toString("base64url")
 }
 
 function concat(left: Uint8Array, right: Uint8Array) {

@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "f98b9d51-a04f-4266-a796-8cc188ee5e81",
+  "id": "d1a99658-23c5-464b-b61b-6b158d199e47",
   "prevIds": [
-    "bf1caa3f-e19a-466c-a723-274a78ea6bc9"
+    "f98b9d51-a04f-4266-a796-8cc188ee5e81"
   ],
   "ddl": [
     {
@@ -1153,6 +1153,16 @@
       "table": "session"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sync_space_id",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -2194,6 +2204,24 @@
       "where": null,
       "origin": "manual",
       "name": "session_parent_idx",
+      "entityType": "indexes",
+      "table": "session"
+    },
+    {
+      "columns": [
+        {
+          "value": "sync_space_id",
+          "isExpression": false
+        },
+        {
+          "value": "time_updated",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "session_sync_space_idx",
       "entityType": "indexes",
       "table": "session"
     },

@@ -3,10 +3,15 @@ import { FileSystem } from "@opencode-ai/core/filesystem"
 import { LocationProcess } from "@opencode-ai/core/location-process"
 import { Location } from "@opencode-ai/core/location"
 import { RelativePath } from "@opencode-ai/core/schema"
-import { Duration, Effect } from "effect"
+import { Duration, Effect, Exit } from "effect"
 import { Shell } from "@opencode-ai/core/shell"
 import { UserShellLocal } from "./user-shell-local"
-import { EXECUTION_TIMEOUT, type CompletionCandidate, type Provider } from "./user-shell-runtime"
+import {
+  EXECUTION_TIMEOUT,
+  type CompletionCandidate,
+  type CompletionDegradedReason,
+  type Provider,
+} from "./user-shell-runtime"
 
 export const provider = Effect.gen(function* () {
   const process = yield* LocationProcess.Service
@@ -83,23 +88,46 @@ export function makeProvider(
             kind: entry.type,
           }),
         )
-      if (token.includes("/")) return paths
+      if (token.includes("/")) return { candidates: paths }
       const shell = input.environment.SHELL ?? "/bin/sh"
-      if (Shell.name(shell) !== "bash" && Shell.name(shell) !== "zsh") return paths
-      const result = yield* process
-        .runShell(UserShellLocal.completionCommand(shell, input.input, input.cursor), {
+      const run = (command: string, selectedShell: string, timeout: Duration.Input) =>
+        process.runShell(command, {
           cwd: input.cwd,
-          shell: "/bin/sh",
-          env: { ...input.environment, TERM: "dumb" },
-          timeout: Duration.millis(1500),
+          shell: selectedShell,
+          env: { ...input.environment, TERM: "dumb", BASH_ENV: "", ENV: "" },
+          timeout,
           maxOutputBytes: 512 * 1024,
           signal: input.signal,
         })
-        .pipe(Effect.catch(() => Effect.void))
-      const names = result ? UserShellLocal.parseCompletionOutput(result.stdout.toString("utf8"), token, range) : []
-      return [...new Map([...paths, ...names].map((candidate) => [candidate.value, candidate])).values()].toSorted(
-        (a, b) => a.display.localeCompare(b.display),
+      const fallback = yield* run(UserShellLocal.commandFallbackScript(token), "/bin/sh", Duration.millis(750)).pipe(
+        Effect.catch(() => Effect.void),
       )
+      const commands = fallback ? UserShellLocal.parseCommandFallback(fallback.stdout.toString("utf8"), range) : []
+      const supported = Shell.name(shell) === "bash" || Shell.name(shell) === "zsh"
+      const native = supported
+        ? yield* run(
+            UserShellLocal.completionCommand(shell, input.input, input.cursor),
+            "/bin/sh",
+            Duration.millis(1500),
+          ).pipe(Effect.exit)
+        : undefined
+      const names =
+        native && Exit.isSuccess(native)
+          ? UserShellLocal.parseCompletionOutput(native.value.stdout.toString("utf8"), token, range)
+          : []
+      const degraded: CompletionDegradedReason | undefined = !supported
+        ? "native_unavailable"
+        : native && Exit.isFailure(native)
+          ? String(native.cause).includes("Timed out")
+            ? "native_timeout"
+            : "native_failed"
+          : native?.value.exitCode === 0
+            ? undefined
+            : "native_failed"
+      const candidates = [
+        ...new Map([...paths, ...commands, ...names].map((candidate) => [candidate.value, candidate])).values(),
+      ].toSorted((a, b) => a.display.localeCompare(b.display)).slice(0, 8)
+      return { candidates, ...(degraded ? { degraded: { reason: degraded } } : {}) }
     })
   return { execute, validateDirectory, complete } satisfies Provider
 }

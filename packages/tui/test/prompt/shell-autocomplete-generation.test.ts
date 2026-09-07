@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { createShellCompletionGeneration, invalidateShellCompletion } from "../../src/component/prompt/autocomplete"
+import {
+  createShellCompletionGeneration,
+  invalidateShellCompletion,
+  shellCompletionDegradedMessage,
+} from "../../src/component/prompt/autocomplete"
 
 describe("Shell autocomplete generation", () => {
   test("rejects a delayed result after input or cursor mutation", () => {
@@ -24,4 +28,12 @@ describe("Shell autocomplete generation", () => {
     expect(hidden).toBe(true)
     expect(generation.accepts(request)).toBe(false)
   })
+})
+
+test("shell completion degradation is concise and identifies the fallback", () => {
+  expect(shellCompletionDegradedMessage("native_timeout")).toBe("Native completion timed out; showing basic matches")
+  expect(shellCompletionDegradedMessage("native_failed")).toBe("Native completion failed; showing basic matches")
+  expect(shellCompletionDegradedMessage("native_unavailable")).toBe(
+    "Native completion unavailable; showing basic matches",
+  )
 })

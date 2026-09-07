@@ -1660,6 +1660,11 @@ export const ShellCompletionResult = Schema.Struct({
   generation: Schema.Number,
   stale: Schema.Boolean,
   candidates: Schema.Array(ShellCompletionCandidate),
+  degraded: Schema.optional(
+    Schema.Struct({
+      reason: Schema.Literals(["native_unavailable", "native_timeout", "native_failed"]),
+    }),
+  ),
 })
 export type ShellCompletionResult = Schema.Schema.Type<typeof ShellCompletionResult>
 

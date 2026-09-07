@@ -24,6 +24,7 @@ import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keym
 import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 import type { TuiSlashCommand } from "../../command-toolkit/host"
+import { useToast } from "../../ui/toast"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -100,6 +101,12 @@ export function createShellCompletionGeneration() {
   }
 }
 
+export function shellCompletionDegradedMessage(reason: "native_unavailable" | "native_timeout" | "native_failed") {
+  if (reason === "native_timeout") return "Native completion timed out; showing basic matches"
+  if (reason === "native_failed") return "Native completion failed; showing basic matches"
+  return "Native completion unavailable; showing basic matches"
+}
+
 export function invalidateShellCompletion(
   generation: ReturnType<typeof createShellCompletionGeneration>,
   visible: AutocompleteRef["visible"],
@@ -138,6 +145,7 @@ export function Autocomplete(props: {
   const tuiConfig = useTuiConfig()
   const paths = useTuiPaths()
   const location = useLocation()
+  const toast = useToast()
   const [store, setStore] = createStore({
     index: 0,
     selected: 0,
@@ -741,6 +749,13 @@ export function Autocomplete(props: {
           .then((response) => response.data)
           .catch(() => undefined)
         if (!result || !shellGeneration.accepts(generation) || result.stale) return
+        if (result.degraded) {
+          toast.show({
+            message: shellCompletionDegradedMessage(result.degraded.reason),
+            variant: "warning",
+            duration: 3000,
+          })
+        }
         const apply = (candidate: (typeof result.candidates)[number]) => {
           const before = input.plainText.slice(0, Number(candidate.replacement.start))
           input.setText(before + candidate.value + input.plainText.slice(Number(candidate.replacement.end)))

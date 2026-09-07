@@ -20,6 +20,7 @@ import {
   wrapExecution,
 } from "../../src/session/user-shell-location"
 import { EXECUTION_TIMEOUT } from "../../src/session/user-shell-runtime"
+import { AppProcess } from "@opencode-ai/core/process"
 
 type Notify = (method: string, params: unknown) => void
 
@@ -298,7 +299,7 @@ describe("Rexd Location routing contract", () => {
     const completion = await Effect.runPromise(
       shell.complete({ input: "rem", cursor: 3, cwd: "/workspace", environment: {} }),
     )
-    expect(completion.map((item) => item.value)).toEqual(["remote.txt", "remote-dir/"])
+    expect(completion.candidates.map((item) => item.value)).toEqual(["remote-dir/", "remote.txt"])
   })
 
   test("remote user shell control framing is nonce-bound and never enters visible output", () => {
@@ -360,13 +361,56 @@ describe("Rexd Location routing contract", () => {
         environment: { SHELL: "/bin/bash" },
       }),
     )
-    expect(executed[0]).toContain("/bin/bash")
-    expect(completion).toContainEqual({
+    expect(executed.some((command) => command.includes("/bin/bash"))).toBe(true)
+    expect(completion.candidates).toContainEqual({
       value: "--format=json",
       display: "--format=json",
       replacement: { start: 4, end: 8 },
       kind: "option",
     })
+  })
+
+  test("remote user shell returns PATH fallback and a structured native timeout", async () => {
+    const process = {
+      runShell: (command: string) =>
+        command.includes("__opencode_prefix")
+          ? Effect.succeed({
+              command,
+              exitCode: 0,
+              output: Buffer.alloc(0),
+              stdout: Buffer.from("__OPENCODE_COMMAND__\thammer-tool\n"),
+              stderr: Buffer.alloc(0),
+              outputTruncated: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            })
+          : Effect.fail(new AppProcess.AppProcessError({ command, cause: new Error("Timed out") })),
+    } as LocationProcess.Interface
+    const filesystem = FileSystem.Service.of({
+      list: () => Effect.succeed([]),
+      find: () => Effect.succeed([]),
+      glob: () => Effect.succeed([]),
+      grep: () => Effect.succeed([]),
+      read: () => Effect.die("not used"),
+      directoryStatus: () => Effect.die("not used"),
+      ensureDirectory: () => Effect.die("not used"),
+    })
+    const location = Location.Service.of({
+      target: { type: "rexd", targetID },
+      directory: AbsolutePath.make("/workspace"),
+      workspaceID: "workspace" as never,
+      project: { id: "project" as never, directory: AbsolutePath.make("/workspace") },
+    })
+    const result = await Effect.runPromise(
+      makeUserShellProvider(process, filesystem, location).complete({
+        input: "hammer",
+        cursor: 6,
+        cwd: "/workspace",
+        environment: { SHELL: "/bin/bash", PATH: "/usr/bin" },
+      }),
+    )
+    expect(result.degraded).toEqual({ reason: "native_timeout" })
+    expect(result.candidates.map((candidate) => candidate.value)).toEqual(["hammer-tool"])
   })
 
   test("target probe reports protocol stage without leaking a thrown failure", async () => {

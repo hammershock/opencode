@@ -12334,6 +12334,9 @@ export type SessionShellCompletionResponses = {
       kind: "command" | "file" | "directory" | "alias" | "function" | "option" | "argument"
       description?: string
     }>
+    degraded?: {
+      reason: "native_unavailable" | "native_timeout" | "native_failed"
+    }
   }
 }
 

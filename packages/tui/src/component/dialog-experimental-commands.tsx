@@ -1,8 +1,14 @@
 import { TextAttributes } from "@opentui/core"
-import { createMemo } from "solid-js"
-import { experimentalCommandSettings, overrideDiagnostic } from "../command-toolkit/experimental-settings"
+import { createMemo, createSignal, onMount } from "solid-js"
+import {
+  experimentalCommandSettings,
+  overrideDiagnostic,
+  persistLocationEnvironment,
+} from "../command-toolkit/experimental-settings"
 import { useKV } from "../context/kv"
+import { useSDK } from "../context/sdk"
 import { useTheme } from "../context/theme"
+import { useToast } from "../ui/toast"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 
 function Status(props: { setting: (typeof experimentalCommandSettings)[number] }) {
@@ -25,15 +31,33 @@ function Status(props: { setting: (typeof experimentalCommandSettings)[number] }
 
 export function DialogExperimentalCommands() {
   const kv = useKV()
-  const options = createMemo(() =>
-    experimentalCommandSettings.map((setting) => ({
+  const sdk = useSDK()
+  const toast = useToast()
+  const [locationEnvironment, setLocationEnvironment] = createSignal<boolean>()
+  onMount(
+    () =>
+      void sdk.client.global.config
+        .get({ throwOnError: true })
+        .then((result) => setLocationEnvironment(result.data.experimental?.location_env === true))
+        .catch(toast.error),
+  )
+  const options = createMemo(() => [
+    ...experimentalCommandSettings.map((setting) => ({
       value: setting.id,
       title: setting.title,
       description: setting.description,
       footer: <Status setting={setting} />,
       category: "Experimental commands",
     })),
-  )
+    {
+      value: "fork.environment.location",
+      title: "Location environment",
+      description: "User setting · load target user and project .env files for Shell and Agent tools",
+      footer: locationEnvironment() === undefined ? "◐ checking" : locationEnvironment() ? "● enabled" : "○ disabled",
+      category: "Experimental features",
+      disabled: locationEnvironment() === undefined,
+    },
+  ])
 
   return (
     <DialogSelect
@@ -44,6 +68,17 @@ export function DialogExperimentalCommands() {
           command: "dialog.experimental.toggle",
           title: "toggle",
           onTrigger: (option: DialogSelectOption<string>) => {
+            if (option.value === "fork.environment.location") {
+              const current = locationEnvironment()
+              if (current === undefined) return
+              const enabled = !current
+              void persistLocationEnvironment(enabled, async (config) => {
+                await sdk.client.global.config.update({ config }, { throwOnError: true })
+              })
+                .then(setLocationEnvironment)
+                .catch(toast.error)
+              return
+            }
             const setting = experimentalCommandSettings.find((item) => item.id === option.value)
             if (!setting) return
             kv.set(setting.key, !kv.get(setting.key, setting.defaultValue))

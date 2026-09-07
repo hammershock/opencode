@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { experimentalCommandSettings } from "../../src/command-toolkit/experimental-settings"
+import {
+  experimentalCommandSettings,
+  persistLocationEnvironment,
+} from "../../src/command-toolkit/experimental-settings"
 
-describe("experimental command settings", () => {
+describe("experimental settings", () => {
   test("uses one discoverable default-off setting per override", () => {
     expect(experimentalCommandSettings).toEqual([
       expect.objectContaining({
@@ -31,5 +34,22 @@ describe("experimental command settings", () => {
     expect(new Set(experimentalCommandSettings.map((setting) => setting.key)).size).toBe(
       experimentalCommandSettings.length,
     )
+  })
+
+  test("persists Location Environment through the canonical config patch", async () => {
+    const patches: unknown[] = []
+    const enabled = await persistLocationEnvironment(true, async (config) => {
+      patches.push(config)
+    })
+    expect(enabled).toBeTrue()
+    expect(patches).toEqual([{ experimental: { location_env: true } }])
+  })
+
+  test("does not report a changed value when persistence fails", async () => {
+    expect(
+      persistLocationEnvironment(false, async () => {
+        throw new Error("write failed")
+      }),
+    ).rejects.toThrow("write failed")
   })
 })

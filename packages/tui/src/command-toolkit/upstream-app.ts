@@ -1,38 +1,13 @@
-import { defineUpstreamCommand, verifyUpstreamCommand } from "@opencode-ai/command-kit"
-
-const reviewedAppExit = defineUpstreamCommand(
-  {
-    identity: "app.exit",
-    host: "tui.app",
-    path: ["exit"],
-    aliases: [["quit"], ["q"]],
-    title: "Exit the app",
-    category: "System",
-    availability: "all-routes",
-    inputBoundary: "no-arguments",
-  },
-  "337fd144d2ba:app.exit:v1",
-)
-
-const currentAppExit = defineUpstreamCommand(
-  {
-    identity: "app.exit",
-    host: "tui.app",
-    path: ["exit"],
-    aliases: [["quit"], ["q"]],
-    title: "Exit the app",
-    category: "System",
-    availability: "all-routes",
-    inputBoundary: "no-arguments",
-  },
-  "337fd144d2ba:app.exit:v1",
-)
+import { verifyUpstreamCommand } from "@opencode-ai/command-kit"
+import { currentUpstreamCommands } from "./upstream-current"
+import { reviewedUpstreamCommands } from "./upstream-reviewed"
 
 // Deliberately checked by TypeScript. Upstream registration drift must be
 // reviewed here before a build can succeed.
-export const verifiedAppExit = verifyUpstreamCommand(reviewedAppExit, currentAppExit)
+export const verifiedAppExit = verifyUpstreamCommand(reviewedUpstreamCommands.appExit, currentUpstreamCommands.appExit)
 
 export const appExitMetadata = {
+  name: verifiedAppExit.contract.identity,
   title: verifiedAppExit.contract.title,
   category: verifiedAppExit.contract.category,
   slash: {

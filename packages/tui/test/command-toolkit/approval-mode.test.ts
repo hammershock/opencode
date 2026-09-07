@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { CommandRegistry, createHostResolver } from "@opencode-ai/command-kit"
 import { approvalModeCommand, type ApprovalModeCommandContext } from "../../src/command-toolkit/approval-mode"
+import { permissionModeActions } from "../../src/component/dialog-permission-mode"
+import type { PermissionMode } from "../../src/context/permission"
 
 describe("approval mode command", () => {
   test("opens the contextual two-state approval control", async () => {
@@ -25,5 +27,32 @@ describe("approval mode command", () => {
       },
     })
     expect(opened).toBe(1)
+  })
+
+  test("shows both durable scopes and changes each independently", async () => {
+    let defaultMode: PermissionMode = "normal"
+    let sessionMode: PermissionMode = "auto"
+    const actions = () =>
+      permissionModeActions({
+        defaultMode,
+        sessionMode,
+        setDefault: (mode) => {
+          defaultMode = mode
+        },
+        setSession: (mode) => {
+          sessionMode = mode
+        },
+      })
+
+    expect(actions().map((item) => [item.value, item.title, item.description])).toEqual([
+      ["default", "Default · Enable auto-approve", "Currently normal · copied only to new Sessions"],
+      ["session", "Session · Disable auto-approve", "Currently auto · changes only this durable Session"],
+    ])
+    await actions()[0]!.run()
+    expect(String(defaultMode)).toBe("auto")
+    expect(String(sessionMode)).toBe("auto")
+    await actions()[1]!.run()
+    expect(String(defaultMode)).toBe("auto")
+    expect(String(sessionMode)).toBe("normal")
   })
 })

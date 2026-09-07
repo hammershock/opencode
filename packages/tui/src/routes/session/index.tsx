@@ -52,7 +52,7 @@ import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
-import { DialogPermissionMode } from "../../component/dialog-permission-mode"
+import { DialogPermissionModes } from "../../component/dialog-permission-mode"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { filetype } from "../../util/filetype"
@@ -91,7 +91,7 @@ import {
 import { reportOverrideDiagnostic } from "../../command-toolkit/experimental-settings"
 import { createCommandHost } from "../../command-toolkit/host"
 import { environmentCommands, type EnvironmentCommandContext } from "../../command-toolkit/environment"
-import { targetCommand, TARGET_MANAGER_SETTING, type TargetCommandContext } from "../../command-toolkit/target"
+import { targetCommand, type TargetCommandContext } from "../../command-toolkit/target"
 import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
 import { approvalModeCommand, type ApprovalModeCommandContext } from "../../command-toolkit/approval-mode"
 import { useTargetManager } from "../../component/target-manager"
@@ -529,7 +529,6 @@ export function Session() {
           sessionID: route.sessionID,
           location: current,
           abortSignal: new AbortController().signal,
-          targetManagerEnabled: kv.get(TARGET_MANAGER_SETTING, false),
           openTargetManager: targetManager.open,
           sessionControls: {
             outputExpansion: setOutputExpansion,
@@ -550,10 +549,11 @@ export function Session() {
           approvalMode: {
             open: () =>
               dialog.replace(() => (
-                <DialogPermissionMode
-                  scope="Session"
-                  mode={session()?.approvalMode ?? "normal"}
-                  set={async (approvalMode) => {
+                <DialogPermissionModes
+                  defaultMode={local.permission.defaultMode}
+                  sessionMode={session()?.approvalMode ?? "normal"}
+                  setDefault={(approvalMode) => local.permission.setDefault(approvalMode)}
+                  setSession={async (approvalMode) => {
                     await sdk.client.session.update(
                       { sessionID: route.sessionID, approvalMode },
                       { throwOnError: true },

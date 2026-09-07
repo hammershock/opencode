@@ -1,6 +1,5 @@
 import type { OverrideDiagnostic } from "@opencode-ai/command-kit"
 import { SESSION_RENAME_DIRECT_SETTING } from "./session-rename"
-import { TARGET_MANAGER_SETTING } from "./target"
 
 export type ExperimentalCommandSetting = {
   id: string
@@ -26,13 +25,6 @@ export const experimentalCommandSettings = [
     key: SESSION_RENAME_DIRECT_SETTING,
     title: "Direct session rename",
     description: "Allow /rename <title> to rename without asking the Agent",
-    defaultValue: false,
-  },
-  {
-    id: "fork.target.manage",
-    key: TARGET_MANAGER_SETTING,
-    title: "Session target manager",
-    description: "Enable /target and /target add without changing the current Session location",
     defaultValue: false,
   },
   {

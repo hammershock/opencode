@@ -318,12 +318,21 @@ function rewriteReplacementDependencies(root: AnyNode, replacements: ReadonlyMap
   return recur(root, true)
 }
 
-export function hasUnbound(root: Node<unknown, unknown, any>, source: AnyNode): boolean {
+export function hasUnbound(
+  root: Node<unknown, unknown, any>,
+  source: AnyNode,
+  replacements: Replacements = [],
+): boolean {
   if (source.kind !== "unbound") throw new Error(`Cannot check non-unbound layer node: ${source.name}`)
-  return walk<boolean>(root, (node, context) => {
-    if (node === source) return true
-    return node.dependencies.some(context.visit)
-  })
+  const replacementMap = replacementMapFrom(replacements)
+  return walk<boolean>(
+    root,
+    (node, context) => {
+      if (node === source) return true
+      return node.dependencies.some(context.visit)
+    },
+    { resolve: (node) => replacementMap.get(node.name) ?? node },
+  )
 }
 
 function flatten(node: AnyNode): readonly AnyNode[] {

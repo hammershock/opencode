@@ -1,10 +1,40 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Stream } from "effect"
+import { Effect, Exit, Layer, Stream } from "effect"
+import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
+import { SyncEventStore } from "@opencode-ai/core/sync/event-store"
+import { SyncOwnership } from "@opencode-ai/core/sync/ownership"
 import { SessionSync } from "@opencode-ai/core/sync/session"
 
 describe("SessionSync", () => {
+  test("keeps the application available when startup recovery fails", async () => {
+    const layer = SessionSync.captureLayer.pipe(
+      Layer.provide([
+        Layer.mock(EventV2.Service, { all: () => Stream.empty }),
+        Layer.mock(SyncEventStore.Service, {
+          scope: () => {
+            throw new Error("unexpected scoped store access")
+          },
+        }),
+        Layer.mock(SyncOwnership.Service, {
+          assign: () => Effect.void,
+          unassign: () => Effect.void,
+          list: () => Effect.fail(new Error("recovery unavailable")),
+        }),
+        Layer.mock(Database.Service, {
+          db: {
+            select: () => ({ from: () => ({ all: () => Effect.succeed([]) }) }),
+          } as unknown as Database.Interface["db"],
+        }),
+      ]),
+    )
+
+    const exit = await Effect.runPromiseExit(Layer.build(layer).pipe(Effect.scoped))
+
+    expect(Exit.isSuccess(exit)).toBe(true)
+  })
+
   test("repairs ownership from surviving rows without discarding deleted Session routing", async () => {
     const ownership = new Map([
       ["explicitly-local", "old-space"],

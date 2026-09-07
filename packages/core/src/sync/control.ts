@@ -27,6 +27,7 @@ import { SyncOwnership } from "./ownership"
 import { SyncCodec } from "./codec"
 import { SyncMembership } from "./membership"
 import { SyncState } from "./state"
+import { TargetBindingRegistry } from "../target-binding-registry"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -56,10 +57,6 @@ export const DeviceUpdate = Schema.Struct({
   id: Schema.NonEmptyString,
   name: Schema.optional(Schema.NonEmptyString),
   revoke: Schema.optional(Schema.Boolean),
-})
-export const BindingUpdate = Schema.Struct({
-  label: Schema.NonEmptyString,
-  targetID: Schema.optional(Schema.NonEmptyString),
 })
 export const Recovery = Schema.Struct({ recoveryString: Schema.NonEmptyString })
 export const HydrateInput = Schema.Struct({ sessionID: Schema.NonEmptyString })
@@ -101,7 +98,6 @@ export interface Interface {
   readonly switchAccount: (input: SyncSetup.CompleteInput) => Effect.Effect<SyncState.State, ControlError>
   readonly devices: () => Effect.Effect<SyncDevice.State, ControlError>
   readonly updateDevice: (input: typeof DeviceUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
-  readonly updateBinding: (input: typeof BindingUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
   readonly exportKey: () => Effect.Effect<typeof Recovery.Type, ControlError>
   /** Index remote heads without downloading their complete Session histories. */
   readonly sessions: () => Effect.Effect<readonly SyncMetadata.Item[], ControlError>
@@ -122,6 +118,7 @@ const layer = Layer.effect(
     const membership = yield* SyncMembership.Service
     const sessionDB = (yield* Database.Service).db
     const global = yield* Global.Service
+    const targetBindings = yield* TargetBindingRegistry.Service
     const devicesFor = (namespaceID: string) =>
       SyncDevice.make(path.join(global.config, "sync", "spaces", namespaceID, "state.json"))
     let lastSuccessAt: number | undefined
@@ -445,18 +442,6 @@ const layer = Layer.effect(
       engine = undefined
       return yield* deviceState()
     })
-    const updateBinding = Effect.fn("SyncControl.updateBinding")(function* (input: typeof BindingUpdate.Type) {
-      yield* Effect.tryPromise({
-        try: async () => {
-          const config = await Effect.runPromise(setup.config())
-          if (!config) throw new Error("Sync is not configured")
-          const devices = devicesFor(config.namespaceID)
-          return input.targetID ? devices.bind(input.label, input.targetID) : devices.unbind(input.label)
-        },
-        catch: () => new ControlError({ kind: "storage" }),
-      })
-      return yield* deviceState()
-    })
     const exportKey = Effect.fn("SyncControl.exportKey")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
@@ -483,11 +468,10 @@ const layer = Layer.effect(
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
       const metadata = metadataStore.scope(config.namespaceID)
-      const devices = devicesFor(config.namespaceID)
-      const [indexed, local, deviceState] = yield* Effect.all([
+      const [indexed, local, bindingSnapshot] = yield* Effect.all([
         metadata.list(),
         sessionDB.select({ id: SessionTable.id }).from(SessionTable).all(),
-        Effect.tryPromise({ try: () => devices.read(), catch: () => new ControlError({ kind: "storage" }) }),
+        Effect.tryPromise({ try: () => targetBindings.load(), catch: () => new ControlError({ kind: "storage" }) }),
       ])
       const localIDs = new Set(local.map((item) => String(item.id)))
       return yield* Effect.forEach(indexed, (item) => {
@@ -497,7 +481,7 @@ const layer = Layer.effect(
         const next: SyncMetadata.Availability =
           item.availability === "conflict"
             ? "conflict"
-            : item.targetLabel && !deviceState.bindings[item.targetLabel]
+            : item.targetLabel && !bindingSnapshot.bindings.has(item.targetLabel)
               ? "unresolved"
               : localIDs.has(item.sessionID)
                 ? "ready"
@@ -560,7 +544,6 @@ const layer = Layer.effect(
       switchAccount,
       devices: deviceState,
       updateDevice,
-      updateBinding,
       exportKey,
       sessions,
       hydrate,
@@ -581,6 +564,7 @@ export const node = makeGlobalNode({
     SyncDatabase.node,
     SyncOwnership.node,
     SyncMembership.node,
+    TargetBindingRegistry.node,
   ],
 })
 

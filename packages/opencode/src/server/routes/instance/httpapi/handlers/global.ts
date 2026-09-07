@@ -185,9 +185,6 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncDeviceUpdate", (ctx) =>
         syncControl.updateDevice(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
       )
-      .handle("syncBindingUpdate", (ctx) =>
-        syncControl.updateBinding(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
-      )
       .handle("syncRecoveryExport", () =>
         syncControl.exportKey().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
       )

@@ -17,8 +17,6 @@ export type Record = typeof Record.Type
 export const State = Schema.Struct({
   version: Schema.Literal(1),
   devices: Schema.Array(Record),
-  /** Device-local label mapping. Connection details and target IDs never enter heads. */
-  bindings: Schema.Record(Schema.String, Schema.NonEmptyString),
 })
 export type State = typeof State.Type
 
@@ -29,7 +27,7 @@ export function make(filename: string) {
       if (cause.code === "ENOENT") return undefined
       throw cause
     })
-    return text ? Schema.decodeUnknownSync(State)(JSON.parse(text)) : { version: 1, devices: [], bindings: {} }
+    return text ? Schema.decodeUnknownSync(State)(JSON.parse(text)) : { version: 1, devices: [] }
   }
   const mutate = <A>(update: (state: State) => readonly [State, A]): Promise<A> => {
     let result!: A
@@ -72,17 +70,7 @@ export function make(filename: string) {
       return [{ ...state, devices: state.devices.map((item) => (item.id === id ? next : item)) }, next]
     })
   }
-  const bind = (label: string, targetID: string) => {
-    if (!label.trim() || !targetID.trim()) return Promise.reject(new Error("Label and target are required"))
-    return mutate((state) => [{ ...state, bindings: { ...state.bindings, [label]: targetID } }, undefined])
-  }
-  const unbind = (label: string) =>
-    mutate((state) => {
-      const bindings = { ...state.bindings }
-      delete bindings[label]
-      return [{ ...state, bindings }, undefined]
-    })
-  return { read, upsert, revoke, rename, bind, unbind }
+  return { read, upsert, revoke, rename }
 }
 
 function byID(left: Record, right: Record) {

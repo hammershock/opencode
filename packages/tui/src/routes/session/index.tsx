@@ -717,7 +717,6 @@ export function Session() {
                         description: device.id,
                         value: { kind: "device" as const, id: device.id },
                       })),
-                      { title: "Bind portable target label", value: { kind: "device" as const, id: "" } },
                     ]}
                     onSelect={(option) => resolve(option.value)}
                   />
@@ -726,19 +725,6 @@ export function Session() {
               ),
             )
             if (!choice) return "cancelled"
-            if (!choice.id) {
-              const label = await DialogPrompt.show(dialog, "Portable target label")
-              if (!label?.trim()) return "cancelled"
-              const targetID = await DialogPrompt.show(dialog, "Local target ID", {
-                description: () => <text>Leave empty to remove this device-local binding.</text>,
-              })
-              if (targetID === null) return "cancelled"
-              await sdk.client.global.syncBindingUpdate(
-                { label: label.trim(), ...(targetID.trim() ? { targetID: targetID.trim() } : {}) },
-                { throwOnError: true },
-              )
-              return "completed"
-            }
             const device = result.data.devices.find((item) => item.id === choice.id)
             if (!device || device.revoked) return "cancelled"
             const action = await DialogPrompt.show(dialog, `Manage ${device.name}`, {

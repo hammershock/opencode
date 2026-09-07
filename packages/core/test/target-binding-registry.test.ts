@@ -35,6 +35,9 @@ describe("device-local portable target bindings", () => {
       expect(two.bindings.get("same-name-is-not-a-binding")).toBe(second)
       const empty = await registry.unbind("same-name-is-not-a-binding", two.revision)
       expect(empty.bindings.size).toBe(0)
+      await expect(registry.unbind("same-name-is-not-a-binding", two.revision)).rejects.toMatchObject({
+        _tag: "TargetBindingRegistry.RevisionConflictError",
+      })
     } finally {
       await fs.rm(directory, { recursive: true, force: true })
     }

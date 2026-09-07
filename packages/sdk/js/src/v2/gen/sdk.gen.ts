@@ -91,8 +91,6 @@ import type {
   GlobalSyncActivateResponses,
   GlobalSyncAssignUnassignedErrors,
   GlobalSyncAssignUnassignedResponses,
-  GlobalSyncBindingUpdateErrors,
-  GlobalSyncBindingUpdateResponses,
   GlobalSyncCreateErrors,
   GlobalSyncCreateResponses,
   GlobalSyncDeleteErrors,
@@ -461,6 +459,8 @@ import type {
   V2TargetBindingBindResponses,
   V2TargetBindingListErrors,
   V2TargetBindingListResponses,
+  V2TargetBindingUnbindErrors,
+  V2TargetBindingUnbindResponses,
   V2TargetCreateErrors,
   V2TargetCreateResponses,
   V2TargetLegacyImportErrors,
@@ -1872,40 +1872,6 @@ export class Global extends HeyApiClient {
       ThrowOnError
     >({
       url: "/global/sync/devices",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
-    })
-  }
-
-  public syncBindingUpdate<ThrowOnError extends boolean = false>(
-    parameters?: {
-      label?: string
-      targetID?: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ) {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "body", key: "label" },
-            { in: "body", key: "targetID" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? this.client).patch<
-      GlobalSyncBindingUpdateResponses,
-      GlobalSyncBindingUpdateErrors,
-      ThrowOnError
-    >({
-      url: "/global/sync/bindings",
       ...options,
       ...params,
       headers: {
@@ -8251,6 +8217,45 @@ export class TargetBinding extends HeyApiClient {
     return (options?.client ?? this.client).get<V2TargetBindingListResponses, V2TargetBindingListErrors, ThrowOnError>({
       url: "/api/target-binding",
       ...options,
+    })
+  }
+
+  /**
+   * Explicitly unbind a portable target label
+   */
+  public unbind<ThrowOnError extends boolean = false>(
+    parameters: {
+      portableTargetLabel: string
+      expectedRevision?: string
+      expectedSessionIDs?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "portableTargetLabel" },
+            { in: "body", key: "expectedRevision" },
+            { in: "body", key: "expectedSessionIDs" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      V2TargetBindingUnbindResponses,
+      V2TargetBindingUnbindErrors,
+      ThrowOnError
+    >({
+      url: "/api/target-binding/{portableTargetLabel}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

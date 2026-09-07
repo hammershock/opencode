@@ -33,6 +33,12 @@ function mapDomainError(cause: unknown) {
     return new TargetNotFoundError({ targetID: cause.targetID, message: "Target not found" })
   if (cause instanceof TargetRegistry.RestoreAuthorizationError)
     return new ForbiddenError({ message: "Target identity restoration was not authorized by Session recovery" })
+  if (cause instanceof TargetBindingRegistry.RevisionConflictError)
+    return new ConflictError({ message: "Target binding registry revision changed", resource: "target-bindings.json" })
+  if (cause instanceof TargetBindingRegistry.InvalidLabelError)
+    return new InvalidRequestError({ message: "Portable target label is invalid", kind: "target_binding" })
+  if (cause instanceof PortableScopeChangedError)
+    return new ConflictError({ message: cause.message, resource: cause.label })
   return new UnknownError({ message: "Target registry operation failed", ref: "target_registry" })
 }
 
@@ -109,14 +115,7 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
       )
       .handle("target.bindPortable", (ctx) =>
         invoke(async () => {
-          const all = await Effect.runPromise(sessions.list())
-          const actual = all
-            .filter((item) => item.portableTargetLabel === ctx.params.portableTargetLabel)
-            .map((item) => item.id)
-            .sort()
-          const expected = [...new Set(ctx.payload.expectedSessionIDs)].sort()
-          if (actual.length !== expected.length || actual.some((id, index) => id !== expected[index]))
-            throw new Error("Portable target recovery scope changed; review the affected Sessions again")
+          await validatePortableScope(sessions, ctx.params.portableTargetLabel, ctx.payload.expectedSessionIDs)
           const prepared = await target.prepare(ctx.payload.targetID)
           if (prepared.status !== "ready") throw new Error(`${prepared.stage}: ${prepared.message}`)
           const snapshot = await bindings.bind(
@@ -124,6 +123,13 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
             ctx.payload.targetID,
             ctx.payload.expectedRevision,
           )
+          return { revision: snapshot.revision, bindings: Object.fromEntries(snapshot.bindings) }
+        }),
+      )
+      .handle("target.unbindPortable", (ctx) =>
+        invoke(async () => {
+          await validatePortableScope(sessions, ctx.params.portableTargetLabel, ctx.payload.expectedSessionIDs)
+          const snapshot = await bindings.unbind(ctx.params.portableTargetLabel, ctx.payload.expectedRevision)
           return { revision: snapshot.revision, bindings: Object.fromEntries(snapshot.bindings) }
         }),
       )
@@ -138,3 +144,23 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
       )
   }),
 )
+
+class PortableScopeChangedError extends Error {
+  constructor(readonly label: string) {
+    super("Portable target recovery scope changed; review the affected Sessions again")
+  }
+}
+
+async function validatePortableScope(
+  sessions: SessionV2.Interface,
+  label: string,
+  expectedSessionIDs: readonly string[],
+) {
+  const actual = (await Effect.runPromise(sessions.list()))
+    .filter((item) => item.portableTargetLabel === label)
+    .map((item) => item.id)
+    .sort()
+  const expected = [...new Set(expectedSessionIDs)].sort()
+  if (actual.length !== expected.length || actual.some((id, index) => id !== expected[index]))
+    throw new PortableScopeChangedError(label)
+}

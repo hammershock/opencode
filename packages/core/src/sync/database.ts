@@ -74,6 +74,31 @@ export function layerFromPath(filename: string) {
   )
 }
 
+export function purgeSpace(db: Interface["db"], spaceID: string) {
+  return db.transaction((tx) =>
+    Effect.forEach(
+      [
+        sql`DELETE FROM sync_event_outbox WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_event_segment WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_event_head WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_event_cursor WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_remote_segment WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_remote_event WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_deletion_set WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_apply_journal WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_session_metadata WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_session_space WHERE space_id = ${spaceID}`,
+      ],
+      (statement) => tx.run(statement),
+      { discard: true },
+    ).pipe(
+      Effect.andThen(
+        tx.run(sql`DELETE FROM sync_event_lease WHERE substr(name, 1, length(${`${spaceID}:`})) = ${`${spaceID}:`}`),
+      ),
+    ),
+  )
+}
+
 const nodeLayer = Layer.unwrap(
   Effect.map(Global.Service, (global) => layerFromPath(path.join(global.config, "sync", "sync.db"))),
 )

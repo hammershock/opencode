@@ -2111,7 +2111,7 @@ export type SyncControlApiError = {
   data: {
     kind: "unconfigured" | "locked" | "provider" | "storage" | "invalid" | "pending" | "deleted"
     diagnostic?: {
-      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect"
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "delete"
       operation?: "list" | "stat" | "download" | "upload" | "delete"
       kind?:
         | "unauthenticated"
@@ -8604,9 +8604,13 @@ export type GlobalSyncDeleteData = {
 
 export type GlobalSyncDeleteErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * Bad request
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
 }
 
 export type GlobalSyncDeleteError = GlobalSyncDeleteErrors[keyof GlobalSyncDeleteErrors]
@@ -8752,7 +8756,7 @@ export type GlobalSyncStatusResponses = {
     lastSuccessAt?: number
     error?: string
     diagnostic?: {
-      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect"
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "delete"
       operation?: "list" | "stat" | "download" | "upload" | "delete"
       kind?:
         | "unauthenticated"

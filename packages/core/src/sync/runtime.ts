@@ -37,7 +37,7 @@ export const Head = Schema.Struct({
 export type Head = typeof Head.Type
 
 export const Diagnostic = Schema.Struct({
-  stage: Schema.Literals(["attachment", "segment", "head", "pull", "hydrate", "collect"]),
+  stage: Schema.Literals(["attachment", "segment", "head", "pull", "hydrate", "collect", "delete"]),
   operation: Schema.optional(Schema.Literals(["list", "stat", "download", "upload", "delete"])),
   kind: Schema.optional(
     Schema.Literals([

@@ -65,6 +65,7 @@ const remoteSession = SyncMetadata.Item.make({
 const makeApiLayer = (
   state: SyncSetup.Interface["state"] = () => Effect.succeed(syncState),
   now: SyncControl.Interface["now"] = () => Effect.void,
+  deleteSpace: SyncControl.Interface["deleteSpace"] = () => Effect.succeed(["session-a"]),
 ) =>
   HttpRouter.serve(
     HttpApiBuilder.layer(RootHttpApi).pipe(
@@ -139,7 +140,7 @@ const makeApiLayer = (
         leaveSpace: () => Effect.succeed(["session-a"]),
         enable: () => Effect.void,
         setInterval: () => Effect.void,
-        deleteSpace: () => Effect.succeed(["session-a"]),
+        deleteSpace,
         removeFromDevice: () => Effect.succeed(["session-a"]),
         unassigned: () => Effect.succeed(["session-unassigned"]),
         assignUnassigned: (input) => Effect.succeed(input.sessionIDs),
@@ -171,6 +172,23 @@ const failedSyncIt = testEffect(
           retryable: true,
           outcome: "unknown",
           message: "Sync segment failed",
+        },
+      }),
+    ),
+  ),
+)
+const failedDeleteIt = testEffect(
+  makeApiLayer(undefined, undefined, () =>
+    Effect.fail(
+      new SyncControl.ControlError({
+        kind: "provider",
+        diagnostic: {
+          stage: "delete",
+          operation: "delete",
+          kind: "network",
+          retryable: true,
+          outcome: "failed",
+          message: "Sync delete failed",
         },
       }),
     ),
@@ -227,6 +245,29 @@ describe("global HttpApi", () => {
             retryable: true,
             outcome: "unknown",
             message: "Sync segment failed",
+          },
+        },
+      })
+    }),
+  )
+
+  failedDeleteIt.live("returns a redacted structured space deletion diagnostic", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.delete(
+        GlobalPaths.syncSpaceDelete.replace(":namespaceID", "space-a"),
+      ).pipe(HttpClient.execute)
+      expect(response.status).toBe(503)
+      expect(yield* response.json).toEqual({
+        name: "SyncControlError",
+        data: {
+          kind: "provider",
+          diagnostic: {
+            stage: "delete",
+            operation: "delete",
+            kind: "network",
+            retryable: true,
+            outcome: "failed",
+            message: "Sync delete failed",
           },
         },
       })

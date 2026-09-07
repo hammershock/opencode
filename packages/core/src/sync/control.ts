@@ -410,9 +410,16 @@ const make = (input: LayerOptions) =>
       return SwitchResult.make({ status: "switched", namespaceID: input.namespaceID })
     })
     const deleteSpace = Effect.fn("SyncControl.deleteSpace")(function* (namespaceID: string) {
-      const deleted = yield* setup
-        .deleteSpace(namespaceID)
-        .pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      const deleted = yield* setup.deleteSpace(namespaceID).pipe(
+        Effect.mapError((error) =>
+          error.kind === "invalid"
+            ? new ControlError({ kind: "invalid" })
+            : new ControlError({
+                kind: error.kind === "storage" ? "storage" : "provider",
+                diagnostic: SyncRuntime.diagnostic("delete", error),
+              }),
+        ),
+      )
       const sessions = yield* purgeSpace(deleted)
       engine = undefined
       restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))

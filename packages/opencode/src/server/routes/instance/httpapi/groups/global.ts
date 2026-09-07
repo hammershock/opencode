@@ -255,7 +255,7 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.delete("syncDelete", GlobalPaths.syncSpaceDelete, {
         params: SyncNamespaceInput,
         success: Schema.Array(Schema.NonEmptyString),
-        error: HttpApiError.BadRequest,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.delete("syncRemove", GlobalPaths.syncRemove, {
         success: Schema.Array(Schema.NonEmptyString),

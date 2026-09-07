@@ -179,6 +179,28 @@ describe("SyncSetup lifecycle", () => {
     expect(secure.values.has("space:kept:root")).toBe(true)
   })
 
+  test("commits local deletion after the remote tombstone even when root-key cleanup fails", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    const setup = await authenticated(tmp.path, secure, provider, () => key("deleted"))
+    await run(setup.create({ name: "Deleted", encryption: "aes-256-gcm" }))
+    await run(setup.activate("deleted"))
+    const failingStore: SyncSecureStore.Store = {
+      ...secure,
+      remove: async (account) => {
+        if (account === "space:deleted:root") throw new Error("fake key cleanup failure")
+        return secure.remove(account)
+      },
+    }
+    const retry = SyncSetup.make({ configDirectory: tmp.path, store: failingStore, provider })
+
+    expect(await run(retry.deleteSpace("deleted"))).toBe("deleted")
+    expect((await run(retry.state()))?.spaces).toEqual([])
+    expect(await provider.stat("deleted-spaces/deleted.json")).toBeDefined()
+    expect(secure.values.has("space:deleted:root")).toBe(true)
+  })
+
   test("applies a remote deletion marker locally before the active runtime can upload its old outbox", async () => {
     await using tmp = await tmpdir()
     const secure = store()

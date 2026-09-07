@@ -46,6 +46,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { ApprovalMode } from "@opencode-ai/schema/approval-mode"
+import { SyncSetup } from "@opencode-ai/core/sync/setup"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -505,7 +506,7 @@ export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" 
 const layer: Layer.Layer<
   Service,
   never,
-  BackgroundJob.Service | RuntimeFlags.Service | Database.Service | EventV2Bridge.Service
+  BackgroundJob.Service | RuntimeFlags.Service | Database.Service | EventV2Bridge.Service | SyncSetup.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -514,6 +515,7 @@ const layer: Layer.Layer<
     const background = yield* BackgroundJob.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const syncSetup = yield* SyncSetup.Service
 
     const createNext = Effect.fn("Session.createNext")(function* (input: {
       id?: SessionID
@@ -531,6 +533,9 @@ const layer: Layer.Layer<
       approvalMode?: ApprovalMode.Mode
     }) {
       const ctx = yield* InstanceState.context
+      // Capture ownership at the creation boundary. Persisting it in the
+      // durable Created event keeps projection and sync routing atomic.
+      const syncSpaceID = (yield* syncSetup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))?.namespaceID
       const result: Info = {
         id: SessionID.descending(input.id),
         slug: Slug.create(),
@@ -541,6 +546,7 @@ const layer: Layer.Layer<
         lastKnownTargetName: input.lastKnownTargetName,
         path: input.path,
         workspaceID: input.workspaceID,
+        syncSpaceID,
         parentID: input.parentID,
         title: input.title ?? (input.parentID ? childTitlePrefix : parentTitlePrefix) + new Date().toISOString(),
         agent: input.agent,
@@ -1054,7 +1060,7 @@ function listByProject(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [BackgroundJob.node, RuntimeFlags.node, Database.node, EventV2Bridge.node],
+  deps: [BackgroundJob.node, RuntimeFlags.node, Database.node, EventV2Bridge.node, SyncSetup.node],
 })
 
 export * as Session from "./session"

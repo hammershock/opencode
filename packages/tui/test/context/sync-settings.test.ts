@@ -25,6 +25,14 @@ describe("sync settings deployment errors", () => {
       }),
     ).toBe("Local sync state is incompatible. Archive the local sync folder and restart opencode-rexd.")
     expect(syncOperationFailure({ message: "incompatible-local-state" })).toBe("Sync operation failed")
+    expect(syncOperationFailure({ data: { kind: "unconfigured" } })).toBe("Select a sync space first")
+    expect(syncOperationFailure({ body: { data: { kind: "locked" } } })).toBe(
+      "Import the recovery key for the active space",
+    )
+    expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "pull" } } })).toBe(
+      "Sync failed during pull",
+    )
+    expect(syncOperationFailure({ data: { diagnostic: { stage: "token secret" } } })).toBe("Sync operation failed")
     expect(syncOperationFailure({ message: "provider failed with token secret" })).toBe("Sync operation failed")
   })
 })

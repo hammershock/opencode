@@ -72,7 +72,23 @@ const INCOMPATIBLE_LOCAL_STATE_MESSAGE = SyncSetup.INCOMPATIBLE_LOCAL_STATE_MESS
 export function syncOperationFailure(error: unknown) {
   if (hasMissingApp(error, 0)) return MISSING_APP_MESSAGE
   if (hasSetupKind(error, "incompatible-local-state", 0)) return INCOMPATIBLE_LOCAL_STATE_MESSAGE
+  if (hasSetupKind(error, "unconfigured", 0)) return "Select a sync space first"
+  if (hasSetupKind(error, "locked", 0)) return "Import the recovery key for the active space"
+  const stage = syncFailureStage(error, 0)
+  if (stage) return `Sync failed during ${stage}`
   return "Sync operation failed"
+}
+
+const SYNC_FAILURE_STAGES = new Set(["attachment", "segment", "head", "pull", "hydrate", "collect"])
+
+function syncFailureStage(value: unknown, depth: number): string | undefined {
+  if (depth > 4 || !value || typeof value !== "object") return
+  const record = value as Record<string, unknown>
+  if (typeof record.stage === "string" && SYNC_FAILURE_STAGES.has(record.stage)) return record.stage
+  for (const item of [record.data, record.error, record.cause, record.body, record.diagnostic]) {
+    const stage = syncFailureStage(item, depth + 1)
+    if (stage) return stage
+  }
 }
 
 function hasSetupKind(value: unknown, kind: string, depth: number): boolean {
@@ -520,6 +536,10 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         await completeOAuth({ type: "manual", code })
       },
       syncNow: async () => {
+        if (!model().activeSpace) {
+          await refresh(true)
+          if (!model().activeSpace) return
+        }
         setModel((current) => ({ ...current, state: "syncing" }))
         await mutate(() => sdk.client.global.syncNow({ throwOnError: true }))
       },

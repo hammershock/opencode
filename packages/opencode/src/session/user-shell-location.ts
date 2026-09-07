@@ -15,6 +15,25 @@ export const provider = Effect.gen(function* () {
   return makeProvider(process, filesystem, location)
 })
 
+const controlPrefix = (nonce: string) => `\0opencode-cwd-${nonce}\0`
+
+export function wrapExecution(command: string, nonce: string) {
+  return `{ ${command}\n}; __opencode_status=$?; printf '\\000opencode-cwd-${nonce}\\000%s\\000' "$(pwd -P)"; exit "$__opencode_status"`
+}
+
+export function readExecutionControl(output: string, nonce: string) {
+  const start = output.lastIndexOf(controlPrefix(nonce))
+  if (start < 0) return { output }
+  const value = start + controlPrefix(nonce).length
+  const end = output.indexOf("\0", value)
+  if (end < 0) return { output: output.slice(0, start) }
+  const finalCwd = output.slice(value, end)
+  return {
+    output: output.slice(0, start) + output.slice(end + 1),
+    ...(finalCwd ? { finalCwd } : {}),
+  }
+}
+
 export function makeProvider(
   process: LocationProcess.Interface,
   filesystem: FileSystem.Interface,
@@ -22,7 +41,8 @@ export function makeProvider(
 ) {
   const execute: Provider["execute"] = (input) =>
     Effect.gen(function* () {
-      const result = yield* process.runShell(input.command, {
+      const nonce = crypto.randomUUID().replaceAll("-", "")
+      const result = yield* process.runShell(wrapExecution(input.command, nonce), {
         cwd: input.cwd,
         shell: "/bin/sh",
         env: input.environment,
@@ -30,8 +50,10 @@ export function makeProvider(
         maxOutputBytes: 8 * 1024 * 1024,
         signal: input.signal,
       })
-      if (result.output?.length) yield* input.onOutput?.(result.output.toString("utf8")) ?? Effect.void
-      return { exitCode: result.exitCode }
+      const visible = readExecutionControl(result.output?.toString("utf8") ?? "", nonce)
+      const control = readExecutionControl(result.stdout.toString("utf8"), nonce)
+      if (visible.output) yield* input.onOutput?.(visible.output) ?? Effect.void
+      return { exitCode: result.exitCode, finalCwd: control.finalCwd }
     })
   const validateDirectory: Provider["validateDirectory"] = (directory) =>
     filesystem.list({ path: RelativePath.make(path.posix.relative(location.directory, directory)) }).pipe(

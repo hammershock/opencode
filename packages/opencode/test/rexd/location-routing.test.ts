@@ -14,7 +14,11 @@ import { rexdFilesystemNodes } from "../../src/rexd/location-filesystem"
 import { rexdSessionNode, RexdLocationSession } from "../../src/rexd/location-session"
 import { runRexdProcess } from "../../src/rexd/location-process"
 import { probeTarget } from "../../src/rexd/target-registry"
-import { makeProvider as makeUserShellProvider } from "../../src/session/user-shell-location"
+import {
+  makeProvider as makeUserShellProvider,
+  readExecutionControl,
+  wrapExecution,
+} from "../../src/session/user-shell-location"
 
 type Notify = (method: string, params: unknown) => void
 
@@ -235,11 +239,15 @@ describe("Rexd Location routing contract", () => {
       runShell: (command: string) =>
         Effect.sync(() => {
           executed.push(command)
+          const nonce = command.match(/opencode-cwd-([a-f0-9]+)/)?.[1]
+          const output = nonce
+            ? Buffer.from(`remote-shell\0opencode-cwd-${nonce}\0/workspace/child\0`)
+            : Buffer.from("remote-shell")
           return {
             command,
             exitCode: 0,
-            output: Buffer.from("remote-shell"),
-            stdout: Buffer.from("remote-shell"),
+            output,
+            stdout: output,
             stderr: Buffer.alloc(0),
             outputTruncated: false,
             stdoutTruncated: false,
@@ -278,12 +286,31 @@ describe("Rexd Location routing contract", () => {
       }),
     )
     expect(result.exitCode).toBe(0)
-    expect(executed).toEqual(["pwd"])
+    expect(result.finalCwd).toBe("/workspace/child")
+    expect(executed).toHaveLength(1)
+    expect(executed[0]).toContain("{ pwd")
+    expect(executed[0]).toContain("pwd -P")
     expect(output).toEqual(["remote-shell"])
     const completion = await Effect.runPromise(
       shell.complete({ input: "rem", cursor: 3, cwd: "/workspace", environment: {} }),
     )
     expect(completion.map((item) => item.value)).toEqual(["remote.txt", "remote-dir/"])
+  })
+
+  test("remote user shell control framing is nonce-bound and never enters visible output", () => {
+    const nonce = "0123456789abcdef"
+    const wrapped = wrapExecution("cd child; false", nonce)
+    expect(wrapped).toContain("cd child; false")
+    expect(wrapped).toContain(`opencode-cwd-${nonce}`)
+
+    expect(readExecutionControl(`visible\0opencode-cwd-${nonce}\0/workspace/child\0`, nonce)).toEqual({
+      output: "visible",
+      finalCwd: "/workspace/child",
+    })
+    expect(readExecutionControl("visible\0opencode-cwd-fixed\0/controller\0", nonce)).toEqual({
+      output: "visible\0opencode-cwd-fixed\0/controller\0",
+    })
+    expect(readExecutionControl(`visible\0opencode-cwd-${nonce}\0broken`, nonce)).toEqual({ output: "visible" })
   })
 
   test("remote user shell loads native completion on the target", async () => {

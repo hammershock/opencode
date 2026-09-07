@@ -1158,13 +1158,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       <Show when={Flag.OPENCODE_SHOW_TTFD}>
         <TimeToFirstDraw />
       </Show>
-      <Show when={syncSettings.transfer()}>
-        {(progress) => (
-          <box position="absolute" top={0} right={1} flexShrink={0}>
-            <SyncTransferSummary progress={progress()} />
-          </box>
-        )}
-      </Show>
       <Show when={ready()}>
         <box flexGrow={1} minHeight={0} flexDirection="column">
           <Switch>
@@ -1186,6 +1179,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       </Show>
       <Show when={!startup.skipInitialLoading}>
         <StartupLoading ready={ready} />
+      </Show>
+      <Show when={syncSettings.transfer()}>
+        {(progress) => (
+          <box position="absolute" top={0} right={1} flexShrink={0}>
+            <SyncTransferSummary progress={progress()} />
+          </box>
+        )}
       </Show>
     </box>
   )

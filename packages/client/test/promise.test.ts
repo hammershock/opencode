@@ -36,8 +36,8 @@ test("exposes every standard HTTP API group", () => {
     "attemptComplete",
     "attemptCancel",
   ])
-  expect(Object.keys(client.files)).toEqual(["list", "find"])
-  expect(Object.keys(client.ptys)).toEqual(["list", "create", "get", "update", "remove"])
+  expect(Object.keys(client.files)).toEqual(["directoryStatus", "ensureDirectory", "list", "find"])
+  expect(Object.keys(client.ptys)).toEqual(["list", "create", "get", "update", "restart", "remove"])
   expect(Object.keys(client.environment)).toEqual(["list", "reload", "reveal", "init"])
 })
 
@@ -66,6 +66,7 @@ test("environment methods preserve the public HTTP boundary", async () => {
   })
   await client.environment.reload({ location: { directory: "/work/project" } })
   await client.environment.reveal({ location: { directory: "/work/project" }, confirmed: true })
+  await client.environment.init({ sessionID: "ses_environment_workflow" })
 
   expect(requests.map((item) => [item.init?.method, item.url])).toEqual([
     [
@@ -74,6 +75,7 @@ test("environment methods preserve the public HTTP boundary", async () => {
     ],
     ["POST", "http://localhost:3000/api/environment/reload?location%5Bdirectory%5D=%2Fwork%2Fproject"],
     ["POST", "http://localhost:3000/api/environment/reveal?location%5Bdirectory%5D=%2Fwork%2Fproject"],
+    ["POST", "http://localhost:3000/api/session/ses_environment_workflow/environment/init"],
   ])
   const reveal = requests[2]?.init?.body
   expect(typeof reveal === "string" && JSON.parse(reveal)).toEqual({ confirmed: true })

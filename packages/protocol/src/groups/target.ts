@@ -4,9 +4,23 @@ import { SessionLocationRebinding } from "@opencode-ai/schema/session-location-r
 import { SessionID } from "@opencode-ai/schema/session-id"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
-import { ConflictError, ForbiddenError, InvalidRequestError, TargetNotFoundError, UnknownError } from "../errors"
+import {
+  ConflictError,
+  ForbiddenError,
+  InvalidRequestError,
+  SessionNotFoundError,
+  TargetNotFoundError,
+  UnknownError,
+} from "../errors"
 
-const errors = [ConflictError, ForbiddenError, InvalidRequestError, TargetNotFoundError, UnknownError] as const
+const errors = [
+  ConflictError,
+  ForbiddenError,
+  InvalidRequestError,
+  SessionNotFoundError,
+  TargetNotFoundError,
+  UnknownError,
+] as const
 const mutation = Schema.Struct({ input: Target.Input, expectedRevision: Schema.String })
 
 export const TargetGroup = HttpApiGroup.make("server.target")
@@ -40,10 +54,26 @@ export const TargetGroup = HttpApiGroup.make("server.target")
         expectedRevision: Schema.String,
         expectedSessionIDs: Schema.Array(SessionID),
       }),
-      success: SessionLocationRebinding.PortableBindingSnapshot,
+      success: SessionLocationRebinding.PortableBindingRecoveryResult,
       error: errors,
     }).annotateMerge(
       OpenApi.annotations({ identifier: "v2.targetBinding.bind", summary: "Explicitly bind a portable target label" }),
+    ),
+  )
+  .add(
+    HttpApiEndpoint.delete("target.unbindPortable", "/api/target-binding/:portableTargetLabel", {
+      params: { portableTargetLabel: Schema.String },
+      payload: Schema.Struct({
+        expectedRevision: Schema.String,
+        expectedSessionIDs: Schema.Array(SessionID),
+      }),
+      success: SessionLocationRebinding.PortableBindingSnapshot,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({
+        identifier: "v2.targetBinding.unbind",
+        summary: "Explicitly unbind a portable target label",
+      }),
     ),
   )
   .add(
@@ -107,10 +137,10 @@ export const TargetGroup = HttpApiGroup.make("server.target")
       params: { targetID: Location.TargetID },
       payload: Schema.Struct({
         input: Target.Input,
-        referencedSessionIDs: Schema.Array(Schema.String),
+        referencedSessionIDs: Schema.Array(SessionID),
         expectedRevision: Schema.String,
       }),
-      success: Target.MutationResult,
+      success: SessionLocationRebinding.RestoreResult,
       error: errors,
     }).annotateMerge(
       OpenApi.annotations({

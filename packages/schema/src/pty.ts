@@ -5,6 +5,7 @@ import { optional } from "./schema"
 import { define, inventory } from "./event"
 import { ascending } from "./identifier"
 import { NonNegativeInt, PositiveInt, statics } from "./schema"
+import { SessionID } from "./session-id"
 
 const IDSchema = Schema.String.check(Schema.isStartsWith("pty")).pipe(Schema.brand("PtyID"))
 
@@ -40,6 +41,8 @@ const Deleted = define({ type: "pty.deleted", schema: { id: ID } })
 export const Event = { Created, Updated, Exited, Deleted, Definitions: inventory(Created, Updated, Exited, Deleted) }
 
 export const CreateInput = Schema.Struct({
+  /** Optional admission token used when a terminal is opened from a Session. */
+  sessionID: optional(SessionID),
   command: optional(Schema.String),
   args: optional(Schema.Array(Schema.String)),
   cwd: optional(Schema.String),
@@ -47,6 +50,12 @@ export const CreateInput = Schema.Struct({
   env: optional(Schema.Record(Schema.String, Schema.String)),
 })
 export interface CreateInput extends Schema.Schema.Type<typeof CreateInput> {}
+
+export const RestartInput = Schema.Struct({
+  /** Optional admission token used when a terminal is restarted from a Session. */
+  sessionID: optional(SessionID),
+})
+export interface RestartInput extends Schema.Schema.Type<typeof RestartInput> {}
 
 export const UpdateInput = Schema.Struct({
   title: optional(Schema.String),

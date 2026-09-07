@@ -81,6 +81,31 @@ describe("upstream-first host fixture", () => {
     ])
   })
 
+  test("preserves upstream resolver order and every shadowing diagnostic", () => {
+    const winner = { id: "project.env", path: ["env"], provenance: { type: "project-config" as const } }
+    const plugin = {
+      id: "plugin.env",
+      path: ["env"],
+      provenance: { type: "legacy-plugin" as const, pluginID: "fixture" },
+    }
+    const result = createHostResolver(fixtureRegistry().routes(), () => [winner, plugin])("/env init")
+    expect(result.status).toBe("upstream")
+    if (result.status !== "upstream") return
+    expect(result.candidate).toEqual(winner)
+    expect(result.diagnostics).toEqual([
+      { type: "shadowed", winner, shadowed: plugin },
+      {
+        type: "shadowed",
+        winner,
+        shadowed: {
+          id: "core.environment.init",
+          path: ["env", "init"],
+          provenance: { type: "core", feature: "environment" },
+        },
+      },
+    ])
+  })
+
   test("uses core only after upstream declines", () => {
     const result = createHostResolver(fixtureRegistry().routes(), () => undefined)("/env init")
     expect(result.status).toBe("core")

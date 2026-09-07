@@ -12,6 +12,7 @@ import { SessionID } from "../session-id"
 import { WorkspaceID } from "../workspace-id"
 import { Location } from "../location"
 import { PermissionV1 } from "./permission"
+import { ApprovalMode } from "../approval-mode"
 
 const Timestamp = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -549,6 +550,7 @@ export const SessionInfo = Schema.Struct({
   directory: Schema.String,
   target: optional(Location.Target),
   lastKnownTargetName: optional(Schema.String),
+  syncSpaceID: optional(Schema.String),
   path: optional(Schema.String),
   parentID: optional(SessionID),
   summary: optional(SessionSummary),
@@ -556,6 +558,7 @@ export const SessionInfo = Schema.Struct({
   tokens: optional(SessionTokens),
   share: optional(SessionShare),
   title: Schema.String,
+  approvalMode: optional(ApprovalMode.Mode),
   agent: optional(Schema.String),
   model: optional(SessionModel),
   version: Schema.String,

@@ -62,6 +62,8 @@ function routeCurrent(route: ReturnType<typeof useRoute>): TuiPluginApi["route"]
       params: {
         sessionID: route.data.sessionID,
         prompt: route.data.prompt,
+        accessMode: route.data.accessMode,
+        resolution: route.data.resolution,
       },
     }
   }

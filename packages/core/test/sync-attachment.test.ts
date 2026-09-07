@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { SyncAttachment } from "@opencode-ai/core/sync/attachment"
 import { SyncCrypto } from "@opencode-ai/core/sync/crypto"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
+import { SyncCodec } from "@opencode-ai/core/sync/codec"
 
 function provider() {
   const files = new Map<string, Uint8Array>()
@@ -28,6 +29,19 @@ function provider() {
 }
 
 describe("SyncAttachment", () => {
+  test("stores and validates attachments in plaintext spaces without a key", async () => {
+    const remote = provider()
+    const service = SyncAttachment.make({
+      codec: SyncCodec.plaintext(),
+      namespaceID: "space",
+      provider: remote.adapter,
+    })
+    const bytes = new TextEncoder().encode("plain attachment")
+    const id = await service.put(bytes, "text/plain")
+    expect([...remote.files.keys()].every((item) => item.endsWith(".json"))).toBeTrue()
+    expect(await service.get(id)).toEqual(bytes)
+  })
+
   test("encrypts, deduplicates and hydrates persisted attachment payloads", async () => {
     const remote = provider()
     const service = SyncAttachment.make({
@@ -114,5 +128,40 @@ describe("SyncAttachment", () => {
       output: "short output",
     })
     expect(calls).toEqual([])
+  })
+
+  test("coalesces concurrent object writes and resumes from a partial attachment", async () => {
+    const remote = provider()
+    const uploads = new Map<string, number>()
+    let failManifest = true
+    const adapter: SyncProvider.Adapter = {
+      ...remote.adapter,
+      uploadAtomic: async (path, bytes, precondition) => {
+        uploads.set(path, (uploads.get(path) ?? 0) + 1)
+        if (path.includes("/manifests/") && failManifest) {
+          failManifest = false
+          throw new SyncProvider.ProviderError("memory", "upload", "network", true)
+        }
+        if (precondition.type === "absent" && remote.files.has(path))
+          throw new SyncProvider.ProviderError("memory", "upload", "conflict", false)
+        await Promise.resolve()
+        return remote.adapter.uploadAtomic(path, bytes, precondition)
+      },
+    }
+    const service = SyncAttachment.make({
+      codec: SyncCodec.plaintext(),
+      namespaceID: "space",
+      provider: adapter,
+    })
+    const bytes = new TextEncoder().encode("large partial payload ".repeat(10_000))
+
+    await expect(
+      Promise.all([service.put(bytes, "text/plain"), service.put(bytes, "text/plain")]),
+    ).rejects.toMatchObject({ kind: "network" })
+    expect([...remote.files.keys()].some((path) => !path.includes("/manifests/"))).toBeTrue()
+
+    const objectID = await service.put(bytes, "text/plain")
+    expect(await service.get(objectID)).toEqual(bytes)
+    expect([...uploads].every(([, count]) => count <= 2)).toBeTrue()
   })
 })

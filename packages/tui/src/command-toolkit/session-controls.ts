@@ -2,7 +2,6 @@ import { defineCommand, type InvocationContext, type RawArguments } from "@openc
 
 export type SessionControlCommandContext = InvocationContext & {
   sessionControls: {
-    permissions: () => Promise<void> | void
     outputExpansion: (expanded: boolean) => void
     delete: () => Promise<"deleted" | "cancelled">
   }
@@ -19,21 +18,6 @@ const empty = (raw: RawArguments) =>
     : ({ status: "parsed", input: undefined } as const)
 
 export const sessionControlCommands = [
-  defineCommand<void, SessionControlCommandContext>({
-    id: "fork.session.permissions",
-    path: ["permissions"],
-    title: "Change permission mode",
-    description: "Open the existing permission-mode control",
-    category: "Session",
-    provenance: { type: "core", feature: "builtin-command-adjustments" },
-    requires: { session: true },
-    capabilities: ["permission.mode.write"],
-    parse: empty,
-    execute: async (ctx) => {
-      await ctx.sessionControls.permissions()
-      return { status: "completed" }
-    },
-  }),
   defineCommand<void, SessionControlCommandContext>({
     id: "fork.session.expand-output",
     path: ["expand"],

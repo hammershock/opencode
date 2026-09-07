@@ -12,6 +12,10 @@ import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
 import { SyncDevice } from "@opencode-ai/core/sync/device"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
+import { SyncState } from "@opencode-ai/core/sync/state"
+import { SyncSpace } from "@opencode-ai/core/sync/space"
+import { SyncRuntime } from "@opencode-ai/core/sync/runtime"
+import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -69,25 +73,91 @@ const GlobalUpgradeResult = Schema.Union([
   }),
 ])
 
+const SyncInitializeInput = Schema.Struct({ deviceName: Schema.NonEmptyString })
+const SyncOAuthBeginResult = Schema.Struct({
+  attemptID: Schema.NonEmptyString,
+  authorizationURL: Schema.NonEmptyString,
+  completion: SyncSetup.BeginInput.fields.completion,
+})
+const SyncSpaceEntry = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("compatible"), descriptor: SyncSpace.Descriptor }),
+  Schema.Struct({ status: Schema.Literal("unsupported"), descriptor: SyncSpace.Descriptor }),
+])
+const SyncDiscovery = Schema.Struct({
+  spaces: Schema.Array(SyncSpaceEntry),
+  deletions: Schema.Array(SyncSpace.Deletion),
+})
+const SyncCreateResult = Schema.Struct({
+  state: SyncState.State,
+  descriptor: SyncSpace.Descriptor,
+  recoveryString: Schema.optional(Schema.NonEmptyString),
+})
+const SyncNamespaceInput = Schema.Struct({ namespaceID: Schema.NonEmptyString })
+const SyncEnabledInput = Schema.Struct({ enabled: Schema.Boolean })
+const SyncIntervalInput = Schema.Struct({ intervalSeconds: SyncState.IntervalSeconds })
+
+export const SyncMissingAppMessage = BaiduAuth.MISSING_APP_MESSAGE
+export const SyncIncompatibleLocalStateMessage = SyncSetup.INCOMPATIBLE_LOCAL_STATE_MESSAGE
+
+export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("SyncSetupApiError")(
+  {
+    name: Schema.Literal("SyncSetupError"),
+    data: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("missing-app"),
+        message: Schema.Literal(SyncMissingAppMessage),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("incompatible-local-state"),
+        message: Schema.Literal(SyncIncompatibleLocalStateMessage),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("bad-request"),
+        message: Schema.Literal("Sync setup request failed"),
+      }),
+    ]),
+  },
+  { httpApiStatus: 400 },
+) {}
+
+export class SyncControlApiError extends Schema.ErrorClass<SyncControlApiError>("SyncControlApiError")(
+  {
+    name: Schema.Literal("SyncControlError"),
+    data: Schema.Struct({
+      kind: Schema.Literals(["unconfigured", "locked", "provider", "storage", "invalid", "pending", "deleted"]),
+      diagnostic: Schema.optional(SyncRuntime.Diagnostic),
+    }),
+  },
+  { httpApiStatus: 503 },
+) {}
+
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
   config: "/global/config",
   dispose: "/global/dispose",
   upgrade: "/global/upgrade",
-  syncSetup: "/global/sync/setup",
-  syncAuthorize: "/global/sync/setup/authorize",
-  syncComplete: "/global/sync/setup/complete",
-  syncReuseLegacy: "/global/sync/setup/reuse-legacy",
+  syncState: "/global/sync/state",
+  syncInitialize: "/global/sync/initialize",
+  syncOAuthBegin: "/global/sync/oauth/begin",
+  syncOAuthComplete: "/global/sync/oauth/complete",
+  syncOAuthSwitchAccount: "/global/sync/oauth/switch-account",
+  syncLogout: "/global/sync/logout",
+  syncSpaces: "/global/sync/spaces",
+  syncSpaceJoin: "/global/sync/spaces/join",
+  syncSpaceActivate: "/global/sync/spaces/activate",
+  syncSpaceLeave: "/global/sync/spaces/leave",
+  syncSpaceDelete: "/global/sync/spaces/:namespaceID",
+  syncUnassigned: "/global/sync/unassigned",
   syncEnabled: "/global/sync/enabled",
+  syncInterval: "/global/sync/interval",
+  syncRemove: "/global/sync/device",
   syncStatus: "/global/sync/status",
   syncNow: "/global/sync/now",
   syncSessions: "/global/sync/sessions",
   syncHydrate: "/global/sync/hydrate",
   syncDevices: "/global/sync/devices",
-  syncBindings: "/global/sync/bindings",
   syncRecovery: "/global/sync/recovery-key",
-  syncReset: "/global/sync/reset",
 } as const
 
 export const GlobalApi = HttpApi.make("global").add(
@@ -120,28 +190,84 @@ export const GlobalApi = HttpApi.make("global").add(
           description: "Retrieve the current global OpenCode configuration settings and preferences.",
         }),
       ),
-      HttpApiEndpoint.get("syncSetup", GlobalPaths.syncSetup, {
-        success: Schema.Struct({ config: Schema.optional(SyncSetup.Config), legacy: SyncSetup.Legacy }),
+      HttpApiEndpoint.get("syncState", GlobalPaths.syncState, {
+        success: Schema.NullOr(SyncState.State),
+        error: SyncSetupApiError,
+      }),
+      HttpApiEndpoint.post("syncInitialize", GlobalPaths.syncInitialize, {
+        payload: SyncInitializeInput,
+        success: SyncState.State,
+        error: SyncSetupApiError,
+      }),
+      HttpApiEndpoint.post("syncOAuthBegin", GlobalPaths.syncOAuthBegin, {
+        payload: SyncSetup.BeginInput,
+        success: SyncOAuthBeginResult,
+        error: SyncSetupApiError,
+      }),
+      HttpApiEndpoint.post("syncOAuthComplete", GlobalPaths.syncOAuthComplete, {
+        payload: SyncSetup.CompleteInput,
+        success: SyncState.State,
+        error: SyncSetupApiError,
+      }),
+      HttpApiEndpoint.post("syncOAuthSwitchAccount", GlobalPaths.syncOAuthSwitchAccount, {
+        payload: SyncSetup.CompleteInput,
+        success: SyncState.State,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.post("syncLogout", GlobalPaths.syncLogout, {
+        success: SyncState.State,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.get("syncDiscover", GlobalPaths.syncSpaces, {
+        success: SyncDiscovery,
         error: HttpApiError.ServiceUnavailable,
       }),
-      HttpApiEndpoint.post("syncAuthorize", GlobalPaths.syncAuthorize, {
-        payload: SyncSetup.BeginInput,
-        success: SyncSetup.BeginResult,
+      HttpApiEndpoint.post("syncCreate", GlobalPaths.syncSpaces, {
+        payload: SyncSetup.CreateInput,
+        success: SyncCreateResult,
+        error: SyncSetupApiError,
+      }),
+      HttpApiEndpoint.post("syncJoin", GlobalPaths.syncSpaceJoin, {
+        payload: SyncSetup.JoinInput,
+        success: SyncState.State,
+        error: SyncSetupApiError,
+      }),
+      HttpApiEndpoint.post("syncActivate", GlobalPaths.syncSpaceActivate, {
+        payload: SyncControl.SwitchInput,
+        success: SyncControl.SwitchResult,
         error: HttpApiError.BadRequest,
       }),
-      HttpApiEndpoint.post("syncComplete", GlobalPaths.syncComplete, {
-        payload: SyncSetup.CompleteInput,
-        success: SyncSetup.SetupResult,
-        error: HttpApiError.BadRequest,
-      }),
-      HttpApiEndpoint.post("syncReuseLegacy", GlobalPaths.syncReuseLegacy, {
-        payload: SyncSetup.ReuseLegacyInput,
-        success: SyncSetup.SetupResult,
+      HttpApiEndpoint.post("syncLeave", GlobalPaths.syncSpaceLeave, {
+        payload: SyncNamespaceInput,
+        success: Schema.Array(Schema.NonEmptyString),
         error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.patch("syncEnabled", GlobalPaths.syncEnabled, {
-        payload: SyncSetup.EnabledInput,
-        success: SyncSetup.Config,
+        payload: SyncEnabledInput,
+        success: SyncState.State,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.patch("syncInterval", GlobalPaths.syncInterval, {
+        payload: SyncIntervalInput,
+        success: SyncState.State,
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.delete("syncDelete", GlobalPaths.syncSpaceDelete, {
+        params: SyncNamespaceInput,
+        success: Schema.Array(Schema.NonEmptyString),
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.delete("syncRemove", GlobalPaths.syncRemove, {
+        success: Schema.Array(Schema.NonEmptyString),
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.get("syncUnassigned", GlobalPaths.syncUnassigned, {
+        success: Schema.Array(Schema.NonEmptyString),
+        error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.post("syncAssignUnassigned", GlobalPaths.syncUnassigned, {
+        payload: SyncControl.AssignInput,
+        success: Schema.Array(Schema.NonEmptyString),
         error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.get("syncStatus", GlobalPaths.syncStatus, {
@@ -150,7 +276,7 @@ export const GlobalApi = HttpApi.make("global").add(
       }),
       HttpApiEndpoint.post("syncNow", GlobalPaths.syncNow, {
         success: Schema.Boolean,
-        error: HttpApiError.ServiceUnavailable,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.get("syncSessions", GlobalPaths.syncSessions, {
         success: Schema.Array(SyncMetadata.Item),
@@ -170,18 +296,9 @@ export const GlobalApi = HttpApi.make("global").add(
         success: SyncDevice.State,
         error: HttpApiError.BadRequest,
       }),
-      HttpApiEndpoint.patch("syncBindingUpdate", GlobalPaths.syncBindings, {
-        payload: SyncControl.BindingUpdate,
-        success: SyncDevice.State,
-        error: HttpApiError.BadRequest,
-      }),
       HttpApiEndpoint.get("syncRecoveryExport", GlobalPaths.syncRecovery, {
         success: SyncControl.Recovery,
         error: HttpApiError.ServiceUnavailable,
-      }),
-      HttpApiEndpoint.post("syncReset", GlobalPaths.syncReset, {
-        success: SyncSetup.SetupResult,
-        error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.patch("configUpdate", GlobalPaths.config, {
         payload: ConfigV1.Info,

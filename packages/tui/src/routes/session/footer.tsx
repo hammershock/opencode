@@ -5,6 +5,7 @@ import { useDirectory } from "../../context/directory"
 import { useConnected } from "../../component/use-connected"
 import { createStore } from "solid-js/store"
 import { useRoute } from "../../context/route"
+import { useSyncSettings } from "../../context/sync-settings"
 
 export function Footer() {
   const { theme } = useTheme()
@@ -19,6 +20,14 @@ export function Footer() {
   })
   const directory = useDirectory()
   const connected = useConnected()
+  const syncSettings = useSyncSettings()
+  const syncColor = createMemo(() => {
+    const state = syncSettings.model().state
+    if (state === "idle") return theme.success
+    if (state === "attention") return theme.error
+    if (state === "syncing" || state === "locked") return theme.warning
+    return theme.textMuted
+  })
 
   const [store, setStore] = createStore({
     welcome: false,
@@ -83,6 +92,7 @@ export function Footer() {
               </text>
             </Show>
             <text fg={theme.textMuted}>/status</text>
+            <text fg={syncColor()}>Sync {syncSettings.status()}</text>
           </Match>
         </Switch>
       </box>

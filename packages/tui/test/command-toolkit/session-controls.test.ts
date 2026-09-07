@@ -14,9 +14,6 @@ function setup(result: "deleted" | "cancelled" = "deleted") {
     abortSignal: new AbortController().signal,
     confirm: async () => true,
     sessionControls: {
-      permissions: () => {
-        calls.push("permissions")
-      },
       outputExpansion: (expanded) => calls.push(expanded ? "expand" : "collapse"),
       delete: async () => {
         calls.push("delete")
@@ -29,7 +26,6 @@ function setup(result: "deleted" | "cancelled" = "deleted") {
 
 describe("session control commands", () => {
   test.each([
-    ["/permissions", "permissions"],
     ["/expand", "expand"],
     ["/collapse", "collapse"],
     ["/delete", "delete"],

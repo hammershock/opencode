@@ -32,6 +32,7 @@ import { batch, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
+import { sessionLocationNotice, sessionLocationNoticeKey } from "../util/session-location-notice"
 
 const emptyConsoleState: ConsoleState = {
   consoleManagedProviders: [],
@@ -195,7 +196,8 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto") {
+          const approvalMode = store.session.find((item) => item.id === request.sessionID)?.approvalMode ?? "normal"
+          if (permission.effective(approvalMode) === "auto") {
             void sdk.client.permission.reply({
               requestID: request.id,
               reply: "once",
@@ -308,6 +310,32 @@ export const {
               session.path = event.properties.subdirectory
               session.workspaceID = event.properties.location.workspaceID
               session.time.updated = event.properties.timestamp
+            }),
+          )
+          break
+        }
+
+        case "session.next.location.rebound": {
+          const result = search(store.session, event.properties.sessionID, (session) => session.id)
+          if (result.found) {
+            setStore(
+              "session",
+              result.index,
+              produce((session) => {
+                session.directory = event.properties.location.directory
+                session.target = event.properties.location.target
+                session.lastKnownTargetName = event.properties.location.lastKnownTargetName
+                session.workspaceID = event.properties.location.workspaceID
+                session.time.updated = event.properties.timestamp
+              }),
+            )
+          }
+          kv.set(
+            sessionLocationNoticeKey(event.properties.sessionID),
+            sessionLocationNotice({
+              revision: event.properties.revision,
+              previous: event.properties.previous,
+              location: event.properties.location,
             }),
           )
           break

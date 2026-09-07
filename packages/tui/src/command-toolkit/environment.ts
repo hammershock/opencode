@@ -3,17 +3,22 @@ import { defineCommand, type InvocationContext, type RawArguments } from "@openc
 export type EnvironmentMetadata = {
   enabled: boolean
   generation: number
-  variables: ReadonlyArray<{ name: string; origin: string; source?: string }>
+  variables: ReadonlyArray<{ name: string; origin: string; source?: string; overrides: ReadonlyArray<string> }>
 }
+
+export type EnvironmentValues = { generation: number; values: Record<string, string> }
+export type EnvironmentInitResult =
+  | { status: "completed"; template: "created" | "existing"; generation: number }
+  | { status: "cancelled" | "failed"; template: "created" | "existing" }
 
 export type EnvironmentCommandContext = InvocationContext & {
   environment: {
     list: () => Promise<EnvironmentMetadata>
     reload: () => Promise<EnvironmentMetadata>
-    ensureTemplate: () => Promise<"created" | "existing">
+    reveal: () => Promise<EnvironmentValues>
+    init: () => Promise<EnvironmentInitResult>
   }
-  presentEnvironment: (snapshot: EnvironmentMetadata) => Promise<void>
-  invokeAgent: (prompt: string) => Promise<"completed" | "cancelled" | "failed">
+  presentEnvironment: (snapshot: EnvironmentMetadata, reveal: () => Promise<EnvironmentValues>) => Promise<void>
 }
 
 const empty = (raw: RawArguments) =>
@@ -38,7 +43,7 @@ export const environmentCommands = [
     capabilities: ["environment.metadata.read"],
     parse: empty,
     execute: async (ctx) => {
-      await ctx.presentEnvironment(await ctx.environment.list())
+      await ctx.presentEnvironment(await ctx.environment.list(), ctx.environment.reveal)
       return { status: "completed" }
     },
   }),
@@ -54,7 +59,7 @@ export const environmentCommands = [
     parse: empty,
     execute: async (ctx) => {
       const snapshot = await ctx.environment.reload()
-      await ctx.presentEnvironment(snapshot)
+      await ctx.presentEnvironment(snapshot, ctx.environment.reveal)
       return { status: "completed", message: `Environment generation ${snapshot.generation} loaded` }
     },
   }),
@@ -69,19 +74,35 @@ export const environmentCommands = [
     capabilities: ["workspace.write", "agent.invoke", "environment.reload"],
     parse: empty,
     execute: async (ctx) => {
-      const template = await ctx.environment.ensureTemplate()
-      const result = await ctx.invokeAgent(
-        "Review the project .env file, add only the environment variables required by this workspace, and do not expose secret values in chat.",
-      )
-      if (result === "cancelled") return { status: "cancelled", message: "Environment was not reloaded" }
-      if (result === "failed") {
-        return { status: "failed", code: "agent_failed", message: "Environment was not reloaded", retryable: true }
+      const result = await ctx.environment.init()
+      if (result.status !== "completed") {
+        if (result.status === "cancelled") return { status: "cancelled", message: "Environment was not reloaded" }
+        return {
+          status: "failed",
+          code: "agent_failed",
+          message: "Environment was not reloaded",
+          retryable: true,
+        }
       }
-      const snapshot = await ctx.environment.reload()
       return {
         status: "completed",
-        message: `${template === "created" ? "Created" : "Kept"} .env and loaded generation ${snapshot.generation}`,
+        message: `${result.template === "created" ? "Created" : "Kept"} .env and loaded generation ${result.generation}`,
       }
     },
   }),
 ] as const
+
+export async function revealEnvironment(input: {
+  confirm: () => Promise<boolean>
+  reveal: () => Promise<EnvironmentValues>
+  present: (values: EnvironmentValues) => Promise<void>
+}) {
+  if (!(await input.confirm())) return false
+  const revealed = await input.reveal()
+  try {
+    await input.present(revealed)
+  } finally {
+    Object.keys(revealed.values).forEach((name) => delete revealed.values[name])
+  }
+  return true
+}

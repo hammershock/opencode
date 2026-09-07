@@ -6,7 +6,8 @@ authors:
   - hammershock
 created: 2026-09-06
 updated: 2026-09-06
-implemented-by: []
+implemented-by:
+  - https://github.com/hammershock/opencode/pull/86
 depends-on:
   - 0001
   - 0003
@@ -67,7 +68,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 1. 用户启动 OpenCode，进入 TUI QuickStart 页面。
 2. QuickStart 显示当前选择的 target 和工作目录。
 3. 用户可以选择 `local` 或一个已配置的 Rexd target；picker 同时提供 `Add target...` 和 `Manage targets...` 入口。
-4. 新增或编辑 target 时，QuickStart 打开配置向导。向导生成稳定 ID，并收集显示名称、SSH 连接方式和远端工作位置；允许测试连接后保存，暂时无法连接时也可以由用户明确选择保存为尚未验证的配置。
+4. 新增或编辑 target 时，QuickStart 打开配置向导。向导生成稳定 ID，并收集显示名称、SSH 连接方式和远端工作位置；保存动作不要求额外确认，并在保存后自动探测。暂时无法连接时保留配置并标记为尚未验证，真正选择该 target 时显示连接错误且不创建 Session。
 5. 用户在所选 target 上选择工作目录：
    - local 目录从本机文件系统选择；
    - Rexd 目录通过该 target 查询，不使用本机文件系统结果。
@@ -423,7 +424,7 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 以下条件全部满足后，本 RFC 才能标记为 `implemented`：
 
 1. QuickStart 可以选择 local 或已配置 target，并完成远端目录补全、验证和原子 Session 创建；整个流程不依赖 `/target`，失败时保留尚未提交的 prompt。
-2. QuickStart 可以通过 Core/Server API 新增、编辑、测试、重命名和移除 target；TUI 不直接读写配置或执行 SSH，保存未验证配置需要明确确认。
+2. QuickStart 可以通过 Core/Server API 新增、编辑、测试、重命名和移除 target；TUI 不直接读写配置或执行 SSH。保存不需要预先确认，验证失败时保留配置并展示实际错误；未验证 target 不能创建 Session。
 3. Session 持久数据只包含设备本地不可变 target ID 和规范化 directory，显示名称、连接配置与运行时 Rexd session 不进入 Session 或同步数据。
 4. managed daemon 的支持平台安装、已安装复用、并发准备、checksum 失败和 unsupported platform 均有测试。
 5. 握手强制检查 protocol、server version、`exec`、`fs`、`events`、`pty`、limits 和 workspace roots。

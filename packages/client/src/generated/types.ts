@@ -275,6 +275,7 @@ export type SessionsListOutput = {
     }
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
+    readonly approvalMode?: "normal" | "auto"
     readonly location: {
       readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
       readonly directory: string
@@ -283,6 +284,7 @@ export type SessionsListOutput = {
     }
     readonly locationRevision?: number
     readonly portableTargetLabel?: string
+    readonly syncSpaceID?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -312,6 +314,7 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["id"]
   readonly agent?: {
     readonly id?: string | null
@@ -323,6 +326,7 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
@@ -334,6 +338,7 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
@@ -345,7 +350,20 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["location"]
+  readonly approvalMode?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: {
+      readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+      readonly directory: string
+      readonly workspaceID?: string
+      readonly lastKnownTargetName?: string
+    } | null
+    readonly approvalMode?: ("normal" | "auto") | null
+  }["approvalMode"]
 }
 
 export type SessionsCreateOutput = {
@@ -364,6 +382,7 @@ export type SessionsCreateOutput = {
     }
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
+    readonly approvalMode?: "normal" | "auto"
     readonly location: {
       readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
       readonly directory: string
@@ -372,6 +391,7 @@ export type SessionsCreateOutput = {
     }
     readonly locationRevision?: number
     readonly portableTargetLabel?: string
+    readonly syncSpaceID?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -409,6 +429,7 @@ export type SessionsGetOutput = {
     }
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
+    readonly approvalMode?: "normal" | "auto"
     readonly location: {
       readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
       readonly directory: string
@@ -417,6 +438,7 @@ export type SessionsGetOutput = {
     }
     readonly locationRevision?: number
     readonly portableTargetLabel?: string
+    readonly syncSpaceID?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -815,6 +837,35 @@ export type SessionsHistoryOutput = {
     | {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.location.rebound"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly previous: {
+            readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+            readonly directory: string
+            readonly workspaceID?: string
+            readonly lastKnownTargetName?: string
+          }
+          readonly location: {
+            readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+            readonly directory: string
+            readonly workspaceID?: string
+            readonly lastKnownTargetName?: string
+          }
+          readonly revision: number
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
         readonly type: "session.next.prompted"
         readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
         readonly location?: {
@@ -874,6 +925,24 @@ export type SessionsHistoryOutput = {
             }>
           }
           readonly delivery: "steer" | "queue"
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.turn.settled"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly messageID: string
+          readonly outcome: "completed" | "failed" | "cancelled"
         }
       }
     | {
@@ -1418,6 +1487,35 @@ export type SessionsEventsOutput =
   | {
       readonly id: string
       readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.location.rebound"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly previous: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly location: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly revision: number
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
       readonly type: "session.next.prompted"
       readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
       readonly location?: {
@@ -1477,6 +1575,24 @@ export type SessionsEventsOutput =
           }>
         }
         readonly delivery: "steer" | "queue"
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.turn.settled"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly messageID: string
+        readonly outcome: "completed" | "failed" | "cancelled"
       }
     }
   | {
@@ -3141,7 +3257,16 @@ export type PtysCreateInput = {
         }
       | undefined
   }["location"]
+  readonly sessionID?: {
+    readonly sessionID?: string
+    readonly command?: string
+    readonly args?: ReadonlyArray<string>
+    readonly cwd?: string
+    readonly title?: string
+    readonly env?: { readonly [x: string]: string }
+  }["sessionID"]
   readonly command?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3149,6 +3274,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["command"]
   readonly args?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3156,6 +3282,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["args"]
   readonly cwd?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3163,6 +3290,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["cwd"]
   readonly title?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3170,6 +3298,7 @@ export type PtysCreateInput = {
     readonly env?: { readonly [x: string]: string }
   }["title"]
   readonly env?: {
+    readonly sessionID?: string
     readonly command?: string
     readonly args?: ReadonlyArray<string>
     readonly cwd?: string
@@ -3254,6 +3383,42 @@ export type PtysUpdateInput = {
 }
 
 export type PtysUpdateOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly id: string
+    readonly title: string
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly status: "running" | "exited"
+    readonly pid: number
+    readonly exitCode?: number
+    readonly environmentGeneration?: number
+    readonly environmentStale?: boolean
+  }
+}
+
+export type PtysRestartInput = {
+  readonly ptyID: { readonly ptyID: string }["ptyID"]
+  readonly location?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+  }["location"]
+  readonly sessionID?: { readonly sessionID?: string }["sessionID"]
+}
+
+export type PtysRestartOutput = {
   readonly location: {
     readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
     readonly directory: string
@@ -3550,6 +3715,7 @@ export type TargetsResolveSessionOutput =
       readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       readonly message: string
     }
+  | { readonly status: "resolution_failed"; readonly message: string }
 
 export type TargetsBindingListOutput = {
   readonly revision: string
@@ -3576,6 +3742,25 @@ export type TargetsBindPortableInput = {
 }
 
 export type TargetsBindPortableOutput = {
+  readonly revision: string
+  readonly bindings: { readonly [x: string]: string }
+  readonly resolvedSessionIDs: ReadonlyArray<string>
+  readonly failedSessionIDs: ReadonlyArray<string>
+}
+
+export type TargetsUnbindPortableInput = {
+  readonly portableTargetLabel: { readonly portableTargetLabel: string }["portableTargetLabel"]
+  readonly expectedRevision: {
+    readonly expectedRevision: string
+    readonly expectedSessionIDs: ReadonlyArray<string>
+  }["expectedRevision"]
+  readonly expectedSessionIDs: {
+    readonly expectedRevision: string
+    readonly expectedSessionIDs: ReadonlyArray<string>
+  }["expectedSessionIDs"]
+}
+
+export type TargetsUnbindPortableOutput = {
   readonly revision: string
   readonly bindings: { readonly [x: string]: string }
 }
@@ -4054,6 +4239,8 @@ export type TargetsRestoreOutput = {
     }>
     readonly valid: boolean
   }
+  readonly resolvedSessionIDs: ReadonlyArray<string>
+  readonly failedSessionIDs: ReadonlyArray<string>
 }
 
 export type TargetsTestConnectionInput = { readonly targetID: { readonly targetID: string }["targetID"] }
@@ -4267,17 +4454,7 @@ export type EnvironmentRevealOutput = {
   }
 }
 
-export type EnvironmentInitInput = {
-  readonly location?: {
-    readonly location?:
-      | {
-          readonly directory?: string | undefined
-          readonly workspace?: string | undefined
-          readonly target?: string | undefined
-        }
-      | undefined
-  }["location"]
-}
+export type EnvironmentInitInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type EnvironmentInitOutput = {
   readonly location: {
@@ -4287,5 +4464,11 @@ export type EnvironmentInitOutput = {
     readonly lastKnownTargetName?: string
     readonly project: { readonly id: string; readonly directory: string }
   }
-  readonly data: { readonly status: "created" | "existing" }
+  readonly data:
+    | {
+        readonly status: "completed"
+        readonly template: "created" | "existing"
+        readonly generation: number | "Infinity" | "-Infinity" | "NaN"
+      }
+    | { readonly status: "cancelled" | "failed"; readonly template: "created" | "existing" }
 }

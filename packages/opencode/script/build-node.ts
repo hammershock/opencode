@@ -22,6 +22,7 @@ await Bun.build({
   define: {
     OPENCODE_MODELS_DEV: generated.modelsData,
     OPENCODE_VERSION: `'${Script.version}'`,
+    OPENCODE_PLUGIN_VERSION: JSON.stringify(process.env.OPENCODE_PLUGIN_VERSION ?? Script.version),
     OPENCODE_CHANNEL: `'${Script.channel}'`,
   },
   files: {

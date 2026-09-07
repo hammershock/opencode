@@ -108,6 +108,7 @@ At minimum run Mac to a configured Linux Rexd target and exercise `mywindows` as
 - `/env list`, reload and init obey masking and transaction rules;
 - Terminal restart/stale behavior is visible after reload;
 - shell startup files do not run for normal commands;
+- local and Rexd User Shell execution use the same bounded one-shot contract; a deliberately blocked command is cancelled at the boundary, preserves cwd, and directs interactive work to Terminal;
 - Backspace and Escape behavior, completion, cwd and Agent isolation match RFC-0004 and RFC-0008.
 
 ### D. Target recovery and rebind

@@ -43,5 +43,7 @@ export const migrations = (
     import("./migration/20260906155032_add-session-target"),
     import("./migration/20260906180254_session_location_revision"),
     import("./migration/20260907023000_session_portable_target_label"),
+    import("./migration/20260907025927_session-approval-mode"),
+    import("./migration/20260907090000_session_sync_space"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

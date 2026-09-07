@@ -1,13 +1,24 @@
 import { describe, expect, test } from "bun:test"
 import { Auth } from "@/auth"
+import { Config } from "@/config/config"
+import type { ConfigProviderV1 } from "@opencode-ai/core/v1/config/provider"
 import { ProviderUsage } from "@/provider/usage"
 import { Deferred, Effect, Fiber, Layer, Schema } from "effect"
 
 const credential = new Auth.Api({ type: "api", key: "managed-secret" })
 
 function authLayer(get: () => Auth.Info | undefined = () => credential) {
-  return Layer.mock(Auth.Service, {
-    get: (providerID) => Effect.succeed(providerID === "test" ? get() : undefined),
+  return Layer.merge(
+    Layer.mock(Auth.Service, {
+      get: (providerID) => Effect.succeed(providerID === "test" ? get() : undefined),
+    }),
+    configLayer(),
+  )
+}
+
+function configLayer(get: () => { provider?: Record<string, ConfigProviderV1.Info> } = () => ({})) {
+  return Layer.mock(Config.Service, {
+    get: () => Effect.succeed(get()),
   })
 }
 
@@ -148,9 +159,12 @@ describe("provider usage", () => {
           },
         ]).pipe(
           Layer.provide(
-            Layer.mock(Auth.Service, {
-              get: () => Effect.succeed(credential),
-            }),
+            Layer.merge(
+              Layer.mock(Auth.Service, {
+                get: () => Effect.succeed(credential),
+              }),
+              configLayer(),
+            ),
           ),
         )
         const service = yield* ProviderUsage.Service.pipe(Effect.provide(layer))
@@ -187,9 +201,12 @@ describe("provider usage", () => {
         }))
         const layer = ProviderUsage.layer(adapters, { concurrency: 2 }).pipe(
           Layer.provide(
-            Layer.mock(Auth.Service, {
-              get: () => Effect.succeed(credential),
-            }),
+            Layer.merge(
+              Layer.mock(Auth.Service, {
+                get: () => Effect.succeed(credential),
+              }),
+              configLayer(),
+            ),
           ),
         )
         const service = yield* ProviderUsage.Service.pipe(Effect.provide(layer))
@@ -232,6 +249,44 @@ describe("provider usage", () => {
         current = new Auth.Api({ type: "api", key: "replacement" })
         yield* service.query({ providerID: "test" })
         expect(calls).toBe(2)
+      }),
+    ))
+
+  test("invalidates cache and forwards resolved provider config when its identity changes", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        let baseURL = "https://one.example"
+        const seen: unknown[] = []
+        let calls = 0
+        const layer = ProviderUsage.layer([
+          {
+            providerID: "test",
+            probe: ({ providerConfig }) => {
+              seen.push(providerConfig)
+              return { status: "ready" }
+            },
+            fetch: ({ providerConfig }) => {
+              seen.push(providerConfig)
+              calls++
+              return Promise.resolve(snapshot(calls))
+            },
+          },
+        ]).pipe(
+          Layer.provide(
+            Layer.merge(
+              Layer.mock(Auth.Service, { get: () => Effect.succeed(credential) }),
+              configLayer(() => ({ provider: { test: { options: { baseURL } } } })),
+            ),
+          ),
+        )
+        const service = yield* ProviderUsage.Service.pipe(Effect.provide(layer))
+        yield* service.query({ providerID: "test" })
+        yield* service.query({ providerID: "test" })
+        expect(calls).toBe(1)
+        baseURL = "https://two.example"
+        yield* service.query({ providerID: "test" })
+        expect(calls).toBe(2)
+        expect(seen).toContainEqual({ options: { baseURL: "https://two.example" } })
       }),
     ))
 

@@ -132,6 +132,11 @@ describe("LocationServiceMap", () => {
             const directory = AbsolutePath.make(dir.path)
             const constructed = Location.Ref.make({ directory })
             const decoded = Schema.decodeUnknownSync(Location.Ref)({ directory })
+            const explicitUndefined = Location.Ref.make({
+              directory,
+              workspaceID: undefined,
+              lastKnownTargetName: undefined,
+            })
 
             expect(constructed).toEqual({
               target: { type: "local" },
@@ -143,6 +148,7 @@ describe("LocationServiceMap", () => {
             expect(Equal.equals(constructed, decoded)).toBe(true)
             expect(Hash.hash(constructed)).toBe(Hash.hash(decoded))
             expect(yield* locations.contextEffect(constructed)).toBe(yield* locations.contextEffect(decoded))
+            expect(yield* locations.contextEffect(constructed)).toBe(yield* locations.contextEffect(explicitUndefined))
           }),
         ),
       ),

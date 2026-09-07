@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { sortModelOptions } from "../../../../src/component/dialog-model"
+import { modelFilterState, sortModelOptions } from "../../../../src/component/dialog-model"
 
 describe("sortModelOptions", () => {
   test("orders provider-scoped model choices by newest release first", () => {
@@ -29,4 +29,9 @@ describe("sortModelOptions", () => {
 
     expect(sorted.map((model) => model.title)).toEqual(["Free new", "Free old", "GLM 5.2", "GLM 5.1", "GLM 5"])
   })
+})
+
+test("whitespace model filters retain flattened row budgeting", () => {
+  expect(modelFilterState("   ")).toEqual({ needle: "", flattened: true })
+  expect(modelFilterState("")).toEqual({ needle: "", flattened: false })
 })

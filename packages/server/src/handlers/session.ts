@@ -6,6 +6,7 @@ import { SessionsCursor } from "@opencode-ai/protocol/groups/session"
 import {
   ConflictError,
   InvalidCursorError,
+  InvalidRequestError,
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionNotFoundError,
@@ -73,8 +74,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               id: ctx.payload.id,
               agent: ctx.payload.agent,
               model: ctx.payload.model,
-              location:
-                ctx.payload.location ?? Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) }),
+              approvalMode: ctx.payload.approvalMode,
+              location: ctx.payload.location ?? Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) }),
             }),
           }
         }),
@@ -118,6 +119,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 }),
               ),
             ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
+                }),
+              ),
+            ),
           )
           return HttpApiSchema.NoContent.make()
         }),
@@ -131,6 +140,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 new SessionNotFoundError({
                   sessionID: error.sessionID,
                   message: `Session not found: ${error.sessionID}`,
+                }),
+              ),
+            ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
                 }),
               ),
             ),
@@ -164,6 +181,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                     new ConflictError({
                       message: `Prompt message ID conflicts with an existing durable record: ${error.messageID}`,
                       resource: error.messageID,
+                    }),
+                  ),
+                ),
+                Effect.catchTag("Session.OperationUnavailableError", (error) =>
+                  Effect.fail(
+                    new InvalidRequestError({
+                      message: `Session ${error.operation} is not available`,
+                      kind: `session_${error.operation}`,
                     }),
                   ),
                 ),
@@ -254,6 +279,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   ),
                 )
               }),
+              Effect.catchTag("Session.OperationUnavailableError", (error) =>
+                Effect.fail(
+                  new InvalidRequestError({
+                    message: `Session ${error.operation} is not available`,
+                    kind: `session_${error.operation}`,
+                  }),
+                ),
+              ),
             ),
           }
         }),
@@ -283,6 +316,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 ),
               )
             }),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
+                }),
+              ),
+            ),
           )
           return HttpApiSchema.NoContent.make()
         }),
@@ -298,6 +339,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   sessionID: error.sessionID,
                   message: `Session not found: ${error.sessionID}`,
                 }),
+            ),
+            Effect.catchTag("Session.OperationUnavailableError", (error) =>
+              Effect.fail(
+                new InvalidRequestError({
+                  message: `Session ${error.operation} is not available`,
+                  kind: `session_${error.operation}`,
+                }),
+              ),
             ),
           )
           return HttpApiSchema.NoContent.make()

@@ -1,10 +1,245 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Stream } from "effect"
+import { Effect, Exit, Layer, Stream } from "effect"
+import { Database } from "@opencode-ai/core/database/database"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
+import { EventSequenceTable, EventTable } from "@opencode-ai/core/event/sql"
+import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
+import { SyncEventStore } from "@opencode-ai/core/sync/event-store"
+import { SyncOwnership } from "@opencode-ai/core/sync/ownership"
 import { SessionSync } from "@opencode-ai/core/sync/session"
+import { Session } from "@opencode-ai/schema/session"
+import { SessionV1 } from "@opencode-ai/schema/session-v1"
+import { eq } from "drizzle-orm"
+import path from "node:path"
+import { tmpdir } from "./fixture/tmpdir"
 
 describe("SessionSync", () => {
+  test("backfills assigned V1 Session history into its target space", async () => {
+    await using tmp = await tmpdir()
+    const layer = LayerNode.compile(LayerNode.group([Database.node, SyncEventStore.node, SyncOwnership.node]), [
+      [Database.node, Database.layerFromPath(path.join(tmp.path, "session.db"))],
+      [SyncDatabase.node, SyncDatabase.layerFromPath(path.join(tmp.path, "sync.db"))],
+    ])
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const store = yield* SyncEventStore.Service
+        const ownership = yield* SyncOwnership.Service
+        const sessionID = Session.ID.make("ses_legacy_backfill")
+        const messageID = SessionV1.MessageID.ascending("msg_legacy_backfill")
+        // Reproduce rows committed by the still-supported V1 Session endpoint;
+        // startup recovery reads this durable fact source without republishing it.
+        yield* database.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 2 }).run()
+        yield* database
+          .insert(EventTable)
+          .values([
+            {
+              id: EventV2.ID.create(),
+              aggregate_id: sessionID,
+              seq: 0,
+              type: "session.created.1",
+              data: {
+                sessionID,
+                info: {
+                  id: sessionID,
+                  slug: "legacy",
+                  projectID: "global",
+                  directory: "/project",
+                  title: "Legacy Session",
+                  version: "test",
+                  time: { created: 0, updated: 0 },
+                },
+              },
+            },
+            {
+              id: EventV2.ID.create(),
+              aggregate_id: sessionID,
+              seq: 1,
+              type: "message.updated.1",
+              data: {
+                sessionID,
+                info: {
+                  id: messageID,
+                  sessionID,
+                  role: "user",
+                  time: { created: 1 },
+                  agent: "build",
+                  model: { providerID: "test", modelID: "test" },
+                },
+              },
+            },
+            {
+              id: EventV2.ID.create(),
+              aggregate_id: sessionID,
+              seq: 2,
+              type: "message.part.updated.1",
+              data: {
+                sessionID,
+                part: {
+                  id: SessionV1.PartID.ascending("prt_legacy_backfill"),
+                  sessionID,
+                  messageID,
+                  type: "text",
+                  text: "legacy history",
+                },
+                time: 2,
+              },
+            },
+          ])
+          .run()
+        yield* ownership.assign(sessionID, "target-space", 1)
+        yield* Effect.forEach(
+          yield* ownership.list(),
+          (item) => SessionSync.backfill(database, store, item.sessionID, item.spaceID),
+          { discard: true },
+        )
+
+        const pending = yield* store.scope("target-space").pending(10)
+        expect(pending.map((event) => event.type).toSorted()).toEqual([
+          "message.part.updated.1",
+          "message.updated.1",
+          "session.created.1",
+        ])
+        expect(new Set(pending.map((event) => event.aggregateID))).toEqual(new Set([sessionID]))
+        expect(yield* store.pending(10)).toEqual([])
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    )
+  })
+
+  test("keeps the application available when startup recovery fails", async () => {
+    const layer = SessionSync.captureLayer.pipe(
+      Layer.provide([
+        Layer.mock(EventV2.Service, {
+          all: () => Stream.empty,
+          listen: () => Effect.succeed(Effect.void),
+        }),
+        Layer.mock(SyncEventStore.Service, {
+          scope: () => {
+            throw new Error("unexpected scoped store access")
+          },
+        }),
+        Layer.mock(SyncOwnership.Service, {
+          assign: () => Effect.void,
+          unassign: () => Effect.void,
+          list: () => Effect.fail(new Error("recovery unavailable")),
+        }),
+        Layer.mock(Database.Service, {
+          db: {
+            select: () => ({ from: () => ({ all: () => Effect.succeed([]) }) }),
+          } as unknown as Database.Interface["db"],
+        }),
+      ]),
+    )
+
+    const exit = await Effect.runPromiseExit(Layer.build(layer).pipe(Effect.scoped))
+
+    expect(Exit.isSuccess(exit)).toBe(true)
+  })
+
+  test("repairs ownership from surviving rows without discarding deleted Session routing", async () => {
+    const ownership = new Map([
+      ["explicitly-local", "old-space"],
+      ["moved", "old-space"],
+      ["deleted", "delete-space"],
+    ])
+    await Effect.runPromise(
+      SessionSync.reconcileOwnership(
+        {
+          assign: (sessionID, spaceID) => Effect.sync(() => void ownership.set(sessionID, spaceID)),
+          unassign: (sessionID) => Effect.sync(() => void ownership.delete(sessionID)),
+        },
+        [
+          { sessionID: "explicitly-local", assignedAt: 1 },
+          { sessionID: "moved", spaceID: "new-space", assignedAt: 2 },
+          { sessionID: "new", spaceID: "new-space", assignedAt: 3 },
+        ],
+      ),
+    )
+    expect(Object.fromEntries(ownership)).toEqual({
+      moved: "new-space",
+      deleted: "delete-space",
+      new: "new-space",
+    })
+  })
+
+  test("routes only owned Session events to their original space", async () => {
+    const spaces: string[] = []
+    const enqueued: string[] = []
+    const ownership = new Map<string, string>()
+    const store = {
+      scope: (spaceID: string) => {
+        spaces.push(spaceID)
+        return store
+      },
+      enqueue: (event: SyncEvent.Envelope) => Effect.sync(() => void enqueued.push(event.aggregateID)),
+      delete: () => Effect.void,
+    } as any
+    const owner = {
+      assign: (sessionID: string, spaceID: string) => Effect.sync(() => void ownership.set(sessionID, spaceID)),
+      get: (sessionID: string) =>
+        Effect.succeed(ownership.get(sessionID) ? { spaceID: ownership.get(sessionID)! } : undefined),
+    }
+    const event = (sessionID: string, type: string, data: Record<string, unknown>) => ({
+      id: `${sessionID}-${type}`,
+      type,
+      durable: { aggregateID: sessionID, seq: type === "session.created" ? 0 : 1, version: 1 },
+      data,
+    })
+
+    await Effect.runPromise(
+      SessionSync.captureOwned(owner as any, store, event("owned", "session.created", { info: { syncSpaceID: "a" } })),
+    )
+    await Effect.runPromise(SessionSync.captureOwned(owner as any, store, event("owned", "session.updated", {})))
+    await Effect.runPromise(SessionSync.captureOwned(owner as any, store, event("local", "session.updated", {})))
+
+    expect(spaces).toEqual(["a", "a"])
+    expect(enqueued).toEqual(["owned", "owned"])
+  })
+
+  test("an explicit persisted unassignment overrides stale ownership but a deleted row still routes its tombstone", async () => {
+    const spaces: string[] = []
+    const deleted: string[] = []
+    const store = {
+      scope: (spaceID: string) => {
+        spaces.push(spaceID)
+        return store
+      },
+      enqueue: () => Effect.void,
+      delete: (value: SyncEvent.Tombstone) => Effect.sync(() => void deleted.push(value.sessionID)),
+    } as any
+    const owner = {
+      assign: () => Effect.void,
+      get: () => Effect.succeed({ spaceID: "old-space" }),
+    }
+    const updated = {
+      id: "updated",
+      type: "session.updated",
+      durable: { aggregateID: "session", seq: 2, version: 1 },
+      data: { sessionID: "session" },
+    }
+    await Effect.runPromise(
+      SessionSync.captureOwned(owner as any, store, updated, 10, () => Effect.succeed({ exists: true } as const)),
+    )
+    expect(spaces).toEqual([])
+
+    await Effect.runPromise(
+      SessionSync.captureOwned(
+        owner as any,
+        store,
+        { ...updated, id: "deleted", type: "session.deleted", durable: { ...updated.durable, seq: 3 } },
+        11,
+        () => Effect.succeed({ exists: false } as const),
+      ),
+    )
+    expect(spaces).toEqual(["old-space"])
+    expect(deleted).toEqual(["session"])
+  })
+
   test("captures ordinary durable events and maps deletion to a permanent tombstone", async () => {
     const calls: unknown[] = []
     const store = {
@@ -65,6 +300,158 @@ describe("SessionSync", () => {
       { publish: true },
     ])
     expect(calls[1]).toEqual(["remove", "s1"])
+  })
+
+  test("persists real versioned Created ownership across restart reconciliation", async () => {
+    await using tmp = await tmpdir()
+    const sessionPath = path.join(tmp.path, "session.db")
+    const syncPath = path.join(tmp.path, "sync.db")
+    const layer = () =>
+      LayerNode.compile(LayerNode.group([Database.node, EventV2.node, SessionProjector.node, SyncOwnership.node]), [
+        [Database.node, Database.layerFromPath(sessionPath)],
+        [SyncDatabase.node, SyncDatabase.layerFromPath(syncPath)],
+      ])
+    const sessionID = Session.ID.make("ses_remote_owned")
+    const spaceID = "remote-space-exact"
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const events = yield* EventV2.Service
+        const ownership = yield* SyncOwnership.Service
+        const projector = SessionSync.projector(
+          events,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          spaceID,
+          (id, ownedSpaceID) => ownership.assign(id, ownedSpaceID),
+        )
+        yield* projector.project({
+          id: EventV2.ID.create(),
+          aggregateID: sessionID,
+          seq: 0,
+          type: "session.created.1",
+          data: {
+            sessionID,
+            info: {
+              id: sessionID,
+              slug: "remote-owned",
+              projectID: "global",
+              directory: "/remote/project",
+              title: "Remote owned Session",
+              version: "test",
+              time: { created: 1, updated: 1 },
+            },
+          },
+        })
+
+        expect(
+          yield* database
+            .select({ spaceID: SessionTable.sync_space_id })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get(),
+        ).toEqual({ spaceID })
+        expect(yield* ownership.get(sessionID)).toMatchObject({ sessionID, spaceID })
+      }).pipe(Effect.scoped, Effect.provide(layer())),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const ownership = yield* SyncOwnership.Service
+        const row = yield* database
+          .select({ sessionID: SessionTable.id, spaceID: SessionTable.sync_space_id })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID))
+          .get()
+        expect(row).toEqual({ sessionID, spaceID })
+        yield* SessionSync.reconcileOwnership(ownership, [{ sessionID, spaceID: row!.spaceID!, assignedAt: 1 }])
+        expect(yield* ownership.get(sessionID)).toMatchObject({ sessionID, spaceID })
+      }).pipe(Effect.scoped, Effect.provide(layer())),
+    )
+  })
+
+  test("does not bind unsupported or non-Created durable wire events", async () => {
+    const replayed: SyncEvent.Envelope[] = []
+    const owned: string[] = []
+    const projector = SessionSync.projector(
+      {
+        replay: (event: SyncEvent.Envelope) => Effect.sync(() => void replayed.push(event)),
+        remove: () => Effect.void,
+      } as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "remote-space",
+      (sessionID) => Effect.sync(() => void owned.push(sessionID)),
+    )
+    const event = (type: string) => ({
+      id: EventV2.ID.create(),
+      aggregateID: `ses_${type}`,
+      seq: 0,
+      type,
+      data: { info: { syncSpaceID: "sender-value" } },
+    })
+
+    await Effect.runPromise(projector.project(event("session.updated.1")))
+    await Effect.runPromise(projector.project(event("session.created.999")))
+
+    expect(replayed.map((item) => item.data)).toEqual([
+      { info: { syncSpaceID: "sender-value" } },
+      { info: { syncSpaceID: "sender-value" } },
+    ])
+    expect(owned).toEqual([])
+  })
+
+  test("marks projection and deletion as sync replay activity", async () => {
+    const calls: string[] = []
+    const activity = {
+      blockers: () => Effect.succeed([]),
+      withActivity: (sessionID: string, kind: string, effect: Effect.Effect<unknown>) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => calls.push(`start:${sessionID}:${kind}`)),
+          () => effect,
+          () => Effect.sync(() => calls.push(`end:${sessionID}:${kind}`)),
+        ),
+    } as any
+    const events = {
+      replay: () => Effect.sync(() => calls.push("replay")),
+      remove: () => Effect.sync(() => calls.push("remove")),
+    } as any
+    const projector = SessionSync.projector(
+      events,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      activity,
+    )
+
+    await Effect.runPromise(
+      projector.project({
+        id: "evt_00000000000000000000000000",
+        aggregateID: "ses_sync_activity",
+        seq: 0,
+        type: "session.created",
+        data: {},
+      }),
+    )
+    await Effect.runPromise(projector.delete({ id: "d1", sessionID: "ses_sync_activity", deletedAt: 1 }))
+
+    expect(calls).toEqual([
+      "start:ses_sync_activity:sync_replay",
+      "replay",
+      "end:ses_sync_activity:sync_replay",
+      "start:ses_sync_activity:sync_replay",
+      "remove",
+      "end:ses_sync_activity:sync_replay",
+    ])
   })
 
   test("materializes a deterministic sibling when a remote history diverges", async () => {

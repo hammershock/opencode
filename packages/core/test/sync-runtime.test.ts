@@ -4,6 +4,9 @@ import { SyncCrypto } from "@opencode-ai/core/sync/crypto"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncRuntime } from "@opencode-ai/core/sync/runtime"
+import { SyncCodec } from "@opencode-ai/core/sync/codec"
+import { SyncAttachment } from "@opencode-ai/core/sync/attachment"
+import { SessionSync } from "@opencode-ai/core/sync/session"
 
 function provider() {
   const files = new Map<string, { bytes: Uint8Array; version: number }>()
@@ -42,6 +45,9 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
   let sealed: SyncEvent.Segment | undefined
   const cursors = new Map<string, number>()
   const applied: SyncEvent.Envelope[] = []
+  const deletions = (operations ?? [])
+    .filter((operation): operation is typeof operation & { kind: "tombstone" } => operation.kind === "tombstone")
+    .map((operation) => operation.tombstone)
   const service = {
     enqueue: () => Effect.void,
     delete: () => Effect.void,
@@ -73,6 +79,14 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
         cursors.set(segment.deviceID, segment.generation)
       }),
     pendingApply: () => Effect.succeed([]),
+    deletions: () => Effect.succeed(deletions),
+    absorbDeletions: (items: readonly SyncEvent.Tombstone[], projector: SyncEvent.DurableProjector) =>
+      Effect.gen(function* () {
+        for (const item of items) {
+          if (!deletions.some((known) => known.sessionID === item.sessionID)) deletions.push(item)
+          yield* projector.delete(item)
+        }
+      }),
     acquire: () => Effect.succeed(true),
     renew: () => Effect.succeed(true),
     release: () => Effect.void,
@@ -81,6 +95,30 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
 }
 
 describe("SyncRuntime", () => {
+  test("uses the plaintext codec without requiring a recovery key", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("mac")
+    const event = SyncEvent.Envelope.make({
+      id: "plain-event",
+      aggregateID: "plain-session",
+      seq: 0,
+      type: "session.created",
+      data: { title: "visible title" },
+    })
+    const local = store(id, event)
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: local.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(runtime.upload())
+    expect([...remote.files.keys()].some((item) => item.endsWith(".json"))).toBeTrue()
+  })
+
   test("uploads encrypted heads and segments, then hydrates metadata and events", async () => {
     const remote = provider()
     const space = SyncCrypto.createSpace()
@@ -192,6 +230,122 @@ describe("SyncRuntime", () => {
     expect(remote.files.size).toBe(objects + 1) // only the newly written head
   })
 
+  test("resumes a partial large-attachment upload through segment, head, acknowledgement and hydration", async () => {
+    const remote = provider()
+    const macID = SyncEvent.DeviceID.make("mac")
+    const windowsID = SyncEvent.DeviceID.make("windows")
+    const output = "large persistent output ".repeat(8_000)
+    const events = [0, 1].map((seq) =>
+      SyncEvent.Envelope.make({
+        id: `large-event-${seq}`,
+        aggregateID: "large-session",
+        seq,
+        type: "session.part.updated",
+        data: { part: { type: "tool", state: { status: "completed", output } } },
+      }),
+    )
+    const mac = store(
+      macID,
+      undefined,
+      events.map((event) => SyncEvent.EventOperation.make({ kind: "event", event })),
+    )
+    let acknowledgements = 0
+    const acknowledge = mac.service.acknowledge
+    mac.service.acknowledge = (segmentID: SyncEvent.SegmentID) => {
+      acknowledgements++
+      return acknowledge(segmentID)
+    }
+    mac.service.head = () => Effect.succeed(acknowledgements ? 1 : 0)
+    let failManifest = true
+    const adapter: SyncProvider.Adapter = {
+      ...remote.adapter,
+      uploadAtomic: async (...args) => {
+        if (args[0].startsWith("chunks/manifests/") && failManifest) {
+          failManifest = false
+          throw new SyncProvider.ProviderError("memory", "upload", "network", true, "unknown")
+        }
+        return remote.adapter.uploadAtomic(...args)
+      },
+    }
+    const sourceAttachment = SyncAttachment.make({
+      codec: SyncCodec.plaintext(),
+      namespaceID: "space",
+      provider: adapter,
+    })
+    const metadata = [
+      {
+        sessionID: "large-session",
+        title: "large",
+        ownerDeviceID: "mac",
+        directory: "/project",
+        revision: 1,
+        updatedAt: 1,
+      },
+    ]
+    const source = SyncRuntime.make({
+      config: { deviceID: macID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: adapter,
+      store: mac.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed(metadata),
+      metadataProjector: { apply: () => Effect.void },
+      attachment: {
+        externalize: (item) => SessionSync.externalize(item, sourceAttachment),
+        references: SyncAttachment.references,
+        collect: sourceAttachment.collect,
+      },
+    })
+
+    await expect(Effect.runPromise(source.now())).rejects.toBeDefined()
+    expect(source.status().lastError).toEqual({
+      stage: "attachment",
+      operation: "upload",
+      kind: "network",
+      retryable: true,
+      outcome: "unknown",
+      retryAfter: undefined,
+      message: "Sync attachment failed",
+    })
+    expect(acknowledgements).toBe(0)
+    expect([...remote.files.keys()].some((path) => path.startsWith("chunks/"))).toBeTrue()
+    expect([...remote.files.keys()].some((path) => path.startsWith("chunks/manifests/"))).toBeFalse()
+
+    await Effect.runPromise(source.now())
+    expect(acknowledgements).toBe(1)
+    expect([...remote.files.keys()].some((path) => path.startsWith("segments/"))).toBeTrue()
+    expect([...remote.files.keys()].some((path) => path.startsWith("devices/"))).toBeTrue()
+
+    const windows = store(windowsID)
+    const targetAttachment = SyncAttachment.make({
+      codec: SyncCodec.plaintext(),
+      namespaceID: "space",
+      provider: adapter,
+    })
+    let discovered: readonly SyncRuntime.Metadata[] = []
+    const target = SyncRuntime.make({
+      config: { deviceID: windowsID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: adapter,
+      store: windows.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: (items) => Effect.sync(() => void (discovered = items)) },
+      attachment: {
+        externalize: (item) => SessionSync.externalize(item, targetAttachment),
+        references: SyncAttachment.references,
+        collect: targetAttachment.collect,
+      },
+    })
+    await Effect.runPromise(target.pull())
+    expect(discovered).toEqual(metadata)
+    await Effect.runPromise(target.hydrate())
+    expect(windows.applied).toHaveLength(2)
+    expect(
+      await Promise.all(windows.applied.map((event) => SyncAttachment.hydrate(event.data, targetAttachment))),
+    ).toEqual(events.map((event) => event.data))
+  })
+
   test("commits attachment references before segments and gates collection on device acknowledgements", async () => {
     const remote = provider()
     const space = SyncCrypto.createSpace()
@@ -210,7 +364,9 @@ describe("SyncRuntime", () => {
       externalize: async (value: SyncEvent.Envelope) =>
         SyncEvent.Envelope.make({ ...value, data: { part: { url: "opencode-sync-attachment://image" } } }),
       references: (value: unknown) =>
-        JSON.stringify(value).includes("opencode-sync-attachment://image") ? new Set<string>(["image"]) : new Set<string>(),
+        JSON.stringify(value).includes("opencode-sync-attachment://image")
+          ? new Set<string>(["image"])
+          : new Set<string>(),
       collect: async (input: unknown) => void collected.push(input),
     }
     const uploader = SyncRuntime.make({
@@ -281,5 +437,81 @@ describe("SyncRuntime", () => {
     })
     await Effect.runPromise(runtime.upload())
     expect(collected[0]).toMatchObject({ liveObjectIDs: new Set(), allActiveDevicesAcknowledged: true })
+  })
+
+  test("prevents a stale device from resurrecting deleted metadata for a third device", async () => {
+    const remote = provider()
+    const codec = SyncCodec.plaintext()
+    const sessionID = "deleted-session"
+    const tombstone = SyncEvent.Tombstone.make({ id: "delete-on-a", sessionID, deletedAt: 2 })
+    const deviceA = store(SyncEvent.DeviceID.make("a"), undefined, [{ kind: "tombstone", tombstone }])
+    const runtimeA = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("a"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceA.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(runtimeA.upload())
+
+    const stale = SyncEvent.Envelope.make({
+      id: "stale-on-b",
+      aggregateID: sessionID,
+      seq: 0,
+      type: "session.created",
+      data: { title: "must not return" },
+    })
+    const deviceB = store(SyncEvent.DeviceID.make("b"), stale)
+    let visibleOnB = true
+    const runtimeB = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("b"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceB.service,
+      projector: {
+        project: () => Effect.void,
+        delete: () => Effect.sync(() => void (visibleOnB = false)),
+      },
+      metadata: () =>
+        Effect.succeed(
+          visibleOnB
+            ? [
+                {
+                  sessionID,
+                  title: "must not return",
+                  ownerDeviceID: "b",
+                  directory: "/stale",
+                  revision: 1,
+                  updatedAt: 1,
+                },
+              ]
+            : [],
+        ),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(runtimeB.upload())
+    expect(visibleOnB).toBeFalse()
+
+    const deviceC = store(SyncEvent.DeviceID.make("c"))
+    const visibleOnC: SyncRuntime.Metadata[] = []
+    let deletedOnC = false
+    const runtimeC = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("c"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceC.service,
+      projector: {
+        project: () => Effect.void,
+        delete: () => Effect.sync(() => void (deletedOnC = true)),
+      },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: (items) => Effect.sync(() => void visibleOnC.push(...items)) },
+    })
+    await Effect.runPromise(runtimeC.pull())
+    expect(deletedOnC).toBeTrue()
+    expect(visibleOnC.some((item) => item.sessionID === sessionID)).toBeFalse()
+    expect(deviceC.applied).toEqual([])
   })
 })

@@ -52,8 +52,10 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     directory: info.directory,
     target: info.target ?? null,
     last_known_target_name: info.lastKnownTargetName ?? null,
+    sync_space_id: info.syncSpaceID ?? null,
     path: info.path,
     title: info.title,
+    approval_mode: info.approvalMode ?? "normal",
     agent: info.agent,
     model: info.model,
     version: info.version,
@@ -416,6 +418,7 @@ const layer = Layer.effectDiscard(
         })
       }),
     )
+    yield* events.project(SessionEvent.Turn.Settled, () => Effect.void)
     yield* events.project(SessionEvent.ContextUpdated, (event) => run(db, event))
     yield* events.project(SessionEvent.Synthetic, (event) => run(db, event))
     yield* events.project(SessionEvent.Shell.Started, (event) => run(db, event))

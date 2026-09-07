@@ -18,6 +18,7 @@ import { DiffViewerFileTree } from "./diff-viewer-file-tree"
 import { Panel, PanelGroup, Separator } from "./diff-viewer-ui"
 import { DialogSelect } from "../../ui/dialog-select"
 import { getScrollAcceleration } from "../../util/scroll"
+import { permitsRouteLocationActions } from "../../util/session-location-access"
 import {
   allExpandedFileTreeDirectories,
   buildFileTree,
@@ -99,6 +100,7 @@ function DiffViewer(props: { api: TuiPluginApi }) {
           sessionID?: string
           messageID?: string
           returnRoute?: TuiRouteCurrent
+          locationAccess?: "read-write" | "read-only"
         }
       | undefined
   const mode = () => params()?.mode ?? "git"
@@ -112,6 +114,7 @@ function DiffViewer(props: { api: TuiPluginApi }) {
     }
   })
   const [diff] = createResource(diffInput, async (input) => {
+    if (params()?.locationAccess !== "read-write" && params()?.sessionID) return []
     if (input.mode === "last-turn") {
       const sessionID = input.sessionID
       if (!sessionID) return []
@@ -1055,14 +1058,18 @@ const tui: TuiPlugin = async (api) => {
       {
         name: "diff.open",
         title: "Open diff viewer",
+        desc: "Review workspace or Session changes",
         slashName: "diff",
         category: "VCS",
         namespace: "palette",
+        enabled: () => permitsRouteLocationActions(api.route.current),
         run() {
+          if (!permitsRouteLocationActions(api.route.current)) return
           api.route.navigate(ROUTE, {
             mode: "git",
             sessionID: "params" in api.route.current ? api.route.current.params?.sessionID : undefined,
             returnRoute: api.route.current,
+            locationAccess: api.route.current.name === "session" ? api.route.current.params?.accessMode : "read-write",
           })
           api.ui.dialog.clear()
         },

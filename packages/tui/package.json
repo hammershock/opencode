@@ -7,7 +7,8 @@
   "license": "MIT",
   "scripts": {
     "test": "bun test --timeout 30000 --only-failures",
-    "typecheck": "tsgo --noEmit"
+    "generate:upstream-commands": "bun run script/generate-upstream-command-manifest.ts",
+    "typecheck": "bun run generate:upstream-commands --check && tsgo --noEmit"
   },
   "exports": {
     ".": "./src/index.tsx",
@@ -69,6 +70,8 @@
   "devDependencies": {
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
-    "@typescript/native-preview": "catalog:"
+    "@typescript/native-preview": "catalog:",
+    "prettier": "3.6.2",
+    "typescript": "catalog:"
   }
 }

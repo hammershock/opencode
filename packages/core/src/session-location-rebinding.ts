@@ -11,6 +11,7 @@ export const ResolutionStatus = Schema.Literals([
   "missing_local_target",
   "unbound_portable_target",
   "target_unavailable",
+  "resolution_failed",
 ])
 export type ResolutionStatus = typeof ResolutionStatus.Type
 
@@ -48,6 +49,10 @@ export type Resolution =
       readonly location: Location.Ref
       readonly target: TargetRegistry.Definition
       readonly stage: TargetRegistry.ConnectionStage
+      readonly message: string
+    }
+  | {
+      readonly status: "resolution_failed"
       readonly message: string
     }
 
@@ -185,6 +190,8 @@ export type RecoveryAdapter = {
     readonly expectedRevision: string
   }) => Promise<{ readonly revision: string }>
   readonly readPortableBindingRevision: () => Promise<string>
+  /** Checked before and after remote validation so an active Session never changes effective Location. */
+  readonly assertSessionsIdle?: (sessionIDs: readonly SessionSchema.ID[]) => Promise<void>
   /** Writes the monotonic tombstone before local projection is removed. */
   readonly publishGlobalDeletion: (sessionID: SessionSchema.ID) => Promise<void>
   readonly removeLocalProjection: (sessionID: SessionSchema.ID) => Promise<void>
@@ -253,6 +260,7 @@ export function makeRecovery(adapter: RecoveryAdapter) {
     }) {
       const current = await adapter.referencedSessions({ portableTargetLabel: input.portableTargetLabel })
       requireSameScope(input.expectedSessionIDs, current)
+      await adapter.assertSessionsIdle?.(current)
       const actualRevision = await adapter.readPortableBindingRevision()
       if (actualRevision !== input.expectedBindingRevision)
         throw new BindingRevisionConflictError({ expected: input.expectedBindingRevision, actual: actualRevision })
@@ -271,6 +279,7 @@ export function makeRecovery(adapter: RecoveryAdapter) {
         }
       }
       if (failures.length) throw new RecoveryValidationError({ failedSessionIDs: failures })
+      await adapter.assertSessionsIdle?.(current)
       const result = await adapter.setPortableBinding({
         portableTargetLabel: input.portableTargetLabel,
         targetID: input.targetID,

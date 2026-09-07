@@ -25,6 +25,14 @@ export const Info = Schema.Struct({
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   source: Schema.optional(Schema.Literals(["command", "mcp", "skill"])),
+  provenance: Schema.optional(
+    Schema.Union([
+      Schema.Struct({ type: Schema.Literal("builtin") }),
+      Schema.Struct({ type: Schema.Literal("custom") }),
+      Schema.Struct({ type: Schema.Literal("mcp"), serverID: Schema.String }),
+      Schema.Struct({ type: Schema.Literal("skill"), location: Schema.String }),
+    ]),
+  ),
   // Some command templates are lazy promises from MCP prompt resolution.
   template: Schema.Unknown,
   subtask: Schema.optional(Schema.Boolean),
@@ -71,6 +79,7 @@ const layer = Layer.effect(
         name: Default.INIT,
         description: "guided AGENTS.md setup",
         source: "command",
+        provenance: { type: "builtin" },
         get template() {
           return PROMPT_INITIALIZE.replace("${path}", ctx.worktree)
         },
@@ -80,6 +89,7 @@ const layer = Layer.effect(
         name: Default.REVIEW,
         description: "review changes [commit|branch|pr], defaults to uncommitted",
         source: "command",
+        provenance: { type: "builtin" },
         get template() {
           return PROMPT_REVIEW.replace("${path}", ctx.worktree)
         },
@@ -94,6 +104,7 @@ const layer = Layer.effect(
           model: command.model,
           description: command.description,
           source: "command",
+          provenance: { type: "custom" },
           get template() {
             return command.template
           },
@@ -106,6 +117,7 @@ const layer = Layer.effect(
         commands[name] = {
           name,
           source: "mcp",
+          provenance: { type: "mcp", serverID: prompt.client },
           description: prompt.description,
           get template() {
             return bridge.promise(
@@ -138,6 +150,7 @@ const layer = Layer.effect(
           name: item.name,
           description: item.description,
           source: "skill",
+          provenance: { type: "skill", location: item.location },
           get template() {
             if (!dir) return item.content
             return [

@@ -13,6 +13,7 @@ import {
 } from "../middleware/workspace-routing"
 import { PtyForbiddenError, PtyNotFoundError } from "../errors"
 import { described } from "./metadata"
+import { LocationMiddleware } from "@opencode-ai/server/location"
 
 const root = "/pty"
 export const Params = Schema.Struct({ ptyID: PtyID })
@@ -32,6 +33,7 @@ export const PtyPaths = {
   create: root,
   get: `${root}/:ptyID`,
   update: `${root}/:ptyID`,
+  restart: `${root}/:ptyID/restart`,
   remove: `${root}/:ptyID`,
   connectToken: `${root}/:ptyID/connect-token`,
   connect: `${root}/:ptyID/connect`,
@@ -98,6 +100,20 @@ export const PtyApi = HttpApi.make("pty")
             description: "Update properties of an existing pseudo-terminal (PTY) session.",
           }),
         ),
+        HttpApiEndpoint.post("restart", PtyPaths.restart, {
+          params: { ptyID: PtyID },
+          query: WorkspaceRoutingQuery,
+          payload: Pty.RestartInput,
+          success: described(Pty.Info, "Restarted session"),
+          error: [PtyNotFoundError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "pty.restart",
+            summary: "Restart PTY session",
+            description:
+              "Replace a running pseudo-terminal (PTY) session using the current Location environment generation.",
+          }),
+        ),
         HttpApiEndpoint.delete("remove", PtyPaths.remove, {
           params: { ptyID: PtyID },
           query: WorkspaceRoutingQuery,
@@ -124,6 +140,7 @@ export const PtyApi = HttpApi.make("pty")
         ),
       )
       .annotateMerge(OpenApi.annotations({ title: "pty", description: "Experimental HttpApi PTY routes." }))
+      .middleware(LocationMiddleware)
       .middleware(InstanceContextMiddleware)
       .middleware(WorkspaceRoutingMiddleware)
       .middleware(Authorization),
@@ -166,6 +183,7 @@ export const PtyConnectApi = HttpApi.make("pty-connect").add(
       ),
     )
     .annotateMerge(OpenApi.annotations({ title: "pty", description: "PTY websocket route." }))
+    .middleware(LocationMiddleware)
     .middleware(InstanceContextMiddleware)
     .middleware(WorkspaceRoutingMiddleware)
     .middleware(PtyConnectAuthorization),

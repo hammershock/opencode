@@ -66,6 +66,7 @@ import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
+import { SessionSync } from "@opencode-ai/core/sync/session"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -110,9 +111,13 @@ import { rexdLocationProvider } from "@/rexd/location"
 import { rexdTargetRegistryNode } from "@/rexd/target-registry"
 import { layer as locationLayer } from "@opencode-ai/server/location"
 import { sessionLocationLayer } from "@opencode-ai/server/middleware/session-location"
+import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
+import { SessionLocationMutation } from "@opencode-ai/core/session/location-mutation"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
 import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
 import { schemaErrorLayer as v2SchemaErrorLayer } from "@opencode-ai/server/middleware/schema-error"
 import { workspaceHandlers } from "./handlers/workspace"
+import { LocationEnvironmentAgent } from "@/location-environment-agent"
 import { instanceContextLayer } from "./middleware/instance-context"
 import { workspaceRoutingLayer } from "./middleware/workspace-routing"
 import { disposeMiddleware } from "./lifecycle"
@@ -184,6 +189,7 @@ const instanceRoutes = instanceApiRoutes.pipe(
 )
 const serverRoutes = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(handlers),
+  HttpRouter.provideRequest(LocationEnvironmentAgent.layer),
   Layer.provide(PluginPtyEnvironment.layer),
   Layer.provide([serverHttpApiAuthLayer, v2SchemaErrorLayer]),
 )
@@ -217,7 +223,7 @@ type RouteRequirements =
   | HttpRouter.Request<"Requires", unknown>
   | HttpRouter.Request<"GlobalRequires", never>
 
-const app = LayerNode.group([
+export const app = LayerNode.group([
   Npm.node,
   FSUtil.node,
   Database.node,
@@ -234,6 +240,7 @@ const app = LayerNode.group([
   Provider.node,
   ProviderUsage.node,
   SyncSetup.node,
+  SessionSync.node,
   SyncControl.node,
   ProviderAuth.node,
   Agent.node,
@@ -279,6 +286,10 @@ const app = LayerNode.group([
   PtyTicket.node,
   TargetRegistry.node,
   TargetBindingRegistry.node,
+  SessionLocationAccess.node,
+  SessionLocationMutation.node,
+  SessionActivity.node,
+  LocationServiceMap.node,
 ])
 
 export function createRoutes(
@@ -317,8 +328,6 @@ export function createRoutes(
         [SessionExecution.node, SessionExecutionLocal.node],
       ]),
     ),
-    Layer.provide(locationServiceMapV2),
-
     Layer.provide(
       AppNodeBuilderV1.build(app, [
         [TargetRegistry.node, rexdTargetRegistryNode],

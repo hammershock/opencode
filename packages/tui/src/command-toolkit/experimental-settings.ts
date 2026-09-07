@@ -1,6 +1,5 @@
 import type { OverrideDiagnostic } from "@opencode-ai/command-kit"
 import { SESSION_RENAME_DIRECT_SETTING } from "./session-rename"
-import { TARGET_MANAGER_SETTING } from "./target"
 
 export type ExperimentalCommandSetting = {
   id: string
@@ -29,13 +28,6 @@ export const experimentalCommandSettings = [
     defaultValue: false,
   },
   {
-    id: "fork.target.manage",
-    key: TARGET_MANAGER_SETTING,
-    title: "Session target manager",
-    description: "Enable /target and /target add without changing the current Session location",
-    defaultValue: false,
-  },
-  {
     id: "fork.session.force-rebind",
     key: SESSION_FORCE_REBIND_SETTING,
     title: "Force Session Location rebind",
@@ -52,4 +44,12 @@ export function reportOverrideDiagnostic(id: string, diagnostic: OverrideDiagnos
 
 export function overrideDiagnostic(id: string) {
   return diagnostics.get(id)
+}
+
+export async function persistLocationEnvironment(
+  enabled: boolean,
+  update: (config: { experimental: { location_env: boolean } }) => Promise<void>,
+) {
+  await update({ experimental: { location_env: enabled } })
+  return enabled
 }

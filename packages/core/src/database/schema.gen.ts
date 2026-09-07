@@ -189,9 +189,11 @@ export default {
           \`target\` text,
           \`last_known_target_name\` text,
           \`portable_target_label\` text,
+          \`sync_space_id\` text,
           \`location_revision\` integer DEFAULT 0 NOT NULL,
           \`path\` text,
           \`title\` text NOT NULL,
+          \`approval_mode\` text DEFAULT 'normal' NOT NULL,
           \`version\` text NOT NULL,
           \`share_url\` text,
           \`summary_additions\` integer,
@@ -272,6 +274,7 @@ export default {
       yield* tx.run(`CREATE INDEX \`session_project_idx\` ON \`session\` (\`project_id\`);`)
       yield* tx.run(`CREATE INDEX \`session_workspace_idx\` ON \`session\` (\`workspace_id\`);`)
       yield* tx.run(`CREATE INDEX \`session_parent_idx\` ON \`session\` (\`parent_id\`);`)
+      yield* tx.run(`CREATE INDEX \`session_sync_space_idx\` ON \`session\` (\`sync_space_id\`,\`time_updated\`);`)
       yield* tx.run(`CREATE INDEX \`todo_session_idx\` ON \`todo\` (\`session_id\`);`)
     })
   },

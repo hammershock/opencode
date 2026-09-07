@@ -30,6 +30,7 @@ type Subscriber = {
 type Active = {
   info: Info
   process: Proc
+  size?: { rows: number; cols: number }
   buffer: string
   bufferCursor: number
   cursor: number
@@ -43,6 +44,10 @@ export type Info = Types.DeepMutable<typeof Info.Type>
 export const CreateInput = Pty.CreateInput
 
 export type CreateInput = Types.DeepMutable<typeof CreateInput.Type>
+
+export const RestartInput = Pty.RestartInput
+
+export type RestartInput = Types.DeepMutable<typeof RestartInput.Type>
 
 export const UpdateInput = Pty.UpdateInput
 
@@ -82,6 +87,14 @@ export interface Interface {
   readonly list: () => Effect.Effect<Info[]>
   readonly get: (id: PtyID) => Effect.Effect<Info, NotFoundError>
   readonly create: (input: CreateInput) => Effect.Effect<Info>
+  /**
+   * Start a replacement with the current Location environment before stopping the
+   * selected PTY. A spawn failure therefore leaves the original PTY untouched.
+   */
+  readonly restart: (
+    id: PtyID,
+    input?: { readonly env?: Readonly<Record<string, string>> },
+  ) => Effect.Effect<Info, NotFoundError | ExitedError>
   readonly update: (id: PtyID, input: UpdateInput) => Effect.Effect<Info, NotFoundError>
   readonly remove: (id: PtyID) => Effect.Effect<void, NotFoundError>
   readonly write: (id: PtyID, data: string) => Effect.Effect<void, NotFoundError>
@@ -172,14 +185,14 @@ const layer = Layer.effect(
       return (yield* requireSession(id)).info
     })
 
-    const create = Effect.fn("Pty.create")(function* (input: CreateInput) {
-      const id = PtyID.ascending()
+    const start = Effect.fnUntraced(function* (id: PtyID, input: CreateInput, size?: Active["size"]) {
       const command = input.command || Shell.preferred(Config.latest(yield* config.entries(), "shell"))
       const args = Shell.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
       const snapshot = yield* environment.snapshot()
       const env = {
-        ...(yield* environment.environment(input.env)),
+        ...snapshot.values,
+        ...input.env,
         TERM: "xterm-256color",
         OPENCODE_TERMINAL: "1",
       } as Record<string, string>
@@ -190,7 +203,10 @@ const layer = Layer.effect(
       }
       yield* Effect.logInfo("creating session", { id, cmd: command, args, cwd })
       const { spawn } = yield* Effect.promise(() => pty())
-      const proc = yield* Effect.sync(() => spawn(command, args, { name: "xterm-256color", cwd, env }))
+      const proc = yield* Effect.sync(() =>
+        spawn(command, args, { name: "xterm-256color", cwd, env, cols: size?.cols, rows: size?.rows }),
+      )
+      const latest = yield* environment.snapshot()
       const info: Info = {
         id,
         title: input.title || `Terminal ${id.slice(-4)}`,
@@ -200,18 +216,18 @@ const layer = Layer.effect(
         status: "running",
         pid: proc.pid,
         environmentGeneration: snapshot.generation,
-        environmentStale: false,
+        environmentStale: latest.generation !== snapshot.generation,
       }
       const session: Active = {
         info,
         process: proc,
+        size,
         buffer: "",
         bufferCursor: 0,
         cursor: 0,
         subscribers: new Map(),
         listeners: [],
       }
-      sessions.set(id, session)
       session.listeners.push(
         proc.onData((chunk) => {
           session.cursor += chunk.length
@@ -251,14 +267,53 @@ const layer = Layer.effect(
           )
         }),
       )
-      yield* events.publish(Event.Created, { info })
-      return info
+      return session
+    })
+
+    const create = Effect.fn("Pty.create")(function* (input: CreateInput) {
+      const id = PtyID.ascending()
+      const session = yield* start(id, input)
+      sessions.set(id, session)
+      yield* events.publish(Event.Created, { info: session.info })
+      return session.info
+    })
+
+    const restart = Effect.fn("Pty.restart")(function* (
+      id: PtyID,
+      input: { readonly env?: Readonly<Record<string, string>> } = {},
+    ) {
+      const previous = yield* requireSession(id)
+      if (previous.info.status !== "running") return yield* new ExitedError({ ptyID: id })
+
+      // Do not tear down the selected process until its replacement has started.
+      const nextID = PtyID.ascending()
+      const replacement = yield* start(
+        nextID,
+        {
+          command: previous.info.command,
+          args: [...previous.info.args],
+          cwd: previous.info.cwd,
+          title: previous.info.title,
+          env: input.env ? { ...input.env } : undefined,
+        },
+        previous.size,
+      )
+
+      sessions.set(nextID, replacement)
+      sessions.delete(id)
+      teardown(previous)
+      yield* events.publish(Event.Deleted, { id })
+      yield* events.publish(Event.Created, { info: replacement.info })
+      return replacement.info
     })
 
     const update = Effect.fn("Pty.update")(function* (id: PtyID, input: UpdateInput) {
       const session = yield* requireSession(id)
       if (input.title) session.info.title = input.title
-      if (input.size && session.info.status === "running") session.process.resize(input.size.cols, input.size.rows)
+      if (input.size && session.info.status === "running") {
+        session.size = { ...input.size }
+        session.process.resize(input.size.cols, input.size.rows)
+      }
       yield* events.publish(Event.Updated, { info: session.info })
       return session.info
     })
@@ -321,7 +376,7 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ list, get, create, update, remove, write, attach })
+    return Service.of({ list, get, create, restart, update, remove, write, attach })
   }),
 )
 

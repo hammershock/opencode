@@ -43,8 +43,10 @@ import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
 import {
+  activeRequest as activeProviderUsageRequest,
   load as loadProviderUsage,
   summary as providerUsageSummary,
+  truncateParts,
   type Result as ProviderUsageResult,
 } from "../../provider-usage"
 import { useDialog } from "../../ui/dialog"
@@ -56,7 +58,14 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
+import {
+  OPENCODE_BASE_MODE,
+  useBindings,
+  useCommandShortcut,
+  useKeymapSelector,
+  useLeaderActive,
+  useOpencodeKeymap,
+} from "../../keymap"
 import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
@@ -64,6 +73,15 @@ import { validateDestination } from "../../routes/home/target-workflow"
 import type { LocationRef } from "@opencode-ai/sdk/v2"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { canAdjustVariant } from "../../model-variant"
+import {
+  activateCommandHost,
+  createCommandHost,
+  type TuiCommandDispatch,
+  type TuiCommandWinner,
+  type TuiSlashCommand,
+} from "../../command-toolkit/host"
+import { adaptKeymapCommands, adaptServerCommands } from "../../command-toolkit/upstream"
 
 registerOpencodeSpinner()
 
@@ -72,7 +90,13 @@ export type PromptProps = {
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
-  onBuiltinSlash?: (input: string) => Promise<boolean>
+  onPromptSubmit?: () => void
+  shellCompletionGeneration?: number
+  commandHost?: {
+    (input: string, source?: "slash" | "palette" | "keybind"): Promise<TuiCommandDispatch>
+    commands: () => readonly TuiCommandWinner[]
+    slashes: () => readonly TuiSlashCommand[]
+  }
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
   right?: JSX.Element
@@ -165,6 +189,11 @@ export function Prompt(props: PromptProps) {
   const route = useRoute()
   const project = useProject()
   const sync = useSync()
+  const approvalMode = createMemo(() =>
+    local.permission.effective(
+      props.sessionID ? (sync.session.get(props.sessionID)?.approvalMode ?? "normal") : local.permission.defaultMode,
+    ),
+  )
   const tuiConfig = useTuiConfig()
   const dialog = useDialog()
   const toast = useToast()
@@ -172,6 +201,38 @@ export function Prompt(props: PromptProps) {
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
+  const upstreamCommandEntries = useKeymapSelector((value) =>
+    value.getCommandEntries({ visibility: "reachable", namespace: "palette" }),
+  )
+  const fallbackCommandHost = createMemo(() =>
+    createCommandHost({
+      register: () => undefined,
+      context: (source) => ({
+        source,
+        client: "tui" as const,
+        sessionID: props.sessionID,
+        location: location(),
+        abortSignal: new AbortController().signal,
+        confirm: async () => false,
+      }),
+      upstream: () => [
+        ...adaptServerCommands(sync.data.command),
+        ...adaptKeymapCommands(upstreamCommandEntries(), (identity) => keymap.dispatchCommand(identity)),
+      ],
+      invalid: (message) => toast.show({ message, variant: "warning" }),
+      outcome: (message, result) =>
+        toast.show({
+          message,
+          variant: result === "failed" ? "error" : result === "cancelled" ? "warning" : "success",
+        }),
+      diagnostic: (diagnostic) => console.warn("[command-kit] shadowed command", diagnostic),
+    }),
+  )
+  const activeCommandHost = () => props.commandHost ?? fallbackCommandHost()
+  createEffect(() => {
+    const dispose = activateCommandHost(keymap, activeCommandHost())
+    onCleanup(dispose)
+  })
   const agentShortcut = useCommandShortcut("agent.cycle")
   const paletteShortcut = useCommandShortcut("command.palette.show")
   const shellExitShortcut = useCommandShortcut("prompt.shell.exit")
@@ -293,36 +354,52 @@ export function Prompt(props: PromptProps) {
   const [providerUsage, setProviderUsage] = createSignal<ProviderUsageResult>()
   const providerUsageText = createMemo(() => {
     const result = providerUsage()
-    const providerID = props.sessionID
-      ? sync.data.message[props.sessionID]?.findLast(
-          (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
-        )?.providerID
-      : undefined
-    if (!result?.snapshot || !providerID) return
-    return providerUsageSummary(
+    const model = local.model.current()
+    if (!result?.snapshot || !model || result.providerID !== model.providerID) return
+    const provider = sync.data.provider.find((item) => item.id === model.providerID)
+    const label = provider?.name ?? model.providerID
+    const value = providerUsageSummary(
       result,
       local.model.usage.selected(
-        providerID,
+        model.providerID,
         result.snapshot.meters.map((meter) => meter.id),
       ),
+      Math.max(12, Math.floor(dimensions().width * 0.35) - label.length - 3),
     )
+    if (!value) return
+    return `${label} · ${value}`
   })
   createEffect(
     on(
       () => {
-        if (!props.sessionID) return
+        const model = local.model.current()
+        if (!props.sessionID || !model) return
         const message = sync.data.message[props.sessionID]?.findLast(
           (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
         )
-        return message ? `${message.id}\0${message.providerID}` : undefined
+        return `${model.providerID}\0${message?.id ?? ""}\0${message?.providerID ?? ""}`
       },
       (key) => {
         setProviderUsage(undefined)
         if (!key) return
-        void loadProviderUsage(sdk, key.split("\0")[1]!, true).then(setProviderUsage)
+        const [providerID, _, completedProviderID] = key.split("\0")
+        const request = activeProviderUsageRequest(providerID, completedProviderID)
+        const controller = new AbortController()
+        void loadProviderUsage(sdk, request.providerID, request.refresh, controller.signal)
+          .then(setProviderUsage)
+          .catch(() => {})
+        onCleanup(() => controller.abort())
       },
     ),
   )
+
+  const footerUsageText = createMemo(() => {
+    const item = usage()
+    return truncateParts(
+      [item?.context, item?.cost, providerUsageText()].filter((value): value is string => Boolean(value)),
+      Math.max(12, Math.floor(dimensions().width / 2) - 16),
+    )
+  })
 
   const [store, setStore] = createStore<{
     prompt: PromptInfo
@@ -465,6 +542,7 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Open editor",
+        desc: "Edit the prompt in an external editor",
         category: "Session",
         name: "prompt.editor",
         slashName: "editor",
@@ -557,6 +635,7 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Skills",
+        desc: "Browse available skills",
         name: "prompt.skills",
         category: "Prompt",
         slashName: "skills",
@@ -916,7 +995,14 @@ export function Prompt(props: PromptProps) {
   useBindings(() => {
     return {
       target: inputTarget,
-      enabled: inputTarget() !== undefined && !props.disabled && store.mode === "normal" && !auto()?.visible,
+      enabled:
+        inputTarget() !== undefined &&
+        canAdjustVariant({
+          disabled: !!props.disabled,
+          mode: store.mode,
+          autocompleteVisible: !!auto()?.visible,
+          dialogOpen: dialog.stack.length > 0,
+        }),
       priority: 1,
       commands: [
         {
@@ -1058,12 +1144,11 @@ export function Prompt(props: PromptProps) {
         return [{ start: extmark.start, end: extmark.end, text: part.text }]
       }),
     )
-    const upstreamCommand =
-      inputText.startsWith("/") &&
-      sync.data.command.some((item) => item.name === inputText.split("\n")[0].split(" ")[0].slice(1))
-    // External server commands keep the upstream winner. Client-only verified
-    // overrides run before model resolution because they do not invoke an Agent.
-    if (store.mode !== "shell" && !upstreamCommand && props.onBuiltinSlash && (await props.onBuiltinSlash(inputText))) {
+    const slashDispatch =
+      store.mode !== "shell"
+        ? await activeCommandHost()(inputText, "slash")
+        : ({ status: "passthrough", input: inputText, diagnostics: [] } as const)
+    if (slashDispatch.status === "handled") {
       history.append({ ...store.prompt, mode: store.mode })
       input.extmarks.clear()
       setStore("prompt", { input: "", parts: [] })
@@ -1143,6 +1228,7 @@ export function Prompt(props: PromptProps) {
 
       const res = await sdk.client.v2.session.create({
         location,
+        approvalMode: local.permission.defaultMode,
         agent: agent.name,
         model: {
           providerID: selectedModel.providerID,
@@ -1201,19 +1287,12 @@ export function Prompt(props: PromptProps) {
         command: inputText,
       })
       setStore("mode", "normal")
-    } else if (upstreamCommand) {
+    } else if (slashDispatch.status === "session") {
       move.startSubmit()
-      // Parse command from first line, preserve multi-line content in arguments
-      const firstLineEnd = inputText.indexOf("\n")
-      const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
-      const [command, ...firstLineArgs] = firstLine.split(" ")
-      const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
-      const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
-
       void sdk.client.session.command({
         sessionID,
-        command: command.slice(1),
-        arguments: args,
+        command: slashDispatch.command,
+        arguments: slashDispatch.arguments,
         agent: agent.name,
         model: `${selectedModel.providerID}/${selectedModel.modelID}`,
         variant,
@@ -1260,6 +1339,7 @@ export function Prompt(props: PromptProps) {
     })
     setStore("extmarkToPartIndex", new Map())
     props.onSubmit?.()
+    props.onPromptSubmit?.()
 
     // temporary hack to make sure the message is sent
     if (!props.sessionID) {
@@ -1426,7 +1506,7 @@ export function Prompt(props: PromptProps) {
   const showVariant = createMemo(() => {
     const variants = local.model.variant.list()
     if (variants.length === 0) return false
-    const current = local.model.variant.current()
+    const current = local.model.variant.effective()
     return !!current
   })
 
@@ -1579,7 +1659,7 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
-                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
+                      <Show when={store.mode === "normal" && approvalMode() === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
                       <Show when={store.mode === "normal"}>
@@ -1596,7 +1676,7 @@ export function Prompt(props: PromptProps) {
                             <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
                             <text>
                               <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                                {local.model.variant.current()}
+                                {local.model.variant.effective()}
                               </span>
                             </text>
                           </Show>
@@ -1792,10 +1872,10 @@ export function Prompt(props: PromptProps) {
               <Switch>
                 <Match when={store.mode === "normal"}>
                   <Switch>
-                    <Match when={usage()}>
-                      {(item) => (
+                    <Match when={footerUsageText()}>
+                      {(text) => (
                         <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost, providerUsageText()].filter(Boolean).join(" · ")}
+                          {text()}
                         </text>
                       )}
                     </Match>
@@ -1813,6 +1893,7 @@ export function Prompt(props: PromptProps) {
                   <text fg={theme.text}>
                     {shellExitShortcut()} <span style={{ fg: theme.textMuted }}>exit shell mode</span>
                   </text>
+                  <text fg={theme.textMuted}>interactive: Terminal panel</text>
                 </Match>
               </Switch>
             </box>
@@ -1841,6 +1922,8 @@ export function Prompt(props: PromptProps) {
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
+        shellMutation={cursorVersion() + (props.shellCompletionGeneration ?? 0)}
+        commandSlashes={activeCommandHost().slashes}
       />
     </>
   )

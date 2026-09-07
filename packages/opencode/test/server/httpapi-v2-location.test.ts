@@ -105,6 +105,21 @@ describe("v2 location HttpApi", () => {
     }
   })
 
+  test("runs environment init through the production Session workflow adapter", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const created = await request("/session", tmp.path, { method: "POST" })
+    expect(created.status).toBe(200)
+    const session = (await created.json()) as { id: string }
+
+    const response = await request(`/api/session/${session.id}/environment/init`, tmp.path, { method: "POST" })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      location: { directory: tmp.path },
+      data: { status: "failed", template: "created" },
+    })
+    expect(await Bun.file(`${tmp.path}/.env`).text()).toStartWith("# Project environment variables for OpenCode.")
+  })
+
   test("streams native EventV2 payloads across locations", async () => {
     await using subscriber = await tmpdir({ git: true })
     await using publisher = await tmpdir({ git: true })

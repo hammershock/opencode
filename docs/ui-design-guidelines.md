@@ -9,13 +9,17 @@ This document defines the normative interaction and presentation rules for fork-
 3. Keep domain state in Core services. Components render typed state and dispatch domain actions; they do not own a second protocol.
 4. Prefer progressive disclosure: rows contain identity and status, focused details contain diagnostics, and confirmation dialogs are reserved for destructive or security-sensitive actions.
 5. Keyboard and mouse actions must invoke the same command or domain workflow.
+6. One product workflow owns one interaction state machine. Slash commands, the command palette, QuickStart and contextual actions deep-link to that workflow or one of its subviews instead of cloning panels and behavior.
 
 ## Layout and density
 
 - Keep labels short and stable. Do not repeat information already present in the panel title or selected row.
 - Align comparable values into columns. Status occupies a fixed, right-aligned trailing column so loading or error text does not move the primary label.
 - A row should normally contain one primary label, one optional muted description and one status. Put verbose errors, paths or instructions in a focused footer or detail view.
+- Prefer a symbol plus a stable text label over prose-only status or icon-only meaning. Symbols aid scanning; labels remain the accessible contract.
 - Preserve panel geometry while asynchronous state changes. Loading must not reorder rows or replace the user's selection.
+- Give every single-line row an explicit width budget and test it at the supported narrow, default and wide terminal widths. Reserve gutters and fixed right-side status before allocating identity text.
+- Unfocused rows never auto-scroll. Truncate their variable text deterministically; when a user-visible identity is genuinely longer than its budget, the selected or mouse-focused row may cycle horizontally so the complete value remains inspectable.
 - Use two rows only when the controls represent independent dimensions. For `/sessions`, the required controls are exactly:
 
   ```text
@@ -56,6 +60,7 @@ This document defines the normative interaction and presentation rules for fork-
 - Confirm only destructive, irreversible or trust-boundary actions, such as global Session/space deletion, recovery-key reset or an unknown SSH host-key decision.
 - Do not add a confirmation merely to explain that a normal save may later fail validation. Save first, then report the actual actionable failure at use or verification time.
 - Confirmation copy names the affected object and scope. A global action says global or all devices explicitly.
+- The same domain action uses the same confirmation title, scope and consequences from every entry point. A deep link may choose the initial subview, but it must not bypass or invent a confirmation.
 - Disabled actions explain the unmet condition in focused detail; do not hide an object merely because it is unavailable or unresolved.
 
 ## Review checklist
@@ -67,3 +72,4 @@ This document defines the normative interaction and presentation rules for fork-
 - Do completion and modal keys outrank global shortcuts, and can accepting a candidate avoid accidental submit?
 - Is every destructive scope explicit, while normal reversible actions avoid redundant confirmation?
 - Does the TUI consume typed domain state without owning credentials, transport or synchronization logic?
+- Do all entry points reuse the owning workflow and its confirmation semantics rather than duplicate a feature-specific panel?

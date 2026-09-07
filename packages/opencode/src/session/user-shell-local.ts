@@ -1,9 +1,15 @@
-import { Duration, Effect, Option, Stream } from "effect"
+import { Duration, Effect, Exit, Option, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import path from "path"
 import { Shell } from "@opencode-ai/core/shell"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import type { CompletionCandidate, CompletionKind, Environment, Provider } from "./user-shell-runtime"
+import type {
+  CompletionCandidate,
+  CompletionKind,
+  CompletionProviderResult,
+  Environment,
+  Provider,
+} from "./user-shell-runtime"
 
 export * as UserShellLocal from "./user-shell-local"
 
@@ -28,7 +34,7 @@ export function provider(
       const process = ChildProcess.make(shell, bareArgs(shell, wrapped), {
         cwd: input.cwd,
         extendEnv: true,
-        env: { ...input.environment, TERM: "dumb" },
+        env: { ...input.environment, TERM: "dumb", BASH_ENV: "", ENV: "" },
         stdin: "ignore",
         forceKillAfter: "3 seconds",
       })
@@ -52,7 +58,11 @@ export function provider(
     const range = replacementRange(input.input, input.cursor)
     const token = unquote(input.input.slice(range.start, range.end))
     const paths = yield* pathCandidates(input.cwd, token, range, fs)
-    const names = yield* nameCandidates(
+    const commands =
+      token.includes("/") || !isCommandPosition(input.input, range.start)
+        ? []
+        : yield* commandCandidates(token, range, input.environment, fs)
+    const native = yield* nativeCandidates(
       shell,
       input.input,
       input.cursor,
@@ -62,7 +72,10 @@ export function provider(
       input.environment,
       spawner,
     )
-    return unique([...paths, ...names])
+    return {
+      candidates: unique([...paths, ...commands, ...native.candidates]),
+      ...(native.degraded ? { degraded: native.degraded } : {}),
+    }
   })
 
   return { execute, validateDirectory, complete }
@@ -115,6 +128,52 @@ export function replacementRange(input: string, cursor: number) {
   return { start, end }
 }
 
+export function isCommandPosition(input: string, cursor: number) {
+  const safe = Math.max(0, Math.min(cursor, input.length))
+  let quote: "'" | '"' | undefined
+  let escaped = false
+  let word = ""
+  let expecting = true
+  const commit = () => {
+    if (!word) return
+    if (!expecting || !/^[A-Za-z_][A-Za-z0-9_]*=.*/s.test(word)) expecting = false
+    word = ""
+  }
+  for (let index = 0; index < safe; index++) {
+    const char = input[index]!
+    if (escaped) {
+      word += char
+      escaped = false
+      continue
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = quote === char ? undefined : (quote ?? char)
+      continue
+    }
+    if (quote) {
+      word += char
+      continue
+    }
+    if (/\s/.test(char)) {
+      commit()
+      if (char === "\n") expecting = true
+      continue
+    }
+    if (char === ";" || char === "|" || char === "&" || char === "(") {
+      commit()
+      expecting = true
+      continue
+    }
+    word += char
+  }
+  commit()
+  return expecting
+}
+
 function wrap(command: string, control: string, shell: string) {
   if (Shell.ps(shell)) {
     const file = control.replaceAll("'", "''")
@@ -126,6 +185,20 @@ function wrap(command: string, control: string, shell: string) {
 
 function quote(input: string) {
   return `'${input.replaceAll("'", `'"'"'`)}'`
+}
+
+export function commandFallbackScript(prefix: string) {
+  return `__opencode_prefix=${quote(prefix)}; __opencode_old_ifs=$IFS; IFS=:; for __opencode_dir in $PATH; do IFS=$__opencode_old_ifs; for __opencode_path in "$__opencode_dir"/"$__opencode_prefix"*; do [ -f "$__opencode_path" ] && [ -x "$__opencode_path" ] && printf '__OPENCODE_COMMAND__\\t%s\\n' "\${__opencode_path##*/}"; done; IFS=:; done; IFS=$__opencode_old_ifs`
+}
+
+export function parseCommandFallback(text: string, range: { start: number; end: number }) {
+  return text
+    .split(/\r?\n/)
+    .flatMap((line) =>
+      line.startsWith("__OPENCODE_COMMAND__\t")
+        ? [item(line.slice("__OPENCODE_COMMAND__\t".length), range, "command")]
+        : [],
+    )
 }
 
 function unquote(input: string) {
@@ -169,7 +242,41 @@ function pathCandidates(cwd: string, token: string, range: { start: number; end:
   )
 }
 
-function nameCandidates(
+function commandCandidates(
+  token: string,
+  range: { start: number; end: number },
+  environment: Environment,
+  fs: FSUtil.Interface,
+) {
+  const directories = (environment.PATH ?? "").split(path.delimiter).filter(Boolean)
+  return Effect.all(
+    directories.map((directory) =>
+      fs.readDirectory(directory).pipe(
+        Effect.flatMap((entries) =>
+          Effect.all(
+            entries
+              .filter((entry) => entry.startsWith(token))
+              .map((entry) =>
+                fs.stat(path.join(directory, entry)).pipe(
+                  Effect.map((info) =>
+                    info.type === "File" && (process.platform === "win32" || (info.mode & 0o111) !== 0)
+                      ? item(entry, range, "command")
+                      : undefined,
+                  ),
+                  Effect.catch(() => Effect.void),
+                ),
+              ),
+            { concurrency: "unbounded" },
+          ).pipe(Effect.map((items) => items.filter((entry) => entry !== undefined))),
+        ),
+        Effect.catch(() => Effect.succeed([])),
+      ),
+    ),
+    { concurrency: "unbounded" },
+  ).pipe(Effect.map((groups) => unique(groups.flat())))
+}
+
+function nativeCandidates(
   shell: string,
   input: string,
   cursor: number,
@@ -178,54 +285,65 @@ function nameCandidates(
   cwd: string,
   environment: Environment,
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-) {
-  if (token.includes("/")) return Effect.succeed([])
+): Effect.Effect<CompletionProviderResult> {
+  if (token.includes("/")) return Effect.succeed({ candidates: [] })
   const name = Shell.name(shell)
+  if (name !== "bash" && name !== "zsh")
+    return Effect.succeed({ candidates: [], degraded: { reason: "native_unavailable" } })
   const script = completionScript(shell, input, cursor)
-  const args = name === "zsh" || name === "bash" ? ["-ic", script] : ["-c", script]
-  const command = ChildProcess.make(shell, args, {
+  const command = ChildProcess.make(shell, bareArgs(shell, script), {
     cwd,
     extendEnv: true,
-    env: { ...environment, TERM: "dumb" },
+    env: { ...environment, TERM: "dumb", BASH_ENV: "", ENV: "" },
     stdin: "ignore",
     stderr: "ignore",
-    forceKillAfter: "3 seconds",
+    forceKillAfter: Duration.millis(250),
   })
   return Effect.gen(function* () {
     const handle = yield* spawner.spawn(command)
     const text = yield* Stream.decodeText(handle.stdout).pipe(Stream.mkString)
-    yield* handle.exitCode
-    return parseCompletionOutput(text, token, range)
+    const exitCode = yield* handle.exitCode
+    if (exitCode !== 0)
+      return { candidates: [], degraded: { reason: "native_failed" as const } } satisfies CompletionProviderResult
+    return { candidates: parseCompletionOutput(text, token, range) } satisfies CompletionProviderResult
   }).pipe(
     Effect.scoped,
     Effect.timeoutOption(Duration.millis(1500)),
-    Effect.map(Option.getOrElse(() => [])),
-    Effect.catch(() => Effect.succeed([])),
+    Effect.map(
+      Option.getOrElse(
+        () => ({ candidates: [], degraded: { reason: "native_timeout" as const } }) satisfies CompletionProviderResult,
+      ),
+    ),
+    Effect.exit,
+    Effect.map((exit) =>
+      Exit.isSuccess(exit)
+        ? exit.value
+        : ({ candidates: [], degraded: { reason: "native_failed" } } satisfies CompletionProviderResult),
+    ),
   )
 }
 
 export function completionScript(shell: string, input: string, cursor: number) {
   const name = Shell.name(shell)
-  const discovery =
-    name === "zsh"
-      ? `print -r -- __OPENCODE_ALIAS__; print -rl -- \${(k)aliases}; print -r -- __OPENCODE_FUNCTION__; print -rl -- \${(k)functions}; print -r -- __OPENCODE_COMMAND__; print -rl -- \${(k)commands}`
-      : name === "bash"
-        ? `printf '%s\\n' __OPENCODE_ALIAS__; compgen -A alias; printf '%s\\n' __OPENCODE_FUNCTION__; compgen -A function; printf '%s\\n' __OPENCODE_COMMAND__; compgen -A command`
-        : `printf '%s\\n' __OPENCODE_COMMAND__; command -v -a 2>/dev/null`
   const native = name === "bash" ? bashCompletion(input, cursor) : name === "zsh" ? zshCompletion(input, cursor) : ""
-  return `${discovery}; ${native}`
+  return native
 }
 
 export function completionCommand(shell: string, input: string, cursor: number) {
-  const mode = Shell.name(shell) === "bash" || Shell.name(shell) === "zsh" ? "-ic" : "-c"
-  return `${quote(shell)} ${mode} ${quote(completionScript(shell, input, cursor))}`
+  return bareCommand(shell, completionScript(shell, input, cursor))
+}
+
+export function bareCommand(shell: string, command: string) {
+  return [quote(shell), ...bareArgs(shell, command).map(quote)].join(" ")
 }
 
 export function parseCompletionOutput(text: string, token: string, range: { start: number; end: number }) {
   let kind: CompletionKind = "command"
   return text.split(/\r?\n/).flatMap((candidate) => {
     if (candidate.startsWith("__OPENCODE_NATIVE__\t"))
-      return [nativeItem(candidate.slice("__OPENCODE_NATIVE__\t".length), range)]
+      return candidate.length === "__OPENCODE_NATIVE__\t".length
+        ? []
+        : [nativeItem(candidate.slice("__OPENCODE_NATIVE__\t".length), range)]
     if (candidate === "__OPENCODE_ALIAS__") {
       kind = "alias"
       return []
@@ -242,30 +360,43 @@ export function parseCompletionOutput(text: string, token: string, range: { star
   })
 }
 
-function bashCompletion(input: string, cursor: number) {
+export function bashCompletion(input: string, cursor: number) {
   const line = quote(input)
   return `
 COMP_LINE=${line}; COMP_POINT=${cursor};
+COMPREPLY=();
 read -r -a COMP_WORDS <<< "\${COMP_LINE:0:COMP_POINT}";
 [[ "\${COMP_LINE:COMP_POINT-1:1}" == " " ]] && COMP_WORDS+=("");
-COMP_CWORD=$((${"#"}COMP_WORDS[@]-1));
+COMP_CWORD=$((\${#COMP_WORDS[@]}-1));
+for __opencode_file in /opt/homebrew/etc/profile.d/bash_completion.sh /usr/local/share/bash-completion/bash_completion /usr/share/bash-completion/bash_completion; do
+  [[ -r "$__opencode_file" ]] && { source "$__opencode_file" >/dev/null 2>&1 || true; break; };
+done;
 _completion_loader "\${COMP_WORDS[0]}" >/dev/null 2>&1 || true;
 __opencode_spec=$(complete -p -- "\${COMP_WORDS[0]}" 2>/dev/null) || true;
-if [[ $__opencode_spec =~ '-F '([^[:space:]]+) ]]; then
-  __opencode_fn="\${BASH_REMATCH[1]}";
-  "$__opencode_fn" "\${COMP_WORDS[0]}" "\${COMP_WORDS[COMP_CWORD]}" "\${COMP_WORDS[COMP_CWORD-1]}" >/dev/null 2>&1 || true;
+if [[ -n "$__opencode_spec" ]]; then
+  eval "set -- $__opencode_spec"; shift;
+  while (( $# )); do
+    case "$1" in
+      -F) shift; "$1" "\${COMP_WORDS[0]}" "\${COMP_WORDS[COMP_CWORD]}" "\${COMP_WORDS[COMP_CWORD-1]}" >/dev/null 2>&1 || true ;;
+      -W) shift; while IFS= read -r __opencode_item; do COMPREPLY+=("$__opencode_item"); done < <(compgen -W "$1" -- "\${COMP_WORDS[COMP_CWORD]}") ;;
+      -C) shift; while IFS= read -r __opencode_item; do COMPREPLY+=("$__opencode_item"); done < <(COMP_LINE="$COMP_LINE" COMP_POINT="$COMP_POINT" COMP_TYPE=9 COMP_KEY=9 eval "$1") ;;
+      -A) shift; while IFS= read -r __opencode_item; do COMPREPLY+=("$__opencode_item"); done < <(compgen -A "$1" -- "\${COMP_WORDS[COMP_CWORD]}") ;;
+      -a|-b|-c|-d|-e|-f|-g|-j|-k|-s|-u|-v) while IFS= read -r __opencode_item; do COMPREPLY+=("$__opencode_item"); done < <(compgen "$1" -- "\${COMP_WORDS[COMP_CWORD]}") ;;
+    esac;
+    shift;
+  done;
   printf '__OPENCODE_NATIVE__\\t%s\\n' "\${COMPREPLY[@]}";
 fi`
 }
 
-function zshCompletion(input: string, cursor: number) {
+export function zshCompletion(input: string, cursor: number) {
   const before = input.slice(0, cursor)
   const parsed = shellWords(before)
   const words = parsed.map(quote).join(" ")
   const current = parsed.length + (/\s$/.test(before) ? 1 : 0)
   const command = quote(parsed[0] ?? "")
   return `
-if (( ! $+functions[compdef] )); then autoload -Uz compinit; compinit -d "\${TMPDIR:-/tmp}/opencode-zcompdump-$UID" >/dev/null 2>&1; fi;
+if (( ! $+functions[compdef] )); then autoload -Uz compinit; compinit -C -d /dev/null >/dev/null 2>&1; fi;
 words=(${words}); ${/\s$/.test(before) ? 'words+=("")' : ""} CURRENT=${Math.max(1, current)};
 PREFIX=\${words[CURRENT]}; SUFFIX='';
 function compadd { local seen=0 arg; for arg in "$@"; do [[ "$arg" == -- ]] && { seen=1; continue; }; (( seen )) && printf '__OPENCODE_NATIVE__\\t%s\\n' "$arg"; done; };

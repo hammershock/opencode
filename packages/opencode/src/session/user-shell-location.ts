@@ -3,10 +3,15 @@ import { FileSystem } from "@opencode-ai/core/filesystem"
 import { LocationProcess } from "@opencode-ai/core/location-process"
 import { Location } from "@opencode-ai/core/location"
 import { RelativePath } from "@opencode-ai/core/schema"
-import { Duration, Effect } from "effect"
+import { Duration, Effect, Exit } from "effect"
 import { Shell } from "@opencode-ai/core/shell"
 import { UserShellLocal } from "./user-shell-local"
-import type { CompletionCandidate, Provider } from "./user-shell-runtime"
+import {
+  EXECUTION_TIMEOUT,
+  type CompletionCandidate,
+  type CompletionDegradedReason,
+  type Provider,
+} from "./user-shell-runtime"
 
 export const provider = Effect.gen(function* () {
   const process = yield* LocationProcess.Service
@@ -15,6 +20,25 @@ export const provider = Effect.gen(function* () {
   return makeProvider(process, filesystem, location)
 })
 
+const controlPrefix = (nonce: string) => `\0opencode-cwd-${nonce}\0`
+
+export function wrapExecution(command: string, nonce: string) {
+  return `{ ${command}\n}; __opencode_status=$?; printf '\\000opencode-cwd-${nonce}\\000%s\\000' "$(pwd -P)"; exit "$__opencode_status"`
+}
+
+export function readExecutionControl(output: string, nonce: string) {
+  const start = output.lastIndexOf(controlPrefix(nonce))
+  if (start < 0) return { output }
+  const value = start + controlPrefix(nonce).length
+  const end = output.indexOf("\0", value)
+  if (end < 0) return { output: output.slice(0, start) }
+  const finalCwd = output.slice(value, end)
+  return {
+    output: output.slice(0, start) + output.slice(end + 1),
+    ...(finalCwd ? { finalCwd } : {}),
+  }
+}
+
 export function makeProvider(
   process: LocationProcess.Interface,
   filesystem: FileSystem.Interface,
@@ -22,16 +46,20 @@ export function makeProvider(
 ) {
   const execute: Provider["execute"] = (input) =>
     Effect.gen(function* () {
-      const result = yield* process.runShell(input.command, {
+      const nonce = crypto.randomUUID().replaceAll("-", "")
+      const shell = targetShell(input.environment)
+      const result = yield* process.runShell(UserShellLocal.bareCommand(shell, wrapExecution(input.command, nonce)), {
         cwd: input.cwd,
         shell: "/bin/sh",
-        env: input.environment,
-        timeout: Duration.minutes(10),
+        env: { ...input.environment, BASH_ENV: "", ENV: "" },
+        timeout: EXECUTION_TIMEOUT,
         maxOutputBytes: 8 * 1024 * 1024,
         signal: input.signal,
       })
-      if (result.output?.length) yield* input.onOutput?.(result.output.toString("utf8")) ?? Effect.void
-      return { exitCode: result.exitCode }
+      const visible = readExecutionControl(result.output?.toString("utf8") ?? "", nonce)
+      const control = readExecutionControl(result.stdout.toString("utf8"), nonce)
+      if (visible.output) yield* input.onOutput?.(visible.output) ?? Effect.void
+      return { exitCode: result.exitCode, finalCwd: control.finalCwd }
     })
   const validateDirectory: Provider["validateDirectory"] = (directory) =>
     filesystem.list({ path: RelativePath.make(path.posix.relative(location.directory, directory)) }).pipe(
@@ -61,25 +89,55 @@ export function makeProvider(
             kind: entry.type,
           }),
         )
-      if (token.includes("/")) return paths
-      const shell = input.environment.SHELL ?? "/bin/sh"
-      if (Shell.name(shell) !== "bash" && Shell.name(shell) !== "zsh") return paths
-      const result = yield* process
-        .runShell(UserShellLocal.completionCommand(shell, input.input, input.cursor), {
+      if (token.includes("/")) return { candidates: paths }
+      const shell = targetShell(input.environment)
+      const run = (command: string, selectedShell: string, timeout: Duration.Input) =>
+        process.runShell(command, {
           cwd: input.cwd,
-          shell: "/bin/sh",
-          env: { ...input.environment, TERM: "dumb" },
-          timeout: Duration.millis(1500),
+          shell: selectedShell,
+          env: { ...input.environment, TERM: "dumb", BASH_ENV: "", ENV: "" },
+          timeout,
           maxOutputBytes: 512 * 1024,
           signal: input.signal,
         })
-        .pipe(Effect.catch(() => Effect.void))
-      const names = result ? UserShellLocal.parseCompletionOutput(result.stdout.toString("utf8"), token, range) : []
-      return [...new Map([...paths, ...names].map((candidate) => [candidate.value, candidate])).values()].toSorted(
-        (a, b) => a.display.localeCompare(b.display),
-      )
+      const fallback = UserShellLocal.isCommandPosition(input.input, range.start)
+        ? yield* run(UserShellLocal.commandFallbackScript(token), "/bin/sh", Duration.millis(750)).pipe(
+            Effect.catch(() => Effect.void),
+          )
+        : undefined
+      const commands = fallback ? UserShellLocal.parseCommandFallback(fallback.stdout.toString("utf8"), range) : []
+      const supported = Shell.name(shell) === "bash" || Shell.name(shell) === "zsh"
+      const native = supported
+        ? yield* run(
+            UserShellLocal.completionCommand(shell, input.input, input.cursor),
+            "/bin/sh",
+            Duration.millis(1500),
+          ).pipe(Effect.exit)
+        : undefined
+      const names =
+        native && Exit.isSuccess(native)
+          ? UserShellLocal.parseCompletionOutput(native.value.stdout.toString("utf8"), token, range)
+          : []
+      const degraded: CompletionDegradedReason | undefined = !supported
+        ? "native_unavailable"
+        : native && Exit.isFailure(native)
+          ? String(native.cause).includes("Timed out")
+            ? "native_timeout"
+            : "native_failed"
+          : native?.value.exitCode === 0
+            ? undefined
+            : "native_failed"
+      const candidates = [
+        ...new Map([...paths, ...commands, ...names].map((candidate) => [candidate.value, candidate])).values(),
+      ].toSorted((a, b) => a.display.localeCompare(b.display))
+      return { candidates, ...(degraded ? { degraded: { reason: degraded } } : {}) }
     })
   return { execute, validateDirectory, complete } satisfies Provider
+}
+
+export function targetShell(environment: Readonly<Record<string, string>>) {
+  const shell = environment.SHELL
+  return shell && Shell.posix(shell) ? shell : "/bin/sh"
 }
 
 export * as UserShellLocation from "./user-shell-location"

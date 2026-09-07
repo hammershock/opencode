@@ -48,6 +48,7 @@ import {
   SessionTable,
 } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionTurn } from "@opencode-ai/core/session/turn"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
@@ -65,6 +66,10 @@ let responses: LLMEvent[][] | undefined
 let responseStream: Stream.Stream<LLMEvent, LLMError> | undefined
 let streamGate: Deferred.Deferred<void> | undefined
 let streamStarted: Deferred.Deferred<void> | undefined
+let streamStartsRemaining = 1
+let observeRunAdmission:
+  | ((event: { readonly key: SessionV2.ID; readonly type: "started" | "joined" }) => void)
+  | undefined
 let streamFailure: LLMError | undefined
 let toolExecutionGate: Deferred.Deferred<void> | undefined
 let toolExecutionsStarted: Deferred.Deferred<void> | undefined
@@ -87,10 +92,10 @@ const client = Layer.succeed(
         : Stream.fromIterable(responses === undefined ? response : (responses.shift() ?? []))
       if (!streamGate) return events
       return Stream.unwrap(
-        (streamStarted ? Deferred.succeed(streamStarted, undefined) : Effect.void).pipe(
-          Effect.andThen(Deferred.await(streamGate)),
-          Effect.as(events),
-        ),
+        (streamStarted && --streamStartsRemaining === 0
+          ? Deferred.succeed(streamStarted, undefined)
+          : Effect.void
+        ).pipe(Effect.andThen(Deferred.await(streamGate)), Effect.as(events)),
       )
     }) as unknown as LLMClientShape["stream"],
     generate: () => Effect.die("unused"),
@@ -242,11 +247,13 @@ const execution = Layer.effect(
     const sessionRunner = yield* SessionRunner.Service
     const coordinator = yield* SessionRunCoordinator.make<SessionV2.ID, SessionRunner.RunError>({
       drain: (sessionID, force) => sessionRunner.run({ sessionID, force }),
+      onAdmission: (event) => observeRunAdmission?.(event),
     })
     return SessionExecution.Service.of({
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,
+      wakeAndWait: coordinator.wakeAndWait,
       interrupt: coordinator.interrupt,
     })
   }),
@@ -324,6 +331,8 @@ const setup = Effect.gen(function* () {
   responseStream = undefined
   streamGate = undefined
   streamStarted = undefined
+  streamStartsRemaining = 1
+  observeRunAdmission = undefined
   toolExecutionGate = undefined
   toolExecutionsStarted = undefined
   toolExecutionsReady = 5
@@ -1473,7 +1482,11 @@ describe("SessionRunnerLLM", () => {
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Echo this" }), resume: false })
+      const admitted = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Echo this" }),
+        resume: false,
+      })
 
       requests.length = 0
       authorizations.length = 0
@@ -1524,6 +1537,9 @@ describe("SessionRunnerLLM", () => {
         },
         { type: "assistant", finish: "stop", content: [{ type: "text", id: "text-final", text: "Done" }] },
       ])
+      expect(yield* SessionTurn.find((yield* Database.Service).db, { sessionID, messageID: admitted.id })).toBe(
+        "completed",
+      )
     }),
   )
 
@@ -1851,11 +1867,15 @@ describe("SessionRunnerLLM", () => {
       ]
       streamGate = yield* Deferred.make<void>()
       streamStarted = yield* Deferred.make<void>()
+      const secondAdmitted = yield* Deferred.make<void>()
+      observeRunAdmission = (event) => {
+        if (event.key === sessionID && event.type === "joined") Deferred.doneUnsafe(secondAdmitted, Effect.void)
+      }
 
       const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
       yield* Deferred.await(streamStarted)
       const second = yield* session.resume(sessionID).pipe(Effect.forkChild)
-      yield* Effect.yieldNow
+      yield* Deferred.await(secondAdmitted)
 
       expect(requests).toHaveLength(1)
       yield* Deferred.succeed(streamGate, undefined)
@@ -1863,6 +1883,7 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(second)
       streamGate = undefined
       streamStarted = undefined
+      observeRunAdmission = undefined
 
       expect(requests).toHaveLength(1)
       expect(yield* session.context(sessionID)).toMatchObject([
@@ -2502,8 +2523,15 @@ describe("SessionRunnerLLM", () => {
 
       const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
       yield* Deferred.await(streamStarted)
+      streamStarted = yield* Deferred.make<void>()
+      streamStartsRemaining = 1
+      const secondAdmitted = yield* Deferred.make<void>()
+      observeRunAdmission = (event) => {
+        if (event.key === otherSessionID && event.type === "started") Deferred.doneUnsafe(secondAdmitted, Effect.void)
+      }
       const second = yield* session.resume(otherSessionID).pipe(Effect.forkChild)
-      yield* Effect.yieldNow
+      yield* Deferred.await(secondAdmitted)
+      yield* Deferred.await(streamStarted)
 
       expect(requests).toHaveLength(2)
       expect(requests.map((request) => request.providerOptions?.openai?.promptCacheKey)).toEqual([
@@ -2515,6 +2543,7 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(second)
       streamGate = undefined
       streamStarted = undefined
+      observeRunAdmission = undefined
     }),
   )
 
@@ -2597,11 +2626,15 @@ describe("SessionRunnerLLM", () => {
       streamFailure = providerUnavailable()
       streamGate = yield* Deferred.make<void>()
       streamStarted = yield* Deferred.make<void>()
+      const secondAdmitted = yield* Deferred.make<void>()
+      observeRunAdmission = (event) => {
+        if (event.key === sessionID && event.type === "joined") Deferred.doneUnsafe(secondAdmitted, Effect.void)
+      }
 
       const first = yield* session.resume(sessionID).pipe(Effect.forkChild)
       yield* Deferred.await(streamStarted)
       const second = yield* session.resume(sessionID).pipe(Effect.forkChild)
-      yield* Effect.yieldNow
+      yield* Deferred.await(secondAdmitted)
 
       expect(requests).toHaveLength(1)
       yield* Deferred.succeed(streamGate, undefined)
@@ -2611,6 +2644,7 @@ describe("SessionRunnerLLM", () => {
       streamFailure = undefined
       streamGate = undefined
       streamStarted = undefined
+      observeRunAdmission = undefined
       yield* session.resume(sessionID)
       expect(requests).toHaveLength(2)
     }),
@@ -2996,7 +3030,11 @@ describe("SessionRunnerLLM", () => {
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Interrupt provider" }), resume: false })
+      const admitted = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Interrupt provider" }),
+        resume: false,
+      })
       requests.length = 0
       response = []
       streamGate = yield* Deferred.make<void>()
@@ -3011,6 +3049,9 @@ describe("SessionRunnerLLM", () => {
 
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
       expect(requests).toHaveLength(1)
+      expect(yield* SessionTurn.find((yield* Database.Service).db, { sessionID, messageID: admitted.id })).toBe(
+        "cancelled",
+      )
       yield* session.interrupt(sessionID)
     }),
   )
@@ -3156,7 +3197,11 @@ describe("SessionRunnerLLM", () => {
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fail durably" }), resume: false })
+      const admitted = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Fail durably" }),
+        resume: false,
+      })
 
       requests.length = 0
       responses = undefined
@@ -3171,6 +3216,9 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Fail durably" },
         { type: "assistant", finish: "error", error: { type: "unknown", message: "Provider unavailable" } },
       ])
+      expect(yield* SessionTurn.find((yield* Database.Service).db, { sessionID, messageID: admitted.id })).toBe(
+        "failed",
+      )
     }),
   )
 

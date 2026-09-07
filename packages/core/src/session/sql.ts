@@ -15,6 +15,7 @@ import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
 import type { Location } from "../location"
+import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -35,9 +36,11 @@ export const SessionTable = sqliteTable(
     target: text({ mode: "json" }).$type<Location.Target>(),
     last_known_target_name: text(),
     portable_target_label: text(),
+    sync_space_id: text(),
     location_revision: integer().notNull().default(0),
     path: DatabasePath.pathColumn(),
     title: text().notNull(),
+    approval_mode: text().$type<ApprovalMode.Mode>().notNull().default("normal"),
     version: text().notNull(),
     share_url: text(),
     summary_additions: integer(),
@@ -67,6 +70,7 @@ export const SessionTable = sqliteTable(
     index("session_project_idx").on(table.project_id),
     index("session_workspace_idx").on(table.workspace_id),
     index("session_parent_idx").on(table.parent_id),
+    index("session_sync_space_idx").on(table.sync_space_id, table.time_updated),
   ],
 )
 

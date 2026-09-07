@@ -5,8 +5,9 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-06
-updated: 2026-09-06
-implemented-by: []
+updated: 2026-09-07
+implemented-by:
+  - https://github.com/hammershock/opencode/pull/86
 depends-on:
   - 0001
   - 0002
@@ -159,6 +160,8 @@ PortableSessionLocation {
 ```
 
 云端不保存设备本地 target ID 或连接详情。其他设备收到 revision 后，通过自己的显式 label binding 解析 target；没有 binding 时保持 Session 可查看但 Location unresolved。并发 Location revisions 由 RFC-0010 的确定性冲突规则收敛，不能按到达顺序静默覆盖。
+
+RFC-0010 的“未归属 Session”只表示没有 `syncSpaceID`，与本 RFC 的 Location `unresolved` 是两个正交状态。全局删除 space 或从本设备完整移除同步时，清除 sync ownership 不得清除 Location、target binding 或本地 target definition；Session 随后仍按原 Location 独立解析。同步设置中的批量归属提示也只改变 sync ownership，不能替代、触发或绕过 unresolved target 恢复向导。
 
 ## 与其他 RFC 的关系
 

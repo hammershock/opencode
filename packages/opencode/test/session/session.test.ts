@@ -2,7 +2,11 @@ import { describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { Database } from "@opencode-ai/core/database/database"
+import { Location } from "@opencode-ai/core/location"
 import { Deferred, Effect, Exit, Layer } from "effect"
+import { eq } from "drizzle-orm"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
@@ -23,6 +27,7 @@ const it = testEffect(
       SessionNs.node,
       EventV2Bridge.node,
       SessionProjector.node,
+      Database.node,
       CrossSpawnSpawner.node,
       InstanceStore.node,
     ]),
@@ -101,6 +106,29 @@ describe("session.created event", () => {
       expect(receivedEvents).toContain("created")
       expect(receivedEvents).toContain("updated")
       expect(receivedEvents.indexOf("created")).toBeLessThan(receivedEvents.indexOf("updated"))
+
+      yield* session.remove(info.id)
+    }),
+  )
+
+  it.instance("persists approval mode through the synchronized session payload", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const received = yield* Deferred.make<EventV2.SerializedEvent>()
+      const listener = (event: { payload: { type?: string; syncEvent?: EventV2.SerializedEvent } }) => {
+        if (event.payload.syncEvent?.type === EventV2.versionedType(SessionNs.Event.Updated.type, 1))
+          Deferred.doneUnsafe(received, Effect.succeed(event.payload.syncEvent))
+      }
+      GlobalBus.on("event", listener)
+      yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+
+      const info = yield* session.create({ approvalMode: "normal" })
+      yield* session.setApprovalMode({ sessionID: info.id, approvalMode: "auto" })
+      expect((yield* session.get(info.id)).approvalMode).toBe("auto")
+      expect(yield* awaitDeferred(received, "timed out waiting for approval mode sync event")).toMatchObject({
+        aggregateID: info.id,
+        data: { info: { approvalMode: "auto" } },
+      })
 
       yield* session.remove(info.id)
     }),
@@ -206,6 +234,64 @@ describe("step-finish token propagation via event", () => {
 })
 
 describe("Session", () => {
+  it.instance("preserves execution placement and sync ownership when updating the title", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const target = Location.RexdTarget.make({
+        type: "rexd",
+        targetID: Location.TargetID.make("00000000-0000-4000-8000-000000000120"),
+      })
+      const lastKnownTargetName = "test-rexd"
+      const syncSpaceID = "test-sync-space"
+      const created = yield* Effect.acquireRelease(session.create({ title: "before" }), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+      yield* db
+        .update(SessionTable)
+        .set({ target, last_known_target_name: lastKnownTargetName, sync_space_id: syncSpaceID })
+        .where(eq(SessionTable.id, created.id))
+        .run()
+        .pipe(Effect.orDie)
+
+      const received = yield* Deferred.make<EventV2.SerializedEvent>()
+      const listener = (event: { payload: { syncEvent?: EventV2.SerializedEvent } }) => {
+        if (
+          event.payload.syncEvent?.type === EventV2.versionedType(SessionNs.Event.Updated.type, 1) &&
+          event.payload.syncEvent.aggregateID === created.id
+        )
+          Deferred.doneUnsafe(received, Effect.succeed(event.payload.syncEvent))
+      }
+      GlobalBus.on("event", listener)
+      yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+
+      expect(yield* session.get(created.id)).toMatchObject({ target, lastKnownTargetName, syncSpaceID })
+      yield* session.setTitle({ sessionID: created.id, title: "after" })
+
+      expect(yield* session.get(created.id)).toMatchObject({
+        title: "after",
+        target,
+        lastKnownTargetName,
+        syncSpaceID,
+      })
+      expect(
+        yield* db
+          .select({
+            target: SessionTable.target,
+            lastKnownTargetName: SessionTable.last_known_target_name,
+            syncSpaceID: SessionTable.sync_space_id,
+          })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, created.id))
+          .get()
+          .pipe(Effect.orDie),
+      ).toEqual({ target, lastKnownTargetName, syncSpaceID })
+      expect(yield* awaitDeferred(received, "timed out waiting for placement-preserving update event")).toMatchObject({
+        data: { info: { target, lastKnownTargetName, syncSpaceID } },
+      })
+    }),
+  )
+
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

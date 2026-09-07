@@ -3,7 +3,7 @@ export * as EventV2 from "./event"
 import { Cause, Context, Effect, Layer, Option, PubSub, Queue, Schema, Stream } from "effect"
 import { Event } from "@opencode-ai/schema/event"
 import type { Data, Definition, Payload } from "@opencode-ai/schema/event"
-import { and, asc, eq, gt, inArray } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, lt } from "drizzle-orm"
 import { Database } from "./database/database"
 import { EventSequenceTable, EventTable } from "./event/sql"
 import { Location } from "./location"
@@ -144,6 +144,8 @@ export interface Interface {
     options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
   ) => Effect.Effect<string | undefined>
   readonly remove: (aggregateID: string) => Effect.Effect<void>
+  /** Deletes older payload rows while retaining aggregate identity and its latest durable marker. */
+  readonly pruneBefore: (aggregateID: string, sequence: number) => Effect.Effect<void>
   readonly claim: (aggregateID: string, ownerID: string) => Effect.Effect<void>
 }
 
@@ -527,6 +529,14 @@ export const layerWith = (options?: LayerOptions) =>
           .pipe(Effect.orDie)
       }
 
+      function pruneBefore(aggregateID: string, sequence: number) {
+        return db
+          .delete(EventTable)
+          .where(and(eq(EventTable.aggregate_id, aggregateID), lt(EventTable.seq, sequence)))
+          .run()
+          .pipe(Effect.orDie, Effect.asVoid)
+      }
+
       function claim(aggregateID: string, ownerID: string) {
         return db
           .update(EventSequenceTable)
@@ -634,6 +644,7 @@ export const layerWith = (options?: LayerOptions) =>
         replay,
         replayAll,
         remove,
+        pruneBefore,
         claim,
       })
     }),

@@ -23,18 +23,37 @@ import { SyncDatabase } from "./database"
 import { NonNegativeInt } from "../schema"
 import { SyncCrypto } from "./crypto"
 import { SyncAttachment } from "./attachment"
+import { SyncOwnership } from "./ownership"
+import { SyncCodec } from "./codec"
+import { SyncMembership } from "./membership"
+import { SyncState } from "./state"
+import { TargetBindingRegistry } from "../target-binding-registry"
+import { SessionActivity } from "../session/activity"
+import { SessionLocationMutation } from "../session/location-mutation"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
+  initialized: Schema.Boolean,
+  authenticated: Schema.Boolean,
   enabled: Schema.Boolean,
   locked: Schema.Boolean,
   provider: Schema.optional(Schema.String),
   namespaceID: Schema.optional(Schema.String),
   deviceID: Schema.optional(Schema.String),
+  account: Schema.optional(SyncState.Account),
+  activeSpace: Schema.optional(
+    Schema.Struct({
+      namespaceID: Schema.NonEmptyString,
+      name: Schema.NonEmptyString,
+      encryption: Schema.Literals(["none", "aes-256-gcm"]),
+    }),
+  ),
+  intervalSeconds: Schema.optional(SyncState.IntervalSeconds),
   outbox: NonNegativeInt,
   cursors: Schema.Record(Schema.String, NonNegativeInt),
   lastSuccessAt: Schema.optional(NonNegativeInt),
   error: Schema.optional(Schema.String),
+  diagnostic: Schema.optional(SyncRuntime.Diagnostic),
 })
 export type Status = typeof Status.Type
 export const DeviceUpdate = Schema.Struct({
@@ -42,28 +61,47 @@ export const DeviceUpdate = Schema.Struct({
   name: Schema.optional(Schema.NonEmptyString),
   revoke: Schema.optional(Schema.Boolean),
 })
-export const BindingUpdate = Schema.Struct({
-  label: Schema.NonEmptyString,
-  targetID: Schema.optional(Schema.NonEmptyString),
-})
 export const Recovery = Schema.Struct({ recoveryString: Schema.NonEmptyString })
 export const HydrateInput = Schema.Struct({ sessionID: Schema.NonEmptyString })
 export const HydrateResult = Schema.Struct({
   sessionID: Schema.NonEmptyString,
   availability: SyncMetadata.Availability,
 })
+export const SwitchInput = Schema.Struct({
+  namespaceID: Schema.NonEmptyString,
+  force: Schema.optional(Schema.Boolean),
+})
+export const SwitchResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("switched"), namespaceID: Schema.NonEmptyString }),
+  Schema.Struct({
+    status: Schema.Literal("blocked"),
+    reason: Schema.Literal("pending-outbox"),
+    outbox: NonNegativeInt,
+    error: Schema.optional(Schema.String),
+  }),
+])
+export const AssignInput = Schema.Struct({ sessionIDs: Schema.Array(Schema.NonEmptyString) })
 
 export class ControlError extends Schema.TaggedErrorClass<ControlError>()("SyncControlError", {
-  kind: Schema.Literals(["unconfigured", "locked", "provider", "storage"]),
+  kind: Schema.Literals(["unconfigured", "locked", "provider", "storage", "invalid", "pending", "deleted"]),
+  diagnostic: Schema.optional(SyncRuntime.Diagnostic),
 }) {}
 
 export interface Interface {
   readonly status: () => Effect.Effect<Status, ControlError>
   readonly now: () => Effect.Effect<void, ControlError>
   readonly enable: (enabled: boolean) => Effect.Effect<void, ControlError>
+  readonly setInterval: (seconds: SyncState.IntervalSeconds) => Effect.Effect<void, ControlError>
+  readonly switchSpace: (input: typeof SwitchInput.Type) => Effect.Effect<typeof SwitchResult.Type, ControlError>
+  readonly leaveSpace: (namespaceID: string) => Effect.Effect<readonly string[], ControlError>
+  readonly deleteSpace: (namespaceID: string) => Effect.Effect<readonly string[], ControlError>
+  readonly removeFromDevice: () => Effect.Effect<readonly string[], ControlError>
+  readonly assignUnassigned: (input: typeof AssignInput.Type) => Effect.Effect<readonly string[], ControlError>
+  readonly unassigned: () => Effect.Effect<readonly string[], ControlError>
+  readonly logout: () => Effect.Effect<void, ControlError>
+  readonly switchAccount: (input: SyncSetup.CompleteInput) => Effect.Effect<SyncState.State, ControlError>
   readonly devices: () => Effect.Effect<SyncDevice.State, ControlError>
   readonly updateDevice: (input: typeof DeviceUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
-  readonly updateBinding: (input: typeof BindingUpdate.Type) => Effect.Effect<SyncDevice.State, ControlError>
   readonly exportKey: () => Effect.Effect<typeof Recovery.Type, ControlError>
   /** Index remote heads without downloading their complete Session histories. */
   readonly sessions: () => Effect.Effect<readonly SyncMetadata.Item[], ControlError>
@@ -76,46 +114,74 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const setup = yield* SyncSetup.Service
-    const store = yield* SyncEventStore.Service
+    const eventStore = yield* SyncEventStore.Service
     const events = yield* EventV2.Service
-    const metadata = yield* SyncMetadata.Service
+    const metadataStore = yield* SyncMetadata.Service
     const syncDB = (yield* SyncDatabase.Service).db
+    const ownership = yield* SyncOwnership.Service
+    const membership = yield* SyncMembership.Service
     const sessionDB = (yield* Database.Service).db
     const global = yield* Global.Service
-    const devices = SyncDevice.make(path.join(global.config, "sync", "state.json"))
+    const targetBindings = yield* TargetBindingRegistry.Service
+    const activity = yield* SessionActivity.Service
+    const locationMutation = yield* SessionLocationMutation.Service
+    const devicesFor = (namespaceID: string) =>
+      SyncDevice.make(path.join(global.config, "sync", "spaces", namespaceID, "state.json"))
     let lastSuccessAt: number | undefined
-    let lastError: string | undefined
+    let lastDiagnostic: SyncRuntime.Diagnostic | undefined
     let engine: ReturnType<typeof SyncRuntime.make> | undefined
     let engineIdentity: string | undefined
+    let scheduler: ReturnType<typeof SyncScheduler.make> | undefined
+
+    const clearSpace = (namespaceID: string) =>
+      SyncDatabase.purgeSpace(syncDB, namespaceID).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+    const purgeSpace = Effect.fn("SyncControl.purgeSpace")(function* (namespaceID: string) {
+      const sessions = yield* membership
+        .unassignSpace(namespaceID)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      yield* clearSpace(namespaceID)
+      return sessions
+    })
+    yield* setup.state().pipe(
+      Effect.flatMap((state) =>
+        membership.stale(new Set(state?.spaces.map((item) => item.descriptor.namespaceID) ?? [])),
+      ),
+      Effect.flatMap((stale) => Effect.forEach(stale, purgeSpace, { discard: true })),
+      Effect.catch(() =>
+        Effect.sync(() => {
+          // Sync recovery must never make the local application unavailable.
+          lastDiagnostic = SyncRuntime.diagnostic("pull", new Error("storage"))
+        }),
+      ),
+    )
 
     const load = Effect.fn("SyncControl.load")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
-      const identity = `${config.namespaceID}:${config.deviceID}:${config.enabled}`
+      const store = eventStore.scope(config.namespaceID)
+      const metadata = metadataStore.scope(config.namespaceID)
+      const devices = devicesFor(config.namespaceID)
+      const identity = `${config.namespaceID}:${config.deviceID}:${config.encryption}`
       if (engine && engineIdentity === identity) return engine
       const secure = yield* Effect.tryPromise({
         try: () => SyncSecureStore.detect(),
         catch: () => new ControlError({ kind: "locked" }),
       })
-      const [credential, encodedKey] = yield* Effect.tryPromise({
-        try: () =>
-          Promise.all([
-            BaiduSyncProvider.readCredential(secure, config.deviceID),
-            secure.get(`space:${config.namespaceID}:root`),
-          ]),
+      const credential = yield* Effect.tryPromise({
+        try: () => BaiduSyncProvider.readCredential(secure, config.deviceID),
         catch: () => new ControlError({ kind: "locked" }),
       })
-      if (!credential || !encodedKey) return yield* new ControlError({ kind: "locked" })
-      const rootKey = new Uint8Array(Buffer.from(encodedKey, "base64url"))
+      if (!credential) return yield* new ControlError({ kind: "locked" })
+      const codec = yield* codecFor(config, secure)
       const provider = BaiduSyncProvider.adapter({ store: secure, deviceID: config.deviceID, root: config.remoteRoot })
-      const attachment = SyncAttachment.make({ rootKey, namespaceID: config.namespaceID, provider })
+      const attachment = SyncAttachment.make({ codec, namespaceID: config.namespaceID, provider })
       engine = SyncRuntime.make({
         config: {
           deviceID: SyncEvent.DeviceID.make(config.deviceID),
           deviceName: config.deviceName,
-          enabled: config.enabled,
+          enabled: true,
         },
-        rootKey,
+        codec,
         provider,
         store,
         projector: (deviceID) =>
@@ -130,6 +196,10 @@ const layer = Layer.effect(
                 .where(eq(SessionTable.id, SessionV2.ID.make(sessionID)))
                 .run()
                 .pipe(Effect.andThen(metadata.remove(sessionID)), Effect.asVoid),
+            config.namespaceID,
+            (sessionID, spaceID) => ownership.assign(sessionID, spaceID),
+            activity,
+            locationMutation,
           ),
         attachment: {
           externalize: (event) => SessionSync.externalize(event, attachment),
@@ -140,6 +210,7 @@ const layer = Layer.effect(
           sessionDB
             .select()
             .from(SessionTable)
+            .where(eq(SessionTable.sync_space_id, config.namespaceID))
             .all()
             .pipe(
               Effect.map((rows) =>
@@ -157,7 +228,11 @@ const layer = Layer.effect(
         metadataProjector: { apply: (values, deviceID) => metadata.apply(deviceID, values) },
         acknowledged: () =>
           syncDB
-            .all<{ device_id: string; cursor: number }>(sql`SELECT device_id, cursor FROM sync_event_cursor`)
+            .all<{ device_id: string; cursor: number }>(
+              sql`
+              SELECT device_id, cursor FROM sync_event_cursor WHERE space_id = ${config.namespaceID}
+            `,
+            )
             .pipe(Effect.map((rows) => Object.fromEntries(rows.map((row) => [row.device_id, row.cursor])))),
         revoked: () =>
           Effect.promise(() => devices.read()).pipe(
@@ -181,77 +256,217 @@ const layer = Layer.effect(
     })
 
     const readStatus = Effect.fn("SyncControl.status")(function* () {
+      const state = yield* setup.state().pipe(Effect.catch(() => Effect.succeed(undefined)))
       const config = yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const authenticated = yield* setup.authenticated().pipe(Effect.catch(() => Effect.succeed(false)))
+      const locked =
+        config?.encryption === "aes-256-gcm" && authenticated
+          ? yield* Effect.tryPromise({
+              try: async () => !(await (await SyncSecureStore.detect()).get(`space:${config.namespaceID}:root`)),
+              catch: () => true,
+            })
+          : false
       const outbox =
-        (yield* syncDB.get<{ value: number }>(sql`SELECT COUNT(*) AS value FROM sync_event_outbox`))?.value ?? 0
+        (yield* syncDB.get<{ value: number }>(sql`
+          SELECT COUNT(*) AS value FROM sync_event_outbox WHERE space_id = ${config?.namespaceID ?? "legacy"}
+        `))?.value ?? 0
       const cursorRows = yield* syncDB.all<{ device_id: string; cursor: number }>(
-        sql`SELECT device_id, cursor FROM sync_event_cursor`,
+        sql`SELECT device_id, cursor FROM sync_event_cursor WHERE space_id = ${config?.namespaceID ?? "legacy"}`,
       )
       return Status.make({
         configured: Boolean(config),
-        enabled: config?.enabled ?? false,
-        locked: lastError === "locked",
-        provider: config?.provider,
+        initialized: Boolean(state),
+        authenticated,
+        enabled: state?.enabled ?? false,
+        locked,
+        provider: state?.provider,
         namespaceID: config?.namespaceID,
-        deviceID: config?.deviceID,
+        deviceID: state?.deviceID,
+        account: state?.account,
+        activeSpace: config
+          ? { namespaceID: config.namespaceID, name: config.name, encryption: config.encryption }
+          : undefined,
+        intervalSeconds: state?.intervalSeconds,
         outbox,
         cursors: Object.fromEntries(cursorRows.map((row) => [row.device_id, row.cursor])),
         lastSuccessAt,
-        error: lastError,
+        error: lastDiagnostic?.message,
+        diagnostic: lastDiagnostic,
       })
     })
     const status = () => readStatus().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
     const now = Effect.fn("SyncControl.now")(function* () {
+      const active = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!active) return yield* new ControlError({ kind: "unconfigured" })
+      const deleted = yield* setup
+        .applyRemoteDeletion(active.namespaceID)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      if (deleted) {
+        scheduler?.stop()
+        engine = undefined
+        yield* purgeSpace(active.namespaceID)
+        return yield* new ControlError({ kind: "deleted" })
+      }
       const runtime = yield* load()
-      yield* runtime.now().pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      yield* runtime.now().pipe(
+        Effect.mapError(() => {
+          lastDiagnostic = runtime.status().lastError
+          return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
+        }),
+      )
       lastSuccessAt = Date.now()
-      lastError = undefined
+      lastDiagnostic = undefined
     })
-    const scheduler = SyncScheduler.make({
-      run: () =>
-        Effect.runPromise(
-          now().pipe(
-            Effect.catch((error) =>
-              Effect.sync(() => {
-                lastError = error.kind
-                return undefined
-              }),
+    const restartScheduler = (config?: SyncState.Active) => {
+      scheduler?.stop()
+      scheduler = undefined
+      if (!config?.enabled) return
+      scheduler = SyncScheduler.make({
+        intervalMs: schedulerInterval(config.intervalSeconds),
+        run: () =>
+          Effect.runPromise(
+            now().pipe(
+              Effect.catch((error) =>
+                Effect.sync(() => {
+                  lastDiagnostic = error.diagnostic ?? SyncRuntime.diagnostic("pull", error)
+                  return undefined
+                }),
+              ),
             ),
           ),
-        ),
-    })
+      })
+      scheduler.start()
+    }
     const configured = yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined)))
-    if (configured?.enabled) scheduler.start()
-    yield* Effect.addFinalizer(() => Effect.sync(() => scheduler.stop()))
+    restartScheduler(configured)
+    yield* Effect.addFinalizer(() => Effect.sync(() => scheduler?.stop()))
     const enable = Effect.fn("SyncControl.enable")(function* (enabled: boolean) {
       yield* setup.setEnabled(enabled).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       engine = undefined
-      if (enabled) scheduler.start()
-      else scheduler.stop()
+      restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+    })
+    const setInterval = Effect.fn("SyncControl.setInterval")(function* (seconds: SyncState.IntervalSeconds) {
+      yield* setup.setInterval(seconds).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+    })
+    const pending = (namespaceID: string) =>
+      syncDB
+        .get<{ value: number }>(
+          sql`
+          SELECT COUNT(*) AS value FROM sync_event_outbox WHERE space_id = ${namespaceID}
+        `,
+        )
+        .pipe(
+          Effect.map((row) => row?.value ?? 0),
+          Effect.mapError(() => new ControlError({ kind: "storage" })),
+        )
+    const switchSpace = Effect.fn("SyncControl.switchSpace")(function* (input: typeof SwitchInput.Type) {
+      const current = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!current) {
+        const authenticated = yield* setup
+          .authenticated()
+          .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+        if (!authenticated) return yield* new ControlError({ kind: "locked" })
+        yield* setup.activate(input.namespaceID).pipe(Effect.mapError(() => new ControlError({ kind: "invalid" })))
+        engine = undefined
+        restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+        return SwitchResult.make({ status: "switched", namespaceID: input.namespaceID })
+      }
+      if (current.namespaceID === input.namespaceID)
+        return SwitchResult.make({ status: "switched", namespaceID: input.namespaceID })
+      const blocked = yield* Effect.tryPromise({
+        try: () =>
+          flushBeforeSwitch({
+            pending: () => Effect.runPromise(pending(current.namespaceID)),
+            flush: () => Effect.runPromise(now()),
+            force: input.force ?? false,
+          }),
+        catch: (cause) => (cause instanceof ControlError ? cause : new ControlError({ kind: "provider" })),
+      })
+      if (blocked) return SwitchResult.make(blocked)
+      yield* setup.activate(input.namespaceID).pipe(Effect.mapError(() => new ControlError({ kind: "invalid" })))
+      engine = undefined
+      restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+      return SwitchResult.make({ status: "switched", namespaceID: input.namespaceID })
+    })
+    const deleteSpace = Effect.fn("SyncControl.deleteSpace")(function* (namespaceID: string) {
+      const deleted = yield* setup
+        .deleteSpace(namespaceID)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      const sessions = yield* purgeSpace(deleted)
+      engine = undefined
+      restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+      return sessions
+    })
+    const leaveSpace = Effect.fn("SyncControl.leaveSpace")(function* (namespaceID: string) {
+      yield* setup.leave(namespaceID).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      const sessions = yield* purgeSpace(namespaceID)
+      engine = undefined
+      restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+      return sessions
+    })
+    const removeFromDevice = Effect.fn("SyncControl.removeFromDevice")(function* () {
+      const spaces = yield* setup.removeFromDevice().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      const sessions = yield* membership
+        .unassignAll()
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      yield* Effect.forEach(spaces, clearSpace, { discard: true })
+      engine = undefined
+      restartScheduler()
+      return sessions
+    })
+    const assignUnassigned = Effect.fn("SyncControl.assignUnassigned")(function* (input: typeof AssignInput.Type) {
+      const current = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!current) return yield* new ControlError({ kind: "unconfigured" })
+      return yield* membership
+        .assignUnassigned(input.sessionIDs, current.namespaceID)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+    })
+    const unassigned = () => membership.unassigned().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+    const logout = Effect.fn("SyncControl.logout")(function* () {
+      yield* setup.logout().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      engine = undefined
+      scheduler?.stop()
+    })
+    const switchAccount = Effect.fn("SyncControl.switchAccount")(function* (input: SyncSetup.CompleteInput) {
+      const state = yield* setup
+        .switchAccount(input)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      engine = undefined
+      scheduler?.stop()
+      return state
     })
     const deviceState = () =>
-      Effect.tryPromise({ try: () => devices.read(), catch: () => new ControlError({ kind: "storage" }) })
+      setup.config().pipe(
+        Effect.mapError(() => new ControlError({ kind: "storage" })),
+        Effect.flatMap((config) =>
+          config
+            ? Effect.tryPromise({
+                try: () => devicesFor(config.namespaceID).read(),
+                catch: () => new ControlError({ kind: "storage" }),
+              })
+            : Effect.fail(new ControlError({ kind: "unconfigured" })),
+        ),
+      )
     const updateDevice = Effect.fn("SyncControl.updateDevice")(function* (input: typeof DeviceUpdate.Type) {
       yield* Effect.tryPromise({
         try: async () => {
+          const config = await Effect.runPromise(setup.config())
+          if (!config) throw new Error("Sync is not configured")
+          if (input.revoke) assertCanRevoke(config.deviceID, input.id)
+          const devices = devicesFor(config.namespaceID)
           if (input.name) await devices.rename(input.id, input.name)
           if (input.revoke) await devices.revoke(input.id)
         },
-        catch: () => new ControlError({ kind: "storage" }),
+        catch: (cause) => (cause instanceof ControlError ? cause : new ControlError({ kind: "storage" })),
       })
       engine = undefined
-      return yield* deviceState()
-    })
-    const updateBinding = Effect.fn("SyncControl.updateBinding")(function* (input: typeof BindingUpdate.Type) {
-      yield* Effect.tryPromise({
-        try: () => (input.targetID ? devices.bind(input.label, input.targetID) : devices.unbind(input.label)),
-        catch: () => new ControlError({ kind: "storage" }),
-      })
       return yield* deviceState()
     })
     const exportKey = Effect.fn("SyncControl.exportKey")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      if (config.encryption === "none") return yield* new ControlError({ kind: "invalid" })
       const secure = yield* Effect.tryPromise({
         try: () => SyncSecureStore.detect(),
         catch: () => new ControlError({ kind: "locked" }),
@@ -271,10 +486,13 @@ const layer = Layer.effect(
       }
     })
     const availabilityRaw = Effect.fn("SyncControl.sessionAvailability")(function* () {
-      const [indexed, local, deviceState] = yield* Effect.all([
+      const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      const metadata = metadataStore.scope(config.namespaceID)
+      const [indexed, local, bindingSnapshot] = yield* Effect.all([
         metadata.list(),
         sessionDB.select({ id: SessionTable.id }).from(SessionTable).all(),
-        Effect.tryPromise({ try: () => devices.read(), catch: () => new ControlError({ kind: "storage" }) }),
+        Effect.tryPromise({ try: () => targetBindings.load(), catch: () => new ControlError({ kind: "storage" }) }),
       ])
       const localIDs = new Set(local.map((item) => String(item.id)))
       return yield* Effect.forEach(indexed, (item) => {
@@ -284,7 +502,7 @@ const layer = Layer.effect(
         const next: SyncMetadata.Availability =
           item.availability === "conflict"
             ? "conflict"
-            : item.targetLabel && !deviceState.bindings[item.targetLabel]
+            : item.targetLabel && !bindingSnapshot.bindings.has(item.targetLabel)
               ? "unresolved"
               : localIDs.has(item.sessionID)
                 ? "ready"
@@ -303,10 +521,13 @@ const layer = Layer.effect(
       // browsing. Selecting one of these rows calls hydrate below.
       yield* runtime.pull().pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
       lastSuccessAt = Date.now()
-      lastError = undefined
+      lastDiagnostic = undefined
       return yield* availability()
     })
     const hydrateRaw = Effect.fn("SyncControl.hydrate")(function* (input: typeof HydrateInput.Type) {
+      const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      const metadata = metadataStore.scope(config.namespaceID)
       const runtime = yield* load()
       // Keep the typed API self-contained: callers are not required to visit
       // the metadata browser endpoint before requesting a Session.
@@ -324,12 +545,30 @@ const layer = Layer.effect(
         ),
       )
       lastSuccessAt = Date.now()
-      lastError = undefined
+      lastDiagnostic = undefined
       return HydrateResult.make({ sessionID: input.sessionID, availability: result?.availability ?? "partial" })
     })
     const hydrate = (input: typeof HydrateInput.Type) =>
       hydrateRaw(input).pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
-    return { status, now, enable, devices: deviceState, updateDevice, updateBinding, exportKey, sessions, hydrate }
+    return {
+      status,
+      now,
+      enable,
+      setInterval,
+      switchSpace,
+      leaveSpace,
+      deleteSpace,
+      removeFromDevice,
+      assignUnassigned,
+      unassigned,
+      logout,
+      switchAccount,
+      devices: deviceState,
+      updateDevice,
+      exportKey,
+      sessions,
+      hydrate,
+    }
   }),
 )
 
@@ -344,5 +583,49 @@ export const node = makeGlobalNode({
     SyncEventStore.node,
     SyncMetadata.node,
     SyncDatabase.node,
+    SyncOwnership.node,
+    SyncMembership.node,
+    TargetBindingRegistry.node,
+    SessionActivity.node,
+    SessionLocationMutation.node,
   ],
 })
+
+export function codecFor(config: Pick<SyncState.Active, "namespaceID" | "encryption">, store: SyncSecureStore.Store) {
+  if (config.encryption === "none") return Effect.succeed(SyncCodec.plaintext())
+  return Effect.tryPromise({
+    try: async () => {
+      const encoded = await store.get(`space:${config.namespaceID}:root`)
+      if (!encoded) throw new Error("Missing sync-space root key")
+      return SyncCodec.encrypted(new Uint8Array(Buffer.from(encoded, "base64url")))
+    },
+    catch: () => new ControlError({ kind: "locked" }),
+  })
+}
+
+export async function flushBeforeSwitch(input: {
+  readonly pending: () => Promise<number>
+  readonly flush: () => Promise<void>
+  readonly force: boolean
+}) {
+  const before = await input.pending()
+  if (!before) return
+  try {
+    await input.flush()
+  } catch {
+    const remaining = await input.pending()
+    if (!remaining) return
+    if (input.force) return
+    return { status: "blocked", reason: "pending-outbox", outbox: remaining, error: "flush-failed" } as const
+  }
+  const remaining = await input.pending()
+  if (remaining && !input.force) return { status: "blocked", reason: "pending-outbox", outbox: remaining } as const
+}
+
+export function assertCanRevoke(currentDeviceID: string, deviceID: string) {
+  if (currentDeviceID === deviceID) throw new ControlError({ kind: "invalid" })
+}
+
+export function schedulerInterval(seconds: SyncState.IntervalSeconds) {
+  return seconds * 1_000
+}

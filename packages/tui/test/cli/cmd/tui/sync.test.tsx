@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { describe, expect, test } from "bun:test"
 import { tmpdir } from "../../../fixture/fixture"
-import { mount, wait } from "./sync-fixture"
+import { json, mount, wait } from "./sync-fixture"
 import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 
 function branchEvent(branch: string, workspace?: string): GlobalEvent {
@@ -60,6 +60,51 @@ describe("tui sync", () => {
       expect(sync.data.vcs?.branch).toBe("feature")
     } finally {
       app.renderer.destroy()
+    }
+  })
+
+  test("projects a Location rebind and persists its user-visible notice", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const session = {
+      id: "ses_rebound",
+      slug: "rebound",
+      projectID: "proj_test",
+      directory: "/old",
+      title: "Rebound session",
+      version: "test",
+      time: { created: 1, updated: 1 },
+    }
+    const mounted = await mount((url) => {
+      if (url.pathname === "/session") return json([session])
+    }, tmp.path)
+
+    try {
+      mounted.emit({
+        directory: "/new",
+        project: "proj_test",
+        payload: {
+          id: "evt_rebound",
+          type: "session.next.location.rebound",
+          properties: {
+            timestamp: 2,
+            sessionID: session.id,
+            previous: { directory: "/old" },
+            location: { directory: "/new" },
+            revision: 1,
+          },
+        },
+      })
+      await wait(() => mounted.sync.data.session[0]?.directory === "/new")
+
+      expect(mounted.sync.data.session[0]).toMatchObject({ directory: "/new", time: { updated: 2 } })
+      expect(mounted.kv.get(`session_location_changed:${session.id}`)).toEqual({
+        revision: 1,
+        previous: { directory: "/old" },
+        location: { directory: "/new" },
+      })
+    } finally {
+      mounted.app.renderer.destroy()
     }
   })
 })

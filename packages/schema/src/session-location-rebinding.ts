@@ -33,6 +33,10 @@ export const Resolution = Schema.Union([
     stage: Target.ConnectionStage,
     message: Schema.String,
   }),
+  Schema.Struct({
+    status: Schema.Literal("resolution_failed"),
+    message: Schema.String,
+  }),
 ]).annotate({ identifier: "SessionLocationRebinding.Resolution" })
 
 export const PortableBindingSnapshot = Schema.Struct({
@@ -57,6 +61,16 @@ export const RecoveryResult = Schema.Struct({
   resolvedSessionIDs: batch,
   failedSessionIDs: batch,
 }).annotate({ identifier: "SessionLocationRebinding.RecoveryResult" })
+
+export const RestoreResult = Schema.Struct({
+  ...Target.MutationResult.fields,
+  ...RecoveryResult.fields,
+}).annotate({ identifier: "SessionLocationRebinding.RestoreResult" })
+
+export const PortableBindingRecoveryResult = Schema.Struct({
+  ...PortableBindingSnapshot.fields,
+  ...RecoveryResult.fields,
+}).annotate({ identifier: "SessionLocationRebinding.PortableBindingRecoveryResult" })
 
 export const RebindInput = Schema.Struct({
   expectedRevision: Schema.Number,

@@ -123,6 +123,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
         )
       },
       "session.next.moved": () => Effect.void,
+      "session.next.location.rebound": () => Effect.void,
       "session.next.prompted": (event) => {
         return adapter.appendMessage(
           SessionMessage.User.make({
@@ -137,6 +138,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
         )
       },
       "session.next.prompt.admitted": () => Effect.void,
+      "session.next.turn.settled": () => Effect.void,
       "session.next.context.updated": (event) =>
         adapter.appendMessage(
           SessionMessage.System.make({

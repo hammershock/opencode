@@ -13,7 +13,7 @@ export type SessionRoute = {
   sessionID: string
   prompt?: PromptInfo
   accessMode?: "read-write" | "read-only"
-  resolution?: "missing_local_target" | "unbound_portable_target" | "target_unavailable"
+  resolution?: "missing_local_target" | "unbound_portable_target" | "target_unavailable" | "resolution_failed"
 }
 
 export type PluginRoute = {

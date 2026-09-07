@@ -13,6 +13,10 @@ import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
+import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
+import { SessionLocationMutation } from "@opencode-ai/core/session/location-mutation"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
+import { LocationEnvironmentAgentV2 } from "@opencode-ai/core/location-environment-agent-v2"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Layer, Option } from "effect"
@@ -38,6 +42,9 @@ const applicationServices = LayerNode.group([
   LocationServiceMap.node,
   TargetRegistry.node,
   TargetBindingRegistry.node,
+  SessionLocationAccess.node,
+  SessionLocationMutation.node,
+  SessionActivity.node,
 ])
 
 export function createRoutes(password?: string) {
@@ -57,6 +64,7 @@ function makeRoutes<AuthError, AuthServices>(auth: Layer.Layer<ServerAuth.Config
 
   return HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
     Layer.provide(handlers),
+    HttpRouter.provideRequest(LocationEnvironmentAgentV2.layer),
     Layer.provide(sessionLocationLayer),
     Layer.provide(locationLayer),
     Layer.provide(authorizationLayer),

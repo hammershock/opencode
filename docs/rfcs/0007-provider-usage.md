@@ -6,7 +6,8 @@ authors:
   - hammershock
 created: 2026-09-06
 updated: 2026-09-06
-implemented-by: []
+implemented-by:
+  - https://github.com/hammershock/opencode/pull/86
 depends-on:
   - 0003
 supersedes: []
@@ -116,6 +117,17 @@ adapter 可以使用三类来源：
 - OpenAI OAuth/Codex 可以使用旧 `wham/usage` 兼容 adapter，但其 `source` 必须是 `experimental_private`。
 
 这些是首批迁移对象而不是封闭 allowlist。其他已连接 provider 仍执行 probe，并在未来通过独立 adapter 提交扩展。
+
+v1 provider ID 与区域端点的支持矩阵如下。表中每个 ID 都只读取该 ID 在 OpenCode 中保存的 credential；相似名称之间不借用 key，也不从外部登录态补全：
+
+| Provider family    | OpenCode provider IDs                                                    | Usage source                                                                              |
+| ------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| OpenAI             | `openai`                                                                 | API key 的响应 rate-limit headers，或当前 OpenCode OAuth credential 的实验性 `wham/usage` |
+| DeepSeek           | `deepseek`                                                               | `api.deepseek.com/user/balance`                                                           |
+| Moonshot           | `moonshotai`, `moonshotai-cn`                                            | 与模型连接同区域的 `.ai` / `.cn` `v1/users/me/balance`                                    |
+| MiniMax Token Plan | `minimax`, `minimax-coding-plan`, `minimax-cn`, `minimax-cn-coding-plan` | 与模型连接同区域的 `.io` / `.com` `v1/token_plan/remains`                                 |
+
+名称相近但不在表内的 provider（包括代理网关、聚合服务或其他厂商的 Token Plan）不会复用上述 adapter。它们在有独立的官方 usage contract 和 adapter 之前保持 `unsupported`。
 
 ## 查询与缓存
 

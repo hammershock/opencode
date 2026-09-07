@@ -1,7 +1,8 @@
-import { Context, Effect, Layer } from "effect"
+import { Cause, Context, Duration, Effect, Layer } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
 import type { SessionSchema } from "@opencode-ai/core/session/schema"
+import { SessionLocationRuntime } from "@opencode-ai/core/session/location-runtime"
 
 export * as UserShellRuntime from "./user-shell-runtime"
 
@@ -15,7 +16,11 @@ export type Environment = Readonly<Record<string, string>>
 export type ExecuteResult = {
   readonly exitCode: number
   readonly finalCwd?: string
+  readonly timedOut?: true
 }
+
+export const EXECUTION_TIMEOUT = Duration.minutes(10)
+export const TIMEOUT_GUIDANCE = "Command timed out. Use Terminal panel for interactive commands."
 
 export type CompletionKind = "command" | "file" | "directory" | "alias" | "function" | "option" | "argument"
 
@@ -27,10 +32,20 @@ export type CompletionCandidate = {
   readonly description?: string
 }
 
+export type CompletionDegradedReason = "native_unavailable" | "native_timeout" | "native_failed"
+
+export type CompletionProviderResult = {
+  readonly candidates: ReadonlyArray<CompletionCandidate>
+  readonly degraded?: {
+    readonly reason: CompletionDegradedReason
+  }
+}
+
 export type CompletionResult = {
   readonly generation: number
   readonly stale: boolean
   readonly candidates: ReadonlyArray<CompletionCandidate>
+  readonly degraded?: CompletionProviderResult["degraded"]
 }
 
 export interface Provider {
@@ -48,7 +63,7 @@ export interface Provider {
     readonly cursor: number
     readonly environment: Environment
     readonly signal?: AbortSignal
-  }) => Effect.Effect<ReadonlyArray<CompletionCandidate>, unknown>
+  }) => Effect.Effect<CompletionProviderResult, unknown>
 }
 
 export interface Interface {
@@ -118,62 +133,88 @@ export const layer = Layer.effect(
       return state(input).cwd
     })
 
-    const execute = Effect.fn("UserShellRuntime.execute")(function* (input: {
-      sessionID: string
-      location: LocationIdentity
-      command: string
-      environment: Environment
-      enabled: boolean
-      provider: Provider
-      signal?: AbortSignal
-      onOutput?: (chunk: string) => Effect.Effect<void>
-    }) {
-      const before = state(input)
-      const operation = input.provider.execute({
-        cwd: before.cwd,
-        command: input.command,
-        environment: input.environment,
-        signal: input.signal,
-        onOutput: input.onOutput,
-      })
-      const result = yield* activity.withActivity(input.sessionID as SessionSchema.ID, "user_shell", operation)
-      if (!input.enabled || !result.finalCwd) return result
-      const canonical = yield* input.provider.validateDirectory(result.finalCwd)
-      const latest = states.get(input.sessionID)
-      if (!canonical || latest?.generation !== before.generation || latest.identity !== before.identity) return result
-      states.set(input.sessionID, { ...latest, cwd: canonical, generation: ++generation })
-      return result
-    })
+    const execute = Effect.fn("UserShellRuntime.execute")(
+      (input: {
+        sessionID: string
+        location: LocationIdentity
+        command: string
+        environment: Environment
+        enabled: boolean
+        provider: Provider
+        signal?: AbortSignal
+        onOutput?: (chunk: string) => Effect.Effect<void>
+      }) =>
+        activity.withActivity(
+          input.sessionID as SessionSchema.ID,
+          "user_shell",
+          Effect.gen(function* () {
+            const before = state(input)
+            const result = yield* input.provider
+              .execute({
+                cwd: before.cwd,
+                command: input.command,
+                environment: input.environment,
+                signal: input.signal,
+                onOutput: input.onOutput,
+              })
+              .pipe(
+                Effect.timeout(EXECUTION_TIMEOUT),
+                Effect.catch((error) =>
+                  Cause.isTimeoutError(error)
+                    ? Effect.succeed<ExecuteResult>({ exitCode: 124, timedOut: true })
+                    : Effect.fail(error),
+                ),
+              )
+            if (!input.enabled || !result.finalCwd) return result
+            const canonical = yield* input.provider.validateDirectory(result.finalCwd)
+            const latest = states.get(input.sessionID)
+            if (!canonical || latest?.generation !== before.generation || latest.identity !== before.identity)
+              return result
+            states.set(input.sessionID, { ...latest, cwd: canonical, generation: ++generation })
+            return result
+          }),
+        ),
+    )
 
-    const complete = Effect.fn("UserShellRuntime.complete")(function* (input: {
-      sessionID: string
-      location: LocationIdentity
-      input: string
-      cursor: number
-      environment: Environment
-      enabled: boolean
-      provider: Provider
-      signal?: AbortSignal
-    }) {
-      const before = state(input)
-      const candidates = yield* input.provider.complete({
-        cwd: before.cwd,
-        input: input.input,
-        cursor: input.cursor,
-        environment: input.environment,
-        signal: input.signal,
-      })
-      const latest = input.enabled ? states.get(input.sessionID) : undefined
-      const stale = input.enabled && (latest?.generation !== before.generation || latest.identity !== before.identity)
-      return {
-        generation: before.generation,
-        stale,
-        candidates: stale ? [] : candidates,
-      }
-    })
+    const complete = Effect.fn("UserShellRuntime.complete")(
+      (input: {
+        sessionID: string
+        location: LocationIdentity
+        input: string
+        cursor: number
+        environment: Environment
+        enabled: boolean
+        provider: Provider
+        signal?: AbortSignal
+      }) =>
+        activity.withActivity(
+          input.sessionID as SessionSchema.ID,
+          "user_shell",
+          Effect.gen(function* () {
+            const before = state(input)
+            const result = yield* input.provider.complete({
+              cwd: before.cwd,
+              input: input.input,
+              cursor: input.cursor,
+              environment: input.environment,
+              signal: input.signal,
+            })
+            const latest = input.enabled ? states.get(input.sessionID) : undefined
+            const stale =
+              input.enabled && (latest?.generation !== before.generation || latest.identity !== before.identity)
+            return {
+              generation: before.generation,
+              stale,
+              candidates: stale ? [] : result.candidates,
+              ...(!stale && result.degraded ? { degraded: result.degraded } : {}),
+            }
+          }),
+        ),
+    )
 
     const reset = Effect.fn("UserShellRuntime.reset")(function* (sessionID: string) {
-      if (states.delete(sessionID)) generation++
+      states.delete(sessionID)
+      generation++
     })
 
     const disable = Effect.sync(() => {
@@ -182,8 +223,16 @@ export const layer = Layer.effect(
       generation++
     })
 
-    return Service.of({ current, execute, complete, reset, disable })
+    const service = Service.of({ current, execute, complete, reset, disable })
+    const locationRuntime = yield* SessionLocationRuntime.Service
+    yield* locationRuntime.register((sessionID) => reset(sessionID))
+
+    return service
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer, deps: [SessionActivity.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [SessionActivity.node, SessionLocationRuntime.node],
+})

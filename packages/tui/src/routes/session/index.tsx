@@ -42,9 +42,11 @@ import { webSearchProviderLabel } from "../../util/tool-display"
 import { Dynamic, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "../../context/sdk"
 import { useEditorContext } from "../../context/editor"
+import { localEditorDirectory } from "../../util/session-location-access"
 import { openEditor } from "../../editor"
 import { useDialog } from "../../ui/dialog"
 import { DialogAlert } from "../../ui/dialog-alert"
+import { showEnvironment } from "../../component/dialog-environment"
 import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
 import type { PromptInfo } from "../../component/prompt/history"
@@ -52,7 +54,7 @@ import { DialogConfirm } from "../../ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
-import { DialogPermissionMode } from "../../component/dialog-permission-mode"
+import { DialogPermissionModes } from "../../component/dialog-permission-mode"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
 import { filetype } from "../../util/filetype"
@@ -79,25 +81,31 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
+import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useKeymapSelector, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
 import { sessionRenameMetadata } from "../../command-toolkit/upstream-session"
 import {
   installSessionRenameOverride,
-  parseSessionRenameOverride,
+  parseSessionRenameArguments,
   SESSION_RENAME_DIRECT_SETTING,
 } from "../../command-toolkit/session-rename"
 import { reportOverrideDiagnostic } from "../../command-toolkit/experimental-settings"
-import { createCommandHost } from "../../command-toolkit/host"
+import { COMMAND_RESTRICTIONS_KEY, createCommandHost, normalizeCommandRestrictions } from "../../command-toolkit/host"
 import { environmentCommands, type EnvironmentCommandContext } from "../../command-toolkit/environment"
-import { targetCommand, TARGET_MANAGER_SETTING, type TargetCommandContext } from "../../command-toolkit/target"
+import { targetCommand, type TargetCommandContext } from "../../command-toolkit/target"
 import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
+import { approvalModeCommand, type ApprovalModeCommandContext } from "../../command-toolkit/approval-mode"
 import { useTargetManager } from "../../component/target-manager"
 import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
 import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
-import { DialogPrompt } from "../../ui/dialog-prompt"
-import { DialogSelect } from "../../ui/dialog-select"
+import { useSyncSettings } from "../../context/sync-settings"
+import { adaptKeymapCommands, adaptServerCommands } from "../../command-toolkit/upstream"
+import {
+  sessionLocationNoticeKey,
+  sessionLocationNoticeText,
+  type SessionLocationNotice,
+} from "../../util/session-location-notice"
 
 addDefaultParsers(parsers.parsers)
 
@@ -212,6 +220,9 @@ export function Session() {
   const { theme } = useTheme()
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID))
+  const locationNoticeKey = sessionLocationNoticeKey(route.sessionID)
+  const locationNotice = createMemo(() => kv.get(locationNoticeKey) as SessionLocationNotice | null | undefined)
+  const dismissLocationNotice = () => kv.set(locationNoticeKey, null)
   const location = createMemo(() => {
     const current = session()
     return current
@@ -312,6 +323,7 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+  const dialog = useDialog()
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -339,7 +351,23 @@ export function Session() {
           await sync.bootstrap({ fatal: false })
         } catch {}
       }
-      editor.reconnect(result.data.directory)
+      if (route.accessMode !== "read-only") {
+        const resolution = await sdk.client.v2.sessionLocation.resolve(
+          { sessionID: route.sessionID },
+          { throwOnError: true },
+        )
+        const locationResolution = resolution.data
+        if (locationResolution.status === "resolved") {
+          const editorDirectory = localEditorDirectory(locationResolution)
+          if (editorDirectory) editor.reconnect(editorDirectory)
+          navigate({ ...route, accessMode: "read-write", resolution: undefined })
+          setLocationAccessReady(true)
+        } else {
+          dialog.replace(() => (
+            <DialogSessionLocationRecovery sessionID={route.sessionID} resolution={locationResolution} />
+          ))
+        }
+      }
       await sync.session.sync(sessionID)
       if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)
     })().catch((error) => {
@@ -373,6 +401,7 @@ export function Session() {
   let seeded = false
   let scroll: ScrollBoxRenderable
   let prompt: PromptRef | undefined
+  const [shellCompletionGeneration, setShellCompletionGeneration] = createSignal(0)
   const bind = (r: PromptRef | undefined) => {
     prompt = r
     promptRef.set(r)
@@ -380,24 +409,14 @@ export function Session() {
     seeded = true
     r.set(route.prompt)
   }
-  const keymap = useOpencodeKeymap()
-  const dialog = useDialog()
-  onMount(() => {
-    if (route.accessMode === "read-only") return
-    void sdk.client.v2.sessionLocation
-      .resolve({ sessionID: route.sessionID }, { throwOnError: true })
-      .then((result) => {
-        const resolution = result.data
-        if (resolution.status === "resolved") {
-          setLocationAccessReady(true)
-          return
-        }
-        dialog.replace(() => <DialogSessionLocationRecovery sessionID={route.sessionID} resolution={resolution} />)
-      })
-      .catch((cause) =>
-        toast.show({ title: "Session target resolution failed", message: errorMessage(cause), variant: "error" }),
-      )
+  event.on("session.next.location.rebound", (evt) => {
+    if (evt.properties.sessionID !== route.sessionID) return
+    setShellCompletionGeneration((value) => value + 1)
   })
+  const keymap = useOpencodeKeymap()
+  const upstreamCommandEntries = useKeymapSelector((value) =>
+    value.getCommandEntries({ visibility: "reachable", namespace: "palette" }),
+  )
   const renameOverride = createMemo(() =>
     installSessionRenameOverride({
       enabled: kv.get(SESSION_RENAME_DIRECT_SETTING, false),
@@ -490,18 +509,24 @@ export function Session() {
   }
 
   const local = useLocal()
+  const syncSettings = useSyncSettings()
   const targetManager = useTargetManager()
   const coreCommandHost = createMemo(() =>
     createCommandHost<
-      EnvironmentCommandContext & TargetCommandContext & SessionControlCommandContext & SyncCommandContext
+      EnvironmentCommandContext &
+        TargetCommandContext &
+        SessionControlCommandContext &
+        SyncCommandContext &
+        ApprovalModeCommandContext
     >({
       register: (registry) => {
         environmentCommands.forEach((command) => registry.register(command))
         registry.register(targetCommand)
         sessionControlCommands.forEach((command) => registry.register(command))
+        registry.register(approvalModeCommand)
         syncCommands.forEach((command) => registry.register(command))
       },
-      context: () => {
+      context: (source) => {
         const current = location()
         const queryLocation = current
           ? ({ directory: current.directory, workspace: current.workspaceID, target: current.target } as {
@@ -517,78 +542,14 @@ export function Session() {
             variables: result.data.data.variables,
           }
         }
-        const syncSetup = async (presetRecovery?: string) => {
-          try {
-            const state = await sdk.client.global.syncSetup({ throwOnError: true })
-            const resetExisting = state.data.config
-              ? await DialogConfirm.show(
-                  dialog,
-                  "Replace sync setup?",
-                  "This device already has a sync configuration. Continue only if you intend to replace it.",
-                )
-              : false
-            if (state.data.config && !resetExisting) return "cancelled" as const
-            const appKey = await DialogPrompt.show(dialog, "Baidu AppKey")
-            if (!appKey?.trim()) return "cancelled" as const
-            const secretKey = await DialogPrompt.show(dialog, "Baidu SecretKey", {
-              description: () => (
-                <text>This value stays in memory and is written only to the system secure store.</text>
-              ),
-            })
-            if (!secretKey?.trim()) return "cancelled" as const
-            const deviceName = await DialogPrompt.show(dialog, "Device name", {
-              value: process.platform === "darwin" ? "Mac" : "WSL",
-            })
-            if (!deviceName?.trim()) return "cancelled" as const
-            const recoveryString =
-              presetRecovery ??
-              (await DialogPrompt.show(dialog, "Recovery key (optional)", {
-                description: () => <text>Leave empty to create a new encrypted sync space.</text>,
-              }))
-            if (recoveryString === null) return "cancelled" as const
-            const pending = await sdk.client.global.syncAuthorize(
-              {
-                appKey: appKey.trim(),
-                secretKey: secretKey.trim(),
-                deviceName: deviceName.trim(),
-                ...(recoveryString.trim() ? { recoveryString: recoveryString.trim() } : {}),
-                resetExisting,
-              },
-              { throwOnError: true },
-            )
-            await clipboard.write?.(pending.data.authorizationURL)
-            await DialogAlert.show(
-              dialog,
-              "Authorize Baidu Netdisk",
-              `Authorization URL copied to clipboard:\n${pending.data.authorizationURL}`,
-            )
-            const code = await DialogPrompt.show(dialog, "Baidu authorization code")
-            if (!code?.trim()) return "cancelled" as const
-            const completed = await sdk.client.global.syncComplete(
-              { attemptID: pending.data.attemptID, code: code.trim() },
-              { throwOnError: true },
-            )
-            await clipboard.write?.(completed.data.recoveryString)
-            await DialogAlert.show(
-              dialog,
-              "Sensitive recovery key",
-              `${completed.data.recoveryString}\n\nCopied to clipboard. Store it safely; it cannot be recovered later.`,
-            )
-            return "completed" as const
-          } catch {
-            return "failed" as const
-          }
-        }
         return {
-          source: "slash",
+          source,
           client: "tui",
           sessionID: route.sessionID,
           location: current,
           abortSignal: new AbortController().signal,
-          targetManagerEnabled: kv.get(TARGET_MANAGER_SETTING, false),
           openTargetManager: targetManager.open,
           sessionControls: {
-            permissions: () => dialog.replace(() => <DialogPermissionMode />),
             outputExpansion: setOutputExpansion,
             delete: async () => {
               const current = session()
@@ -604,147 +565,75 @@ export function Session() {
               return "deleted"
             },
           },
+          approvalMode: {
+            open: () =>
+              dialog.replace(() => (
+                <DialogPermissionModes
+                  defaultMode={local.permission.defaultMode}
+                  sessionMode={session()?.approvalMode ?? "normal"}
+                  setDefault={(approvalMode) => local.permission.setDefault(approvalMode)}
+                  setSession={async (approvalMode) => {
+                    await sdk.client.session.update(
+                      { sessionID: route.sessionID, approvalMode },
+                      { throwOnError: true },
+                    )
+                  }}
+                />
+              )),
+          },
           confirm: async (request) => Boolean(await DialogConfirm.show(dialog, request.title, request.message)),
           environment: {
             list: () => metadata("list"),
             reload: () => metadata("reload"),
-            ensureTemplate: async () => {
-              const result = await sdk.client.v2.environment.init({ location: queryLocation }, { throwOnError: true })
-              return result.data.data.status
-            },
-          },
-          presentEnvironment: async (snapshot) => {
-            const variables =
-              snapshot.variables.map((item) => `${item.name} · ${item.origin}`).join("\n") || "No variables"
-            await DialogAlert.show(dialog, `Environment generation ${snapshot.generation}`, variables)
-          },
-          invokeAgent: async (prompt) => {
-            try {
-              await sdk.client.session.promptAsync(
-                { sessionID: route.sessionID, noReply: false, parts: [{ type: "text", text: prompt }] },
+            reveal: async () => {
+              const result = await sdk.client.v2.environment.reveal(
+                { location: queryLocation, confirmed: true },
                 { throwOnError: true },
               )
-              return "completed"
-            } catch {
-              return "failed"
-            }
-          },
-          openSyncSetup: syncSetup,
-          sync: {
-            status: async () => {
-              const result = await sdk.client.global.syncStatus({ throwOnError: true })
-              return result.data
+              return { generation: Number(result.data.data.generation), values: result.data.data.values }
             },
-            now: async () => {
-              await sdk.client.global.syncNow({ throwOnError: true })
-            },
-            enable: async (enabled) => {
-              await sdk.client.global.syncEnabled({ enabled }, { throwOnError: true })
-            },
-            exportKey: async () => {
-              const result = await sdk.client.global.syncRecoveryExport({ throwOnError: true })
-              return result.data.recoveryString
-            },
-            importKey: async (recovery) => {
-              if ((await syncSetup(recovery)) !== "completed") throw new Error("Recovery key import was not completed")
-            },
-          },
-          presentSyncStatus: async (status) => {
-            await DialogAlert.show(
-              dialog,
-              "Cloud sync status",
-              status.namespaceID
-                ? `${status.enabled ? "Enabled" : "Disabled"} · ${status.provider}\nDevice ${status.deviceID}\nOutbox ${status.outbox}`
-                : "Cloud sync is not configured",
-            )
-          },
-          presentSensitiveRecoveryKey: async (key) => {
-            await clipboard.write?.(key)
-            await DialogAlert.show(dialog, "Sensitive recovery key", `${key}\n\nCopied to clipboard.`)
-          },
-          promptSensitiveRecoveryKey: () =>
-            DialogPrompt.show(dialog, "Recovery key").then((value) => value ?? undefined),
-          confirmAndResetSync: async () => {
-            const confirmed = await DialogConfirm.show(
-              dialog,
-              "Reset sync space",
-              "Permanently delete the old encrypted namespace and create a new one? This cannot be undone.",
-            )
-            if (!confirmed) return "cancelled"
-            try {
-              const result = await sdk.client.global.syncReset({ throwOnError: true })
-              await clipboard.write?.(result.data.recoveryString)
-              await DialogAlert.show(
-                dialog,
-                "New sensitive recovery key",
-                `${result.data.recoveryString}\n\nCopied to clipboard. Other devices must import this new key.`,
-              )
-              return "completed"
-            } catch {
-              return "failed"
-            }
-          },
-          openDevices: async () => {
-            const result = await sdk.client.global.syncDevices({ throwOnError: true })
-            const choice = await new Promise<{ kind: "device"; id: string } | undefined>((resolve) =>
-              dialog.replace(
-                () => (
-                  <DialogSelect
-                    title="Sync devices"
-                    options={[
-                      ...result.data.devices.map((device) => ({
-                        title: `${device.name}${device.revoked ? " (revoked)" : ""}`,
-                        description: device.id,
-                        value: { kind: "device" as const, id: device.id },
-                      })),
-                      { title: "Bind portable target label", value: { kind: "device" as const, id: "" } },
-                    ]}
-                    onSelect={(option) => resolve(option.value)}
-                  />
-                ),
-                () => resolve(undefined),
-              ),
-            )
-            if (!choice) return "cancelled"
-            if (!choice.id) {
-              const label = await DialogPrompt.show(dialog, "Portable target label")
-              if (!label?.trim()) return "cancelled"
-              const targetID = await DialogPrompt.show(dialog, "Local target ID", {
-                description: () => <text>Leave empty to remove this device-local binding.</text>,
-              })
-              if (targetID === null) return "cancelled"
-              await sdk.client.global.syncBindingUpdate(
-                { label: label.trim(), ...(targetID.trim() ? { targetID: targetID.trim() } : {}) },
+            init: async () => {
+              const result = await sdk.client.v2.environment.init(
+                { sessionID: route.sessionID },
                 { throwOnError: true },
               )
-              return "completed"
-            }
-            const device = result.data.devices.find((item) => item.id === choice.id)
-            if (!device || device.revoked) return "cancelled"
-            const action = await DialogPrompt.show(dialog, `Manage ${device.name}`, {
-              placeholder: "rename or revoke",
-              description: () => (
-                <text>Enter “rename” or “revoke”. Revocation stops the device blocking garbage collection.</text>
-              ),
-            })
-            if (action?.trim() === "rename") {
-              const name = await DialogPrompt.show(dialog, "Device name", { value: device.name })
-              if (!name?.trim()) return "cancelled"
-              await sdk.client.global.syncDeviceUpdate({ id: device.id, name: name.trim() }, { throwOnError: true })
-            } else if (action?.trim() === "revoke") {
-              const confirmed = await DialogConfirm.show(
-                dialog,
-                "Revoke device",
-                `Revoke “${device.name}”? This is monotonic and cannot reactivate the old device identity.`,
-              )
-              if (!confirmed) return "cancelled"
-              await sdk.client.global.syncDeviceUpdate({ id: device.id, revoke: true }, { throwOnError: true })
-            } else return "cancelled"
-            return "completed"
+              if (result.data.data.status !== "completed") return result.data.data
+              return {
+                status: result.data.data.status,
+                template: result.data.data.template,
+                generation: Number(result.data.data.generation),
+              }
+            },
           },
+          presentEnvironment: (snapshot, reveal) => showEnvironment(dialog, snapshot, reveal, toast.error),
+          openSyncSettings: syncSettings.open,
         }
       },
-      upstream: () => undefined,
+      upstream: () => [
+        ...adaptServerCommands(sync.data.command),
+        ...adaptKeymapCommands(upstreamCommandEntries(), (identity) => keymap.dispatchCommand(identity)).map(
+          (command) =>
+            command.id !== sessionRenameMetadata.value
+              ? command
+              : {
+                  ...command,
+                  dispatch: {
+                    type: "client" as const,
+                    run: async (argumentsValue: string) => {
+                      const parsed = parseSessionRenameArguments(argumentsValue)
+                      if (parsed.status === "invalid") {
+                        toast.show({ message: parsed.message, variant: "warning" })
+                        return
+                      }
+                      await renameOverride().execute(parsed.input)
+                      reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic())
+                    },
+                  },
+                },
+        ),
+      ],
+      restrictions: () => normalizeCommandRestrictions(kv.get(COMMAND_RESTRICTIONS_KEY)),
+      diagnostic: (diagnostic) => console.warn("[command-kit] shadowed command", diagnostic),
       invalid: (message) => toast.show({ message, variant: "warning" }),
       outcome: (message, status) =>
         toast.show({
@@ -790,6 +679,7 @@ export function Session() {
   const sessionCommandList = createMemo(() => [
     {
       title: session()?.share?.url ? "Copy share link" : "Share session",
+      description: "Share the current session or copy its link",
       value: "session.share",
       suggested: route.type === "session",
       category: "Session",
@@ -834,6 +724,7 @@ export function Session() {
     },
     {
       title: "Jump to message",
+      description: "Open the session timeline",
       value: "session.timeline",
       category: "Session",
       slash: {
@@ -856,6 +747,7 @@ export function Session() {
     },
     {
       title: "Fork session",
+      description: "Create a session from an earlier message",
       value: "session.fork",
       category: "Session",
       slash: {
@@ -878,6 +770,7 @@ export function Session() {
     },
     {
       title: "Compact session",
+      description: "Summarize older context in this session",
       value: "session.compact",
       category: "Session",
       slash: {
@@ -904,6 +797,7 @@ export function Session() {
     },
     {
       title: "Unshare session",
+      description: "Disable the current session share link",
       value: "session.unshare",
       category: "Session",
       enabled: !!session()?.share?.url,
@@ -927,6 +821,7 @@ export function Session() {
     },
     {
       title: "Undo previous message",
+      description: "Revert the most recent user message",
       value: "session.undo",
       category: "Session",
       slash: {
@@ -963,6 +858,7 @@ export function Session() {
     },
     {
       title: "Redo",
+      description: "Restore the next reverted message",
       value: "session.redo",
       category: "Session",
       enabled: !!session()?.revert?.messageID,
@@ -1011,6 +907,7 @@ export function Session() {
     },
     {
       title: showTimestamps() ? "Hide timestamps" : "Show timestamps",
+      description: "Toggle message timestamps",
       value: "session.toggle.timestamps",
       category: "Session",
       slash: {
@@ -1028,6 +925,7 @@ export function Session() {
         if (next === "hide") return "Collapse thinking"
         return "Expand thinking"
       })(),
+      description: "Toggle expanded thinking content",
       value: "session.toggle.thinking",
       category: "Session",
       slash: {
@@ -1233,6 +1131,7 @@ export function Session() {
     },
     {
       title: "Copy session transcript",
+      description: "Copy the current session as text",
       value: "session.copy",
       category: "Session",
       slash: {
@@ -1263,6 +1162,7 @@ export function Session() {
     },
     {
       title: "Export session transcript",
+      description: "Export the current session to a file",
       value: "session.export",
       category: "Session",
       slash: {
@@ -1402,9 +1302,9 @@ export function Session() {
   ])
 
   const sessionCommands = createMemo(() =>
-    sessionCommandList().map((command) => ({
+    [...sessionCommandList(), ...coreCommandHost().registrations()].map((command) => ({
       namespace: "palette",
-      name: command.value,
+      name: "value" in command ? command.value : command.name,
       desc: "description" in command ? command.description : undefined,
       slashName: "slash" in command ? command.slash?.name : undefined,
       slashAliases: "slash" in command ? command.slash?.aliases : undefined,
@@ -1628,6 +1528,25 @@ export function Session() {
                     </text>
                   </box>
                 </Show>
+                <Show when={locationNotice()}>
+                  {(notice) => (
+                    <box
+                      flexDirection="row"
+                      justifyContent="space-between"
+                      paddingLeft={2}
+                      paddingRight={2}
+                      paddingTop={1}
+                      paddingBottom={1}
+                      border={["top"]}
+                      borderColor={theme.warning}
+                    >
+                      <text fg={theme.warning}>{sessionLocationNoticeText(notice())}</text>
+                      <text fg={theme.textMuted} onMouseUp={dismissLocationNotice}>
+                        dismiss
+                      </text>
+                    </box>
+                  )}
+                </Show>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt
                     request={permissions()[0]}
@@ -1657,24 +1576,12 @@ export function Session() {
                       visible={visible()}
                       ref={bind}
                       disabled={disabled()}
-                      onBuiltinSlash={async (input) => {
-                        if (kv.get(SESSION_RENAME_DIRECT_SETTING, false)) {
-                          const parsed = parseSessionRenameOverride(input)
-                          if (parsed.status === "invalid") {
-                            toast.show({ message: parsed.message, variant: "warning" })
-                            return true
-                          }
-                          if (parsed.status !== "not-match") {
-                            await renameOverride().execute(parsed.input)
-                            reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic())
-                            return true
-                          }
-                        }
-                        return coreCommandHost()(input)
-                      }}
+                      commandHost={coreCommandHost()}
+                      shellCompletionGeneration={shellCompletionGeneration()}
                       onSubmit={() => {
                         toBottom()
                       }}
+                      onPromptSubmit={dismissLocationNotice}
                       sessionID={route.sessionID}
                       right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
                     />

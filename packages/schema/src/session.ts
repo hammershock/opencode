@@ -9,6 +9,7 @@ import { DateTimeUtcFromMillis, NonNegativeInt, optional, RelativePath } from ".
 import { SessionEvent } from "./session-event"
 import { SessionID } from "./session-id"
 import { Revert } from "./revert"
+import { ApprovalMode } from "./approval-mode"
 
 export const ID = SessionID
 export type ID = SessionID
@@ -38,6 +39,10 @@ export const Info = Schema.Struct({
     archived: DateTimeUtcFromMillis.pipe(optional),
   }),
   title: Schema.String,
+  approvalMode: ApprovalMode.Mode.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("normal" as const)),
+    Schema.withConstructorDefault(Effect.succeed("normal" as const)),
+  ),
   location: Location.Ref,
   locationRevision: NonNegativeInt.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(0)),
@@ -45,6 +50,8 @@ export const Info = Schema.Struct({
   ),
   /** Synchronized logical target identity; never contains a device-local target ID or connection data. */
   portableTargetLabel: Schema.String.pipe(optional),
+  /** Stable sync-space ownership. Missing means this Session is device-local and is never uploaded. */
+  syncSpaceID: Schema.String.pipe(optional),
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })

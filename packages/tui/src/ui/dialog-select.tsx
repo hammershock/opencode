@@ -60,8 +60,13 @@ export interface DialogSelectOption<T = any> {
   description?: string
   details?: string[]
   footer?: JSX.Element | string
+  flatFooter?: string
+  footerWidth?: number
+  flatFooterWidth?: number
   titleWidth?: number
   truncateTitle?: boolean | "left"
+  inspectTitle?: boolean
+  inspectFooter?: boolean
   category?: string
   categoryView?: JSX.Element
   disabled?: boolean
@@ -458,7 +463,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           "dialog.select.submit",
         ]),
         ...visible.flatMap((item) => tuiConfig.keybinds.get(item.command)),
-        ...(visible.length
+        ...(visible.length && !props.bindings?.some((binding) => binding.key === "tab")
           ? [
               {
                 key: "tab",
@@ -636,6 +641,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                     {(option) => {
                       const active = createMemo(() => !props.locked && isDeepEqual(option.value, selected()?.value))
                       const current = createMemo(() => isDeepEqual(option.value, props.current))
+                      const footer = createMemo(() => selectFooter(option, !!flatten()))
+                      const footerWidth = createMemo(() => selectFooterWidth(option, !!flatten()))
                       return (
                         <box
                           flexDirection="column"
@@ -685,9 +692,12 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                             <Option
                               title={option.title}
                               titleView={option.titleView}
-                              footer={flatten() ? (option.category ?? option.footer) : option.footer}
+                              footer={footer()}
+                              footerWidth={footerWidth()}
                               titleWidth={option.titleWidth}
                               truncateTitle={option.truncateTitle}
+                              inspectTitle={option.inspectTitle}
+                              inspectFooter={option.inspectFooter}
                               description={option.description !== category ? option.description : undefined}
                               active={active()}
                               current={current()}
@@ -737,13 +747,30 @@ function Option(props: {
   current?: boolean
   muted?: boolean
   footer?: JSX.Element | string
+  footerWidth?: number
   titleWidth?: number
   truncateTitle?: boolean | "left"
+  inspectTitle?: boolean
+  inspectFooter?: boolean
   gutter?: () => JSX.Element
   onMouseOver?: () => void
 }) {
   const { theme } = useTheme()
   const fg = selectedForeground(theme)
+  const [inspectionOffset, setInspectionOffset] = createSignal(0)
+  createEffect(() => {
+    const title = props.inspectTitle && !props.titleView && Bun.stringWidth(props.title) > (props.titleWidth ?? 61)
+    const footer =
+      props.inspectFooter &&
+      typeof props.footer === "string" &&
+      Bun.stringWidth(props.footer) > (props.footerWidth ?? 0)
+    if (!props.active || (!title && !footer)) {
+      setInspectionOffset(0)
+      return
+    }
+    const timer = setInterval(() => setInspectionOffset((offset) => offset + 1), 180)
+    onCleanup(() => clearInterval(timer))
+  })
   const text = createMemo(() => {
     if (props.active && !props.muted) return fg
     if (props.muted && (props.active || props.current)) return theme.textMuted
@@ -772,20 +799,68 @@ function Option(props: {
         paddingLeft={3}
       >
         {props.titleView ??
-          (props.truncateTitle === false
-            ? props.title
-            : props.truncateTitle === "left"
-              ? Locale.truncateLeft(props.title, props.titleWidth ?? 61)
-              : Locale.truncate(props.title, props.titleWidth ?? 61))}
+          (props.inspectTitle && props.active
+            ? inspectionFrame(props.title, props.titleWidth ?? 61, inspectionOffset())
+            : props.inspectTitle
+              ? displayTruncate(props.title, props.titleWidth ?? 61)
+              : props.truncateTitle === false
+                ? props.title
+                : props.truncateTitle === "left"
+                  ? Locale.truncateLeft(props.title, props.titleWidth ?? 61)
+                  : Locale.truncate(props.title, props.titleWidth ?? 61))}
         <Show when={props.description}>
           <span style={{ fg: props.active && !props.muted ? fg : theme.textMuted }}> {props.description}</span>
         </Show>
       </text>
       <Show when={props.footer}>
-        <box flexShrink={0}>
-          <text fg={props.active && !props.muted ? fg : theme.textMuted}>{props.footer}</text>
+        <box flexShrink={0} width={props.footerWidth}>
+          <text fg={props.active && !props.muted ? fg : theme.textMuted} wrapMode="none" overflow="hidden">
+            {props.inspectFooter && typeof props.footer === "string" && props.footerWidth
+              ? props.active
+                ? inspectionFrame(props.footer, props.footerWidth, inspectionOffset())
+                : displayTruncate(props.footer, props.footerWidth)
+              : props.footer}
+          </text>
         </box>
       </Show>
     </>
   )
+}
+
+export function inspectionFrame(value: string, width: number, offset: number) {
+  if (width <= 0) return ""
+  if (Bun.stringWidth(value) <= width) return value
+  const characters = [...`${value}   `]
+  const start = ((offset % characters.length) + characters.length) % characters.length
+  const ordered = [...characters.slice(start), ...characters.slice(0, start)]
+  return ordered.reduce(
+    (result, character) => {
+      if (result.done || Bun.stringWidth(result.value + character) > width) return { ...result, done: true }
+      return { value: result.value + character, done: false }
+    },
+    { value: "", done: false },
+  ).value
+}
+
+export function displayTruncate(value: string, width: number) {
+  if (width <= 0) return ""
+  if (Bun.stringWidth(value) <= width) return value
+  if (width === 1) return "…"
+  return (
+    [...value].reduce(
+      (result, character) => {
+        if (result.done || Bun.stringWidth(result.value + character) >= width) return { ...result, done: true }
+        return { value: result.value + character, done: false }
+      },
+      { value: "", done: false },
+    ).value + "…"
+  )
+}
+
+export function selectFooter<T>(option: DialogSelectOption<T>, flat: boolean) {
+  return flat ? (option.flatFooter ?? option.category ?? option.footer) : option.footer
+}
+
+export function selectFooterWidth<T>(option: DialogSelectOption<T>, flat: boolean) {
+  return flat ? (option.flatFooterWidth ?? option.footerWidth) : option.footerWidth
 }

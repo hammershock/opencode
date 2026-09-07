@@ -16,6 +16,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     id: SessionSchema.ID.make(row.id),
     projectID: ProjectV2.ID.make(row.project_id),
     title: row.title,
+    approvalMode: row.approval_mode,
     parentID: row.parent_id ? SessionSchema.ID.make(row.parent_id) : undefined,
     agent: row.agent ? AgentV2.ID.make(row.agent) : undefined,
     model: row.model
@@ -43,6 +44,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     }),
     locationRevision: row.location_revision,
     portableTargetLabel: row.portable_target_label ?? undefined,
+    syncSpaceID: row.sync_space_id ?? undefined,
     subpath: row.path ? RelativePath.make(row.path) : undefined,
     revert: row.revert ? { ...row.revert, messageID: SessionMessage.ID.make(row.revert.messageID) } : undefined,
     time: {

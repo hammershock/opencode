@@ -19,8 +19,10 @@ export type Event =
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
   | EventSessionNextMoved
+  | EventSessionNextLocationRebound
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
+  | EventSessionNextTurnSettled
   | EventSessionNextContextUpdated
   | EventSessionNextSynthetic
   | EventSessionNextShellStarted
@@ -157,6 +159,8 @@ export type SnapshotFileDiff = {
   status?: "added" | "deleted" | "modified"
 }
 
+export type ApprovalMode = "normal" | "auto"
+
 export type PermissionAction = "allow" | "deny" | "ask"
 
 export type PermissionRule = {
@@ -175,6 +179,7 @@ export type Session = {
   directory: string
   target?: LocationTarget
   lastKnownTargetName?: string
+  syncSpaceID?: string
   path?: string
   parentID?: string
   summary?: {
@@ -197,6 +202,7 @@ export type Session = {
     url: string
   }
   title: string
+  approvalMode?: ApprovalMode
   agent?: string
   model?: {
     id: string
@@ -854,6 +860,17 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.location.rebound"
+        properties: {
+          timestamp: number
+          sessionID: string
+          previous: LocationRef
+          location: LocationRef
+          revision: number
+        }
+      }
+    | {
+        id: string
         type: "session.next.prompted"
         properties: {
           timestamp: number
@@ -872,6 +889,16 @@ export type GlobalEvent = {
           messageID: string
           prompt: Prompt
           delivery: "steer" | "queue"
+        }
+      }
+    | {
+        id: string
+        type: "session.next.turn.settled"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
+          outcome: "completed" | "failed" | "cancelled"
         }
       }
     | {
@@ -1615,8 +1642,10 @@ export type GlobalEvent = {
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
     | SyncEventSessionNextMoved
+    | SyncEventSessionNextLocationRebound
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
+    | SyncEventSessionNextTurnSettled
     | SyncEventSessionNextContextUpdated
     | SyncEventSessionNextSynthetic
     | SyncEventSessionNextShellStarted
@@ -2038,8 +2067,50 @@ export type Config = {
   }
 }
 
+export type SyncSetupApiError = {
+  name: "SyncSetupError"
+  data:
+    | {
+        kind: "missing-app"
+        message: "Baidu Netdisk is not enabled in this build. Reinstall an official opencode-rexd build or contact its distributor."
+      }
+    | {
+        kind: "incompatible-local-state"
+        message: "Local sync state is incompatible. Archive the local sync folder and restart opencode-rexd."
+      }
+    | {
+        kind: "bad-request"
+        message: "Sync setup request failed"
+      }
+}
+
 export type EffectHttpApiErrorServiceUnavailable = {
   _tag: "ServiceUnavailable"
+}
+
+export type SyncControlApiError = {
+  name: "SyncControlError"
+  data: {
+    kind: "unconfigured" | "locked" | "provider" | "storage" | "invalid" | "pending" | "deleted"
+    diagnostic?: {
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect"
+      operation?: "list" | "stat" | "download" | "upload" | "delete"
+      kind?:
+        | "unauthenticated"
+        | "permission"
+        | "not-found"
+        | "conflict"
+        | "rate-limit"
+        | "network"
+        | "provider"
+        | "cancelled"
+        | "invalid-response"
+      retryable: boolean
+      outcome?: "failed" | "unknown"
+      retryAfter?: number
+      message: string
+    }
+  }
 }
 
 export type Model = {
@@ -2213,6 +2284,7 @@ export type GlobalSession = {
   directory: string
   target?: LocationTarget
   lastKnownTargetName?: string
+  syncSpaceID?: string
   path?: string
   parentID?: string
   summary?: {
@@ -2235,6 +2307,7 @@ export type GlobalSession = {
     url: string
   }
   title: string
+  approvalMode?: ApprovalMode
   agent?: string
   model?: {
     id: string
@@ -2357,6 +2430,21 @@ export type Command = {
   agent?: string
   model?: string
   source?: "command" | "mcp" | "skill"
+  provenance?:
+    | {
+        type: "builtin"
+      }
+    | {
+        type: "custom"
+      }
+    | {
+        type: "mcp"
+        serverID: string
+      }
+    | {
+        type: "skill"
+        location: string
+      }
   template: string
   subtask?: boolean
   hints: Array<string>
@@ -2784,8 +2872,10 @@ export type SessionDurableEvent =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextLocationRebound
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextTurnSettled
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -2911,8 +3001,10 @@ export type V2Event =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextLocationRebound
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextTurnSettled
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -3412,6 +3504,24 @@ export type SyncEventSessionNextMoved = {
   }
 }
 
+export type SyncEventSessionNextLocationRebound = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.location.rebound.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      previous: LocationRef
+      location: LocationRef
+      revision: number
+    }
+  }
+}
+
 export type SyncEventSessionNextPrompted = {
   type: "sync"
   id: string
@@ -3444,6 +3554,23 @@ export type SyncEventSessionNextPromptAdmitted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
+    }
+  }
+}
+
+export type SyncEventSessionNextTurnSettled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.turn.settled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
+      outcome: "completed" | "failed" | "cancelled"
     }
   }
 }
@@ -3989,9 +4116,11 @@ export type SessionV2Info = {
     archived?: number
   }
   title: string
+  approvalMode?: ApprovalMode
   location: LocationRef
   locationRevision?: number
   portableTargetLabel?: string
+  syncSpaceID?: string
   subpath?: string
   revert?: RevertState
 }
@@ -4289,6 +4418,27 @@ export type SessionNextMoved = {
   }
 }
 
+export type SessionNextLocationRebound = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.location.rebound"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    previous: LocationRef
+    location: LocationRef
+    revision: number
+  }
+}
+
 export type SessionNextPrompted = {
   id: string
   metadata?: {
@@ -4328,6 +4478,26 @@ export type SessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+  }
+}
+
+export type SessionNextTurnSettled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.turn.settled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    outcome: "completed" | "failed" | "cancelled"
   }
 }
 
@@ -6295,12 +6465,25 @@ export type SessionLocationRebindingResolution =
       stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       message: string
     }
+  | {
+      status: "resolution_failed"
+      message: string
+    }
 
 export type SessionLocationRebindingPortableBindingSnapshot = {
   revision: string
   bindings: {
     [key: string]: string
   }
+}
+
+export type SessionLocationRebindingPortableBindingRecoveryResult = {
+  revision: string
+  bindings: {
+    [key: string]: string
+  }
+  resolvedSessionIDs: Array<string>
+  failedSessionIDs: Array<string>
 }
 
 export type SessionLocationRebindingRebindInput = {
@@ -6312,6 +6495,70 @@ export type SessionLocationRebindingRebindResult = {
   status: "unchanged" | "rebound"
   revision: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
   warnings: Array<string>
+}
+
+export type SessionLocationRebindingRestoreResult = {
+  target: {
+    id: string
+    status: "unverified"
+    name: string
+    transport: "ssh"
+    connection:
+      | {
+          type: "ssh-config"
+          host: string
+        }
+      | {
+          type: "manual"
+          host: string
+          user: string
+          port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          identityFile?: string
+        }
+    defaultDirectory?: string
+    workspaceRoots: Array<string>
+    command?: {
+      program: string
+      args: Array<string>
+    }
+  }
+  snapshot: {
+    path: string
+    revision: string
+    targets: Array<{
+      id: string
+      status: "unverified"
+      name: string
+      transport: "ssh"
+      connection:
+        | {
+            type: "ssh-config"
+            host: string
+          }
+        | {
+            type: "manual"
+            host: string
+            user: string
+            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            identityFile?: string
+          }
+      defaultDirectory?: string
+      workspaceRoots: Array<string>
+      command?: {
+        program: string
+        args: Array<string>
+      }
+    }>
+    diagnostics: Array<{
+      severity: "error" | "warning"
+      path: string
+      message: string
+      offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    }>
+    valid: boolean
+  }
+  resolvedSessionIDs: Array<string>
+  failedSessionIDs: Array<string>
 }
 
 export type EventModelsDevRefreshed = {
@@ -6444,6 +6691,18 @@ export type EventSessionNextMoved = {
   }
 }
 
+export type EventSessionNextLocationRebound = {
+  id: string
+  type: "session.next.location.rebound"
+  properties: {
+    timestamp: number
+    sessionID: string
+    previous: LocationRef
+    location: LocationRef
+    revision: number
+  }
+}
+
 export type EventSessionNextPrompted = {
   id: string
   type: "session.next.prompted"
@@ -6465,6 +6724,17 @@ export type EventSessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+  }
+}
+
+export type EventSessionNextTurnSettled = {
+  id: string
+  type: "session.next.turn.settled"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    outcome: "completed" | "failed" | "cancelled"
   }
 }
 
@@ -7489,14 +7759,372 @@ export type GlobalConfigUpdateResponses = {
 
 export type GlobalConfigUpdateResponse = GlobalConfigUpdateResponses[keyof GlobalConfigUpdateResponses]
 
-export type GlobalSyncSetupData = {
+export type GlobalSyncStateData = {
   body?: never
   path?: never
   query?: never
-  url: "/global/sync/setup"
+  url: "/global/sync/state"
 }
 
-export type GlobalSyncSetupErrors = {
+export type GlobalSyncStateErrors = {
+  /**
+   * SyncSetupApiError | InvalidRequestError
+   */
+  400: SyncSetupApiError | InvalidRequestError
+}
+
+export type GlobalSyncStateError = GlobalSyncStateErrors[keyof GlobalSyncStateErrors]
+
+export type GlobalSyncStateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 2
+    revision: number
+    provider: "baidu"
+    deviceID: string
+    deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
+    enabled: boolean
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
+  }
+}
+
+export type GlobalSyncStateResponse = GlobalSyncStateResponses[keyof GlobalSyncStateResponses]
+
+export type GlobalSyncInitializeData = {
+  body?: {
+    deviceName: string
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/initialize"
+}
+
+export type GlobalSyncInitializeErrors = {
+  /**
+   * SyncSetupApiError | InvalidRequestError
+   */
+  400: SyncSetupApiError | InvalidRequestError
+}
+
+export type GlobalSyncInitializeError = GlobalSyncInitializeErrors[keyof GlobalSyncInitializeErrors]
+
+export type GlobalSyncInitializeResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 2
+    revision: number
+    provider: "baidu"
+    deviceID: string
+    deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
+    enabled: boolean
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
+  }
+}
+
+export type GlobalSyncInitializeResponse = GlobalSyncInitializeResponses[keyof GlobalSyncInitializeResponses]
+
+export type GlobalSyncOAuthBeginData = {
+  body?: {
+    redirectURI: string
+    completion: "loopback" | "manual"
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/oauth/begin"
+}
+
+export type GlobalSyncOAuthBeginErrors = {
+  /**
+   * SyncSetupApiError | InvalidRequestError
+   */
+  400: SyncSetupApiError | InvalidRequestError
+}
+
+export type GlobalSyncOAuthBeginError = GlobalSyncOAuthBeginErrors[keyof GlobalSyncOAuthBeginErrors]
+
+export type GlobalSyncOAuthBeginResponses = {
+  /**
+   * Success
+   */
+  200: {
+    attemptID: string
+    authorizationURL: string
+    completion: "loopback" | "manual"
+  }
+}
+
+export type GlobalSyncOAuthBeginResponse = GlobalSyncOAuthBeginResponses[keyof GlobalSyncOAuthBeginResponses]
+
+export type GlobalSyncOAuthCompleteData = {
+  body?: {
+    attemptID: string
+    response:
+      | {
+          type: "loopback"
+          callbackURL: string
+        }
+      | {
+          type: "manual"
+          code: string
+        }
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/oauth/complete"
+}
+
+export type GlobalSyncOAuthCompleteErrors = {
+  /**
+   * SyncSetupApiError | InvalidRequestError
+   */
+  400: SyncSetupApiError | InvalidRequestError
+}
+
+export type GlobalSyncOAuthCompleteError = GlobalSyncOAuthCompleteErrors[keyof GlobalSyncOAuthCompleteErrors]
+
+export type GlobalSyncOAuthCompleteResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 2
+    revision: number
+    provider: "baidu"
+    deviceID: string
+    deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
+    enabled: boolean
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
+  }
+}
+
+export type GlobalSyncOAuthCompleteResponse = GlobalSyncOAuthCompleteResponses[keyof GlobalSyncOAuthCompleteResponses]
+
+export type GlobalSyncOAuthSwitchAccountData = {
+  body?: {
+    attemptID: string
+    response:
+      | {
+          type: "loopback"
+          callbackURL: string
+        }
+      | {
+          type: "manual"
+          code: string
+        }
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/oauth/switch-account"
+}
+
+export type GlobalSyncOAuthSwitchAccountErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncOAuthSwitchAccountError =
+  GlobalSyncOAuthSwitchAccountErrors[keyof GlobalSyncOAuthSwitchAccountErrors]
+
+export type GlobalSyncOAuthSwitchAccountResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 2
+    revision: number
+    provider: "baidu"
+    deviceID: string
+    deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
+    enabled: boolean
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
+  }
+}
+
+export type GlobalSyncOAuthSwitchAccountResponse =
+  GlobalSyncOAuthSwitchAccountResponses[keyof GlobalSyncOAuthSwitchAccountResponses]
+
+export type GlobalSyncLogoutData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/logout"
+}
+
+export type GlobalSyncLogoutErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncLogoutError = GlobalSyncLogoutErrors[keyof GlobalSyncLogoutErrors]
+
+export type GlobalSyncLogoutResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 2
+    revision: number
+    provider: "baidu"
+    deviceID: string
+    deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
+    enabled: boolean
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
+  }
+}
+
+export type GlobalSyncLogoutResponse = GlobalSyncLogoutResponses[keyof GlobalSyncLogoutResponses]
+
+export type GlobalSyncDiscoverData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/spaces"
+}
+
+export type GlobalSyncDiscoverErrors = {
   /**
    * Bad request
    */
@@ -7507,148 +8135,275 @@ export type GlobalSyncSetupErrors = {
   503: EffectHttpApiErrorServiceUnavailable
 }
 
-export type GlobalSyncSetupError = GlobalSyncSetupErrors[keyof GlobalSyncSetupErrors]
+export type GlobalSyncDiscoverError = GlobalSyncDiscoverErrors[keyof GlobalSyncDiscoverErrors]
 
-export type GlobalSyncSetupResponses = {
+export type GlobalSyncDiscoverResponses = {
   /**
    * Success
    */
   200: {
-    config?: {
-      version: 1
-      provider: "baidu"
+    spaces: Array<
+      | {
+          status: "compatible"
+          descriptor: {
+            namespaceID: string
+            name: string
+            protocol: {
+              major: number
+              minor: number
+            }
+            encryption: "none" | "aes-256-gcm"
+            createdAt: number
+            updatedAt: number
+            summary: {
+              sessions: number
+              devices: number
+              updatedAt: number
+            }
+            revision: number
+          }
+        }
+      | {
+          status: "unsupported"
+          descriptor: {
+            namespaceID: string
+            name: string
+            protocol: {
+              major: number
+              minor: number
+            }
+            encryption: "none" | "aes-256-gcm"
+            createdAt: number
+            updatedAt: number
+            summary: {
+              sessions: number
+              devices: number
+              updatedAt: number
+            }
+            revision: number
+          }
+        }
+    >
+    deletions: Array<{
       namespaceID: string
-      deviceID: string
-      deviceName: string
-      enabled: boolean
-      intervalSeconds: number
-      remoteRoot: string
-    }
-    legacy: {
-      available: boolean
-      unavailable?: boolean
-      deviceID?: string
-    }
+      deletedAt: number
+      revision: number
+    }>
   }
 }
 
-export type GlobalSyncSetupResponse = GlobalSyncSetupResponses[keyof GlobalSyncSetupResponses]
+export type GlobalSyncDiscoverResponse = GlobalSyncDiscoverResponses[keyof GlobalSyncDiscoverResponses]
 
-export type GlobalSyncAuthorizeData = {
+export type GlobalSyncCreateData = {
   body?: {
-    appKey: string
-    secretKey: string
-    deviceName: string
+    name: string
+    encryption?: "none" | "aes-256-gcm"
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/spaces"
+}
+
+export type GlobalSyncCreateErrors = {
+  /**
+   * SyncSetupApiError | InvalidRequestError
+   */
+  400: SyncSetupApiError | InvalidRequestError
+}
+
+export type GlobalSyncCreateError = GlobalSyncCreateErrors[keyof GlobalSyncCreateErrors]
+
+export type GlobalSyncCreateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    state: {
+      version: 2
+      revision: number
+      provider: "baidu"
+      deviceID: string
+      deviceName: string
+      account?: {
+        id: string
+        maskedDisplay: string
+      }
+      activeSpaceID?: string
+      enabled: boolean
+      intervalSeconds: 30 | 60 | 300
+      spaces: Array<{
+        accountID: string
+        descriptor: {
+          namespaceID: string
+          name: string
+          protocol: {
+            major: number
+            minor: number
+          }
+          encryption: "none" | "aes-256-gcm"
+          createdAt: number
+          updatedAt: number
+          summary: {
+            sessions: number
+            devices: number
+            updatedAt: number
+          }
+          revision: number
+        }
+        remoteRoot: string
+        joinedAt: number
+      }>
+    }
+    descriptor: {
+      namespaceID: string
+      name: string
+      protocol: {
+        major: number
+        minor: number
+      }
+      encryption: "none" | "aes-256-gcm"
+      createdAt: number
+      updatedAt: number
+      summary: {
+        sessions: number
+        devices: number
+        updatedAt: number
+      }
+      revision: number
+    }
     recoveryString?: string
-    redirectURI?: string
-    resetExisting?: boolean
-  }
-  path?: never
-  query?: never
-  url: "/global/sync/setup/authorize"
-}
-
-export type GlobalSyncAuthorizeErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type GlobalSyncAuthorizeError = GlobalSyncAuthorizeErrors[keyof GlobalSyncAuthorizeErrors]
-
-export type GlobalSyncAuthorizeResponses = {
-  /**
-   * Success
-   */
-  200: {
-    attemptID: string
-    authorizationURL: string
   }
 }
 
-export type GlobalSyncAuthorizeResponse = GlobalSyncAuthorizeResponses[keyof GlobalSyncAuthorizeResponses]
+export type GlobalSyncCreateResponse = GlobalSyncCreateResponses[keyof GlobalSyncCreateResponses]
 
-export type GlobalSyncCompleteData = {
+export type GlobalSyncJoinData = {
   body?: {
-    attemptID: string
-    code: string
-  }
-  path?: never
-  query?: never
-  url: "/global/sync/setup/complete"
-}
-
-export type GlobalSyncCompleteErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type GlobalSyncCompleteError = GlobalSyncCompleteErrors[keyof GlobalSyncCompleteErrors]
-
-export type GlobalSyncCompleteResponses = {
-  /**
-   * Success
-   */
-  200: {
-    config: {
-      version: 1
-      provider: "baidu"
-      namespaceID: string
-      deviceID: string
-      deviceName: string
-      enabled: boolean
-      intervalSeconds: number
-      remoteRoot: string
-    }
-    recoveryString: string
-  }
-}
-
-export type GlobalSyncCompleteResponse = GlobalSyncCompleteResponses[keyof GlobalSyncCompleteResponses]
-
-export type GlobalSyncReuseLegacyData = {
-  body?: {
-    deviceName: string
+    namespaceID: string
     recoveryString?: string
-    resetExisting?: boolean
   }
   path?: never
   query?: never
-  url: "/global/sync/setup/reuse-legacy"
+  url: "/global/sync/spaces/join"
 }
 
-export type GlobalSyncReuseLegacyErrors = {
+export type GlobalSyncJoinErrors = {
+  /**
+   * SyncSetupApiError | InvalidRequestError
+   */
+  400: SyncSetupApiError | InvalidRequestError
+}
+
+export type GlobalSyncJoinError = GlobalSyncJoinErrors[keyof GlobalSyncJoinErrors]
+
+export type GlobalSyncJoinResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 2
+    revision: number
+    provider: "baidu"
+    deviceID: string
+    deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
+    enabled: boolean
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
+  }
+}
+
+export type GlobalSyncJoinResponse = GlobalSyncJoinResponses[keyof GlobalSyncJoinResponses]
+
+export type GlobalSyncActivateData = {
+  body?: {
+    namespaceID: string
+    force?: boolean
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/spaces/activate"
+}
+
+export type GlobalSyncActivateErrors = {
   /**
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
 }
 
-export type GlobalSyncReuseLegacyError = GlobalSyncReuseLegacyErrors[keyof GlobalSyncReuseLegacyErrors]
+export type GlobalSyncActivateError = GlobalSyncActivateErrors[keyof GlobalSyncActivateErrors]
 
-export type GlobalSyncReuseLegacyResponses = {
+export type GlobalSyncActivateResponses = {
   /**
    * Success
    */
-  200: {
-    config: {
-      version: 1
-      provider: "baidu"
-      namespaceID: string
-      deviceID: string
-      deviceName: string
-      enabled: boolean
-      intervalSeconds: number
-      remoteRoot: string
-    }
-    recoveryString: string
-  }
+  200:
+    | {
+        status: "switched"
+        namespaceID: string
+      }
+    | {
+        status: "blocked"
+        reason: "pending-outbox"
+        outbox: number
+        error?: string
+      }
 }
 
-export type GlobalSyncReuseLegacyResponse = GlobalSyncReuseLegacyResponses[keyof GlobalSyncReuseLegacyResponses]
+export type GlobalSyncActivateResponse = GlobalSyncActivateResponses[keyof GlobalSyncActivateResponses]
+
+export type GlobalSyncLeaveData = {
+  body?: {
+    namespaceID: string
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/spaces/leave"
+}
+
+export type GlobalSyncLeaveErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncLeaveError = GlobalSyncLeaveErrors[keyof GlobalSyncLeaveErrors]
+
+export type GlobalSyncLeaveResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncLeaveResponse = GlobalSyncLeaveResponses[keyof GlobalSyncLeaveResponses]
 
 export type GlobalSyncEnabledData = {
   body?: {
@@ -7673,18 +8428,215 @@ export type GlobalSyncEnabledResponses = {
    * Success
    */
   200: {
-    version: 1
+    version: 2
+    revision: number
     provider: "baidu"
-    namespaceID: string
     deviceID: string
     deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
     enabled: boolean
-    intervalSeconds: number
-    remoteRoot: string
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
   }
 }
 
 export type GlobalSyncEnabledResponse = GlobalSyncEnabledResponses[keyof GlobalSyncEnabledResponses]
+
+export type GlobalSyncIntervalData = {
+  body?: {
+    intervalSeconds: 30 | 60 | 300
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/interval"
+}
+
+export type GlobalSyncIntervalErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncIntervalError = GlobalSyncIntervalErrors[keyof GlobalSyncIntervalErrors]
+
+export type GlobalSyncIntervalResponses = {
+  /**
+   * Success
+   */
+  200: {
+    version: 2
+    revision: number
+    provider: "baidu"
+    deviceID: string
+    deviceName: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpaceID?: string
+    enabled: boolean
+    intervalSeconds: 30 | 60 | 300
+    spaces: Array<{
+      accountID: string
+      descriptor: {
+        namespaceID: string
+        name: string
+        protocol: {
+          major: number
+          minor: number
+        }
+        encryption: "none" | "aes-256-gcm"
+        createdAt: number
+        updatedAt: number
+        summary: {
+          sessions: number
+          devices: number
+          updatedAt: number
+        }
+        revision: number
+      }
+      remoteRoot: string
+      joinedAt: number
+    }>
+  }
+}
+
+export type GlobalSyncIntervalResponse = GlobalSyncIntervalResponses[keyof GlobalSyncIntervalResponses]
+
+export type GlobalSyncDeleteData = {
+  body?: never
+  path: {
+    namespaceID: string
+  }
+  query?: never
+  url: "/global/sync/spaces/{namespaceID}"
+}
+
+export type GlobalSyncDeleteErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncDeleteError = GlobalSyncDeleteErrors[keyof GlobalSyncDeleteErrors]
+
+export type GlobalSyncDeleteResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncDeleteResponse = GlobalSyncDeleteResponses[keyof GlobalSyncDeleteResponses]
+
+export type GlobalSyncRemoveData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/device"
+}
+
+export type GlobalSyncRemoveErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncRemoveError = GlobalSyncRemoveErrors[keyof GlobalSyncRemoveErrors]
+
+export type GlobalSyncRemoveResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncRemoveResponse = GlobalSyncRemoveResponses[keyof GlobalSyncRemoveResponses]
+
+export type GlobalSyncUnassignedData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/unassigned"
+}
+
+export type GlobalSyncUnassignedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncUnassignedError = GlobalSyncUnassignedErrors[keyof GlobalSyncUnassignedErrors]
+
+export type GlobalSyncUnassignedResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncUnassignedResponse = GlobalSyncUnassignedResponses[keyof GlobalSyncUnassignedResponses]
+
+export type GlobalSyncAssignUnassignedData = {
+  body?: {
+    sessionIDs: Array<string>
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/unassigned"
+}
+
+export type GlobalSyncAssignUnassignedErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncAssignUnassignedError = GlobalSyncAssignUnassignedErrors[keyof GlobalSyncAssignUnassignedErrors]
+
+export type GlobalSyncAssignUnassignedResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncAssignUnassignedResponse =
+  GlobalSyncAssignUnassignedResponses[keyof GlobalSyncAssignUnassignedResponses]
 
 export type GlobalSyncStatusData = {
   body?: never
@@ -7712,17 +8664,47 @@ export type GlobalSyncStatusResponses = {
    */
   200: {
     configured: boolean
+    initialized: boolean
+    authenticated: boolean
     enabled: boolean
     locked: boolean
     provider?: string
     namespaceID?: string
     deviceID?: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpace?: {
+      namespaceID: string
+      name: string
+      encryption: "none" | "aes-256-gcm"
+    }
+    intervalSeconds?: 30 | 60 | 300
     outbox: number
     cursors: {
       [key: string]: number
     }
     lastSuccessAt?: number
     error?: string
+    diagnostic?: {
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect"
+      operation?: "list" | "stat" | "download" | "upload" | "delete"
+      kind?:
+        | "unauthenticated"
+        | "permission"
+        | "not-found"
+        | "conflict"
+        | "rate-limit"
+        | "network"
+        | "provider"
+        | "cancelled"
+        | "invalid-response"
+      retryable: boolean
+      outcome?: "failed" | "unknown"
+      retryAfter?: number
+      message: string
+    }
   }
 }
 
@@ -7741,9 +8723,9 @@ export type GlobalSyncNowErrors = {
    */
   400: BadRequestError
   /**
-   * ServiceUnavailable
+   * SyncControlApiError
    */
-  503: EffectHttpApiErrorServiceUnavailable
+  503: SyncControlApiError
 }
 
 export type GlobalSyncNowError = GlobalSyncNowErrors[keyof GlobalSyncNowErrors]
@@ -7864,9 +8846,6 @@ export type GlobalSyncDevicesResponses = {
       updatedAt: number
       revoked: boolean
     }>
-    bindings: {
-      [key: string]: string
-    }
   }
 }
 
@@ -7905,53 +8884,10 @@ export type GlobalSyncDeviceUpdateResponses = {
       updatedAt: number
       revoked: boolean
     }>
-    bindings: {
-      [key: string]: string
-    }
   }
 }
 
 export type GlobalSyncDeviceUpdateResponse = GlobalSyncDeviceUpdateResponses[keyof GlobalSyncDeviceUpdateResponses]
-
-export type GlobalSyncBindingUpdateData = {
-  body?: {
-    label: string
-    targetID?: string
-  }
-  path?: never
-  query?: never
-  url: "/global/sync/bindings"
-}
-
-export type GlobalSyncBindingUpdateErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type GlobalSyncBindingUpdateError = GlobalSyncBindingUpdateErrors[keyof GlobalSyncBindingUpdateErrors]
-
-export type GlobalSyncBindingUpdateResponses = {
-  /**
-   * Success
-   */
-  200: {
-    version: 1
-    devices: Array<{
-      id: string
-      name: string
-      revision: number
-      updatedAt: number
-      revoked: boolean
-    }>
-    bindings: {
-      [key: string]: string
-    }
-  }
-}
-
-export type GlobalSyncBindingUpdateResponse = GlobalSyncBindingUpdateResponses[keyof GlobalSyncBindingUpdateResponses]
 
 export type GlobalSyncRecoveryExportData = {
   body?: never
@@ -7984,43 +8920,6 @@ export type GlobalSyncRecoveryExportResponses = {
 
 export type GlobalSyncRecoveryExportResponse =
   GlobalSyncRecoveryExportResponses[keyof GlobalSyncRecoveryExportResponses]
-
-export type GlobalSyncResetData = {
-  body?: never
-  path?: never
-  query?: never
-  url: "/global/sync/reset"
-}
-
-export type GlobalSyncResetErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type GlobalSyncResetError = GlobalSyncResetErrors[keyof GlobalSyncResetErrors]
-
-export type GlobalSyncResetResponses = {
-  /**
-   * Success
-   */
-  200: {
-    config: {
-      version: 1
-      provider: "baidu"
-      namespaceID: string
-      deviceID: string
-      deviceName: string
-      enabled: boolean
-      intervalSeconds: number
-      remoteRoot: string
-    }
-    recoveryString: string
-  }
-}
-
-export type GlobalSyncResetResponse = GlobalSyncResetResponses[keyof GlobalSyncResetResponses]
 
 export type GlobalDisposeData = {
   body?: never
@@ -9648,6 +10547,7 @@ export type PtyListResponse = PtyListResponses[keyof PtyListResponses]
 
 export type PtyCreateData = {
   body?: {
+    sessionID?: string
     command?: string
     args?: Array<string>
     cwd?: string
@@ -9789,6 +10689,42 @@ export type PtyUpdateResponses = {
 }
 
 export type PtyUpdateResponse = PtyUpdateResponses[keyof PtyUpdateResponses]
+
+export type PtyRestartData = {
+  body?: {
+    sessionID?: string
+  }
+  path: {
+    ptyID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/pty/{ptyID}/restart"
+}
+
+export type PtyRestartErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * PtyNotFoundError
+   */
+  404: PtyNotFoundError
+}
+
+export type PtyRestartError = PtyRestartErrors[keyof PtyRestartErrors]
+
+export type PtyRestartResponses = {
+  /**
+   * Restarted session
+   */
+  200: Pty
+}
+
+export type PtyRestartResponse = PtyRestartResponses[keyof PtyRestartResponses]
 
 export type PtyConnectTokenData = {
   body?: never
@@ -10211,6 +11147,7 @@ export type SessionCreateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
+    approvalMode?: ApprovalMode
     workspaceID?: string
   }
   path?: never
@@ -10344,6 +11281,7 @@ export type SessionUpdateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
+    approvalMode?: ApprovalMode
     time?: {
       archived?: number
     }
@@ -10463,9 +11401,13 @@ export type SessionDiffData = {
 
 export type SessionDiffErrors = {
   /**
-   * Bad request
+   * BadRequest | InvalidRequestError
    */
-  400: BadRequestError
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
 }
 
 export type SessionDiffError = SessionDiffErrors[keyof SessionDiffErrors]
@@ -11060,6 +12002,9 @@ export type SessionShellCompletionResponses = {
       kind: "command" | "file" | "directory" | "alias" | "function" | "option" | "argument"
       description?: string
     }>
+    degraded?: {
+      reason: "native_unavailable" | "native_timeout" | "native_failed"
+    }
   }
 }
 
@@ -12155,6 +13100,7 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
+    approvalMode?: ApprovalMode
   }
   path?: never
   query?: never
@@ -12748,7 +13694,7 @@ export type V2SessionMessageErrors = {
   /**
    * SessionNotFoundError | MessageNotFoundError
    */
-  404: MessageNotFoundError | SessionNotFoundError
+  404: SessionNotFoundError | MessageNotFoundError
 }
 
 export type V2SessionMessageError = V2SessionMessageErrors[keyof V2SessionMessageErrors]
@@ -13911,6 +14857,7 @@ export type V2PtyListResponse = V2PtyListResponses[keyof V2PtyListResponses]
 
 export type V2PtyCreateData = {
   body: {
+    sessionID?: string
     command?: string
     args?: Array<string>
     cwd?: string
@@ -14089,6 +15036,52 @@ export type V2PtyUpdateResponses = {
 }
 
 export type V2PtyUpdateResponse = V2PtyUpdateResponses[keyof V2PtyUpdateResponses]
+
+export type V2PtyRestartData = {
+  body: {
+    sessionID?: string
+  }
+  path: {
+    ptyID: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+  }
+  url: "/api/pty/{ptyID}/restart"
+}
+
+export type V2PtyRestartErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * PtyNotFoundError
+   */
+  404: PtyNotFoundError
+}
+
+export type V2PtyRestartError = V2PtyRestartErrors[keyof V2PtyRestartErrors]
+
+export type V2PtyRestartResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: Pty
+  }
+}
+
+export type V2PtyRestartResponse = V2PtyRestartResponses[keyof V2PtyRestartResponses]
 
 export type V2PtyConnectTokenData = {
   body?: never
@@ -14586,9 +15579,9 @@ export type V2TargetCreateErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -14693,9 +15686,9 @@ export type V2SessionLocationResolveErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -14739,9 +15732,9 @@ export type V2TargetBindingListErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -14762,6 +15755,56 @@ export type V2TargetBindingListResponses = {
 }
 
 export type V2TargetBindingListResponse = V2TargetBindingListResponses[keyof V2TargetBindingListResponses]
+
+export type V2TargetBindingUnbindData = {
+  body: {
+    expectedRevision: string
+    expectedSessionIDs: Array<string>
+  }
+  path: {
+    portableTargetLabel: string
+  }
+  query?: never
+  url: "/api/target-binding/{portableTargetLabel}"
+}
+
+export type V2TargetBindingUnbindErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * SessionNotFoundError | TargetNotFoundError
+   */
+  404: SessionNotFoundError | TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetBindingUnbindError = V2TargetBindingUnbindErrors[keyof V2TargetBindingUnbindErrors]
+
+export type V2TargetBindingUnbindResponses = {
+  /**
+   * SessionLocationRebinding.PortableBindingSnapshot
+   */
+  200: SessionLocationRebindingPortableBindingSnapshot
+}
+
+export type V2TargetBindingUnbindResponse = V2TargetBindingUnbindResponses[keyof V2TargetBindingUnbindResponses]
 
 export type V2TargetBindingBindData = {
   body: {
@@ -14790,9 +15833,9 @@ export type V2TargetBindingBindErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -14807,9 +15850,9 @@ export type V2TargetBindingBindError = V2TargetBindingBindErrors[keyof V2TargetB
 
 export type V2TargetBindingBindResponses = {
   /**
-   * SessionLocationRebinding.PortableBindingSnapshot
+   * SessionLocationRebinding.PortableBindingRecoveryResult
    */
-  200: SessionLocationRebindingPortableBindingSnapshot
+  200: SessionLocationRebindingPortableBindingRecoveryResult
 }
 
 export type V2TargetBindingBindResponse = V2TargetBindingBindResponses[keyof V2TargetBindingBindResponses]
@@ -14837,9 +15880,9 @@ export type V2SessionLocationRebindErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -14905,9 +15948,9 @@ export type V2TargetWizardInspectErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -14978,9 +16021,9 @@ export type V2TargetWizardCompleteErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15031,9 +16074,9 @@ export type V2TargetRemoveErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15136,9 +16179,9 @@ export type V2TargetUpdateErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15268,9 +16311,9 @@ export type V2TargetRestoreErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15285,69 +16328,9 @@ export type V2TargetRestoreError = V2TargetRestoreErrors[keyof V2TargetRestoreEr
 
 export type V2TargetRestoreResponses = {
   /**
-   * Success
+   * SessionLocationRebinding.RestoreResult
    */
-  200: {
-    target: {
-      id: string
-      status: "unverified"
-      name: string
-      transport: "ssh"
-      connection:
-        | {
-            type: "ssh-config"
-            host: string
-          }
-        | {
-            type: "manual"
-            host: string
-            user: string
-            port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-            identityFile?: string
-          }
-      defaultDirectory?: string
-      workspaceRoots: Array<string>
-      command?: {
-        program: string
-        args: Array<string>
-      }
-    }
-    snapshot: {
-      path: string
-      revision: string
-      targets: Array<{
-        id: string
-        status: "unverified"
-        name: string
-        transport: "ssh"
-        connection:
-          | {
-              type: "ssh-config"
-              host: string
-            }
-          | {
-              type: "manual"
-              host: string
-              user: string
-              port: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-              identityFile?: string
-            }
-        defaultDirectory?: string
-        workspaceRoots: Array<string>
-        command?: {
-          program: string
-          args: Array<string>
-        }
-      }>
-      diagnostics: Array<{
-        severity: "error" | "warning"
-        path: string
-        message: string
-        offset?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-      }>
-      valid: boolean
-    }
-  }
+  200: SessionLocationRebindingRestoreResult
 }
 
 export type V2TargetRestoreResponse = V2TargetRestoreResponses[keyof V2TargetRestoreResponses]
@@ -15375,9 +16358,9 @@ export type V2TargetTestErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15431,9 +16414,9 @@ export type V2TargetPrepareErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15554,9 +16537,9 @@ export type V2TargetLegacyImportErrors = {
    */
   403: ForbiddenError
   /**
-   * TargetNotFoundError
+   * SessionNotFoundError | TargetNotFoundError
    */
-  404: TargetNotFoundError
+  404: SessionNotFoundError | TargetNotFoundError
   /**
    * ConflictError
    */
@@ -15789,15 +16772,11 @@ export type V2EnvironmentRevealResponse = V2EnvironmentRevealResponses[keyof V2E
 
 export type V2EnvironmentInitData = {
   body?: never
-  path?: never
-  query?: {
-    location?: {
-      directory?: string
-      workspace?: string
-      target?: string
-    }
+  path: {
+    sessionID: string
   }
-  url: "/api/environment/init"
+  query?: never
+  url: "/api/session/{sessionID}/environment/init"
 }
 
 export type V2EnvironmentInitErrors = {
@@ -15809,6 +16788,10 @@ export type V2EnvironmentInitErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
 }
 
 export type V2EnvironmentInitError = V2EnvironmentInitErrors[keyof V2EnvironmentInitErrors]
@@ -15819,9 +16802,16 @@ export type V2EnvironmentInitResponses = {
    */
   200: {
     location: LocationInfo
-    data: {
-      status: "created" | "existing"
-    }
+    data:
+      | {
+          status: "completed"
+          template: "created" | "existing"
+          generation: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      | {
+          status: "cancelled" | "failed"
+          template: "created" | "existing"
+        }
   }
 }
 

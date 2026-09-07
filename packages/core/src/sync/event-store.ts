@@ -20,6 +20,7 @@ export class DivergentEventError extends Schema.TaggedErrorClass<DivergentEventE
 ) {}
 
 export interface Interface {
+  readonly scope: (spaceID: string) => Interface
   readonly enqueue: (event: SyncEvent.Envelope, createdAt?: number) => Effect.Effect<void, unknown>
   readonly delete: (tombstone: SyncEvent.Tombstone, createdAt?: number) => Effect.Effect<void, unknown>
   readonly pending: (limit: number) => Effect.Effect<ReadonlyArray<SyncEvent.Envelope>, unknown>
@@ -40,6 +41,11 @@ export interface Interface {
     projector: SyncEvent.DurableProjector,
   ) => Effect.Effect<void, unknown>
   readonly pendingApply: () => Effect.Effect<ReadonlyArray<SyncEvent.Segment>, unknown>
+  readonly deletions: () => Effect.Effect<ReadonlyArray<SyncEvent.Tombstone>, unknown>
+  readonly absorbDeletions: (
+    tombstones: readonly SyncEvent.Tombstone[],
+    projector: SyncEvent.DurableProjector,
+  ) => Effect.Effect<void, unknown>
   readonly acquire: (name: string, owner: string, ttl: number, now?: number) => Effect.Effect<boolean, unknown>
   readonly renew: (name: string, owner: string, ttl: number, now?: number) => Effect.Effect<boolean, unknown>
   readonly release: (name: string, owner: string) => Effect.Effect<void, unknown>
@@ -61,412 +67,467 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const db = (yield* SyncDatabase.Service).db
 
-    const enqueue = Effect.fn("SyncEventStore.enqueue")(function* (event: SyncEvent.Envelope, createdAt = Date.now()) {
-      yield* db.transaction(
-        (tx) =>
-          Effect.gen(function* () {
-            const deleted = yield* tx.get(sql`
-              SELECT 1 FROM sync_deletion_set WHERE session_id = ${event.aggregateID}
+    const scoped = (spaceID: string): Interface => {
+      const enqueue = Effect.fn("SyncEventStore.enqueue")(function* (
+        event: SyncEvent.Envelope,
+        createdAt = Date.now(),
+      ) {
+        yield* db.transaction(
+          (tx) =>
+            Effect.gen(function* () {
+              const deleted = yield* tx.get(sql`
+              SELECT 1 FROM sync_deletion_set WHERE session_id = ${event.aggregateID} AND space_id = ${spaceID}
             `)
-            if (deleted) return
-            const payload = encodeEvent(event)
-            yield* tx.run(sql`
-              INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind)
-              VALUES (${event.id}, ${event.aggregateID}, ${event.seq}, ${payload}, ${createdAt}, 'event')
-              ON CONFLICT(event_id) DO NOTHING
+              if (deleted) return
+              const payload = encodeEvent(event)
+              yield* tx.run(sql`
+              INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind, space_id)
+              VALUES (${event.id}, ${event.aggregateID}, ${event.seq}, ${payload}, ${createdAt}, 'event', ${spaceID})
+              ON CONFLICT(space_id, event_id) DO NOTHING
             `)
-            const stored = yield* tx.get<OutboxRow>(sql`
-              SELECT payload FROM sync_event_outbox WHERE event_id = ${event.id}
+              const stored = yield* tx.get<OutboxRow>(sql`
+              SELECT payload FROM sync_event_outbox WHERE event_id = ${event.id} AND space_id = ${spaceID}
             `)
-            if (stored?.payload !== payload)
-              return yield* Effect.die(new Error(`Sync outbox event ${event.id} has divergent payload`))
-          }),
-        { behavior: "immediate" },
-      )
-    })
+              if (stored?.payload !== payload)
+                return yield* Effect.die(new Error(`Sync outbox event ${event.id} has divergent payload`))
+            }),
+          { behavior: "immediate" },
+        )
+      })
 
-    const remove = Effect.fn("SyncEventStore.delete")(function* (
-      tombstone: SyncEvent.Tombstone,
-      createdAt = Date.now(),
-    ) {
-      yield* db.transaction(
-        (tx) =>
-          Effect.gen(function* () {
-            const payload = canonical(tombstone)
-            yield* tx.run(sql`
+      const remove = Effect.fn("SyncEventStore.delete")(function* (
+        tombstone: SyncEvent.Tombstone,
+        createdAt = Date.now(),
+      ) {
+        yield* db.transaction(
+          (tx) =>
+            Effect.gen(function* () {
+              const payload = canonical(tombstone)
+              yield* tx.run(sql`
               DELETE FROM sync_event_outbox
-              WHERE aggregate_id = ${tombstone.sessionID} AND segment_id IS NULL
+              WHERE aggregate_id = ${tombstone.sessionID} AND segment_id IS NULL AND space_id = ${spaceID}
             `)
-            yield* tx.run(sql`
-              INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind)
-              VALUES (${tombstone.id}, ${tombstone.sessionID}, 0, ${payload}, ${createdAt}, 'tombstone')
-              ON CONFLICT(event_id) DO NOTHING
+              yield* tx.run(sql`
+              INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind, space_id)
+              VALUES (${tombstone.id}, ${tombstone.sessionID}, 0, ${payload}, ${createdAt}, 'tombstone', ${spaceID})
+              ON CONFLICT(space_id, event_id) DO NOTHING
             `)
-            const stored = yield* tx.get<OperationRow>(sql`
-              SELECT payload, kind FROM sync_event_outbox WHERE event_id = ${tombstone.id}
+              const stored = yield* tx.get<OperationRow>(sql`
+              SELECT payload, kind FROM sync_event_outbox WHERE event_id = ${tombstone.id} AND space_id = ${spaceID}
             `)
-            if (stored?.payload !== payload || stored.kind !== "tombstone")
-              return yield* Effect.die(new Error(`Sync tombstone ${tombstone.id} has divergent payload`))
-            yield* tx.run(sql`
-              INSERT INTO sync_deletion_set (session_id, marker, deleted_at)
-              VALUES (${tombstone.sessionID}, ${payload}, ${tombstone.deletedAt})
-              ON CONFLICT(session_id) DO NOTHING
+              if (stored?.payload !== payload || stored.kind !== "tombstone")
+                return yield* Effect.die(new Error(`Sync tombstone ${tombstone.id} has divergent payload`))
+              yield* tx.run(sql`
+              INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
+              VALUES (${tombstone.sessionID}, ${payload}, ${tombstone.deletedAt}, ${spaceID})
+              ON CONFLICT(space_id, session_id) DO NOTHING
             `)
-          }),
-        { behavior: "immediate" },
-      )
-    })
+            }),
+          { behavior: "immediate" },
+        )
+      })
 
-    const pending = Effect.fn("SyncEventStore.pending")(function* (limit: number) {
-      const rows = yield* db.all<OutboxRow>(sql`
+      const pending = Effect.fn("SyncEventStore.pending")(function* (limit: number) {
+        const rows = yield* db.all<OutboxRow>(sql`
         SELECT payload FROM sync_event_outbox
-        WHERE segment_id IS NULL AND kind = 'event'
+        WHERE segment_id IS NULL AND kind = 'event' AND space_id = ${spaceID}
         ORDER BY created_at, event_id
         LIMIT ${limit}
       `)
-      return rows.map((row) => decodeEvent(row.payload))
-    })
+        return rows.map((row) => decodeEvent(row.payload))
+      })
 
-    const seal = Effect.fn("SyncEventStore.seal")(function* (
-      deviceID: SyncEvent.DeviceID,
-      limit: number,
-      createdAt = Date.now(),
-    ) {
-      return yield* db.transaction(
-        (tx) =>
-          Effect.gen(function* () {
-            const existing = yield* tx.get<SegmentRow>(sql`
+      const seal = Effect.fn("SyncEventStore.seal")(function* (
+        deviceID: SyncEvent.DeviceID,
+        limit: number,
+        createdAt = Date.now(),
+      ) {
+        return yield* db.transaction(
+          (tx) =>
+            Effect.gen(function* () {
+              const existing = yield* tx.get<SegmentRow>(sql`
               SELECT payload FROM sync_event_segment
-              WHERE device_id = ${deviceID} AND acknowledged_at IS NULL
+              WHERE device_id = ${deviceID} AND acknowledged_at IS NULL AND space_id = ${spaceID}
               ORDER BY generation
               LIMIT 1
             `)
-            if (existing) return decodeSegment(existing.payload)
-            const rows = yield* tx.all<OperationRow>(sql`
+              if (existing) return decodeSegment(existing.payload)
+              const rows = yield* tx.all<OperationRow>(sql`
               SELECT payload, kind FROM sync_event_outbox
-              WHERE segment_id IS NULL
+              WHERE segment_id IS NULL AND space_id = ${spaceID}
               ORDER BY created_at, event_id
               LIMIT ${limit}
             `)
-            if (rows.length === 0) return undefined
-            const generation =
-              (yield* tx.get<NumberRow>(sql`
-                SELECT MAX(generation) AS value FROM sync_event_segment WHERE device_id = ${deviceID}
+              if (rows.length === 0) return undefined
+              const generation =
+                (yield* tx.get<NumberRow>(sql`
+                SELECT MAX(generation) AS value FROM sync_event_segment WHERE device_id = ${deviceID} AND space_id = ${spaceID}
               `))?.value ?? 0
-            const next = generation + 1
-            const segment = SyncEvent.Segment.make({
-              version: 1,
-              id: SyncEvent.SegmentID.make(`${deviceID}:${next}`),
-              deviceID,
-              generation: next,
-              createdAt,
-              operations: rows.map((row) =>
-                row.kind === "tombstone"
-                  ? { kind: "tombstone" as const, tombstone: decodeTombstone(row.payload) }
-                  : { kind: "event" as const, event: decodeEvent(row.payload) },
-              ),
-            })
-            const payload = encodeSegment(segment)
-            yield* tx.run(sql`
-              INSERT INTO sync_event_segment (id, device_id, generation, payload, created_at)
-              VALUES (${segment.id}, ${deviceID}, ${next}, ${payload}, ${createdAt})
+              const next = generation + 1
+              const segment = SyncEvent.Segment.make({
+                version: 1,
+                id: SyncEvent.SegmentID.make(`${deviceID}:${next}`),
+                deviceID,
+                generation: next,
+                createdAt,
+                operations: rows.map((row) =>
+                  row.kind === "tombstone"
+                    ? { kind: "tombstone" as const, tombstone: decodeTombstone(row.payload) }
+                    : { kind: "event" as const, event: decodeEvent(row.payload) },
+                ),
+              })
+              const payload = encodeSegment(segment)
+              yield* tx.run(sql`
+              INSERT INTO sync_event_segment (id, device_id, generation, payload, created_at, space_id)
+              VALUES (${segment.id}, ${deviceID}, ${next}, ${payload}, ${createdAt}, ${spaceID})
             `)
-            yield* tx.run(sql`
+              yield* tx.run(sql`
               UPDATE sync_event_outbox SET segment_id = ${segment.id}
               WHERE event_id IN (SELECT value FROM json_each(${JSON.stringify(segment.operations.map(operationID))}))
+                AND space_id = ${spaceID}
             `)
-            return segment
-          }),
-        { behavior: "immediate" },
-      )
-    })
+              return segment
+            }),
+          { behavior: "immediate" },
+        )
+      })
 
-    const acknowledge = Effect.fn("SyncEventStore.acknowledge")(function* (segmentID: SyncEvent.SegmentID) {
-      yield* db.transaction((tx) =>
-        Effect.gen(function* () {
-          yield* tx.run(sql`
+      const acknowledge = Effect.fn("SyncEventStore.acknowledge")(function* (segmentID: SyncEvent.SegmentID) {
+        yield* db.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.run(sql`
             UPDATE sync_event_segment SET acknowledged_at = ${Date.now()}
-            WHERE id = ${segmentID} AND acknowledged_at IS NULL
+            WHERE id = ${segmentID} AND acknowledged_at IS NULL AND space_id = ${spaceID}
           `)
-          yield* tx.run(sql`
-            INSERT INTO sync_event_head (device_id, generation)
-            SELECT device_id, generation FROM sync_event_segment WHERE id = ${segmentID}
-            ON CONFLICT(device_id) DO UPDATE SET generation = MAX(generation, excluded.generation)
+            yield* tx.run(sql`
+            INSERT INTO sync_event_head (device_id, generation, space_id)
+            SELECT device_id, generation, space_id FROM sync_event_segment WHERE id = ${segmentID} AND space_id = ${spaceID}
+            ON CONFLICT(space_id, device_id) DO UPDATE SET generation = MAX(generation, excluded.generation)
           `)
-          yield* tx.run(sql`DELETE FROM sync_event_outbox WHERE segment_id = ${segmentID}`)
-        }),
-      )
-    })
+            yield* tx.run(sql`DELETE FROM sync_event_outbox WHERE segment_id = ${segmentID} AND space_id = ${spaceID}`)
+          }),
+        )
+      })
 
-    const head = Effect.fn("SyncEventStore.head")(function* (deviceID: SyncEvent.DeviceID) {
-      return (
-        (yield* db.get<NumberRow>(sql`
-          SELECT generation AS value FROM sync_event_head WHERE device_id = ${deviceID}
+      const head = Effect.fn("SyncEventStore.head")(function* (deviceID: SyncEvent.DeviceID) {
+        return (
+          (yield* db.get<NumberRow>(sql`
+          SELECT generation AS value FROM sync_event_head WHERE device_id = ${deviceID} AND space_id = ${spaceID}
         `))?.value ?? 0
-      )
-    })
+        )
+      })
 
-    const cursor = Effect.fn("SyncEventStore.cursor")(function* (deviceID: SyncEvent.DeviceID) {
-      return (
-        (yield* db.get<NumberRow>(sql`
-          SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${deviceID}
+      const cursor = Effect.fn("SyncEventStore.cursor")(function* (deviceID: SyncEvent.DeviceID) {
+        return (
+          (yield* db.get<NumberRow>(sql`
+          SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${deviceID} AND space_id = ${spaceID}
         `))?.value ?? 0
-      )
-    })
+        )
+      })
 
-    const apply = Effect.fn("SyncEventStore.apply")(function* (
-      segment: SyncEvent.Segment,
-      projector: SyncEvent.Projector<Transaction>,
-    ) {
-      yield* db.transaction(
-        (tx) =>
-          Effect.gen(function* () {
-            const current =
-              (yield* tx.get<NumberRow>(sql`
-                SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${segment.deviceID}
+      const apply = Effect.fn("SyncEventStore.apply")(function* (
+        segment: SyncEvent.Segment,
+        projector: SyncEvent.Projector<Transaction>,
+      ) {
+        yield* db.transaction(
+          (tx) =>
+            Effect.gen(function* () {
+              const current =
+                (yield* tx.get<NumberRow>(sql`
+                SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${segment.deviceID} AND space_id = ${spaceID}
               `))?.value ?? 0
-            const payload = encodeSegment(segment)
-            const received = segment.generation - 1
-            if (current >= segment.generation) {
-              const stored = yield* tx.get<RemoteSegmentRow>(sql`
+              const payload = encodeSegment(segment)
+              const received = segment.generation - 1
+              if (current >= segment.generation) {
+                const stored = yield* tx.get<RemoteSegmentRow>(sql`
                 SELECT payload FROM sync_remote_segment
-                WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation}
+                WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation} AND space_id = ${spaceID}
               `)
-              if (stored?.payload !== payload)
-                return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
-              return
-            }
-            if (current !== received)
-              return yield* new CursorMismatchError({ deviceID: segment.deviceID, expected: current, received })
-            for (const operation of segment.operations) {
-              const id = operationID(operation)
-              const fingerprint = operationFingerprint(operation)
-              const stored = yield* tx.get<RemoteEventRow>(sql`
+                if (stored?.payload !== payload)
+                  return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
+                return
+              }
+              if (current !== received)
+                return yield* new CursorMismatchError({ deviceID: segment.deviceID, expected: current, received })
+              for (const operation of segment.operations) {
+                const id = operationID(operation)
+                const fingerprint = operationFingerprint(operation)
+                const stored = yield* tx.get<RemoteEventRow>(sql`
                 SELECT fingerprint FROM sync_remote_event
-                WHERE device_id = ${segment.deviceID} AND event_id = ${id}
+                WHERE device_id = ${segment.deviceID} AND event_id = ${id} AND space_id = ${spaceID}
               `)
-              if (stored?.fingerprint === fingerprint) continue
-              if (stored) return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
-              if (operation.kind === "tombstone") {
-                const marker = canonical(operation.tombstone)
+                if (stored?.fingerprint === fingerprint) continue
+                if (stored) return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
+                if (operation.kind === "tombstone") {
+                  const marker = canonical(operation.tombstone)
+                  yield* tx.run(sql`
+                  INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
+                  VALUES (${operation.tombstone.sessionID}, ${marker}, ${operation.tombstone.deletedAt}, ${spaceID})
+                  ON CONFLICT(space_id, session_id) DO NOTHING
+                `)
+                  yield* projector.delete(tx, operation.tombstone)
+                } else {
+                  const deleted = yield* tx.get(sql`
+                  SELECT 1 FROM sync_deletion_set WHERE session_id = ${operation.event.aggregateID} AND space_id = ${spaceID}
+                `)
+                  if (!deleted) yield* projector.project(tx, operation.event)
+                }
                 yield* tx.run(sql`
-                  INSERT INTO sync_deletion_set (session_id, marker, deleted_at)
-                  VALUES (${operation.tombstone.sessionID}, ${marker}, ${operation.tombstone.deletedAt})
-                  ON CONFLICT(session_id) DO NOTHING
-                `)
-                yield* projector.delete(tx, operation.tombstone)
-              } else {
-                const deleted = yield* tx.get(sql`
-                  SELECT 1 FROM sync_deletion_set WHERE session_id = ${operation.event.aggregateID}
-                `)
-                if (!deleted) yield* projector.project(tx, operation.event)
+                INSERT INTO sync_remote_event (device_id, event_id, fingerprint, space_id)
+                VALUES (${segment.deviceID}, ${id}, ${fingerprint}, ${spaceID})
+              `)
               }
               yield* tx.run(sql`
-                INSERT INTO sync_remote_event (device_id, event_id, fingerprint)
-                VALUES (${segment.deviceID}, ${id}, ${fingerprint})
-              `)
-            }
-            yield* tx.run(sql`
-              INSERT INTO sync_remote_segment (device_id, generation, payload)
-              VALUES (${segment.deviceID}, ${segment.generation}, ${payload})
+              INSERT INTO sync_remote_segment (device_id, generation, payload, space_id)
+              VALUES (${segment.deviceID}, ${segment.generation}, ${payload}, ${spaceID})
             `)
-            yield* tx.run(sql`
-              INSERT INTO sync_event_cursor (device_id, cursor)
-              VALUES (${segment.deviceID}, ${segment.generation})
-              ON CONFLICT(device_id) DO UPDATE SET cursor = excluded.cursor
+              yield* tx.run(sql`
+              INSERT INTO sync_event_cursor (device_id, cursor, space_id)
+              VALUES (${segment.deviceID}, ${segment.generation}, ${spaceID})
+              ON CONFLICT(space_id, device_id) DO UPDATE SET cursor = excluded.cursor
             `)
-          }),
-        { behavior: "immediate" },
-      )
-    })
+            }),
+          { behavior: "immediate" },
+        )
+      })
 
-    const pendingApply = Effect.fn("SyncEventStore.pendingApply")(function* () {
-      const rows = yield* db.all<ApplyJournalRow>(sql`
-        SELECT payload FROM sync_apply_journal ORDER BY device_id, generation
+      const pendingApply = Effect.fn("SyncEventStore.pendingApply")(function* () {
+        const rows = yield* db.all<ApplyJournalRow>(sql`
+        SELECT payload FROM sync_apply_journal WHERE space_id = ${spaceID} ORDER BY device_id, generation
       `)
-      return rows.map((row) => decodeSegment(row.payload))
-    })
+        return rows.map((row) => decodeSegment(row.payload))
+      })
 
-    const applyDurable = Effect.fn("SyncEventStore.applyDurable")(function* (
-      segment: SyncEvent.Segment,
-      projector: SyncEvent.DurableProjector,
-    ) {
-      const payload = encodeSegment(segment)
-      const staged = yield* db.transaction(
-        (tx) =>
-          Effect.gen(function* () {
-            const current =
-              (yield* tx.get<NumberRow>(sql`
-                SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${segment.deviceID}
-              `))?.value ?? 0
-            if (current >= segment.generation) {
-              const stored = yield* tx.get<RemoteSegmentRow>(sql`
-                SELECT payload FROM sync_remote_segment
-                WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation}
-              `)
-              if (stored?.payload !== payload)
-                return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
-              return false
-            }
-            const received = segment.generation - 1
-            if (current !== received)
-              return yield* new CursorMismatchError({ deviceID: segment.deviceID, expected: current, received })
-
-            const journal = yield* tx.get<ApplyJournalRow>(sql`
-              SELECT payload FROM sync_apply_journal
-              WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation}
-            `)
-            if (journal && journal.payload !== payload)
-              return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
-
-            const fingerprints = new Map<string, string>()
-            for (const operation of segment.operations) {
-              const id = operationID(operation)
-              const fingerprint = operationFingerprint(operation)
-              const previous = fingerprints.get(id)
-              if (previous !== undefined && previous !== fingerprint)
-                return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
-              fingerprints.set(id, fingerprint)
-              const stored = yield* tx.get<RemoteEventRow>(sql`
-                SELECT fingerprint FROM sync_remote_event
-                WHERE device_id = ${segment.deviceID} AND event_id = ${id}
-              `)
-              if (stored && stored.fingerprint !== fingerprint)
-                return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
-              if (operation.kind === "tombstone") {
-                const marker = canonical(operation.tombstone)
-                yield* tx.run(sql`
-                  INSERT INTO sync_deletion_set (session_id, marker, deleted_at)
-                  VALUES (${operation.tombstone.sessionID}, ${marker}, ${operation.tombstone.deletedAt})
-                  ON CONFLICT(session_id) DO NOTHING
-                `)
-              }
-            }
-            if (!journal)
-              yield* tx.run(sql`
-                INSERT INTO sync_apply_journal (device_id, generation, payload, created_at)
-                VALUES (${segment.deviceID}, ${segment.generation}, ${payload}, ${Date.now()})
-              `)
-            return true
-          }),
-        { behavior: "immediate" },
-      )
-      if (!staged) return
-
-      for (const operation of segment.operations) {
-        if (operation.kind === "tombstone") {
-          yield* projector.delete(operation.tombstone)
-          continue
-        }
-        const deleted = yield* db.get(sql`
-          SELECT 1 FROM sync_deletion_set WHERE session_id = ${operation.event.aggregateID}
+      const deletions = Effect.fn("SyncEventStore.deletions")(function* () {
+        const rows = yield* db.all<OutboxRow>(sql`
+          SELECT marker AS payload FROM sync_deletion_set
+          WHERE space_id = ${spaceID} ORDER BY session_id
         `)
-        if (!deleted) yield* projector.project(operation.event)
-      }
+        return rows.map((row) => decodeTombstone(row.payload))
+      })
 
-      yield* db.transaction(
-        (tx) =>
-          Effect.gen(function* () {
-            const current =
-              (yield* tx.get<NumberRow>(sql`
-                SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${segment.deviceID}
+      const absorbDeletions = Effect.fn("SyncEventStore.absorbDeletions")(function* (
+        tombstones: readonly SyncEvent.Tombstone[],
+        projector: SyncEvent.DurableProjector,
+      ) {
+        yield* db.transaction(
+          (tx) =>
+            Effect.forEach(
+              tombstones,
+              (tombstone) => {
+                const marker = canonical(tombstone)
+                return Effect.all(
+                  [
+                    tx.run(sql`
+                      INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
+                      VALUES (${tombstone.sessionID}, ${marker}, ${tombstone.deletedAt}, ${spaceID})
+                      ON CONFLICT(space_id, session_id) DO NOTHING
+                    `),
+                    tx.run(sql`
+                      DELETE FROM sync_event_outbox
+                      WHERE aggregate_id = ${tombstone.sessionID} AND segment_id IS NULL AND space_id = ${spaceID}
+                    `),
+                  ],
+                  { discard: true },
+                )
+              },
+              { discard: true },
+            ),
+          { behavior: "immediate" },
+        )
+        // The durable projector can live in a different database. Repeating
+        // this idempotent deletion repairs a crash between the monotonic fact
+        // above and removal of the local Session projection.
+        yield* Effect.forEach(tombstones, (tombstone) => projector.delete(tombstone), { discard: true })
+      })
+
+      const applyDurable = Effect.fn("SyncEventStore.applyDurable")(function* (
+        segment: SyncEvent.Segment,
+        projector: SyncEvent.DurableProjector,
+      ) {
+        const payload = encodeSegment(segment)
+        const staged = yield* db.transaction(
+          (tx) =>
+            Effect.gen(function* () {
+              const current =
+                (yield* tx.get<NumberRow>(sql`
+                SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${segment.deviceID} AND space_id = ${spaceID}
               `))?.value ?? 0
-            if (current !== segment.generation - 1)
-              return yield* new CursorMismatchError({
-                deviceID: segment.deviceID,
-                expected: current,
-                received: segment.generation - 1,
-              })
-            const journal = yield* tx.get<ApplyJournalRow>(sql`
-              SELECT payload FROM sync_apply_journal
-              WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation}
-            `)
-            if (journal?.payload !== payload)
-              return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
-            for (const operation of segment.operations) {
-              yield* tx.run(sql`
-                INSERT INTO sync_remote_event (device_id, event_id, fingerprint)
-                VALUES (${segment.deviceID}, ${operationID(operation)}, ${operationFingerprint(operation)})
-                ON CONFLICT(device_id, event_id) DO NOTHING
+              if (current >= segment.generation) {
+                const stored = yield* tx.get<RemoteSegmentRow>(sql`
+                SELECT payload FROM sync_remote_segment
+                WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation} AND space_id = ${spaceID}
               `)
-            }
-            yield* tx.run(sql`
-              INSERT INTO sync_remote_segment (device_id, generation, payload)
-              VALUES (${segment.deviceID}, ${segment.generation}, ${payload})
-            `)
-            yield* tx.run(sql`
-              INSERT INTO sync_event_cursor (device_id, cursor)
-              VALUES (${segment.deviceID}, ${segment.generation})
-              ON CONFLICT(device_id) DO UPDATE SET cursor = excluded.cursor
-            `)
-            yield* tx.run(sql`
-              DELETE FROM sync_apply_journal
-              WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation}
-            `)
-          }),
-        { behavior: "immediate" },
-      )
-    })
+                if (stored?.payload !== payload)
+                  return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
+                return false
+              }
+              const received = segment.generation - 1
+              if (current !== received)
+                return yield* new CursorMismatchError({ deviceID: segment.deviceID, expected: current, received })
 
-    const acquire = Effect.fn("SyncEventStore.acquire")(function* (
-      name: string,
-      owner: string,
-      ttl: number,
-      now = Date.now(),
-    ) {
-      return yield* db.transaction(
-        (tx) =>
-          Effect.gen(function* () {
-            yield* tx.run(sql`DELETE FROM sync_event_lease WHERE name = ${name} AND expires_at <= ${now}`)
-            yield* tx.run(sql`
+              const journal = yield* tx.get<ApplyJournalRow>(sql`
+              SELECT payload FROM sync_apply_journal
+              WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation} AND space_id = ${spaceID}
+            `)
+              if (journal && journal.payload !== payload)
+                return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
+
+              const fingerprints = new Map<string, string>()
+              for (const operation of segment.operations) {
+                const id = operationID(operation)
+                const fingerprint = operationFingerprint(operation)
+                const previous = fingerprints.get(id)
+                if (previous !== undefined && previous !== fingerprint)
+                  return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
+                fingerprints.set(id, fingerprint)
+                const stored = yield* tx.get<RemoteEventRow>(sql`
+                SELECT fingerprint FROM sync_remote_event
+                WHERE device_id = ${segment.deviceID} AND event_id = ${id} AND space_id = ${spaceID}
+              `)
+                if (stored && stored.fingerprint !== fingerprint)
+                  return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
+                if (operation.kind === "tombstone") {
+                  const marker = canonical(operation.tombstone)
+                  yield* tx.run(sql`
+                  INSERT INTO sync_deletion_set (session_id, marker, deleted_at, space_id)
+                  VALUES (${operation.tombstone.sessionID}, ${marker}, ${operation.tombstone.deletedAt}, ${spaceID})
+                  ON CONFLICT(space_id, session_id) DO NOTHING
+                `)
+                }
+              }
+              if (!journal)
+                yield* tx.run(sql`
+                INSERT INTO sync_apply_journal (device_id, generation, payload, created_at, space_id)
+                VALUES (${segment.deviceID}, ${segment.generation}, ${payload}, ${Date.now()}, ${spaceID})
+              `)
+              return true
+            }),
+          { behavior: "immediate" },
+        )
+        if (!staged) return
+
+        for (const operation of segment.operations) {
+          if (operation.kind === "tombstone") {
+            yield* projector.delete(operation.tombstone)
+            continue
+          }
+          const deleted = yield* db.get(sql`
+          SELECT 1 FROM sync_deletion_set WHERE session_id = ${operation.event.aggregateID} AND space_id = ${spaceID}
+        `)
+          if (!deleted) yield* projector.project(operation.event)
+        }
+
+        yield* db.transaction(
+          (tx) =>
+            Effect.gen(function* () {
+              const current =
+                (yield* tx.get<NumberRow>(sql`
+                SELECT cursor AS value FROM sync_event_cursor WHERE device_id = ${segment.deviceID} AND space_id = ${spaceID}
+              `))?.value ?? 0
+              if (current !== segment.generation - 1)
+                return yield* new CursorMismatchError({
+                  deviceID: segment.deviceID,
+                  expected: current,
+                  received: segment.generation - 1,
+                })
+              const journal = yield* tx.get<ApplyJournalRow>(sql`
+              SELECT payload FROM sync_apply_journal
+              WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation} AND space_id = ${spaceID}
+            `)
+              if (journal?.payload !== payload)
+                return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: segment.id })
+              for (const operation of segment.operations) {
+                yield* tx.run(sql`
+                INSERT INTO sync_remote_event (device_id, event_id, fingerprint, space_id)
+                VALUES (${segment.deviceID}, ${operationID(operation)}, ${operationFingerprint(operation)}, ${spaceID})
+                ON CONFLICT(space_id, device_id, event_id) DO NOTHING
+              `)
+              }
+              yield* tx.run(sql`
+              INSERT INTO sync_remote_segment (device_id, generation, payload, space_id)
+              VALUES (${segment.deviceID}, ${segment.generation}, ${payload}, ${spaceID})
+            `)
+              yield* tx.run(sql`
+              INSERT INTO sync_event_cursor (device_id, cursor, space_id)
+              VALUES (${segment.deviceID}, ${segment.generation}, ${spaceID})
+              ON CONFLICT(space_id, device_id) DO UPDATE SET cursor = excluded.cursor
+            `)
+              yield* tx.run(sql`
+              DELETE FROM sync_apply_journal
+              WHERE device_id = ${segment.deviceID} AND generation = ${segment.generation} AND space_id = ${spaceID}
+            `)
+            }),
+          { behavior: "immediate" },
+        )
+      })
+
+      const acquire = Effect.fn("SyncEventStore.acquire")(function* (
+        name: string,
+        owner: string,
+        ttl: number,
+        now = Date.now(),
+      ) {
+        const leaseName = `${spaceID}:${name}`
+        return yield* db.transaction(
+          (tx) =>
+            Effect.gen(function* () {
+              yield* tx.run(sql`DELETE FROM sync_event_lease WHERE name = ${leaseName} AND expires_at <= ${now}`)
+              yield* tx.run(sql`
               INSERT INTO sync_event_lease (name, owner, expires_at)
-              VALUES (${name}, ${owner}, ${now + ttl})
+              VALUES (${leaseName}, ${owner}, ${now + ttl})
               ON CONFLICT(name) DO NOTHING
             `)
-            const lease = yield* tx.get<LeaseRow>(sql`
-              SELECT owner, expires_at FROM sync_event_lease WHERE name = ${name}
+              const lease = yield* tx.get<LeaseRow>(sql`
+              SELECT owner, expires_at FROM sync_event_lease WHERE name = ${leaseName}
             `)
-            return lease?.owner === owner
-          }),
-        { behavior: "immediate" },
-      )
-    })
+              return lease?.owner === owner
+            }),
+          { behavior: "immediate" },
+        )
+      })
 
-    const renew = Effect.fn("SyncEventStore.renew")(function* (
-      name: string,
-      owner: string,
-      ttl: number,
-      now = Date.now(),
-    ) {
-      yield* db.run(sql`
+      const renew = Effect.fn("SyncEventStore.renew")(function* (
+        name: string,
+        owner: string,
+        ttl: number,
+        now = Date.now(),
+      ) {
+        const leaseName = `${spaceID}:${name}`
+        yield* db.run(sql`
         UPDATE sync_event_lease SET expires_at = ${now + ttl}
-        WHERE name = ${name} AND owner = ${owner} AND expires_at > ${now}
+        WHERE name = ${leaseName} AND owner = ${owner} AND expires_at > ${now}
       `)
-      const lease = yield* db.get<LeaseRow>(sql`
-        SELECT owner, expires_at FROM sync_event_lease WHERE name = ${name}
+        const lease = yield* db.get<LeaseRow>(sql`
+        SELECT owner, expires_at FROM sync_event_lease WHERE name = ${leaseName}
       `)
-      return lease?.owner === owner && lease.expires_at === now + ttl
-    })
+        return lease?.owner === owner && lease.expires_at === now + ttl
+      })
 
-    const release = Effect.fn("SyncEventStore.release")(function* (name: string, owner: string) {
-      yield* db.run(sql`DELETE FROM sync_event_lease WHERE name = ${name} AND owner = ${owner}`)
-    })
+      const release = Effect.fn("SyncEventStore.release")(function* (name: string, owner: string) {
+        yield* db.run(sql`DELETE FROM sync_event_lease WHERE name = ${`${spaceID}:${name}`} AND owner = ${owner}`)
+      })
 
-    return {
-      enqueue,
-      delete: remove,
-      pending,
-      seal,
-      acknowledge,
-      head,
-      cursor,
-      apply,
-      applyDurable,
-      pendingApply,
-      acquire,
-      renew,
-      release,
+      return {
+        scope: scoped,
+        enqueue,
+        delete: remove,
+        pending,
+        seal,
+        acknowledge,
+        head,
+        cursor,
+        apply,
+        applyDurable,
+        pendingApply,
+        deletions,
+        absorbDeletions,
+        acquire,
+        renew,
+        release,
+      }
     }
+    return scoped("legacy")
   }).pipe(Effect.orDie),
 )
 

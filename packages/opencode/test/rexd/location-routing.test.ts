@@ -3,7 +3,7 @@ import { FileSystem } from "@opencode-ai/core/filesystem"
 import { Location } from "@opencode-ai/core/location"
 import type { LocationProcess } from "@opencode-ai/core/location-process"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import { Context, Layer } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -14,7 +14,14 @@ import { rexdFilesystemNodes } from "../../src/rexd/location-filesystem"
 import { rexdSessionNode, RexdLocationSession } from "../../src/rexd/location-session"
 import { runRexdProcess } from "../../src/rexd/location-process"
 import { probeTarget } from "../../src/rexd/target-registry"
-import { makeProvider as makeUserShellProvider } from "../../src/session/user-shell-location"
+import {
+  makeProvider as makeUserShellProvider,
+  readExecutionControl,
+  targetShell,
+  wrapExecution,
+} from "../../src/session/user-shell-location"
+import { EXECUTION_TIMEOUT } from "../../src/session/user-shell-runtime"
+import { AppProcess } from "@opencode-ai/core/process"
 
 type Notify = (method: string, params: unknown) => void
 
@@ -231,15 +238,23 @@ describe("Rexd Location routing contract", () => {
 
   test("user shell delegates execution and completion to location services", async () => {
     const executed: string[] = []
+    let executionTimeout = 0
+    let executionEnvironment: Readonly<Record<string, string>> | undefined
     const process = {
-      runShell: (command: string) =>
+      runShell: (command: string, options: { timeout: Duration.Duration; env?: Readonly<Record<string, string>> }) =>
         Effect.sync(() => {
           executed.push(command)
+          executionTimeout = Duration.toMillis(options.timeout)
+          executionEnvironment = options.env
+          const nonce = command.match(/opencode-cwd-([a-f0-9]+)/)?.[1]
+          const output = nonce
+            ? Buffer.from(`remote-shell\0opencode-cwd-${nonce}\0/workspace/child\0`)
+            : Buffer.from("remote-shell")
           return {
             command,
             exitCode: 0,
-            output: Buffer.from("remote-shell"),
-            stdout: Buffer.from("remote-shell"),
+            output,
+            stdout: output,
             stderr: Buffer.alloc(0),
             outputTruncated: false,
             stdoutTruncated: false,
@@ -272,18 +287,40 @@ describe("Rexd Location routing contract", () => {
       shell.execute({
         command: "pwd",
         cwd: "/workspace",
-        environment: {},
+        environment: { SHELL: "/bin/zsh", BASH_ENV: "/target/.bash_env", ENV: "/target/.sh_env" },
         signal: new AbortController().signal,
         onOutput: (value) => Effect.sync(() => void output.push(value)),
       }),
     )
     expect(result.exitCode).toBe(0)
-    expect(executed).toEqual(["pwd"])
+    expect(result.finalCwd).toBe("/workspace/child")
+    expect(executed).toHaveLength(1)
+    expect(executed[0]).toStartWith("'/bin/zsh' '-f' '-c'")
+    expect(executed[0]).toContain("{ pwd")
+    expect(executionEnvironment).toMatchObject({ SHELL: "/bin/zsh", BASH_ENV: "", ENV: "" })
+    expect(executed[0]).toContain("pwd -P")
+    expect(executionTimeout).toBe(Duration.toMillis(EXECUTION_TIMEOUT))
     expect(output).toEqual(["remote-shell"])
     const completion = await Effect.runPromise(
       shell.complete({ input: "rem", cursor: 3, cwd: "/workspace", environment: {} }),
     )
-    expect(completion.map((item) => item.value)).toEqual(["remote.txt", "remote-dir/"])
+    expect(completion.candidates.map((item) => item.value)).toEqual(["remote-dir/", "remote.txt"])
+  })
+
+  test("remote user shell control framing is nonce-bound and never enters visible output", () => {
+    const nonce = "0123456789abcdef"
+    const wrapped = wrapExecution("cd child; false", nonce)
+    expect(wrapped).toContain("cd child; false")
+    expect(wrapped).toContain(`opencode-cwd-${nonce}`)
+
+    expect(readExecutionControl(`visible\0opencode-cwd-${nonce}\0/workspace/child\0`, nonce)).toEqual({
+      output: "visible",
+      finalCwd: "/workspace/child",
+    })
+    expect(readExecutionControl("visible\0opencode-cwd-fixed\0/controller\0", nonce)).toEqual({
+      output: "visible\0opencode-cwd-fixed\0/controller\0",
+    })
+    expect(readExecutionControl(`visible\0opencode-cwd-${nonce}\0broken`, nonce)).toEqual({ output: "visible" })
   })
 
   test("remote user shell loads native completion on the target", async () => {
@@ -329,13 +366,147 @@ describe("Rexd Location routing contract", () => {
         environment: { SHELL: "/bin/bash" },
       }),
     )
-    expect(executed[0]).toContain("/bin/bash")
-    expect(completion).toContainEqual({
+    expect(executed.some((command) => command.includes("/bin/bash"))).toBe(true)
+    expect(completion.candidates).toContainEqual({
       value: "--format=json",
       display: "--format=json",
       replacement: { start: 4, end: 8 },
       kind: "option",
     })
+  })
+
+  test("remote user shell returns PATH fallback and a structured native timeout", async () => {
+    const process = {
+      runShell: (command: string) =>
+        command.includes("__opencode_prefix")
+          ? Effect.succeed({
+              command,
+              exitCode: 0,
+              output: Buffer.alloc(0),
+              stdout: Buffer.from("__OPENCODE_COMMAND__\thammer-tool\n"),
+              stderr: Buffer.alloc(0),
+              outputTruncated: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            })
+          : Effect.fail(new AppProcess.AppProcessError({ command, cause: new Error("Timed out") })),
+    } as LocationProcess.Interface
+    const filesystem = FileSystem.Service.of({
+      list: () => Effect.succeed([]),
+      find: () => Effect.succeed([]),
+      glob: () => Effect.succeed([]),
+      grep: () => Effect.succeed([]),
+      read: () => Effect.die("not used"),
+      directoryStatus: () => Effect.die("not used"),
+      ensureDirectory: () => Effect.die("not used"),
+    })
+    const location = Location.Service.of({
+      target: { type: "rexd", targetID },
+      directory: AbsolutePath.make("/workspace"),
+      workspaceID: "workspace" as never,
+      project: { id: "project" as never, directory: AbsolutePath.make("/workspace") },
+    })
+    const result = await Effect.runPromise(
+      makeUserShellProvider(process, filesystem, location).complete({
+        input: "hammer",
+        cursor: 6,
+        cwd: "/workspace",
+        environment: { SHELL: "/bin/bash", PATH: "/usr/bin" },
+      }),
+    )
+    expect(result.degraded).toEqual({ reason: "native_timeout" })
+    expect(result.candidates.map((candidate) => candidate.value)).toEqual(["hammer-tool"])
+  })
+
+  test("remote user shell omits PATH command fallback for an argument", async () => {
+    const executed: string[] = []
+    const process = {
+      runShell: (command: string) =>
+        Effect.sync(() => {
+          executed.push(command)
+          return {
+            command,
+            exitCode: 0,
+            output: Buffer.alloc(0),
+            stdout: Buffer.from("__OPENCODE_COMMAND__\thammer-tool\n"),
+            stderr: Buffer.alloc(0),
+            outputTruncated: false,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          }
+        }),
+    } as LocationProcess.Interface
+    const filesystem = FileSystem.Service.of({
+      list: () => Effect.succeed([FileSystem.Entry.make({ path: RelativePath.make("hammer-path"), type: "file" })]),
+      find: () => Effect.succeed([]),
+      glob: () => Effect.succeed([]),
+      grep: () => Effect.succeed([]),
+      read: () => Effect.die("not used"),
+      directoryStatus: () => Effect.die("not used"),
+      ensureDirectory: () => Effect.die("not used"),
+    })
+    const location = Location.Service.of({
+      target: { type: "rexd", targetID },
+      directory: AbsolutePath.make("/workspace"),
+      workspaceID: "workspace" as never,
+      project: { id: "project" as never, directory: AbsolutePath.make("/workspace") },
+    })
+    const result = await Effect.runPromise(
+      makeUserShellProvider(process, filesystem, location).complete({
+        input: "git ham",
+        cursor: 7,
+        cwd: "/workspace",
+        environment: { SHELL: "/bin/sh", PATH: "/usr/bin" },
+      }),
+    )
+    expect(executed).toEqual([])
+    expect(result.candidates.map((candidate) => candidate.value)).toEqual(["hammer-path"])
+  })
+
+  test("remote user shell keeps candidates beyond the eight-row TUI viewport", async () => {
+    const process = {
+      runShell: () => Effect.die("path argument completion must not spawn a shell"),
+    } as LocationProcess.Interface
+    const filesystem = FileSystem.Service.of({
+      list: () =>
+        Effect.succeed(
+          Array.from({ length: 12 }, (_, index) =>
+            FileSystem.Entry.make({
+              path: RelativePath.make(`candidate-${String(index).padStart(2, "0")}`),
+              type: "file",
+            }),
+          ),
+        ),
+      find: () => Effect.succeed([]),
+      glob: () => Effect.succeed([]),
+      grep: () => Effect.succeed([]),
+      read: () => Effect.die("not used"),
+      directoryStatus: () => Effect.die("not used"),
+      ensureDirectory: () => Effect.die("not used"),
+    })
+    const location = Location.Service.of({
+      target: { type: "rexd", targetID },
+      directory: AbsolutePath.make("/workspace"),
+      workspaceID: "workspace" as never,
+      project: { id: "project" as never, directory: AbsolutePath.make("/workspace") },
+    })
+    const result = await Effect.runPromise(
+      makeUserShellProvider(process, filesystem, location).complete({
+        input: "cat ./candidate-",
+        cursor: 16,
+        cwd: "/workspace",
+        environment: { SHELL: "/bin/bash" },
+      }),
+    )
+    expect(result.candidates).toHaveLength(12)
+    expect(result.candidates.at(8)?.value).toBe("candidate-08")
+    expect(result.candidates.at(11)?.value).toBe("candidate-11")
+  })
+
+  test("remote user shell falls back from an unsupported target shell", () => {
+    expect(targetShell({})).toBe("/bin/sh")
+    expect(targetShell({ SHELL: "/usr/bin/fish" })).toBe("/bin/sh")
+    expect(targetShell({ SHELL: "/bin/bash" })).toBe("/bin/bash")
   })
 
   test("target probe reports protocol stage without leaking a thrown failure", async () => {
@@ -351,5 +522,17 @@ describe("Rexd Location routing contract", () => {
     const ready = await probeTarget(target, async () => ({ handshake: {}, prepared: undefined }) as never)
     expect(ready.status).toBe("ready")
     if (ready.status === "ready") expect(ready.stages).toContain("capabilities")
+
+    let probedDirectory: string | undefined
+    await probeTarget(
+      target,
+      async (_target, options) => {
+        probedDirectory = options.directory
+        return { handshake: {}, prepared: undefined } as never
+      },
+      true,
+      "/workspace/historical",
+    )
+    expect(probedDirectory).toBe("/workspace/historical")
   })
 })

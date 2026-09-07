@@ -57,7 +57,7 @@ export async function targetWizard(
     ...(defaultDirectory ? { defaultDirectory } : {}),
     ...(current?.command ? { command: current.command } : {}),
   })
-  const inspected = current || !services ? undefined : await services.inspect(draft(["/"]))
+  const inspected = !services ? undefined : await services.inspect(draft(["/"]))
   const roots = await DialogPrompt.show(dialog, "Workspace root", {
     value: current?.workspaceRoots.join(", ") ?? "/",
     description: () => (

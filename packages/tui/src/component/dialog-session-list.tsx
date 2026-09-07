@@ -22,6 +22,7 @@ import { useKV } from "../context/kv"
 import { SESSION_FORCE_REBIND_SETTING } from "../command-toolkit/experimental-settings"
 import path from "node:path"
 import { TextAttributes } from "@opentui/core"
+import { useTuiPaths } from "../context/runtime"
 
 type SessionListFilter = { scope?: "project"; path?: string }
 export type DialogSessionListFilters = {
@@ -133,6 +134,7 @@ export function DialogSessionList() {
   const project = useProject()
   const { theme } = useTheme()
   const sdk = useSDK()
+  const paths = useTuiPaths()
   const event = useEvent()
   const kv = useKV()
   const local = useLocal()
@@ -494,6 +496,8 @@ export function DialogSessionList() {
                         sdk,
                         sessionID: session.id,
                         expectedRevision: current.data.data.locationRevision ?? 0,
+                        currentDirectory: current.data.data.location.directory,
+                        localHome: paths.home,
                       }),
                     )
                     .then(() => sync.session.refresh())

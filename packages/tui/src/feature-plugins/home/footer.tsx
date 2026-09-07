@@ -11,9 +11,13 @@ import { useSDK } from "../../context/sdk"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { DialogPrompt } from "../../ui/dialog-prompt"
-import { DialogConfirm } from "../../ui/dialog-confirm"
 import type { TargetDefinition } from "../../component/target-wizard"
 import { TargetHealth, useTargetManager } from "../../component/target-manager"
+import {
+  completeLocalDirectory,
+  preflightDirectory as preflightLocationDirectory,
+  targetInput,
+} from "../../component/location-directory-workflow"
 
 const id = "internal:home-footer"
 
@@ -39,60 +43,12 @@ function Directory(props: { api: TuiPluginApi }) {
     return out
   })
 
-  const targetInput = (target: TargetDefinition) => ({
-    name: target.name,
-    connection: target.connection,
-    workspaceRoots: target.workspaceRoots,
-    transport: target.transport,
-    ...(target.defaultDirectory ? { defaultDirectory: target.defaultDirectory } : {}),
-    ...(target.command ? { command: target.command } : {}),
-  })
-
   const completeLocal = async (value: string, cursor: number, cwd: string) => {
-    const prefix = value.slice(0, cursor)
-    const expanded =
-      prefix === "~" ? paths.home : prefix.startsWith("~/") ? path.join(paths.home, prefix.slice(2)) : prefix
-    const absolute = path.isAbsolute(expanded) ? expanded : path.join(cwd, expanded)
-    const parent = absolute.endsWith(path.sep) ? absolute : path.dirname(absolute)
-    const fragment = absolute.endsWith(path.sep) ? "" : path.basename(absolute)
-    const result = await sdk.client.v2.fs.list({ location: { directory: parent }, path: "." }, { throwOnError: true })
-    const candidates = result.data.data
-      .filter((entry) => entry.type === "directory" && path.basename(entry.path).startsWith(fragment))
-      .map((entry) => path.join(parent, path.basename(entry.path)) + path.sep)
-      .sort()
-    const completion = candidates.slice(1).reduce((common, candidate) => {
-      let index = 0
-      while (index < common.length && common[index] === candidate[index]) index++
-      return common.slice(0, index)
-    }, candidates[0] ?? "")
-    if (!completion) return { value, cursor, candidates }
-    return { value: completion + value.slice(cursor), cursor: completion.length, candidates }
+    return completeLocalDirectory({ sdk, home: paths.home, value, cursor, cwd })
   }
 
   const preflightDirectory = async (target: HomeSessionTarget, directory: string, workspaceRoots: string[]) => {
-    if (!path.isAbsolute(directory)) throw new Error("Working directory must be absolute")
-    const normalized = path.normalize(directory)
-    const anchor = workspaceRoots
-      .map((root) => path.normalize(root))
-      .filter((root) => normalized === root || normalized.startsWith(root.endsWith(path.sep) ? root : root + path.sep))
-      .sort((a, b) => b.length - a.length)[0]
-    if (!anchor) throw new Error("Working directory is outside the configured workspace roots")
-    const location = {
-      directory: anchor,
-      ...(target.type === "rexd" ? { target: target.targetID } : {}),
-    }
-    const relative = path.relative(anchor, normalized) || "."
-    const checked = await sdk.client.v2.fs.directoryStatus({ location, path: relative }, { throwOnError: true })
-    if (checked.data.data.status === "directory") return checked.data.data.path
-    if (checked.data.data.status === "not-directory") throw new Error("The selected path is not a directory")
-    const create = await DialogConfirm.show(
-      dialog,
-      "Create working directory?",
-      `${normalized} does not exist. Create it now?`,
-    )
-    if (!create) return
-    const created = await sdk.client.v2.fs.ensureDirectory({ location, path: relative }, { throwOnError: true })
-    return created.data.data.path
+    return preflightLocationDirectory({ dialog, sdk, target, directory, workspaceRoots })
   }
 
   const openDirectory = () => {

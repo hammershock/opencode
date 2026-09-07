@@ -20,8 +20,15 @@ import { sessionListLocation, sessionListMatches, type SessionListLocationRecord
 import { DialogSessionLocationRecovery, forceRebindSession } from "./dialog-session-location-recovery"
 import { useKV } from "../context/kv"
 import { SESSION_FORCE_REBIND_SETTING } from "../command-toolkit/experimental-settings"
+import path from "node:path"
+import { TextAttributes } from "@opentui/core"
 
 type SessionListFilter = { scope?: "project"; path?: string }
+export type DialogSessionListFilters = {
+  readonly focus: "cwd" | "scope"
+  readonly cwd: "cwd" | "all"
+  readonly scope: "current" | "all"
+}
 
 type SyncAvailability = "metadata-only" | "hydrating" | "ready" | "partial" | "conflict" | "unresolved"
 type SyncedSession = {
@@ -41,8 +48,40 @@ type DialogSessionEntry = {
   readonly path?: string
   readonly parentID?: string
   readonly workspaceID?: string
+  readonly syncSpaceID?: string
   readonly time: { readonly updated: number }
   readonly syncMetadata?: SyncedSession
+}
+
+export function updateDialogSessionListFilters(
+  filters: DialogSessionListFilters,
+  key: "tab" | "left" | "right",
+): DialogSessionListFilters {
+  if (key === "tab") return { ...filters, focus: filters.focus === "cwd" ? "scope" : "cwd" }
+  if (filters.focus === "cwd") return { ...filters, cwd: filters.cwd === "cwd" ? "all" : "cwd" }
+  return { ...filters, scope: filters.scope === "current" ? "all" : "current" }
+}
+
+export function dialogSessionListLocationFilter(input: {
+  mode: DialogSessionListFilters["cwd"]
+  worktree?: string
+  directory?: string
+}): SessionListFilter {
+  if (input.mode === "all" || !input.worktree || !input.directory) return { scope: "project" }
+  return { path: path.relative(path.resolve(input.worktree), input.directory).replaceAll("\\", "/") }
+}
+
+export function sessionInDialogSyncScope(
+  session: { readonly syncSpaceID?: string },
+  scope: DialogSessionListFilters["scope"],
+  activeSpaceID?: string,
+) {
+  if (scope === "all") return true
+  return activeSpaceID !== undefined && session.syncSpaceID === activeSpaceID
+}
+
+export function includeCloudSessionInDialogScope(scope: DialogSessionListFilters["scope"], activeSpaceID?: string) {
+  return scope === "current" && activeSpaceID !== undefined
 }
 
 export function syncAvailabilityLabel(availability: SyncAvailability) {
@@ -101,16 +140,27 @@ export function DialogSessionList() {
   const [toDelete, setToDelete] = createSignal<string>()
   const [deleted, setDeleted] = createSignal(new Set<string>())
   const [search, setSearch] = createDebouncedSignal("", 150)
+  const [filters, setFilters] = createSignal<DialogSessionListFilters>({
+    focus: "cwd",
+    cwd: kv.get("session_directory_filter_enabled", true) ? "cwd" : "all",
+    scope: "current",
+  })
   const deleteHint = useCommandShortcut("session.delete")
   const quickSwitch1 = useCommandShortcut("session.quick_switch.1")
   const quickSwitch9 = useCommandShortcut("session.quick_switch.9")
 
-  const [browseResults, { refetch: refetchBrowse }] = createResource(
-    () => sync.session.query(),
-    (filter) => loadDialogSessionList({ filter, list: (query) => sdk.client.session.list(query) }),
+  const locationFilter = createMemo(() =>
+    dialogSessionListLocationFilter({
+      mode: filters().cwd,
+      worktree: project.data.instance.path.worktree,
+      directory: project.data.instance.path.directory,
+    }),
+  )
+  const [browseResults, { refetch: refetchBrowse }] = createResource(locationFilter, (filter) =>
+    loadDialogSessionList({ filter, list: (query) => sdk.client.session.list(query) }),
   )
   const [searchResults, { refetch }] = createResource(
-    () => ({ query: search(), filter: sync.session.query() }),
+    () => ({ query: search(), filter: locationFilter() }),
     (input) => {
       if (!input.query) return undefined
       return loadDialogSessionList({
@@ -120,16 +170,22 @@ export function DialogSessionList() {
       })
     },
   )
-  const [syncedSessions, { refetch: refetchSyncedSessions }] = createResource(async (): Promise<SyncedSession[]> => {
-    try {
-      const result = await sdk.client.global.syncSessions()
-      return (result.data ?? []) as SyncedSession[]
-    } catch {
-      // Sync is optional. A local session list remains usable when the secure
-      // store is locked, sync is not configured, or the provider is offline.
-      return []
-    }
-  })
+  const [syncScope, { refetch: refetchSyncedSessions }] = createResource(
+    async (): Promise<{
+      activeSpaceID?: string
+      sessions: SyncedSession[]
+    }> => {
+      try {
+        const [status, sessions] = await Promise.all([sdk.client.global.syncStatus(), sdk.client.global.syncSessions()])
+        const activeSpaceID = status.data?.namespaceID
+        return { activeSpaceID, sessions: activeSpaceID ? ((sessions.data ?? []) as SyncedSession[]) : [] }
+      } catch {
+        // Sync is optional. A local session list remains usable when the secure
+        // store is locked, sync is not configured, or the provider is offline.
+        return { sessions: [] }
+      }
+    },
+  )
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
   const sessions = createMemo(() => {
@@ -142,7 +198,8 @@ export function DialogSessionList() {
       ? [...searched, ...browsed.filter((candidate) => !searched.some((item) => item.id === candidate.id))]
       : browsed
     const synced = new Map(sync.data.session.map((session) => [session.id, session]))
-    const remote = new Map((syncedSessions() ?? []).map((session) => [session.sessionID, session]))
+    const activeSpaceID = syncScope()?.activeSpaceID
+    const remote = new Map((syncScope()?.sessions ?? []).map((session) => [session.sessionID, session]))
     const ids = new Set(result.map((session) => session.id))
     const extra = [currentSessionID(), ...local.session.pinned()].flatMap((id) => {
       if (!id || ids.has(id)) return []
@@ -151,7 +208,7 @@ export function DialogSessionList() {
       return session ? [session] : []
     })
     const query = search().trim().toLowerCase()
-    const remoteOnly = [...remote.values()]
+    const remoteOnly = (includeCloudSessionInDialogScope(filters().scope, activeSpaceID) ? [...remote.values()] : [])
       .filter((session) => !ids.has(session.sessionID))
       .filter((session) => !session.deleted)
       .filter((session) => !query || session.title.toLowerCase().includes(query))
@@ -160,8 +217,13 @@ export function DialogSessionList() {
       ...session,
       syncMetadata: remote.get(session.id),
     })
-    return [...result.map((session) => localEntry(synced.get(session.id) ?? session)), ...extra.map(localEntry), ...remoteOnly]
+    return [
+      ...result.map((session) => localEntry(synced.get(session.id) ?? session)),
+      ...extra.map(localEntry),
+      ...remoteOnly,
+    ]
       .filter((session) => !deleted().has(session.id))
+      .filter((session) => session.syncMetadata || sessionInDialogSyncScope(session, filters().scope, activeSpaceID))
       .filter((session) => sessionListMatches(session as typeof session & SessionListLocationRecord, query))
   })
 
@@ -265,7 +327,7 @@ export function DialogSessionList() {
       .map((x) => x.id)
   }
 
-  const browseOrder = createMemo(() => orderByRecency(browseResults() ?? sync.data.session))
+  const browseOrder = createMemo(() => orderByRecency(sessions()))
 
   const quickSwitchHint = createMemo(() => {
     const first = quickSwitch1()
@@ -341,6 +403,25 @@ export function DialogSessionList() {
   return (
     <DialogSelect
       title="Sessions"
+      titleView={
+        <box flexDirection="column">
+          <text fg={theme.text} attributes={TextAttributes.BOLD}>
+            Sessions
+          </text>
+          <SessionFilterRow
+            title="Filter"
+            values={["Cwd", "All"]}
+            selected={filters().cwd === "cwd" ? 0 : 1}
+            focused={filters().focus === "cwd"}
+          />
+          <SessionFilterRow
+            title="Scope"
+            values={["Current Sync Space", "All"]}
+            selected={filters().scope === "current" ? 0 : 1}
+            focused={filters().focus === "scope"}
+          />
+        </box>
+      }
       options={options()}
       skipFilter={true}
       preserveSelection={true}
@@ -488,7 +569,30 @@ export function DialogSessionList() {
         },
       ]}
       footerHints={quickSwitchFooterHints()}
+      bindings={(["tab", "left", "right"] as const).map((key) => ({
+        key,
+        desc: key === "tab" ? "Switch Session filter row" : "Change Session filter",
+        group: "Dialog",
+        cmd: () => {
+          setFilters((current) => updateDialogSessionListFilters(current, key))
+        },
+      }))}
     />
+  )
+}
+
+function SessionFilterRow(props: {
+  title: string
+  values: readonly [string, string]
+  selected: number
+  focused: boolean
+}) {
+  const { theme } = useTheme()
+  return (
+    <text fg={props.focused ? theme.text : theme.textMuted}>
+      {props.title}: {props.selected === 0 ? `[${props.values[0]}]` : props.values[0]}{" "}
+      {props.selected === 1 ? `[${props.values[1]}]` : props.values[1]}
+    </text>
   )
 }
 

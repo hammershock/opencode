@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { createDialogSessionListQuery, loadDialogSessionList, syncAvailabilityLabel } from "../../src/component/dialog-session-list"
+import {
+  createDialogSessionListQuery,
+  dialogSessionListLocationFilter,
+  includeCloudSessionInDialogScope,
+  loadDialogSessionList,
+  sessionInDialogSyncScope,
+  syncAvailabilityLabel,
+  updateDialogSessionListFilters,
+} from "../../src/component/dialog-session-list"
 
 describe("dialog session list", () => {
   test("requests root sessions for the default browse list", () => {
@@ -50,5 +58,40 @@ describe("dialog session list", () => {
     expect(syncAvailabilityLabel("partial")).toContain("retry")
     expect(syncAvailabilityLabel("conflict")).toContain("conflict")
     expect(syncAvailabilityLabel("unresolved")).toContain("binding")
+  })
+
+  test("tabs between fixed filter rows and arrows change only the focused value", () => {
+    const initial = { focus: "cwd" as const, cwd: "cwd" as const, scope: "current" as const }
+    expect(updateDialogSessionListFilters(initial, "right")).toEqual({ ...initial, cwd: "all" })
+    const scope = updateDialogSessionListFilters(initial, "tab")
+    expect(scope).toEqual({ ...initial, focus: "scope" })
+    expect(updateDialogSessionListFilters(scope, "left")).toEqual({ ...scope, scope: "all" })
+    expect(updateDialogSessionListFilters(scope, "tab")).toEqual(initial)
+  })
+
+  test("maps Cwd to the upstream path query and All to the upstream project query", () => {
+    expect(
+      dialogSessionListLocationFilter({ mode: "cwd", worktree: "/repo", directory: "/repo/packages/tui" }),
+    ).toEqual({ path: "packages/tui" })
+    expect(
+      dialogSessionListLocationFilter({ mode: "all", worktree: "/repo", directory: "/repo/packages/tui" }),
+    ).toEqual({ scope: "project" })
+    expect(dialogSessionListLocationFilter({ mode: "cwd" })).toEqual({ scope: "project" })
+  })
+
+  test("Current Sync Space excludes unassigned and inactive local Sessions while All keeps every local Session", () => {
+    const active = { syncSpaceID: "active" }
+    const inactive = { syncSpaceID: "inactive" }
+    const unassigned = {}
+    expect(sessionInDialogSyncScope(active, "current", "active")).toBe(true)
+    expect(sessionInDialogSyncScope(inactive, "current", "active")).toBe(false)
+    expect(sessionInDialogSyncScope(unassigned, "current", "active")).toBe(false)
+    expect(sessionInDialogSyncScope(active, "current")).toBe(false)
+    expect(includeCloudSessionInDialogScope("current", "active")).toBe(true)
+    expect(includeCloudSessionInDialogScope("current")).toBe(false)
+    expect(includeCloudSessionInDialogScope("all", "active")).toBe(false)
+    expect(
+      [active, inactive, unassigned].filter((session) => sessionInDialogSyncScope(session, "all", "active")),
+    ).toHaveLength(3)
   })
 })

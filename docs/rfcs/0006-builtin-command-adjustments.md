@@ -5,7 +5,7 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-07
 implemented-by: []
 depends-on:
   - 0003
@@ -193,6 +193,19 @@ Upstream baseline：打开 Session 列表并进行选择。
 - 云端 Session 的发现、按需打开和 ownership 规则由 RFC-0010 定义；
 - `/sessions` 只调用可复用 Session query service，不直接实现云端下载或冲突处理。
 
+列表在搜索框之外提供两个彼此独立的单行筛选器，并始终保持两行稳定布局：
+
+```text
+Filter: [Cwd] All
+Scope:  [Current Sync Space] All
+```
+
+- `Filter` 选择已有的 Session 属性筛选方式；`Cwd` 按执行目录筛选，`All` 不施加该维度的约束；
+- `Scope` 选择 `Current Sync Space` 或 `All`。前者只显示归属于当前 active sync space 的 Session，不包含未归属 Session；后者显示本机已经持有的所有空间归属 Session 和未归属 Session；
+- `Scope: All` 不查询非当前空间的 cloud-only metadata，不隐式加入、激活或切换任何同步空间；
+- `Tab` 只在两行筛选器之间移动焦点，左右方向键改变当前行的值；搜索框仍是独立焦点和独立过滤条件；
+- 筛选只影响当前列表视图，不改变 Session ownership、active sync space、同步配置或 durable Session 数据。
+
 `/sessions` 还可以承载 RFC-0009 定义的实验性 `Force rebind location...` 管理操作。该入口默认隐藏，只在设备级实验设置开启时显示，并必须标注为不推荐。Location 校验、空闲检查、事务提交、运行时重建和同步 revision 全部属于 RFC-0009 domain workflow，不在 Session list 组件中实现。
 
 ### `/models` 与 provider usage
@@ -209,23 +222,36 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 
 以下 command family 不是当前 upstream baseline 的内建命令，因此不属于 override。它们与 `/target`、`/env`、`/sync` 一样，是本仓库计划提供的基础 Core command：
 
-| Command family         | 从旧归档恢复的基础职责                                          |
-| ---------------------- | --------------------------------------------------------------- |
-| `/target`              | 打开 RFC-0002 target registry manager；不切换当前 Session      |
-| `/env`                 | 管理 location environment                                       |
-| `/sync`、`/devices`    | 管理跨设备同步和设备                                            |
-| `/permissions`         | 打开现有权限模式选择面板                                        |
-| `/expand`、`/collapse` | 显式展开或收起当前 Session 视图中的截断命令输出                 |
-| `/delete`              | 二次确认后删除当前 Session                                      |
+| Command family         | 从旧归档恢复的基础职责                                    |
+| ---------------------- | --------------------------------------------------------- |
+| `/target`              | 打开 RFC-0002 target registry manager；不切换当前 Session |
+| `/env`                 | 管理 location environment                                 |
+| `/sync`、`/devices`    | 管理跨设备同步和设备                                      |
+| `/permissions`         | 打开现有权限模式选择面板                                  |
+| `/expand`、`/collapse` | 显式展开或收起当前 Session 视图中的截断命令输出           |
+| `/delete`              | 二次确认后删除当前 Session                                |
 
 这些命令必须通过 RFC-0003 toolkit 注册，复用客户端已有的 domain action，并遵循以下边界：
 
+- 所有可信 fork Core command 必须由同一 registry host 同时提供给 slash autocomplete、直接 submit dispatch 和 `Ctrl+P` command palette；三条入口消费相同的 identity、参数、availability 和 handler，不能维护手工重复清单。上下文不满足时可以隐藏或禁用并说明原因，不能让同一命令在不同入口解析为不同效果。
 - `/permissions` 打开与现有 panel 相同的模式选择器，在“按配置规则询问”和“自动批准未被显式拒绝的请求”之间选择。command 不维护第二份 permission 状态，其生效范围和持久性与 panel 完全相同。
 - `/expand` 将当前 Session route 的命令输出全局展开 override 明确设为 on；`/collapse` 明确设为 off。二者不是同一个 toggle command 的 aliases，重复执行必须幂等。
 - output expansion 只属于当前客户端进程中当前 Session view 的运行时展示状态；不写入用户配置、Session、同步数据或模型上下文，route/view 销毁后可以重置。逐条点击产生的局部展开状态仍由原组件维护。
 - `/delete` 只针对当前 Session，展示包含 Session title 的二次确认；取消不产生副作用。确认后调用统一 Session delete domain API，成功后返回 home 并刷新 Session 列表。
 - `/delete` 不直接写同步墓碑或调用云存储。同步层只能通过正式 Session deletion event/domain change 响应删除；RFC-0010 启用时，该事件默认删除所有设备上的同步副本。
 - 所有命令都不创建 Session message、不触发模型调用，也不能在 prompt submit 中按字符串特判。
+
+### `/permissions` 的 Default 与 Session 状态
+
+权限快捷入口使用两个明确、独立的层级：
+
+- `Default` 是设备本地用户偏好，决定此后新建 Session 的初始 approval mode；
+- `Session` 是创建 Session 时从 Default 复制的 durable 值，此后独立修改，不继续跟随 Default；
+- approval mode 只有 normal（按既有权限规则询问）与 auto-approve（自动批准未被显式拒绝的请求）两种；它不替代显式 deny 规则，也不扩展工具或 Location 权限；
+- 修改 Default 不回写已有 Session；修改 Session 不修改 Default；
+- 旧 Session 缺少该字段时按 normal 解释，迁移不能使其自动获得更宽权限；
+- Session approval mode 属于 Session durable metadata，并随该 Session 在 RFC-0010 所属同步空间内同步；设备 Default、panel 焦点和临时 UI 状态不进入同步；
+- `/permissions` panel 同时清楚展示 Default 与当前 Session 值。没有当前 Session 时只能修改 Default；有 Session 时用户必须明确选择修改哪个层级。
 
 `/target`、`/env` 和 `/sync` 的业务语义仍分别由对应 RFC 定义；本节只确认它们属于 toolkit Core command，而非 upstream override。
 
@@ -253,6 +279,8 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 7. TUI 与 Web/Desktop 未声明范围内不受影响；
 8. upstream handler/schema drift 的静态构建失败测试；
 9. 每项实验开关关闭时的 upstream passthrough，以及开启但 override 安装失败时的 warning fallback。
+10. Core command 从 slash autocomplete、直接 submit 和 `Ctrl+P` 解析为同一注册项，并遵守同一 contextual availability。
+11. Default 只影响之后的新 Session，Session mode 可独立持久化和同步，旧 Session 安全地回落到 normal。
 
 不要在同一个实现提交中同时调整多个无关的上游命令。
 
@@ -277,3 +305,6 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 8. `/rename <title>`、`/permissions`、`/expand`、`/collapse` 和 `/delete` 均由 toolkit 消费，不会成为 prompt、Session message 或 Agent 调用。
 9. `/sessions` 可以显示并搜索 local、Rexd 和同步 metadata 所描述的执行位置，unresolved Session 不会静默消失或改为 local。
 10. 实验性 Location 重绑定只暴露 RFC-0009 workflow；全局同步删除只消费 RFC-0010 domain event，不在 TUI command handler 中重复实现，也不提供 local-only 分支。
+11. `/sessions` 的 Filter 与 Scope 是独立视图条件；`Current Sync Space` 与 `All` 不会查询其他空间的 cloud-only metadata 或切换 active space。
+12. fork Core command 在 slash autocomplete、直接 submit 和 `Ctrl+P` 中由同一 registry host 发现和执行。
+13. `/permissions` 分离设备 Default 与 durable Session mode；复制、迁移、持久化和同步不会意外扩大已有 Session 权限。

@@ -62,7 +62,7 @@ export async function begin(input: {
     throw new AuthError("storage")
   })
   if (!app) throw new AuthError("missing-app")
-  const randomUUID = input.randomUUID ?? crypto.randomUUID
+  const randomUUID = input.randomUUID ?? (() => crypto.randomUUID())
   const attempt: Attempt = {
     id: randomUUID(),
     state: randomUUID(),

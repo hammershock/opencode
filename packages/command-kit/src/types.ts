@@ -101,6 +101,28 @@ export type RegisteredCommand<Context extends InvocationContext = InvocationCont
   prepare: (input: RawArguments) => PreparedCommand<Context>
 }
 
+/** Device-local restrictions may only remove access or add confirmation. */
+export type CommandRestrictions = {
+  disabled?: readonly string[]
+  hidden?: readonly string[]
+  confirm?: readonly string[]
+  deniedCapabilities?: readonly string[]
+}
+
+export type CommandPolicyDecision =
+  | { status: "allowed"; confirm: boolean }
+  | { status: "denied"; code: "command_disabled" | "capability_denied"; capability?: string }
+
+export function evaluateCommandRestrictions(
+  command: Pick<RegisteredCommand, "id" | "capabilities">,
+  restrictions: CommandRestrictions | undefined,
+): CommandPolicyDecision {
+  if (restrictions?.disabled?.includes(command.id)) return { status: "denied", code: "command_disabled" }
+  const capability = command.capabilities.find((item) => restrictions?.deniedCapabilities?.includes(item))
+  if (capability) return { status: "denied", code: "capability_denied", capability }
+  return { status: "allowed", confirm: restrictions?.confirm?.includes(command.id) === true }
+}
+
 export function defineCommand<Input, Context extends InvocationContext = InvocationContext>(
   definition: CommandDefinition<Input, Context>,
 ) {

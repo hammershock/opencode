@@ -1,15 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { installSessionRenameOverride, parseSessionRenameOverride } from "../../src/command-toolkit/session-rename"
+import { installSessionRenameOverride, parseSessionRenameArguments } from "../../src/command-toolkit/session-rename"
 import type { OverrideWarning } from "@opencode-ai/command-kit"
 
 describe("session rename override", () => {
-  test("matches only the complete upstream path and rejects multiline titles", () => {
-    expect(parseSessionRenameOverride("/rename Project α")).toEqual({
+  test("parses resolver-owned arguments and rejects multiline titles", () => {
+    expect(parseSessionRenameArguments("Project α")).toEqual({
       status: "parsed",
       input: { title: "Project α" },
     })
-    expect(parseSessionRenameOverride("/renamed Project α")).toEqual({ status: "not-match" })
-    expect(parseSessionRenameOverride("/rename first\nsecond")).toEqual({
+    expect(parseSessionRenameArguments("first\nsecond")).toEqual({
       status: "invalid",
       message: "Session titles must be a single line",
     })

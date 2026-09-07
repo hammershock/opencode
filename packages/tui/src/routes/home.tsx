@@ -12,9 +12,9 @@ import { useEditorContext } from "../context/editor"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useTuiConfig } from "../config"
 import { HomeSessionDestinationProvider } from "./home/session-destination"
-import { createCommandHost } from "../command-toolkit/host"
+import { COMMAND_RESTRICTIONS_KEY, createCommandHost, normalizeCommandRestrictions } from "../command-toolkit/host"
 import { approvalModeCommand, type ApprovalModeCommandContext } from "../command-toolkit/approval-mode"
-import { useBindings } from "../keymap"
+import { useBindings, useKeymapSelector, useOpencodeKeymap } from "../keymap"
 import { useDialog } from "../ui/dialog"
 import { DialogPermissionMode } from "../component/dialog-permission-mode"
 import { useToast } from "../ui/toast"
@@ -23,6 +23,8 @@ import { useSyncSettings } from "../context/sync-settings"
 import { useTheme } from "../context/theme"
 import { targetCommand, type TargetCommandContext } from "../command-toolkit/target"
 import { useTargetManager } from "../component/target-manager"
+import { adaptKeymapCommands, adaptServerCommands } from "../command-toolkit/upstream"
+import { useKV } from "../context/kv"
 
 let once = false
 const placeholder = {
@@ -50,6 +52,11 @@ export function Home() {
   const syncSettings = useSyncSettings()
   const { theme } = useTheme()
   const targetManager = useTargetManager()
+  const keymap = useOpencodeKeymap()
+  const upstreamCommandEntries = useKeymapSelector((value) =>
+    value.getCommandEntries({ visibility: "reachable", namespace: "palette" }),
+  )
+  const kv = useKV()
   const syncColor = createMemo(() => {
     const state = syncSettings.model().state
     if (state === "idle") return theme.success
@@ -84,7 +91,12 @@ export function Home() {
         openTargetManager: targetManager.open,
         openSyncSettings: syncSettings.open,
       }),
-      upstream: () => undefined,
+      upstream: () => [
+        ...adaptServerCommands(sync.data.command),
+        ...adaptKeymapCommands(upstreamCommandEntries(), (identity) => keymap.dispatchCommand(identity)),
+      ],
+      restrictions: () => normalizeCommandRestrictions(kv.get(COMMAND_RESTRICTIONS_KEY)),
+      diagnostic: (diagnostic) => console.warn("[command-kit] shadowed command", diagnostic),
       invalid: (message) => toast.show({ message, variant: "warning" }),
       outcome: (message, status) =>
         toast.show({
@@ -149,7 +161,7 @@ export function Home() {
               ref={bind}
               right={<pluginRuntime.Slot name="home_prompt_right" />}
               placeholders={placeholder}
-              onBuiltinSlash={(input) => commandHost()(input)}
+              commandHost={commandHost()}
             />
           </pluginRuntime.Slot>
         </box>

@@ -23,6 +23,7 @@ import { useFrecency } from "../../prompt/frecency"
 import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
 import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
+import type { TuiSlashCommand } from "../../command-toolkit/host"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -121,13 +122,15 @@ export function Autocomplete(props: {
   agentStyleId: number
   promptPartTypeId: () => number
   shellMutation: number
+  commandSlashes?: () => readonly TuiSlashCommand[]
 }) {
   const editor = useEditorContext()
   const sdk = useSDK()
   const sync = useSync()
   const data = useData()
   const project = useProject()
-  const slashes = useCommandSlashes()
+  const upstreamSlashes = useCommandSlashes()
+  const slashes = () => props.commandSlashes?.() ?? upstreamSlashes()
   const modeStack = useOpencodeModeStack()
   const { theme } = useTheme()
   const dimensions = useTerminalDimensions()
@@ -491,23 +494,21 @@ export function Autocomplete(props: {
   )
 
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = [...slashes()]
-
-    for (const serverCommand of sync.data.command) {
-      if (serverCommand.source === "skill") continue
-      const label = serverCommand.source === "mcp" ? ":mcp" : ""
-      results.push({
-        display: "/" + serverCommand.name + label,
-        description: serverCommand.description,
-        onSelect: () => {
-          const newText = "/" + serverCommand.name + " "
-          const cursor = props.input().logicalCursor
-          props.input().deleteRange(0, 0, cursor.row, cursor.col)
-          props.input().insertText(newText)
-          props.input().cursorOffset = Bun.stringWidth(newText)
-        },
-      })
-    }
+    const results: AutocompleteOption[] = slashes().map((command) => ({
+      display: command.display,
+      description: command.description,
+      aliases: command.aliases,
+      onSelect:
+        "insertText" in command && command.insertText
+          ? () => {
+              const newText = command.insertText!
+              const cursor = props.input().logicalCursor
+              props.input().deleteRange(0, 0, cursor.row, cursor.col)
+              props.input().insertText(newText)
+              props.input().cursorOffset = Bun.stringWidth(newText)
+            }
+          : command.onSelect,
+    }))
 
     results.sort((a, b) => a.display.localeCompare(b.display))
 

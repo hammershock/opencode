@@ -7,10 +7,7 @@ export type SessionRenameInput = {
   title: string
 }
 
-export function parseSessionRenameOverride(source: string) {
-  const match = /^\/rename(?:[\t\v\f\r ]+([\s\S]*))?$/.exec(source)
-  if (!match) return { status: "not-match" } as const
-  const title = match[1] ?? ""
+export function parseSessionRenameArguments(title: string) {
   if (/\r|\n/.test(title)) return { status: "invalid", message: "Session titles must be a single line" } as const
   return { status: "parsed", input: { title } } as const
 }

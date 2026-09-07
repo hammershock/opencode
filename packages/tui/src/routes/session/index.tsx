@@ -81,17 +81,17 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { DialogRetryAction } from "../../component/dialog-retry-action"
 import { getRevertDiffFiles } from "../../util/revert-diff"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
+import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useKeymapSelector, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
 import { sessionRenameMetadata } from "../../command-toolkit/upstream-session"
 import {
   installSessionRenameOverride,
-  parseSessionRenameOverride,
+  parseSessionRenameArguments,
   SESSION_RENAME_DIRECT_SETTING,
 } from "../../command-toolkit/session-rename"
 import { reportOverrideDiagnostic } from "../../command-toolkit/experimental-settings"
-import { createCommandHost } from "../../command-toolkit/host"
+import { COMMAND_RESTRICTIONS_KEY, createCommandHost, normalizeCommandRestrictions } from "../../command-toolkit/host"
 import { environmentCommands, type EnvironmentCommandContext } from "../../command-toolkit/environment"
 import { targetCommand, type TargetCommandContext } from "../../command-toolkit/target"
 import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
@@ -100,6 +100,7 @@ import { useTargetManager } from "../../component/target-manager"
 import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
 import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
 import { useSyncSettings } from "../../context/sync-settings"
+import { adaptKeymapCommands, adaptServerCommands } from "../../command-toolkit/upstream"
 
 addDefaultParsers(parsers.parsers)
 
@@ -400,6 +401,9 @@ export function Session() {
     r.set(route.prompt)
   }
   const keymap = useOpencodeKeymap()
+  const upstreamCommandEntries = useKeymapSelector((value) =>
+    value.getCommandEntries({ visibility: "reachable", namespace: "palette" }),
+  )
   const renameOverride = createMemo(() =>
     installSessionRenameOverride({
       enabled: kv.get(SESSION_RENAME_DIRECT_SETTING, false),
@@ -596,7 +600,31 @@ export function Session() {
           openSyncSettings: syncSettings.open,
         }
       },
-      upstream: () => undefined,
+      upstream: () => [
+        ...adaptServerCommands(sync.data.command),
+        ...adaptKeymapCommands(upstreamCommandEntries(), (identity) => keymap.dispatchCommand(identity)).map(
+          (command) =>
+            command.id !== sessionRenameMetadata.value
+              ? command
+              : {
+                  ...command,
+                  dispatch: {
+                    type: "client" as const,
+                    run: async (argumentsValue: string) => {
+                      const parsed = parseSessionRenameArguments(argumentsValue)
+                      if (parsed.status === "invalid") {
+                        toast.show({ message: parsed.message, variant: "warning" })
+                        return
+                      }
+                      await renameOverride().execute(parsed.input)
+                      reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic())
+                    },
+                  },
+                },
+        ),
+      ],
+      restrictions: () => normalizeCommandRestrictions(kv.get(COMMAND_RESTRICTIONS_KEY)),
+      diagnostic: (diagnostic) => console.warn("[command-kit] shadowed command", diagnostic),
       invalid: (message) => toast.show({ message, variant: "warning" }),
       outcome: (message, status) =>
         toast.show({
@@ -1509,21 +1537,7 @@ export function Session() {
                       visible={visible()}
                       ref={bind}
                       disabled={disabled()}
-                      onBuiltinSlash={async (input) => {
-                        if (kv.get(SESSION_RENAME_DIRECT_SETTING, false)) {
-                          const parsed = parseSessionRenameOverride(input)
-                          if (parsed.status === "invalid") {
-                            toast.show({ message: parsed.message, variant: "warning" })
-                            return true
-                          }
-                          if (parsed.status !== "not-match") {
-                            await renameOverride().execute(parsed.input)
-                            reportOverrideDiagnostic("fork.session.rename-direct", renameOverride().diagnostic())
-                            return true
-                          }
-                        }
-                        return coreCommandHost()(input)
-                      }}
+                      commandHost={coreCommandHost()}
                       onSubmit={() => {
                         toBottom()
                       }}

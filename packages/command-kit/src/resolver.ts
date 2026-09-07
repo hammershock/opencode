@@ -28,7 +28,12 @@ export type ResolutionDiagnostic = {
 }
 
 export type HostResolution<Context extends InvocationContext = InvocationContext> =
-  | { status: "upstream"; candidate: UpstreamCandidate; diagnostics: readonly ResolutionDiagnostic[] }
+  | {
+      status: "upstream"
+      candidate: UpstreamCandidate
+      arguments: RawArguments
+      diagnostics: readonly ResolutionDiagnostic[]
+    }
   | {
       status: "core"
       resolution: Extract<CoreResolution<Context>, { status: "matched" }>
@@ -36,7 +41,7 @@ export type HostResolution<Context extends InvocationContext = InvocationContext
     }
   | { status: "passthrough"; input: string; diagnostics: readonly [] }
 
-export type UpstreamResolver = (input: string) => UpstreamCandidate | undefined
+export type UpstreamResolver = (input: string) => UpstreamCandidate | readonly UpstreamCandidate[] | undefined
 
 export function resolveCore<Context extends InvocationContext>(
   input: string,
@@ -70,10 +75,15 @@ export function createHostResolver<Context extends InvocationContext>(
   upstream: UpstreamResolver,
 ) {
   return (input: string): HostResolution<Context> => {
-    const candidate = upstream(input)
+    const upstreamResult = upstream(input)
+    const candidates = upstreamResult ? (Array.isArray(upstreamResult) ? upstreamResult : [upstreamResult]) : []
+    const candidate = candidates[0]
     const core = resolveCore(input, routes)
     if (candidate) {
       const diagnostics: ResolutionDiagnostic[] = []
+      for (const shadowed of candidates.slice(1)) {
+        diagnostics.push({ type: "shadowed", winner: candidate, shadowed })
+      }
       if (core.status === "matched") {
         diagnostics.push({
           type: "shadowed",
@@ -81,7 +91,7 @@ export function createHostResolver<Context extends InvocationContext>(
           shadowed: { id: core.command.id, path: core.route, provenance: core.command.provenance },
         })
       }
-      return { status: "upstream", candidate, diagnostics }
+      return { status: "upstream", candidate, arguments: rawArguments(input, candidate.path), diagnostics }
     }
     if (core.status === "matched") return { status: "core", resolution: core, diagnostics: [] }
     return { status: "passthrough", input, diagnostics: [] }
@@ -114,4 +124,10 @@ function skipOneSeparator(input: string, offset: number) {
   const match = /^[\t\v\f\r\n ]+/.exec(input.slice(offset))
   if (!match) return offset
   return offset + match[0].length
+}
+
+function rawArguments(input: string, path: readonly string[]): RawArguments {
+  const consumed = matchRoute(path, scanFirstLine(input)) ?? input.length
+  const start = skipOneSeparator(input, consumed)
+  return { source: input, value: input.slice(start), range: { start, end: input.length } }
 }

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { CommandRegistry, defineCommand, type CompletionItem, type InvocationContext } from "../src"
+import {
+  CommandRegistry,
+  defineCommand,
+  evaluateCommandRestrictions,
+  type CompletionItem,
+  type InvocationContext,
+} from "../src"
 
 describe("command contracts", () => {
   test("completion returns an explicit source replacement range", async () => {
@@ -77,6 +83,27 @@ describe("command contracts", () => {
     expect(prepared.status).toBe("parsed")
     if (prepared.status !== "parsed") return
     expect(await prepared.execute(context())).toEqual({ status: "completed", message: "New name" })
+  })
+
+  test("device policy can only tighten a command's declared capability ceiling", () => {
+    const command = {
+      id: "core.environment.reload",
+      capabilities: ["environment.reload", "workspace.read"],
+    }
+    expect(evaluateCommandRestrictions(command, undefined)).toEqual({ status: "allowed", confirm: false })
+    expect(evaluateCommandRestrictions(command, { confirm: [command.id] })).toEqual({
+      status: "allowed",
+      confirm: true,
+    })
+    expect(evaluateCommandRestrictions(command, { disabled: [command.id] })).toEqual({
+      status: "denied",
+      code: "command_disabled",
+    })
+    expect(evaluateCommandRestrictions(command, { deniedCapabilities: ["environment.reload"] })).toEqual({
+      status: "denied",
+      code: "capability_denied",
+      capability: "environment.reload",
+    })
   })
 })
 

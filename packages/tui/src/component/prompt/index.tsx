@@ -74,7 +74,13 @@ import type { LocationRef } from "@opencode-ai/sdk/v2"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 import { canAdjustVariant } from "../../model-variant"
-import { createCommandHost, type TuiCommandDispatch, type TuiSlashCommand } from "../../command-toolkit/host"
+import {
+  activateCommandHost,
+  createCommandHost,
+  type TuiCommandDispatch,
+  type TuiCommandWinner,
+  type TuiSlashCommand,
+} from "../../command-toolkit/host"
 import { adaptKeymapCommands, adaptServerCommands } from "../../command-toolkit/upstream"
 
 registerOpencodeSpinner()
@@ -86,6 +92,7 @@ export type PromptProps = {
   onSubmit?: () => void
   commandHost?: {
     (input: string, source?: "slash" | "palette" | "keybind"): Promise<TuiCommandDispatch>
+    commands: () => readonly TuiCommandWinner[]
     slashes: () => readonly TuiSlashCommand[]
   }
   ref?: (ref: PromptRef | undefined) => void
@@ -220,6 +227,10 @@ export function Prompt(props: PromptProps) {
     }),
   )
   const activeCommandHost = () => props.commandHost ?? fallbackCommandHost()
+  createEffect(() => {
+    const dispose = activateCommandHost(keymap, activeCommandHost())
+    onCleanup(dispose)
+  })
   const agentShortcut = useCommandShortcut("agent.cycle")
   const paletteShortcut = useCommandShortcut("command.palette.show")
   const shellExitShortcut = useCommandShortcut("prompt.shell.exit")

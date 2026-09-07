@@ -2375,6 +2375,21 @@ export type Command = {
   agent?: string
   model?: string
   source?: "command" | "mcp" | "skill"
+  provenance?:
+    | {
+        type: "builtin"
+      }
+    | {
+        type: "custom"
+      }
+    | {
+        type: "mcp"
+        serverID: string
+      }
+    | {
+        type: "skill"
+        location: string
+      }
   template: string
   subtask?: boolean
   hints: Array<string>

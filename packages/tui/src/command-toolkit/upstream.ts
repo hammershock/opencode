@@ -18,6 +18,11 @@ type ServerCommand = {
   name: string
   description?: string
   source?: "command" | "mcp" | "skill"
+  provenance?:
+    | { type: "builtin" }
+    | { type: "custom" }
+    | { type: "mcp"; serverID: string }
+    | { type: "skill"; location: string }
 }
 
 function path(value: string) {
@@ -62,11 +67,20 @@ export function adaptServerCommands(commands: readonly ServerCommand[]): TuiUpst
     title: command.name,
     description: command.description,
     hidden: command.source === "skill",
-    provenance: {
-      type: "upstream",
-      host: "session",
-      identity: `${command.source ?? "command"}:${command.name}`,
-    },
+    provenance:
+      command.provenance?.type === "mcp"
+        ? { type: "mcp", serverID: command.provenance.serverID }
+        : command.provenance?.type === "skill"
+          ? { type: "skill", location: command.provenance.location }
+          : command.provenance?.type === "custom"
+            ? { type: "custom-command" }
+            : command.provenance?.type === "builtin"
+              ? { type: "upstream", host: "session", identity: `builtin:${command.name}` }
+              : command.source === "mcp"
+                ? { type: "mcp", serverID: "unknown" }
+                : command.source === "skill"
+                  ? { type: "skill", location: "unknown" }
+                  : { type: "custom-command" },
     dispatch: { type: "session", command: command.name },
   }))
 }

@@ -35,5 +35,21 @@ export const FileSystemHandler = HttpApiBuilder.group(Api, "server.fs", (handler
           }),
         ),
       )
+      .handle("fs.directoryStatus", (ctx) =>
+        response(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.Service
+            return yield* fs.directoryStatus(ctx.payload.path)
+          }),
+        ),
+      )
+      .handle("fs.ensureDirectory", (ctx) =>
+        response(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.Service
+            return yield* fs.ensureDirectory(ctx.payload.path)
+          }),
+        ),
+      )
   }),
 )

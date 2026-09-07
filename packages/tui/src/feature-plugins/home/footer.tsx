@@ -10,8 +10,8 @@ import { DialogSelect } from "../../ui/dialog-select"
 import { useSDK } from "../../context/sdk"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
-import { DialogLocationDirectory } from "../../component/dialog-location-directory"
 import { DialogPrompt } from "../../ui/dialog-prompt"
+import { DialogConfirm } from "../../ui/dialog-confirm"
 import type { TargetDefinition } from "../../component/target-wizard"
 import { TargetHealth, useTargetManager } from "../../component/target-manager"
 
@@ -39,21 +39,106 @@ function Directory(props: { api: TuiPluginApi }) {
     return out
   })
 
+  const targetInput = (target: TargetDefinition) => ({
+    name: target.name,
+    connection: target.connection,
+    workspaceRoots: target.workspaceRoots,
+    transport: target.transport,
+    ...(target.defaultDirectory ? { defaultDirectory: target.defaultDirectory } : {}),
+    ...(target.command ? { command: target.command } : {}),
+  })
+
+  const completeLocal = async (value: string, cursor: number, cwd: string) => {
+    const prefix = value.slice(0, cursor)
+    const expanded =
+      prefix === "~" ? paths.home : prefix.startsWith("~/") ? path.join(paths.home, prefix.slice(2)) : prefix
+    const absolute = path.isAbsolute(expanded) ? expanded : path.join(cwd, expanded)
+    const parent = absolute.endsWith(path.sep) ? absolute : path.dirname(absolute)
+    const fragment = absolute.endsWith(path.sep) ? "" : path.basename(absolute)
+    const result = await sdk.client.v2.fs.list({ location: { directory: parent }, path: "." }, { throwOnError: true })
+    const candidates = result.data.data
+      .filter((entry) => entry.type === "directory" && path.basename(entry.path).startsWith(fragment))
+      .map((entry) => path.join(parent, path.basename(entry.path)) + path.sep)
+      .sort()
+    const completion = candidates.slice(1).reduce((common, candidate) => {
+      let index = 0
+      while (index < common.length && common[index] === candidate[index]) index++
+      return common.slice(0, index)
+    }, candidates[0] ?? "")
+    if (!completion) return { value, cursor, candidates }
+    return { value: completion + value.slice(cursor), cursor: completion.length, candidates }
+  }
+
+  const preflightDirectory = async (target: HomeSessionTarget, directory: string, workspaceRoots: string[]) => {
+    if (!path.isAbsolute(directory)) throw new Error("Working directory must be absolute")
+    const normalized = path.normalize(directory)
+    const anchor = workspaceRoots
+      .map((root) => path.normalize(root))
+      .filter((root) => normalized === root || normalized.startsWith(root.endsWith(path.sep) ? root : root + path.sep))
+      .sort((a, b) => b.length - a.length)[0]
+    if (!anchor) throw new Error("Working directory is outside the configured workspace roots")
+    const location = {
+      directory: anchor,
+      ...(target.type === "rexd" ? { target: target.targetID } : {}),
+    }
+    const relative = path.relative(anchor, normalized) || "."
+    const checked = await sdk.client.v2.fs.directoryStatus({ location, path: relative }, { throwOnError: true })
+    if (checked.data.data.status === "directory") return checked.data.data.path
+    if (checked.data.data.status === "not-directory") throw new Error("The selected path is not a directory")
+    const create = await DialogConfirm.show(
+      dialog,
+      "Create working directory?",
+      `${normalized} does not exist. Create it now?`,
+    )
+    if (!create) return
+    const created = await sdk.client.v2.fs.ensureDirectory({ location, path: relative }, { throwOnError: true })
+    return created.data.data.path
+  }
+
   const openDirectory = () => {
     if (!destination) return
-    const selected = destination.destination()
-    if (!selected || selected.type !== "directory") return
-    const initial = selected.directory
-    dialog.replace(() => (
-      <DialogLocationDirectory
-        target={destination.target()}
-        initial={initial}
-        onSelect={(directory) => {
-          destination.setDestination({ type: "directory", directory, subdirectory: false })
-          dialog.clear()
-        }}
-      />
-    ))
+    const current = destination.destination()
+    if (!current || current.type !== "directory") return
+    void (async () => {
+      const target = destination.target()
+      if (target.type === "local") {
+        const directory = await DialogPrompt.show(dialog, "local working directory", {
+          value: current.directory,
+          placeholder: current.directory,
+          description: () => (
+            <text>Absolute local directory used by the new Session. Press Tab to complete paths.</text>
+          ),
+          complete: (value, cursor) => completeLocal(value, cursor, current.directory),
+        })
+        if (!directory?.trim()) return
+        const validated = await preflightDirectory(target, directory.trim(), [path.parse(directory.trim()).root])
+        if (!validated) return
+        destination.setDestination({ type: "directory", directory: validated, subdirectory: false })
+        return dialog.clear()
+      }
+      const configured = targets()?.targets.find((item) => item.id === target.targetID) as TargetDefinition | undefined
+      if (!configured) throw new Error(`Target ${target.name} is no longer configured`)
+      const input = targetInput(configured)
+      const directory = await DialogPrompt.show(dialog, `${target.name} working directory`, {
+        value: current.directory,
+        placeholder: current.directory,
+        description: () => <text>Absolute remote directory used by the new Session. Press Tab to complete paths.</text>,
+        complete: async (value, cursor) => {
+          const completed = await sdk.client.v2.target.wizard.complete(
+            { input, value, cursor, cwd: current.directory },
+            { throwOnError: true },
+          )
+          return { ...completed.data, cursor: Number(completed.data.cursor) }
+        },
+      })
+      if (!directory?.trim()) return
+      const validated = await preflightDirectory(target, directory.trim(), configured.workspaceRoots)
+      if (!validated) return
+      destination.setDestination({ type: "directory", directory: validated, subdirectory: false })
+      dialog.clear()
+    })().catch((error) =>
+      toast.show({ title: "Cannot select working directory", message: errorMessage(error), variant: "error" }),
+    )
   }
 
   const chooseLocal = () => {
@@ -63,33 +148,15 @@ function Directory(props: { api: TuiPluginApi }) {
         value: starting,
         placeholder: starting,
         description: () => <text>Absolute local directory used by the new Session. Press Tab to complete paths.</text>,
-        complete: async (value, cursor) => {
-          const prefix = value.slice(0, cursor)
-          const expanded =
-            prefix === "~" ? paths.home : prefix.startsWith("~/") ? path.join(paths.home, prefix.slice(2)) : prefix
-          const absolute = path.isAbsolute(expanded) ? expanded : path.join(starting, expanded)
-          const parent = absolute.endsWith(path.sep) ? absolute : path.dirname(absolute)
-          const fragment = absolute.endsWith(path.sep) ? "" : path.basename(absolute)
-          const result = await sdk.client.v2.fs.list(
-            { location: { directory: parent }, path: "." },
-            { throwOnError: true },
-          )
-          const candidates = result.data.data
-            .filter((entry) => entry.type === "directory" && path.basename(entry.path).startsWith(fragment))
-            .map((entry) => path.join(parent, path.basename(entry.path)) + path.sep)
-            .sort()
-          const completion = candidates.slice(1).reduce((common, candidate) => {
-            let index = 0
-            while (index < common.length && common[index] === candidate[index]) index++
-            return common.slice(0, index)
-          }, candidates[0] ?? "")
-          if (!completion) return { value, cursor, candidates }
-          return { value: completion + value.slice(cursor), cursor: completion.length, candidates }
-        },
+        complete: (value, cursor) => completeLocal(value, cursor, starting),
       })
       if (!directory?.trim()) return
+      const selected = await preflightDirectory({ type: "local" }, directory.trim(), [
+        path.parse(directory.trim()).root,
+      ])
+      if (!selected) return
       destination?.setTarget({ type: "local" })
-      destination?.setDestination({ type: "directory", directory: directory.trim(), subdirectory: false })
+      destination?.setDestination({ type: "directory", directory: selected, subdirectory: false })
       dialog.clear()
     })().catch((error) =>
       toast.show({ title: "Cannot select local directory", message: errorMessage(error), variant: "error" }),
@@ -101,14 +168,7 @@ function Directory(props: { api: TuiPluginApi }) {
       try {
         const result = await sdk.client.v2.target.prepare({ targetID: target.id }, { throwOnError: true })
         if (result.data.status !== "ready") throw new Error(`${result.data.stage}: ${result.data.message}`)
-        const input = {
-          name: target.name,
-          connection: target.connection,
-          workspaceRoots: target.workspaceRoots,
-          transport: target.transport,
-          ...(target.defaultDirectory ? { defaultDirectory: target.defaultDirectory } : {}),
-          ...(target.command ? { command: target.command } : {}),
-        }
+        const input = targetInput(target)
         const inspected = await sdk.client.v2.target.wizard.inspect({ input }, { throwOnError: true })
         const starting = inspected.data.home
         const directory = await DialogPrompt.show(dialog, `${target.name} working directory`, {
@@ -127,8 +187,10 @@ function Directory(props: { api: TuiPluginApi }) {
         })
         if (!directory?.trim()) return
         const selected = { type: "rexd" as const, targetID: target.id, name: target.name }
+        const validated = await preflightDirectory(selected, directory.trim(), target.workspaceRoots)
+        if (!validated) return
         destination?.setTarget(selected)
-        destination?.setDestination({ type: "directory", directory: directory.trim(), subdirectory: false })
+        destination?.setDestination({ type: "directory", directory: validated, subdirectory: false })
         dialog.clear()
       } catch (error) {
         toast.show({ title: "Target unavailable", message: errorMessage(error), variant: "error" })

@@ -56,6 +56,23 @@ describe("FileSystem", () => {
     ),
   )
 
+  it.live("checks and explicitly creates directories", () =>
+    withTmp((directory) =>
+      Effect.gen(function* () {
+        const service = yield* FileSystem.Service
+        const missing = yield* service.directoryStatus(RelativePath.make("new/nested"))
+        expect(missing.status).toBe("missing")
+
+        const created = yield* service.ensureDirectory(RelativePath.make("new/nested"))
+        expect(created.status).toBe("directory")
+        expect((yield* service.directoryStatus(RelativePath.make("new/nested"))).status).toBe("directory")
+
+        yield* Effect.promise(() => fs.writeFile(path.join(directory, "file"), "content"))
+        expect((yield* service.directoryStatus(RelativePath.make("file"))).status).toBe("not-directory")
+      }).pipe(provide(directory)),
+    ),
+  )
+
   it.live("rejects lexical escapes", () =>
     withTmp((directory) =>
       Effect.gen(function* () {

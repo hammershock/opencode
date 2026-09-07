@@ -17,6 +17,11 @@ export const Entry = Schema.Struct({
   type: Schema.Literals(["file", "directory"]),
 }).annotate({ identifier: "FileSystem.Entry" })
 
+export const DirectoryStatus = Schema.Struct({
+  status: Schema.Literals(["directory", "missing", "not-directory"]),
+  path: Schema.String,
+}).annotate({ identifier: "FileSystem.DirectoryStatus" })
+
 export interface Submatch extends Schema.Schema.Type<typeof Submatch> {}
 export const Submatch = Schema.Struct({
   text: Schema.String,

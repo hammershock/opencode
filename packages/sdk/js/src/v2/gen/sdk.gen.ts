@@ -314,6 +314,10 @@ import type {
   V2EnvironmentRevealResponses,
   V2EventSubscribeErrors,
   V2EventSubscribeResponses,
+  V2FsDirectoryStatusErrors,
+  V2FsDirectoryStatusResponses,
+  V2FsEnsureDirectoryErrors,
+  V2FsEnsureDirectoryResponses,
   V2FsFindErrors,
   V2FsFindResponses,
   V2FsListErrors,
@@ -6853,6 +6857,84 @@ export class Fs extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  /**
+   * Inspect a directory path
+   */
+  public directoryStatus<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+        target?: string
+      }
+      path?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "body", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2FsDirectoryStatusResponses, V2FsDirectoryStatusErrors, ThrowOnError>(
+      {
+        url: "/api/fs/directory/status",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
+  }
+
+  /**
+   * Create a directory
+   */
+  public ensureDirectory<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+        target?: string
+      }
+      path?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "body", key: "path" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2FsEnsureDirectoryResponses, V2FsEnsureDirectoryErrors, ThrowOnError>(
+      {
+        url: "/api/fs/directory",
+        ...options,
+        ...params,
+        headers: {
+          "Content-Type": "application/json",
+          ...options?.headers,
+          ...params.headers,
+        },
+      },
+    )
   }
 
   /**

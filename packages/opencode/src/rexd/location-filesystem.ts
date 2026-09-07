@@ -57,6 +57,28 @@ export function rexdFilesystemNodes(
           Effect.promise(async () =>
             (await files.list(input.path ?? ".", directory)).map(entry).filter((item) => item !== undefined),
           ),
+        directoryStatus: (input) =>
+          Effect.promise(async () => {
+            const result = await files.stat(input, directory)
+            return {
+              status: result.exists ? (result.type === "dir" ? "directory" : "not-directory") : "missing",
+              path: files.resolve(input, directory),
+            } as const
+          }),
+        ensureDirectory: (input) =>
+          Effect.promise(async () => {
+            const target = files.resolve(input, directory)
+            await runRexdProcess(lease, {
+              argv: ["mkdir", "-p", "--", target],
+              shell: false,
+              cwd: directory,
+              timeout: "30 seconds",
+              maxOutputBytes: 64 * 1024,
+            }).then((result) => {
+              if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8"))
+            })
+            return { status: "directory", path: target } as const
+          }),
       }),
     }
   })

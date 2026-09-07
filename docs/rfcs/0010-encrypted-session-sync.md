@@ -163,7 +163,9 @@ Core 只依赖该 contract。百度 adapter 负责 OAuth、分页、precreate、
 
 `/sync`、command palette 中的 `Sync settings` 和 QuickStart 的同步设置入口必须打开同一个 TUI workflow，不得各自实现状态机或确认逻辑。该 workflow 提供 connect/logout/remove account、create/enter/switch/leave/delete space、enable/disable、interval、sync now、status，以及加密空间的 export/import recovery key。`/devices` 深链到同一 workflow 的 active-space Devices 子视图；返回时回到同一个 Sync settings overview，而不是另一套设备管理面板。所有操作是 RFC-0003 控制面效果，不进入 Session 或模型上下文。
 
-成功创建、进入或切换 active space 后，如果本机存在未归属 Session，workflow 对该次显式激活至多显示一次批量提示：`Add all` 或 `No`。它不逐个询问，不在启动、后台同步、重新打开面板或定时调度时主动弹出。`No` 保持全部 Session 未归属；overview 保留显式的 `Add unassigned Sessions...` action，用户可稍后重新发起。确认只处理提示时列出的、提交时仍未归属的 Session；期间新建或已改变归属的 Session 不被意外纳入。归属操作必须通过 Session domain workflow 产生初始 outbox，不能由 TUI 直接修改字段。
+如果 active space 存在且本机仍有未归属 Session，打开 Sync settings overview 时可显示一次批量提示：`Add all` 或 `No`。提示 identity 由 active space ID 与当时未归属 Session ID 的精确快照共同决定；关闭提示等价于 `No`，同一组内容再次打开面板不重复提示，未归属集合变化后可以重新提示。成功创建、进入或切换 active space 也可以触发相同规则的提示。用户显式执行 `Sync now` 时则始终重新提供这次选择，不受已拒绝 identity 抑制。启动、后台同步和定时调度不得主动弹窗，也不得自动归属。
+
+确认只提交提示快照中的精确 Session ID；期间新建、删除或已经改变归属的 Session 不被意外纳入，Core 在提交时再次筛选仍为未归属的 ID。`No` 保持全部 Session 未归属。归属操作必须通过 Session domain workflow 产生初始 outbox，不能由 TUI 直接修改字段；显式 `Sync now` 中完成归属后，应再执行一次同步以发送新产生的 outbox。
 
 `/sessions` 在搜索框之外固定显示两个独立筛选维度：
 
@@ -236,4 +238,4 @@ tombstone 对同一 space ID 与 Session ID 组合永久、单调地占优。删
 12. TUI 命令只使用 toolkit 和 Sync service；Web/Desktop 不暴露未验收的同步产品入口。
 13. OAuth 成功不自动进入空间；`/sync`、command palette 和 QuickStart 共用一个 workflow，`/devices` 只深链到其中的 Devices 子视图。
 14. 30 秒、1 分钟、5 分钟 interval 均可选择且默认 30 秒；logout 保留本地同步身份与恢复状态，Switch 只改变 active，单空间 Leave 只移除该空间的本机状态和 ownership，完整移除对所有空间执行本地移除并清除 auth/state；三者均保留本地 Session。
-15. 未归属 Session 只在显式 active-space transition 后至多批量提示一次；拒绝、后台调度和重新打开面板不会隐式归属或反复弹窗。
+15. 未归属 Session 按 active space 与精确 ID 集合记忆一次面板提示；关闭等价于拒绝，同一集合不重复提示，集合变化后可再次提示。显式 `Sync now` 始终允许重新选择，后台调度和启动不会弹窗或隐式归属；提交只作用于提示快照中仍未归属的 Session。

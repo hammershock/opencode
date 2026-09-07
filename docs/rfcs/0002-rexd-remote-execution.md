@@ -67,7 +67,7 @@ OpenCode 当前以启动命令所在目录作为默认工作位置。虽然当�
 1. 用户启动 OpenCode，进入 TUI QuickStart 页面。
 2. QuickStart 显示当前选择的 target 和工作目录。
 3. 用户可以选择 `local` 或一个已配置的 Rexd target；picker 同时提供 `Add target...` 和 `Manage targets...` 入口。
-4. 新增或编辑 target 时，QuickStart 打开配置向导。向导生成稳定 ID，并收集显示名称、SSH 连接方式和远端工作位置；允许测试连接后保存，暂时无法连接时也可以由用户明确选择保存为尚未验证的配置。
+4. 新增或编辑 target 时，QuickStart 打开配置向导。向导生成稳定 ID，并收集显示名称、SSH 连接方式和远端工作位置；保存动作不要求额外确认，并在保存后自动探测。暂时无法连接时保留配置并标记为尚未验证，真正选择该 target 时显示连接错误且不创建 Session。
 5. 用户在所选 target 上选择工作目录：
    - local 目录从本机文件系统选择；
    - Rexd 目录通过该 target 查询，不使用本机文件系统结果。

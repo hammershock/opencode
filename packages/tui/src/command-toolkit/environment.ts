@@ -3,7 +3,7 @@ import { defineCommand, type InvocationContext, type RawArguments } from "@openc
 export type EnvironmentMetadata = {
   enabled: boolean
   generation: number
-  variables: ReadonlyArray<{ name: string; origin: string; source?: string }>
+  variables: ReadonlyArray<{ name: string; origin: string; source?: string; overrides: ReadonlyArray<string> }>
 }
 
 export type EnvironmentValues = { generation: number; values: Record<string, string> }

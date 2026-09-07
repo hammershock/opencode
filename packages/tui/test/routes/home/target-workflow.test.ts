@@ -1,7 +1,28 @@
 import { describe, expect, test } from "bun:test"
-import { validateDestination } from "../../../src/routes/home/target-workflow"
+import {
+  executionTargetActions,
+  openExecutionTargetAction,
+  remoteInitialDirectory,
+  validateDestination,
+} from "../../../src/routes/home/target-workflow"
 
 describe("QuickStart target preflight", () => {
+  test("uses the configured remote directory before the inspected home", () => {
+    expect(remoteInitialDirectory({ defaultDirectory: "/srv/project" }, "/home/remote")).toBe("/srv/project")
+    expect(remoteInitialDirectory({}, "/home/remote")).toBe("/home/remote")
+  })
+
+  test("opens the existing target manager in direct add mode", () => {
+    expect(executionTargetActions).toEqual([
+      { title: "Add target…", value: "add", category: "Actions" },
+      { title: "Manage targets…", value: "manage", category: "Actions" },
+    ])
+    const opened: Array<"manage" | "add" | undefined> = []
+    openExecutionTargetAction("add", (mode) => opened.push(mode))
+    openExecutionTargetAction("manage", (mode) => opened.push(mode))
+    expect(opened).toEqual(["add", "manage"])
+  })
+
   test("local validates the directory without preparing a target", async () => {
     const calls: string[] = []
     const result = await validateDestination({

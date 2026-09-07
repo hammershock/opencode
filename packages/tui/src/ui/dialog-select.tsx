@@ -458,7 +458,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           "dialog.select.submit",
         ]),
         ...visible.flatMap((item) => tuiConfig.keybinds.get(item.command)),
-        ...(visible.length
+        ...(visible.length && !props.bindings?.some((binding) => binding.key === "tab")
           ? [
               {
                 key: "tab",

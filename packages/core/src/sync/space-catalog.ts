@@ -137,26 +137,29 @@ export function make(input: {
     const existing = await deletion(namespaceID, signal)
     const marker =
       existing?.value ?? (await publishDeletion(input.provider, { namespaceID, deletedAt: now(), revision: 1 }, signal))
-    const objects = await SyncProvider.listAll(input.provider, spacePrefix(namespaceID), signal).catch(() => {
-      throw new CatalogError("cleanup")
-    })
-    const descriptorObject = await input.provider.stat(descriptorPath(namespaceID), signal).catch(() => undefined)
-    const results = await input.provider
-      .deleteBatch(
-        [
-          ...objects.map((object) => ({ path: object.path, version: object.version })),
-          ...(descriptorObject ? [{ path: descriptorObject.path, version: descriptorObject.version }] : []),
-        ],
-        signal,
-      )
-      .catch(() => {
-        throw new CatalogError("cleanup")
-      })
-    if (results.some((result) => result.status === "conflict")) throw new CatalogError("cleanup")
-    return marker
+    const cleanup = await cleanupSpace(input.provider, namespaceID, signal).then(
+      () => "complete" as const,
+      () => "pending" as const,
+    )
+    // The permanent marker is the deletion commit. Payload cleanup is retryable
+    // garbage collection and must not turn a committed delete into a failure.
+    return { marker, cleanup }
   }
 
   return { discover, inspect, join, create, remove }
+}
+
+async function cleanupSpace(provider: SyncProvider.Adapter, namespaceID: string, signal?: AbortSignal) {
+  const objects = await SyncProvider.listAll(provider, spacePrefix(namespaceID), signal)
+  const descriptorObject = await provider.stat(descriptorPath(namespaceID), signal).catch(() => undefined)
+  const results = await provider.deleteBatch(
+    [
+      ...objects.map((object) => ({ path: object.path, version: object.version })),
+      ...(descriptorObject ? [{ path: descriptorObject.path, version: descriptorObject.version }] : []),
+    ],
+    signal,
+  )
+  if (results.some((result) => result.status === "conflict")) throw new CatalogError("cleanup")
 }
 
 function descriptorPath(namespaceID: string) {

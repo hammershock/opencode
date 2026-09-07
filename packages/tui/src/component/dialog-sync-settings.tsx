@@ -390,7 +390,7 @@ function showSpaceActions(dialog: DialogContext, space: SyncSpace, actions: Sync
   if (space.membership === "available") options.push({ title: "Enter space", value: "enter" })
   if (space.membership === "joined") options.push({ title: "Switch to this space", value: "switch" })
   if (space.membership !== "available") options.push({ title: "Leave on this device", value: "leave" })
-  options.push({ title: "Delete space globally", value: "delete" })
+  if (space.supported) options.push({ title: "Delete space globally", value: "delete" })
   dialog.replace(() => (
     <DialogSelect
       title={space.name}

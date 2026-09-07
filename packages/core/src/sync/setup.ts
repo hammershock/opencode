@@ -255,12 +255,35 @@ export function make(input: {
     const binding = context.current.spaces.find(
       (item) => item.descriptor.namespaceID === namespaceID && item.accountID === context.current.account?.id,
     )
-    if (!binding) return yield* new SetupError({ kind: "invalid" })
+    if (binding && !SyncSpace.compatible(binding.descriptor.protocol))
+      return yield* new SetupError({ kind: "invalid" })
+    if (!binding) {
+      const inspection = yield* effect("remote", () =>
+        context.catalog.inspect(namespaceID).catch((cause) => {
+          if (cause instanceof SyncSpaceCatalog.CatalogError && cause.kind === "deleted") return undefined
+          throw cause
+        }),
+      )
+      if (inspection?.status === "unsupported") return yield* new SetupError({ kind: "invalid" })
+    }
     yield* effect("remote", () => context.catalog.remove(namespaceID))
     yield* effect("storage", () =>
-      states.write(SyncState.remove(context.current, namespaceID), context.current.revision),
+      states.update((current) => {
+        if (current.account?.id !== context.current.account?.id) throw new SetupError({ kind: "account-mismatch" })
+        const spaces = current.spaces.filter(
+          (item) => item.descriptor.namespaceID !== namespaceID || item.accountID !== context.current.account?.id,
+        )
+        return {
+          ...current,
+          spaces,
+          activeSpaceID:
+            current.activeSpaceID === namespaceID && spaces.length !== current.spaces.length
+              ? undefined
+              : current.activeSpaceID,
+        }
+      }),
     )
-    if (binding.descriptor.encryption === "aes-256-gcm")
+    if (binding?.descriptor.encryption === "aes-256-gcm")
       yield* Effect.tryPromise(() => input.store.remove(rootAccount(namespaceID))).pipe(Effect.ignore)
     return namespaceID
   })

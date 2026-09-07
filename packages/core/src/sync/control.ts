@@ -28,9 +28,11 @@ import { SyncCodec } from "./codec"
 import { SyncMembership } from "./membership"
 import { SyncProvider } from "./provider"
 import { SyncState } from "./state"
+import { SyncTransfer } from "./transfer"
 import { TargetBindingRegistry } from "../target-binding-registry"
 import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
+import { SyncTransferEvent } from "@opencode-ai/schema/sync-transfer-event"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -188,7 +190,10 @@ const make = (input: LayerOptions) =>
       const provider = input.provider
         ? input.provider({ store: secure, deviceID: config.deviceID, remoteRoot: config.remoteRoot })
         : BaiduSyncProvider.adapter({ store: secure, deviceID: config.deviceID, root: config.remoteRoot })
-      const attachment = SyncAttachment.make({ codec, namespaceID: config.namespaceID, provider })
+      const transfer = SyncTransfer.make((progress) =>
+        Effect.runPromise(events.publish(SyncTransferEvent.Updated, { progress })).then(() => undefined),
+      )
+      const attachment = SyncAttachment.make({ codec, namespaceID: config.namespaceID, provider, transfer })
       engine = SyncRuntime.make({
         config: {
           deviceID: SyncEvent.DeviceID.make(config.deviceID),
@@ -197,6 +202,7 @@ const make = (input: LayerOptions) =>
         },
         codec,
         provider,
+        transfer,
         store,
         projector: (deviceID) =>
           SessionSync.projector(

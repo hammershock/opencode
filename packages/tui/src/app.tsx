@@ -35,7 +35,7 @@ import { useEvent } from "./context/event"
 import { SDKProvider, useSDK } from "./context/sdk"
 import { StartupLoading } from "./component/startup-loading"
 import { SyncProvider, useSync } from "./context/sync"
-import { SyncSettingsProvider } from "./context/sync-settings"
+import { SyncSettingsProvider, useSyncSettings } from "./context/sync-settings"
 import { DataProvider } from "./context/data"
 import { LocationProvider } from "./context/location"
 import { LocalProvider, useLocal } from "./context/local"
@@ -58,6 +58,7 @@ import { DialogConsoleOrg } from "./component/dialog-console-org"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { Home } from "./routes/home"
 import { Session } from "./routes/session"
+import { SyncTransferSummary } from "./component/sync-transfer-summary"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
@@ -403,6 +404,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const pluginRuntime = usePluginRuntime()
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
+  const syncSettings = useSyncSettings()
 
   const api = createTuiApi(
     createTuiApiAdapters({
@@ -1155,6 +1157,13 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     >
       <Show when={Flag.OPENCODE_SHOW_TTFD}>
         <TimeToFirstDraw />
+      </Show>
+      <Show when={syncSettings.transfer()}>
+        {(progress) => (
+          <box position="absolute" top={0} right={1} flexShrink={0}>
+            <SyncTransferSummary progress={progress()} />
+          </box>
+        )}
       </Show>
       <Show when={ready()}>
         <box flexGrow={1} minHeight={0} flexDirection="column">

@@ -155,7 +155,8 @@ Core 只依赖该 contract。百度 adapter 负责 OAuth、分页、precreate、
 
 ## 增量、索引与调度
 
-- owned Session mutation 与对应 space-scoped outbox 原子提交，再异步上传；上传成功并更新本设备 head 后才清除 outbox；
+- Session durable event 在 Session 数据库中原子提交，并作为跨数据库 capture journal；space-scoped outbox 以 event ID 幂等、至少一次地从该 journal 捕获，再异步上传。启动时必须先订阅 live durable stream，再修复 ownership 并回放完整已归属历史，使进程在 Session commit 与 outbox capture 之间崩溃也不会丢事件；上传成功并更新本设备 head 后才清除 outbox；
+- Session 数据库中的 `syncSpaceID` 是仍存在 Session 的 canonical membership：启动恢复必须用全部 Session 行修复 ownership，显式 `NULL` 清除崩溃遗留的旧 ownership，非空值修复 assign/space-switch 中断；已经删除而没有 Session 行的 aggregate 保留旧 ownership，只用于把最终 tombstone 路由回原空间；
 - enabled 时按用户级配置对 active space 调度；v1 只提供 30 秒、1 分钟、5 分钟三个 interval preset，默认 30 秒；启动、网络恢复和 `/sync now` 也触发，相同方向请求合并；
 - upload 与 pull 使用按 space、device、方向隔离的跨进程 lease 和 TTL；
 - 每个 device head 携带该设备已知的最小永久 Session deletion set。任何上传都必须先索引远端 head、吸收并投影其中的删除事实，再处理本机 outbox；因此离线旧设备不能先发布陈旧 metadata 再得知删除；

@@ -5,6 +5,32 @@ import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SessionSync } from "@opencode-ai/core/sync/session"
 
 describe("SessionSync", () => {
+  test("repairs ownership from surviving rows without discarding deleted Session routing", async () => {
+    const ownership = new Map([
+      ["explicitly-local", "old-space"],
+      ["moved", "old-space"],
+      ["deleted", "delete-space"],
+    ])
+    await Effect.runPromise(
+      SessionSync.reconcileOwnership(
+        {
+          assign: (sessionID, spaceID) => Effect.sync(() => void ownership.set(sessionID, spaceID)),
+          unassign: (sessionID) => Effect.sync(() => void ownership.delete(sessionID)),
+        },
+        [
+          { sessionID: "explicitly-local", assignedAt: 1 },
+          { sessionID: "moved", spaceID: "new-space", assignedAt: 2 },
+          { sessionID: "new", spaceID: "new-space", assignedAt: 3 },
+        ],
+      ),
+    )
+    expect(Object.fromEntries(ownership)).toEqual({
+      moved: "new-space",
+      deleted: "delete-space",
+      new: "new-space",
+    })
+  })
+
   test("routes only owned Session events to their original space", async () => {
     const spaces: string[] = []
     const enqueued: string[] = []

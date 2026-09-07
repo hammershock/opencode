@@ -95,12 +95,12 @@ export function includeCloudSessionInDialogScope(scope: DialogSessionListFilters
 
 export function syncAvailabilityLabel(availability: SyncAvailability) {
   return {
-    "metadata-only": "cloud · not downloaded",
-    hydrating: "cloud · downloading",
-    ready: "cloud · ready",
-    partial: "cloud · incomplete; retry",
-    conflict: "cloud · conflict copy",
-    unresolved: "cloud · target needs binding",
+    "metadata-only": "◐ metadata-only",
+    hydrating: "◐ hydrating",
+    ready: "● ready",
+    partial: "! partial",
+    conflict: "! conflict",
+    unresolved: "! unresolved",
   }[availability]
 }
 

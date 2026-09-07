@@ -58,7 +58,10 @@ export function provider(
     const range = replacementRange(input.input, input.cursor)
     const token = unquote(input.input.slice(range.start, range.end))
     const paths = yield* pathCandidates(input.cwd, token, range, fs)
-    const commands = token.includes("/") ? [] : yield* commandCandidates(token, range, input.environment, fs)
+    const commands =
+      token.includes("/") || !isCommandPosition(input.input, range.start)
+        ? []
+        : yield* commandCandidates(token, range, input.environment, fs)
     const native = yield* nativeCandidates(
       shell,
       input.input,
@@ -123,6 +126,52 @@ export function replacementRange(input: string, cursor: number) {
     end = index + 1
   }
   return { start, end }
+}
+
+export function isCommandPosition(input: string, cursor: number) {
+  const safe = Math.max(0, Math.min(cursor, input.length))
+  let quote: "'" | '"' | undefined
+  let escaped = false
+  let word = ""
+  let expecting = true
+  const commit = () => {
+    if (!word) return
+    if (!expecting || !/^[A-Za-z_][A-Za-z0-9_]*=.*/s.test(word)) expecting = false
+    word = ""
+  }
+  for (let index = 0; index < safe; index++) {
+    const char = input[index]!
+    if (escaped) {
+      word += char
+      escaped = false
+      continue
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (char === "'" || char === '"') {
+      quote = quote === char ? undefined : (quote ?? char)
+      continue
+    }
+    if (quote) {
+      word += char
+      continue
+    }
+    if (/\s/.test(char)) {
+      commit()
+      if (char === "\n") expecting = true
+      continue
+    }
+    if (char === ";" || char === "|" || char === "&" || char === "(") {
+      commit()
+      expecting = true
+      continue
+    }
+    word += char
+  }
+  commit()
+  return expecting
 }
 
 function wrap(command: string, control: string, shell: string) {

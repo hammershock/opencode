@@ -112,6 +112,48 @@ describe("UserShellLocal", () => {
   )
 
   it(
+    "uses PATH fallback only at a command position",
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fs.makeTempDirectoryScoped()
+      const bin = path.join(root, "bin")
+      yield* fs.makeDirectory(bin)
+      yield* fs.writeWithDirs(path.join(bin, "hammer-tool"), "", 0o755)
+      yield* fs.writeFileString(path.join(root, "hammer-path"), "")
+      const local = UserShellLocal.provider("/bin/sh", fs, spawner)
+
+      const argument = yield* local.complete({
+        cwd: root,
+        input: "git ham",
+        cursor: 7,
+        environment: { PATH: bin },
+      })
+      expect(argument.candidates.map((candidate) => candidate.value)).toEqual(["hammer-path"])
+
+      const command = yield* local.complete({
+        cwd: root,
+        input: "false || ham",
+        cursor: 12,
+        environment: { PATH: bin },
+      })
+      expect(command.candidates.map((candidate) => candidate.value)).toEqual(["hammer-path", "hammer-tool"])
+    }),
+  )
+
+  it(
+    "recognizes assignments and shell control operators before a command",
+    Effect.sync(() => {
+      expect(UserShellLocal.isCommandPosition("", 0)).toBe(true)
+      expect(UserShellLocal.isCommandPosition("FOO='two words' ", 16)).toBe(true)
+      expect(UserShellLocal.isCommandPosition("git ", 4)).toBe(false)
+      expect(UserShellLocal.isCommandPosition("printf 'a | b'; ", 16)).toBe(true)
+      expect(UserShellLocal.isCommandPosition("printf a && ", 12)).toBe(true)
+      expect(UserShellLocal.isCommandPosition("printf a\n", 9)).toBe(true)
+    }),
+  )
+
+  it(
     "supports bash -F, -W, and -A programmable completion",
     Effect.gen(function* () {
       const fs = yield* FSUtil.Service

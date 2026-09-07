@@ -13,6 +13,7 @@ const connected = {
   enabled: true,
   interval: 30,
   state: "idle",
+  remote: "idle",
   activeSpace: {
     id: "space-1",
     name: "Research",
@@ -36,10 +37,23 @@ describe("Sync Settings presentation", () => {
     expect(buildSyncOverviewRows(connected)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ title: "ha***@example.com", status: "● connected" }),
+        expect.objectContaining({ title: "Check cloud status", status: "○ not checked" }),
         expect.objectContaining({ title: "Research", status: "● idle" }),
         expect.objectContaining({ title: "Auto sync", status: "● on" }),
         expect.objectContaining({ title: "Interval", status: "30 sec" }),
       ]),
+    )
+  })
+
+  test("shows bounded remote refresh states without replacing local rows", () => {
+    expect(buildSyncOverviewRows({ ...connected, remote: "checking" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "◐ checking" })]),
+    )
+    expect(buildSyncOverviewRows({ ...connected, remote: "ready" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "● ready" })]),
+    )
+    expect(buildSyncOverviewRows({ ...connected, remote: "unavailable" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Retry cloud status", status: "! unavailable" })]),
     )
   })
 

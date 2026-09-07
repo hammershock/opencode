@@ -1,5 +1,5 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
-import type { EventSyncTransferUpdated, GlobalSyncDiscoverResponse, GlobalSyncStateResponse } from "@opencode-ai/sdk/v2"
+import type { GlobalSyncDiscoverResponse, GlobalSyncStateResponse } from "@opencode-ai/sdk/v2"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
@@ -12,6 +12,8 @@ import { useKV } from "./kv"
 import { useClipboard } from "./clipboard"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
+import { remoteFailureDetail, useRemoteStatus } from "./remote-status"
+import { syncTransferSummary } from "../component/sync-transfer-summary"
 import {
   showAssignUnassignedSessions,
   showSyncDevices,
@@ -25,7 +27,6 @@ import {
 const DISMISSED_UNASSIGNED = "sync_unassigned_dismissed"
 
 type OpenView = "overview" | "devices"
-type ActiveTransfer = Exclude<EventSyncTransferUpdated["properties"]["progress"], { state: "idle" }>
 
 const initial: SyncSettingsViewModel = {
   account: { state: "disconnected", oauth: { state: "idle" } },
@@ -76,7 +77,9 @@ export function syncOperationFailure(error: unknown) {
   if (hasSetupKind(error, "unconfigured", 0)) return "Select a sync space first"
   if (hasSetupKind(error, "locked", 0)) return "Import the recovery key for the active space"
   const stage = syncFailureStage(error, 0)
-  if (stage) return `Sync failed during ${stage}`
+  if (stage) return `Sync failed during ${stage} · ${remoteFailureDetail(error)}`
+  const detail = remoteFailureDetail(error)
+  if (detail !== "remote operation failed") return `Sync failed · ${detail}`
   return "Sync operation failed"
 }
 
@@ -165,8 +168,8 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     const clipboard = useClipboard()
     const dialog = useDialog()
     const toast = useToast()
+    const remoteStatus = useRemoteStatus()
     const [model, setModel] = createSignal(initial)
-    const [transfer, setTransfer] = createSignal<ActiveTransfer>()
     let discovered: GlobalSyncDiscoverResponse["spaces"] = []
     let oauth:
       | {
@@ -182,12 +185,21 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
 
     const unsubscribe = sdk.event.on("event", (event) => {
       if (event.payload.type === "server.connected") {
-        setTransfer(undefined)
+        remoteStatus.clear("sync-transfer")
         return
       }
       if (event.payload.type !== "sync.transfer.updated") return
       const progress = event.payload.properties.progress
-      setTransfer(progress.state === "active" ? progress : undefined)
+      if (progress.state === "idle") {
+        remoteStatus.clear("sync-transfer")
+        return
+      }
+      remoteStatus.set("sync-transfer", {
+        area: "Sync",
+        operation: "synchronize",
+        phase: syncTransferSummary(progress).replace(/^◐ /, ""),
+        state: "running",
+      })
     })
 
     onCleanup(() => {
@@ -389,6 +401,15 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
             : state.enabled
               ? "idle"
               : "off"
+        if (status?.diagnostic)
+          remoteStatus.set("sync-runtime-error", {
+            area: "Sync",
+            operation: "background synchronization",
+            phase: status.diagnostic.stage,
+            state: "failed",
+            detail: remoteFailureDetail(status.diagnostic),
+          })
+        else remoteStatus.clear("sync-runtime-error")
         setModel({
           account:
             status && !authenticated
@@ -671,7 +692,6 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
 
     return {
       model,
-      transfer,
       status: () => syncStatus(model().state),
       async open(view: OpenView = "overview") {
         render(view)

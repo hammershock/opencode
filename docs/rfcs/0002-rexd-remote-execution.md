@@ -166,6 +166,8 @@ TUI 不直接读写 `targets.jsonc`，也不自行执行 SSH。Core/Server 提�
 
 QuickStart 的 `Execution Target` picker 与 target manager 必须在打开时异步、非阻塞地探测每个已配置 target，并以简洁的 `checking`、`ready`、`unavailable` 或 `invalid` 状态展示。聚焦失败项时可以显示脱敏的阶段和原因；探测失败不得关闭面板、切换选择或导致 TUI crash。用户可主动刷新。此处健康探测只检查现有 SSH/Rexd 可达性、握手与能力，不执行 daemon 安装或升级；完整 managed-daemon prepare 仍只在激活 target/创建 Session 的准备阶段运行。
 
+所有会使用户等待的 Rexd Target 远端操作还必须接入共享的右上角状态栏，包括健康探测、连接测试、环境检测、daemon prepare、握手、远端目录补全、目录验证与创建。开始时立即显示 target 操作和阶段；成功即清除；失败保留经过脱敏的 stage、稳定错误类别、可重试性和说明。面板内的行状态仍用于比较多个 target，不能代替跨面板可见的操作状态栏。
+
 ### Location
 
 Location 表示一次会话绑定的完整工作位置：

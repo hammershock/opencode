@@ -3,6 +3,7 @@ import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { createSimpleContext } from "./helper"
 import { batch, onCleanup, onMount } from "solid-js"
+import { remoteFailureDetail, useRemoteStatus } from "./remote-status"
 
 export type EventSource = {
   subscribe: (handler: (event: GlobalEvent) => void) => Promise<() => void>
@@ -18,14 +19,57 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     events?: EventSource
   }) => {
     const abort = new AbortController()
+    const remoteStatus = useRemoteStatus()
+    const sourceFetch = props.fetch ?? fetch
     let sse: AbortController | undefined
+
+    const trackedFetch = (async (input, init) => {
+      const operation = remoteRequest(input, init)
+      if (!operation) return sourceFetch(input, init)
+      const id = remoteStatus.begin(operation.area, operation.operation, operation.phase)
+      try {
+        const response = await sourceFetch(input, init)
+        const body =
+          !response.ok || operation.inspectResponse
+            ? await response
+                .clone()
+                .json()
+                .catch(() => undefined)
+            : undefined
+        if (!response.ok) {
+          remoteStatus.fail(id, remoteFailureDetail(body ?? `HTTP ${response.status}`), operation.phase)
+          return response
+        }
+        if (
+          operation.inspectResponse &&
+          body &&
+          typeof body === "object" &&
+          "status" in body &&
+          body.status !== "ready"
+        ) {
+          const value = body as { stage?: string; message?: string; status?: string }
+          remoteStatus.fail(
+            id,
+            remoteFailureDetail({ stage: value.stage, kind: value.status, message: value.message }),
+            value.stage ?? operation.phase,
+          )
+          return response
+        }
+        remoteStatus.complete(id)
+        return response
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") remoteStatus.complete(id)
+        else remoteStatus.fail(id, remoteFailureDetail(error), operation.phase)
+        throw error
+      }
+    }) as typeof fetch
 
     function createSDK() {
       return createOpencodeClient({
         baseUrl: props.url,
         signal: abort.signal,
         directory: props.directory,
-        fetch: props.fetch,
+        fetch: trackedFetch,
         headers: props.headers,
       })
     }
@@ -144,8 +188,65 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       },
       directory: props.directory,
       event: emitter,
-      fetch: props.fetch ?? fetch,
+      fetch: trackedFetch,
       url: props.url,
     }
   },
 })
+
+function remoteRequest(input: RequestInfo | URL, init?: RequestInit) {
+  const url = new URL(input instanceof Request ? input.url : String(input))
+  const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
+  const sync = syncOperation(url.pathname, method)
+  if (sync) return { area: "Sync" as const, ...sync }
+
+  if (url.pathname === "/api/target/wizard/inspect")
+    return { area: "Target" as const, operation: "inspect environment", phase: "SSH" }
+  if (url.pathname === "/api/target/wizard/complete")
+    return { area: "Target" as const, operation: "complete remote path", phase: "filesystem" }
+  if (/^\/api\/target\/[^/]+\/test$/.test(url.pathname))
+    return { area: "Target" as const, operation: "test connection", phase: "SSH", inspectResponse: true }
+  if (/^\/api\/target\/[^/]+\/prepare$/.test(url.pathname))
+    return { area: "Target" as const, operation: "prepare target", phase: "daemon and handshake" }
+  if (url.pathname.startsWith("/api/fs/") && remoteLocation(url))
+    return {
+      area: "Target" as const,
+      operation: url.pathname.includes("directory/status")
+        ? "validate directory"
+        : url.pathname.endsWith("/directory")
+          ? "create directory"
+          : "inspect remote files",
+      phase: "filesystem",
+    }
+}
+
+function syncOperation(pathname: string, method: string) {
+  if (pathname === "/global/sync/oauth/begin") return { operation: "connect account", phase: "authorization" }
+  if (pathname === "/global/sync/oauth/complete" || pathname === "/global/sync/oauth/switch-account")
+    return { operation: "connect account", phase: "token exchange" }
+  if (pathname === "/global/sync/spaces" && method === "GET")
+    return { operation: "refresh cloud status", phase: "discover spaces" }
+  if (pathname === "/global/sync/spaces" && method === "POST")
+    return { operation: "create space", phase: "publish catalog" }
+  if (pathname === "/global/sync/spaces/join") return { operation: "enter space", phase: "verify catalog" }
+  if (pathname === "/global/sync/spaces/activate") return { operation: "switch space", phase: "flush and activate" }
+  if (/^\/global\/sync\/spaces\/[^/]+$/.test(pathname) && method === "DELETE")
+    return { operation: "delete space", phase: "publish deletion marker" }
+  if (pathname === "/global/sync/now") return { operation: "synchronize", phase: "exchange changes" }
+  if (pathname === "/global/sync/hydrate") return { operation: "download session", phase: "hydrate" }
+  if (pathname === "/global/sync/devices")
+    return { operation: method === "GET" ? "refresh devices" : "update device", phase: "device heads" }
+}
+
+function remoteLocation(url: URL) {
+  const target = url.searchParams.get("location[target]")
+  if (target) return true
+  const value = url.searchParams.get("location")
+  if (!value) return false
+  try {
+    const location = JSON.parse(value) as { target?: unknown }
+    return typeof location.target === "string" && location.target.length > 0
+  } catch {
+    return false
+  }
+}

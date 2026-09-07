@@ -52,7 +52,7 @@ test("renders active sync transfer events and clears the summary on idle", async
       },
     })
     await setup.waitForVisualIdle()
-    expect(setup.captureCharFrame()).toContain("◐ ↑ sessions · 2 · 1.5 KB")
+    expect(setup.captureCharFrame()).toContain("◐ Sync · synchronize · ↑ sessions · 2 · 1.5 KB")
 
     events.emit({
       directory,
@@ -63,7 +63,7 @@ test("renders active sync transfer events and clears the summary on idle", async
       },
     })
     await setup.waitForVisualIdle()
-    expect(setup.captureCharFrame()).not.toContain("◐ ↑ sessions")
+    expect(setup.captureCharFrame()).not.toContain("◐ Sync · synchronize")
 
     process.emit("SIGHUP")
     await task

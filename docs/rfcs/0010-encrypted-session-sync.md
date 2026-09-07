@@ -216,6 +216,8 @@ tombstone 对同一 space ID 与 Session ID 组合永久、单调地占优。删
 
 同步状态使用稳定词汇：`off`、`idle`、`syncing`、`locked`、`attention`。列表内容状态使用 `metadata-only`、`hydrating`、`ready`、`partial`、`conflict`、`unresolved`。provider stage 与可重试性属于诊断详情，不创造更多近义 UI 状态。
 
+所有会访问百度网盘或等待远端同步结果的操作必须接入共享的右上角状态栏，包括 OAuth exchange、space discovery/create/join/switch/global delete、设备读写、显式同步、后台有效传输和 hydration。状态栏即时显示操作与阶段；有效数据交换显示上传/下载方向、对象类型、数量和字节增量；成功即清除。失败必须保留经过脱敏的 stage、provider operation、稳定 kind、retryable 与说明，不能只显示通用 `sync failed`。永久 space deletion marker 一旦成功发布即代表全局删除已经提交；后续 payload 垃圾回收或本机 key 清理失败只能成为诊断/待重试清理，不能把已经提交的删除回报为失败或保留本机 binding。
+
 - 网络、限流和 5xx 使用带 jitter 的有界指数退避；认证失败等待重新授权；
 - 上传结果未知时先 stat/verify，不盲目重复 finalize；
 - corrupt/tampered、错误 key 和 schema/protocol mismatch 不覆盖对象或推进 cursor；

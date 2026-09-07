@@ -6,6 +6,7 @@ import * as Socket from "effect/unstable/socket/Socket"
 import path from "path"
 import { pathToFileURL } from "url"
 import { mkdir } from "fs/promises"
+import { createReadStream } from "fs"
 import { Location } from "@opencode-ai/core/location"
 import { Pty } from "@opencode-ai/core/pty"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
@@ -154,6 +155,9 @@ describe("v2 pty HttpApi", () => {
 
   testPty("serves location-wrapped PTY routes and retains exited sessions", async () => {
     await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    const exitGate = path.join(tmp.path, "exit-gate")
+    const fifo = Bun.spawn(["mkfifo", exitGate])
+    expect(await fifo.exited).toBe(0)
 
     const empty = await request("/api/pty", tmp.path)
     expect(empty.status).toBe(200)
@@ -162,12 +166,22 @@ describe("v2 pty HttpApi", () => {
     const created = await request("/api/pty", tmp.path, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ command: "/usr/bin/env", args: ["sh", "-c", "exit 4"], title: "v2" }),
+      body: JSON.stringify({
+        command: "/bin/sh",
+        args: ["-c", 'read _ < "$EXIT_GATE"; exit 4'],
+        title: "v2",
+        env: { EXIT_GATE: exitGate },
+      }),
     })
     expect(created.status).toBe(200)
     const body = Schema.decodeUnknownSync(Location.response(Pty.Info))(await created.json())
     expect(String(body.location.directory)).toBe(tmp.path)
     expect(body.data.title).toBe("v2")
+
+    // PTY listeners are installed before the command is released, so a fast
+    // process cannot exit before the retention observer is ready.
+    const release = Bun.spawn(["/bin/sh", "-c", 'printf "go\\n" > "$1"', "sh", exitGate])
+    expect(await release.exited).toBe(0)
 
     // The canonical surface keeps exited sessions observable with their exit code.
     const deadline = Date.now() + 20_000
@@ -263,78 +277,66 @@ describe("v2 pty HttpApi", () => {
         expect(removed.status).toBe(204)
       }),
   )
-  ;(process.platform === "win32" ? effectIt.live.skip : effectIt.live)(
+  testPty(
     "applies plugin shell environment before forced PTY values",
-    () =>
-      Effect.gen(function* () {
-        const dir = yield* tmpdirScoped({ git: true, config: { formatter: false, lsp: false } })
-        const plugin = path.join(dir, "plugin.ts")
-        const cwd = path.join(dir, "child")
-        yield* Effect.promise(() => mkdir(cwd))
-        yield* Effect.promise(() =>
-          Bun.write(
-            plugin,
-            [
-              "export default async () => ({",
-              '  "shell.env": (input, output) => {',
-              '    output.env.SHARED = "plugin"',
-              '    output.env.PLUGIN = "plugin"',
-              '    output.env.TERM = "plugin"',
-              "    output.env.HOOK_CWD = input.cwd",
-              "  },",
-              "})",
-              "",
-            ].join("\n"),
-          ),
-        )
-        yield* Effect.promise(() =>
-          Bun.write(
-            path.join(dir, "opencode.json"),
-            JSON.stringify({ plugin: [pathToFileURL(plugin).href], formatter: false, lsp: false }),
-          ),
-        )
+    async () => {
+      await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+      const dir = tmp.path
+      const plugin = path.join(dir, "plugin.ts")
+      const cwd = path.join(dir, "child")
+      const output = path.join(cwd, "environment.txt")
+      await mkdir(cwd)
+      await Bun.write(
+        plugin,
+        [
+          "export default async () => ({",
+          '  "shell.env": (input, output) => {',
+          '    output.env.SHARED = "plugin"',
+          '    output.env.PLUGIN = "plugin"',
+          '    output.env.TERM = "plugin"',
+          "    output.env.HOOK_CWD = input.cwd",
+          "  },",
+          "})",
+          "",
+        ].join("\n"),
+      )
+      await Bun.write(
+        path.join(dir, "opencode.json"),
+        JSON.stringify({ plugin: [pathToFileURL(plugin).href], formatter: false, lsp: false }),
+      )
 
-        const created = yield* HttpClientRequest.post("/api/pty").pipe(
-          directoryHeader(dir),
-          HttpClientRequest.bodyJson({
+      const fifo = Bun.spawn(["mkfifo", output])
+      expect(await fifo.exited).toBe(0)
+      const reader = createReadStream(output, { encoding: "utf8" })
+      const outputReady = new Promise<string>((resolve, reject) => {
+        let value = ""
+        reader.on("data", (chunk) => (value += chunk))
+        reader.on("end", () => resolve(value))
+        reader.on("error", reject)
+      })
+
+      let ptyID: string | undefined
+      try {
+        const created = await request("/api/pty", dir, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
             command: "/bin/sh",
-            args: ["-c", 'printf "%s|%s|%s|%s|%s\\n" "$CALLER" "$SHARED" "$PLUGIN" "$TERM" "$HOOK_CWD"; sleep 0.2'],
+            args: ["-c", 'printf "%s|%s|%s|%s|%s\\n" "$CALLER" "$SHARED" "$PLUGIN" "$TERM" "$HOOK_CWD" > "$OUTPUT"'],
             cwd,
-            env: { CALLER: "caller", SHARED: "caller", TERM: "caller" },
+            env: { CALLER: "caller", SHARED: "caller", TERM: "caller", OUTPUT: output },
           }),
-          Effect.flatMap(HttpClient.execute),
-        )
+        })
         expect(created.status).toBe(200)
-        const info = (yield* Schema.decodeUnknownEffect(Location.response(Pty.Info))(yield* created.json)).data
+        const info = Schema.decodeUnknownSync(Location.response(Pty.Info))(await created.json()).data
+        ptyID = info.id
 
-        const socket = yield* Socket.makeWebSocket(
-          `${(yield* serverUrl()).replace(/^http/, "ws")}/api/pty/${info.id}/connect?cursor=0&location[directory]=${encodeURIComponent(dir)}`,
-          { closeCodeIsError: () => false },
-        )
-        const messages = yield* Queue.unbounded<string>()
-        yield* socket
-          .runRaw((message) =>
-            Queue.offer(messages, typeof message === "string" ? message : new TextDecoder().decode(message)),
-          )
-          .pipe(
-            Effect.catch(() => Effect.void),
-            Effect.forkScoped,
-          )
-        const write = yield* socket.writer
-
-        const takeUntil = (expected: string, seen = ""): Effect.Effect<string, unknown> =>
-          Effect.gen(function* () {
-            const next = seen + (yield* Queue.take(messages).pipe(Effect.timeout("5 seconds")))
-            if (next.includes(expected)) return next
-            return yield* takeUntil(expected, next)
-          })
-
-        expect(yield* takeUntil(`caller|plugin|plugin|xterm-256color|${cwd}`)).toContain(
-          `caller|plugin|plugin|xterm-256color|${cwd}`,
-        )
-        yield* write(new Socket.CloseEvent(1000, "done")).pipe(Effect.catch(() => Effect.void))
-        yield* HttpClientRequest.delete(`/api/pty/${info.id}`).pipe(directoryHeader(dir), HttpClient.execute)
-      }),
+        expect(await outputReady).toContain(`caller|plugin|plugin|xterm-256color|${cwd}`)
+      } finally {
+        reader.destroy()
+        if (ptyID) await request(`/api/pty/${ptyID}`, dir, { method: "DELETE" })
+      }
+    },
     { timeout: 15_000 },
   )
 })

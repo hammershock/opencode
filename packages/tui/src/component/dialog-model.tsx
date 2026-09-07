@@ -93,8 +93,10 @@ export function DialogModel(props: { providerID?: string }) {
   const showExtra = createMemo(() => connected() && !props.providerID)
 
   const options = createMemo(() => {
-    const needle = query().trim()
-    const showSections = showExtra() && needle.length === 0
+    const filterState = modelFilterState(query())
+    const needle = filterState.needle
+    const flattened = filterState.flattened
+    const showSections = showExtra() && !flattened
     const favorites = connected() ? local.model.favorite() : []
     const recents = local.model.recent()
 
@@ -172,7 +174,7 @@ export function DialogModel(props: { providerID?: string }) {
               flatFooterWidth,
               inspectFooter: true,
               titleWidth: modelTitleWidth(dimensions().width, {
-                footerWidth: needle ? flatFooterWidth : footer ? Bun.stringWidth(footer) : undefined,
+                footerWidth: flattened ? flatFooterWidth : footer ? Bun.stringWidth(footer) : undefined,
                 description,
               }),
               inspectTitle: true,
@@ -316,6 +318,10 @@ export function DialogModel(props: { providerID?: string }) {
       current={local.model.current()}
     />
   )
+}
+
+export function modelFilterState(query: string) {
+  return { needle: query.trim(), flattened: query.length > 0 }
 }
 
 function DialogProviderUsageDetails(props: { providerID: string; providerName: string; initial?: Result }) {

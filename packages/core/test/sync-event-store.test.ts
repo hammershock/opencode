@@ -43,13 +43,28 @@ describe("SyncEventStore", () => {
     const raw = new BunDatabase(filename)
     raw.run("CREATE TABLE sync_schema (version INTEGER PRIMARY KEY)")
     raw.run("INSERT INTO sync_schema (version) VALUES (2)")
-    raw.run("CREATE TABLE sync_event_outbox (event_id TEXT PRIMARY KEY, segment_id TEXT, created_at INTEGER)")
-    raw.run("CREATE TABLE sync_event_segment (id TEXT PRIMARY KEY, device_id TEXT, generation INTEGER)")
-    raw.run("CREATE TABLE sync_event_head (device_id TEXT PRIMARY KEY)")
-    raw.run("CREATE TABLE sync_event_cursor (device_id TEXT PRIMARY KEY)")
-    raw.run("CREATE TABLE sync_remote_segment (device_id TEXT, generation INTEGER)")
-    raw.run("CREATE TABLE sync_remote_event (device_id TEXT, event_id TEXT)")
-    raw.run("CREATE TABLE sync_deletion_set (session_id TEXT PRIMARY KEY)")
+    raw.run(`CREATE TABLE sync_event_outbox (
+      event_id TEXT PRIMARY KEY, aggregate_id TEXT NOT NULL, seq INTEGER NOT NULL,
+      payload TEXT NOT NULL, created_at INTEGER NOT NULL, segment_id TEXT, kind TEXT NOT NULL DEFAULT 'event'
+    )`)
+    raw.run(`CREATE TABLE sync_event_segment (
+      id TEXT PRIMARY KEY, device_id TEXT NOT NULL, generation INTEGER NOT NULL,
+      payload TEXT NOT NULL, created_at INTEGER NOT NULL, acknowledged_at INTEGER,
+      UNIQUE(device_id, generation)
+    )`)
+    raw.run("CREATE TABLE sync_event_head (device_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)")
+    raw.run("CREATE TABLE sync_event_cursor (device_id TEXT PRIMARY KEY, cursor INTEGER NOT NULL)")
+    raw.run(`CREATE TABLE sync_remote_segment (
+      device_id TEXT NOT NULL, generation INTEGER NOT NULL, payload TEXT NOT NULL,
+      PRIMARY KEY(device_id, generation)
+    )`)
+    raw.run(`CREATE TABLE sync_remote_event (
+      device_id TEXT NOT NULL, event_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+      PRIMARY KEY(device_id, event_id)
+    )`)
+    raw.run(`CREATE TABLE sync_deletion_set (
+      session_id TEXT PRIMARY KEY, marker TEXT NOT NULL, deleted_at INTEGER NOT NULL
+    )`)
     raw.close()
     const database = SyncDatabase.layerFromPath(filename)
     const version = await Effect.runPromise(
@@ -58,7 +73,72 @@ describe("SyncEventStore", () => {
         return yield* db.get<{ version: number }>(sql`SELECT MAX(version) AS version FROM sync_schema`)
       }).pipe(Effect.scoped, Effect.provide(database)),
     )
-    expect(version).toEqual({ version: 5 })
+    expect(version).toEqual({ version: 6 })
+  })
+
+  test("preserves v5 rows while rebuilding space-composite keys and the immutable trigger", async () => {
+    await using tmp = await tmpdir()
+    const filename = path.join(tmp.path, "sync.db")
+    const raw = new BunDatabase(filename)
+    raw.exec(`
+      CREATE TABLE sync_schema (version INTEGER PRIMARY KEY);
+      INSERT INTO sync_schema VALUES (5);
+      CREATE TABLE sync_event_outbox (event_id TEXT PRIMARY KEY, aggregate_id TEXT NOT NULL, seq INTEGER NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL, segment_id TEXT, kind TEXT NOT NULL DEFAULT 'event', space_id TEXT NOT NULL DEFAULT 'legacy');
+      CREATE TABLE sync_event_segment (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, generation INTEGER NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL, acknowledged_at INTEGER, space_id TEXT NOT NULL DEFAULT 'legacy', UNIQUE(device_id, generation));
+      CREATE TABLE sync_event_head (device_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy');
+      CREATE TABLE sync_event_cursor (device_id TEXT PRIMARY KEY, cursor INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy');
+      CREATE TABLE sync_remote_segment (device_id TEXT NOT NULL, generation INTEGER NOT NULL, payload TEXT NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY(device_id, generation));
+      CREATE TABLE sync_remote_event (device_id TEXT NOT NULL, event_id TEXT NOT NULL, fingerprint TEXT NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY(device_id, event_id));
+      CREATE TABLE sync_deletion_set (session_id TEXT PRIMARY KEY, marker TEXT NOT NULL, deleted_at INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy');
+      CREATE TABLE sync_apply_journal (device_id TEXT NOT NULL, generation INTEGER NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy', PRIMARY KEY(device_id, generation));
+      CREATE TABLE sync_session_metadata (session_id TEXT PRIMARY KEY, payload TEXT NOT NULL, source_device TEXT NOT NULL, revision INTEGER NOT NULL, availability TEXT NOT NULL, updated_at INTEGER NOT NULL, space_id TEXT NOT NULL DEFAULT 'legacy');
+      CREATE TRIGGER sync_event_segment_immutable BEFORE UPDATE OF device_id, generation, payload, created_at ON sync_event_segment BEGIN SELECT RAISE(ABORT, 'sync event segments are immutable'); END;
+      CREATE INDEX sync_event_outbox_space_idx ON sync_event_outbox(space_id, segment_id, created_at);
+      CREATE INDEX sync_event_segment_space_idx ON sync_event_segment(space_id, device_id, generation);
+      CREATE INDEX sync_event_cursor_space_idx ON sync_event_cursor(space_id, device_id);
+      INSERT INTO sync_event_outbox VALUES ('event', 'session', 0, '{}', 1, NULL, 'event', 'kept');
+      INSERT INTO sync_event_segment VALUES ('segment', 'device', 1, '{}', 1, NULL, 'kept');
+      INSERT INTO sync_event_head VALUES ('device', 1, 'kept');
+      INSERT INTO sync_event_cursor VALUES ('device', 1, 'kept');
+      INSERT INTO sync_remote_segment VALUES ('device', 1, '{}', 'kept');
+      INSERT INTO sync_remote_event VALUES ('device', 'event', 'fingerprint', 'kept');
+      INSERT INTO sync_deletion_set VALUES ('session', '{}', 1, 'kept');
+      INSERT INTO sync_apply_journal VALUES ('device', 1, '{}', 1, 'kept');
+      INSERT INTO sync_session_metadata VALUES ('session', '{}', 'device', 1, 'ready', 1, 'kept');
+    `)
+    raw.close()
+
+    const database = SyncDatabase.layerFromPath(filename)
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = (yield* SyncDatabase.Service).db
+        expect(yield* db.get(sql`SELECT MAX(version) AS version FROM sync_schema`)).toEqual({ version: 6 })
+        for (const table of [
+          "sync_event_outbox",
+          "sync_event_segment",
+          "sync_event_head",
+          "sync_event_cursor",
+          "sync_remote_segment",
+          "sync_remote_event",
+          "sync_deletion_set",
+          "sync_apply_journal",
+          "sync_session_metadata",
+        ]) {
+          expect(yield* db.get(sql.raw(`SELECT space_id FROM ${table}`))).toEqual({ space_id: "kept" })
+        }
+        expect(
+          (yield* db.all<{ name: string; pk: number }>(sql`PRAGMA table_info(sync_event_cursor)`))
+            .filter((column) => column.pk > 0)
+            .sort((a, b) => a.pk - b.pk)
+            .map((column) => column.name),
+        ).toEqual(["space_id", "device_id"])
+        expect(
+          yield* db
+            .run(sql`UPDATE sync_event_segment SET payload = 'changed' WHERE space_id = 'kept' AND id = 'segment'`)
+            .pipe(Effect.exit),
+        ).toSatisfy(Exit.isFailure)
+      }).pipe(Effect.scoped, Effect.provide(database)),
+    )
   })
 
   test("durably seals ordered outbox events into one immutable per-device generation", async () => {
@@ -92,21 +172,32 @@ describe("SyncEventStore", () => {
     )
   })
 
-  test("partitions pending events, cursors, and leases by sync space", async () => {
+  test("permits the same device identity and generation in two sync spaces", async () => {
     await run(
       Effect.gen(function* () {
         const root = yield* SyncEventStore.Service
         const first = root.scope("space-a")
         const second = root.scope("space-b")
-        yield* first.enqueue(event("space-a-event", 0))
-        yield* second.enqueue({ ...event("space-b-event", 0), aggregateID: "session-b" })
-        expect((yield* first.pending(10)).map((item) => item.id)).toEqual(["space-a-event"])
-        expect((yield* second.pending(10)).map((item) => item.id)).toEqual(["space-b-event"])
+        yield* first.enqueue(event("shared-event", 0))
+        yield* second.enqueue(event("shared-event", 0))
+        expect((yield* first.pending(10)).map((item) => item.id)).toEqual(["shared-event"])
+        expect((yield* second.pending(10)).map((item) => item.id)).toEqual(["shared-event"])
         expect(yield* first.acquire("upload", "first", 1_000, 0)).toBe(true)
         expect(yield* second.acquire("upload", "second", 1_000, 0)).toBe(true)
-        const sealed = yield* first.seal(device, 10, 10)
-        expect(sealed?.operations).toHaveLength(1)
-        expect(yield* second.seal(SyncEvent.DeviceID.make("device-space-b"), 10, 10)).toBeDefined()
+        const firstSegment = yield* first.seal(device, 10, 10)
+        const secondSegment = yield* second.seal(device, 10, 10)
+        expect(firstSegment).toEqual(secondSegment)
+        yield* first.acknowledge(firstSegment!.id)
+        yield* second.acknowledge(secondSegment!.id)
+        expect(yield* first.head(device)).toBe(1)
+        expect(yield* second.head(device)).toBe(1)
+
+        const remoteSegment = segment(1, [event("remote-shared", 0)])
+        const projector = { project: () => Effect.void, delete: () => Effect.void }
+        yield* first.apply(remoteSegment, projector)
+        yield* second.apply(remoteSegment, projector)
+        expect(yield* first.cursor(remote)).toBe(1)
+        expect(yield* second.cursor(remote)).toBe(1)
       }),
     )
   })

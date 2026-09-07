@@ -1,9 +1,9 @@
 export * as SyncSpace from "./space"
 
 import { Schema } from "effect"
-import { NonNegativeInt } from "../schema"
+import { NonNegativeInt, PositiveInt } from "../schema"
 
-export const Protocol = Schema.Struct({ major: Schema.Literal(1), minor: NonNegativeInt })
+export const Protocol = Schema.Struct({ major: PositiveInt, minor: NonNegativeInt })
 export type Protocol = typeof Protocol.Type
 export const Encryption = Schema.Literals(["none", "aes-256-gcm"])
 export type Encryption = typeof Encryption.Type
@@ -33,6 +33,22 @@ export const Deletion = Schema.Struct({
   revision: NonNegativeInt,
 })
 export type Deletion = typeof Deletion.Type
+
+export const RemoteProtocol = Schema.Struct({
+  namespaceID: Schema.NonEmptyString,
+  protocol: Protocol,
+  encryption: Encryption,
+  createdAt: NonNegativeInt,
+})
+export type RemoteProtocol = typeof RemoteProtocol.Type
+
+export type Inspection =
+  | { readonly status: "ready"; readonly descriptor: Descriptor; readonly protocol: RemoteProtocol }
+  | { readonly status: "unsupported"; readonly descriptor: Descriptor }
+
+export type CatalogEntry =
+  | { readonly status: "compatible"; readonly descriptor: Descriptor }
+  | { readonly status: "unsupported"; readonly descriptor: Descriptor }
 
 export const Catalog = Schema.Struct({
   version: Schema.Literal(1),

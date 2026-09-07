@@ -33,6 +33,10 @@ export const Resolution = Schema.Union([
     stage: Target.ConnectionStage,
     message: Schema.String,
   }),
+  Schema.Struct({
+    status: Schema.Literal("resolution_failed"),
+    message: Schema.String,
+  }),
 ]).annotate({ identifier: "SessionLocationRebinding.Resolution" })
 
 export const PortableBindingSnapshot = Schema.Struct({

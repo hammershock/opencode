@@ -29,6 +29,7 @@ import { SyncMembership } from "./membership"
 import { SyncState } from "./state"
 import { TargetBindingRegistry } from "../target-binding-registry"
 import { SessionActivity } from "../session/activity"
+import { SessionLocationMutation } from "../session/location-mutation"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -121,6 +122,7 @@ const layer = Layer.effect(
     const global = yield* Global.Service
     const targetBindings = yield* TargetBindingRegistry.Service
     const activity = yield* SessionActivity.Service
+    const locationMutation = yield* SessionLocationMutation.Service
     const devicesFor = (namespaceID: string) =>
       SyncDevice.make(path.join(global.config, "sync", "spaces", namespaceID, "state.json"))
     let lastSuccessAt: number | undefined
@@ -138,20 +140,18 @@ const layer = Layer.effect(
       yield* clearSpace(namespaceID)
       return sessions
     })
-    yield* setup
-      .state()
-      .pipe(
-        Effect.flatMap((state) =>
-          membership.stale(new Set(state?.spaces.map((item) => item.descriptor.namespaceID) ?? [])),
-        ),
-        Effect.flatMap((stale) => Effect.forEach(stale, purgeSpace, { discard: true })),
-        Effect.catch(() =>
-          Effect.sync(() => {
-            // Sync recovery must never make the local application unavailable.
-            lastError = "storage"
-          }),
-        ),
-      )
+    yield* setup.state().pipe(
+      Effect.flatMap((state) =>
+        membership.stale(new Set(state?.spaces.map((item) => item.descriptor.namespaceID) ?? [])),
+      ),
+      Effect.flatMap((stale) => Effect.forEach(stale, purgeSpace, { discard: true })),
+      Effect.catch(() =>
+        Effect.sync(() => {
+          // Sync recovery must never make the local application unavailable.
+          lastError = "storage"
+        }),
+      ),
+    )
 
     const load = Effect.fn("SyncControl.load")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
@@ -197,6 +197,7 @@ const layer = Layer.effect(
             config.namespaceID,
             (sessionID, spaceID) => ownership.assign(sessionID, spaceID),
             activity,
+            locationMutation,
           ),
         attachment: {
           externalize: (event) => SessionSync.externalize(event, attachment),
@@ -578,6 +579,7 @@ export const node = makeGlobalNode({
     SyncMembership.node,
     TargetBindingRegistry.node,
     SessionActivity.node,
+    SessionLocationMutation.node,
   ],
 })
 

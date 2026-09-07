@@ -558,6 +558,7 @@ const Endpoint14_0 = (raw: RawClient["server.pty"]) => (input?: Endpoint14_0Inpu
 type Endpoint14_1Request = Parameters<RawClient["server.pty"]["pty.create"]>[0]
 type Endpoint14_1Input = {
   readonly location?: Endpoint14_1Request["query"]["location"]
+  readonly sessionID?: Endpoint14_1Request["payload"]["sessionID"]
   readonly command?: Endpoint14_1Request["payload"]["command"]
   readonly args?: Endpoint14_1Request["payload"]["args"]
   readonly cwd?: Endpoint14_1Request["payload"]["cwd"]
@@ -568,6 +569,7 @@ const Endpoint14_1 = (raw: RawClient["server.pty"]) => (input?: Endpoint14_1Inpu
   raw["pty.create"]({
     query: { location: input?.["location"] },
     payload: {
+      sessionID: input?.["sessionID"],
       command: input?.["command"],
       args: input?.["args"],
       cwd: input?.["cwd"],

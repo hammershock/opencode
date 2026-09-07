@@ -59,6 +59,8 @@ export type TuiRouteCurrent =
       params: {
         sessionID: string
         prompt?: unknown
+        accessMode?: "read-write" | "read-only"
+        resolution?: "missing_local_target" | "unbound_portable_target" | "target_unavailable" | "resolution_failed"
       }
     }
   | {

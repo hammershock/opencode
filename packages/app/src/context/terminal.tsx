@@ -94,6 +94,11 @@ export function getLegacyTerminalStorageKeys(dir: string, legacySessionID?: stri
   return [`${dir}/terminal/${legacySessionID}.v1`, `${dir}/terminal.v1`]
 }
 
+/** Reads the route identity at request time; workspace terminal caches outlive Session route changes. */
+export function terminalAdmission(getSessionID: () => string | undefined) {
+  return { sessionID: getSessionID() }
+}
+
 type TerminalSession = ReturnType<typeof createWorkspaceTerminalSession>
 
 type TerminalCacheEntry = {
@@ -148,6 +153,7 @@ function createWorkspaceTerminalSession(
   dir: string,
   scope: ServerScopeValue,
   legacySessionID?: string,
+  getSessionID: () => string | undefined = () => legacySessionID,
 ) {
   const location = { directory: sdk.directory }
   const legacy = scope === ServerScope.local ? getLegacyTerminalStorageKeys(dir, legacySessionID) : []
@@ -278,11 +284,16 @@ function createWorkspaceTerminalSession(
     if (!pty) return
     const data = await (async () => {
       if ((await sdk.protocol) === "v1") {
-        return (await sdk.client.pty.create({ title: pty.title })).data
+        return (
+          await sdk.client.pty.create({ ...terminalAdmission(getSessionID), title: pty.title } as Parameters<
+            typeof sdk.client.pty.create
+          >[0])
+        ).data
       }
       return (
         await sdk.api.pty.create({
           location,
+          ...terminalAdmission(getSessionID),
           title: pty.title,
         })
       ).data
@@ -327,9 +338,16 @@ function createWorkspaceTerminalSession(
 
       const doCreate = async () => {
         if ((await sdk.protocol) === "v1") {
-          return (await sdk.client.pty.create({ title: defaultTitle(nextNumber) })).data
+          return (
+            await sdk.client.pty.create({
+              ...terminalAdmission(getSessionID),
+              title: defaultTitle(nextNumber),
+            } as Parameters<typeof sdk.client.pty.create>[0])
+          ).data
         }
-        return (await sdk.api.pty.create({ location, title: defaultTitle(nextNumber) })).data
+        return (
+          await sdk.api.pty.create({ location, ...terminalAdmission(getSessionID), title: defaultTitle(nextNumber) })
+        ).data
       }
       doCreate()
         .then((data) => {
@@ -498,7 +516,7 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
       }
 
       const entry = createRoot((dispose) => ({
-        value: createWorkspaceTerminalSession(sdk(), dir, serverScope, legacySessionID),
+        value: createWorkspaceTerminalSession(sdk(), dir, serverScope, legacySessionID, () => params.id),
         dispose,
       }))
 

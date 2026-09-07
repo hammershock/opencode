@@ -1,7 +1,7 @@
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
-import { DateTime, Effect, Layer, Schema, Context, Stream, Semaphore } from "effect"
+import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
 import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
@@ -42,6 +42,7 @@ import { PermissionV2 } from "./permission"
 import { QuestionV2 } from "./question"
 import { SessionActivity } from "./session/activity"
 import { SessionLocationAccess } from "./session/location-access"
+import { SessionLocationMutation } from "./session/location-mutation"
 import { SyncSetup } from "./sync/setup"
 import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
 
@@ -150,11 +151,14 @@ export interface Interface {
     after?: number
     limit: number
   }) => Effect.Effect<{ events: ReadonlyArray<SessionEvent.DurableEvent>; hasMore: boolean }, NotFoundError>
-  readonly switchAgent: (input: { sessionID: SessionSchema.ID; agent: string }) => Effect.Effect<void, NotFoundError>
+  readonly switchAgent: (input: {
+    sessionID: SessionSchema.ID
+    agent: string
+  }) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly switchModel: (input: {
     sessionID: SessionSchema.ID
     model: ModelV2.Ref
-  }) => Effect.Effect<void, NotFoundError>
+  }) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly prompt: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
@@ -177,6 +181,7 @@ export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+  readonly locationBlockers: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<string>, NotFoundError>
   readonly resume: (
     sessionID: SessionSchema.ID,
   ) => Effect.Effect<void, NotFoundError | OperationUnavailableError | SessionRunner.RunError>
@@ -194,9 +199,11 @@ export interface Interface {
       sessionID: SessionSchema.ID
       messageID: SessionMessage.ID
       files?: boolean
-    }) => Effect.Effect<Revert.State, NotFoundError | MessageNotFoundError | Snapshot.Error>
-    readonly clear: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | Snapshot.Error>
-    readonly commit: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
+    }) => Effect.Effect<Revert.State, NotFoundError | MessageNotFoundError | Snapshot.Error | OperationUnavailableError>
+    readonly clear: (
+      sessionID: SessionSchema.ID,
+    ) => Effect.Effect<void, NotFoundError | Snapshot.Error | OperationUnavailableError>
+    readonly commit: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   }
 }
 
@@ -213,7 +220,7 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
-    const locationMutation = yield* Semaphore.make(1)
+    const locationMutation = yield* SessionLocationMutation.Service
     const activity = yield* SessionActivity.Service
     const locationAccess = yield* SessionLocationAccess.Service
     const requireLocation = Effect.fn("V2Session.requireLocation")(function* (sessionID: SessionSchema.ID) {
@@ -226,7 +233,19 @@ const layer = Layer.effect(
       )
     })
     const syncSetup = yield* SyncSetup.Service
-    const locationBlockers = (sessionID: SessionSchema.ID, ref: Location.Ref) =>
+    const runtimeBlockers = Effect.fn("V2Session.runtimeLocationBlockers")(function* (sessionID: SessionSchema.ID) {
+      if (!(yield* store.get(sessionID))) return yield* new NotFoundError({ sessionID })
+      const blockers: string[] = []
+      if ((yield* execution.active).has(sessionID)) blockers.push("agent_turn")
+      if (
+        (yield* SessionInput.hasPending(db, sessionID, "steer")) ||
+        (yield* SessionInput.hasPending(db, sessionID, "queue"))
+      )
+        blockers.push("queued_turn")
+      blockers.push(...(yield* activity.blockers(sessionID)))
+      return blockers
+    })
+    const locationScopedBlockers = (sessionID: SessionSchema.ID, ref: Location.Ref) =>
       Effect.scoped(
         Effect.gen(function* () {
           const context = yield* locations.contextEffect(ref)
@@ -237,15 +256,20 @@ const layer = Layer.effect(
           if ((yield* pty.list()).some((item) => item.status === "running")) blockers.push("terminal_pty")
           if ((yield* permissions.forSession(sessionID)).length) blockers.push("permission")
           if ((yield* questions.list()).some((item) => item.sessionID === sessionID)) blockers.push("question")
-          if (
-            (yield* SessionInput.hasPending(db, sessionID, "steer")) ||
-            (yield* SessionInput.hasPending(db, sessionID, "queue"))
-          )
-            blockers.push("queued_turn")
-          blockers.push(...(yield* activity.blockers(sessionID)))
           return blockers
         }),
       )
+    const locationBlockers = Effect.fn("V2Session.locationBlockers")(function* (sessionID: SessionSchema.ID) {
+      const runtime = [...(yield* runtimeBlockers(sessionID))]
+      const resolution = yield* locationAccess.resolve(sessionID).pipe(
+        Effect.catchTag("SessionLocationAccess.NotFoundError", () => new NotFoundError({ sessionID })),
+        Effect.catchTag("SessionLocationAccess.UnresolvedError", () =>
+          Effect.succeed({ status: "resolution_failed" as const, message: "Session Location resolution failed" }),
+        ),
+      )
+      if (resolution.status !== "resolved") return runtime
+      return [...runtime, ...(yield* locationScopedBlockers(sessionID, resolution.location))]
+    })
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
     const decode = (row: typeof SessionMessageTable.$inferSelect) =>
       decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(
@@ -259,122 +283,125 @@ const layer = Layer.effect(
       )
 
     const result = Service.of({
-      create: Effect.fn("V2Session.create")(function* (input) {
-        const sessionID = input.id ?? SessionSchema.ID.create()
-        const recorded = yield* store.get(sessionID)
-        if (recorded) return recorded
-        const project = yield* projects.resolve(input.location.directory)
-        yield* db
-          .insert(ProjectTable)
-          .values({ id: project.id, worktree: project.directory, vcs: project.vcs?.type, sandboxes: [] })
-          .onConflictDoNothing()
-          .run()
-          .pipe(Effect.orDie)
-        const now = Date.now()
-        // Ownership is captured exactly once at creation. A disabled scheduler
-        // still retains the active space so offline changes stay in its outbox.
-        const syncSpaceID = (yield* syncSetup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))?.namespaceID
-        const info = SessionV1.SessionInfo.make({
-          id: sessionID,
-          slug: Slug.create(),
-          version: InstallationVersion,
-          projectID: project.id,
-          directory: input.location.directory,
-          target: input.location.target,
-          lastKnownTargetName: input.location.lastKnownTargetName,
-          syncSpaceID,
-          path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
-          workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
-          title: `New session - ${new Date(now).toISOString()}`,
-          approvalMode: input.approvalMode ?? "normal",
-          agent: input.agent,
-          model: input.model
-            ? {
-                id: ModelV2.ID.make(input.model.id),
-                providerID: input.model.providerID,
-                variant: input.model.variant,
-              }
-            : undefined,
-          cost: 0,
-          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          time: { created: now, updated: now },
-        })
-        const projected = yield* events
-          .publish(SessionV1.Event.Created, { sessionID, info }, { location: input.location })
-          .pipe(
-            Effect.as({ type: "created" } as const),
-            Effect.catchDefect((defect) => {
-              if (!(defect instanceof SessionProjector.SessionAlreadyProjected)) {
-                return Effect.die(defect)
-              }
-              // Concurrent creation lost the projection race. The existing Session identity wins.
-              return store
-                .get(sessionID)
-                .pipe(
-                  Effect.flatMap((session) =>
-                    session ? Effect.succeed({ type: "existing", session } as const) : Effect.die(defect),
-                  ),
-                )
-            }),
-          )
-        if (projected.type === "existing") return projected.session
-        // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
-        return yield* result.get(sessionID).pipe(Effect.orDie)
-      }),
-      rebindLocation: Effect.fn("V2Session.rebindLocation")((input) =>
-        locationMutation.withPermits(1)(
+      create: Effect.fn("V2Session.create")((input) =>
+        locationMutation.withLock(
           Effect.gen(function* () {
-            const before = yield* store.get(input.sessionID)
-            if (!before) return yield* new NotFoundError({ sessionID: input.sessionID })
-            if (before.locationRevision !== input.expectedRevision)
-              return yield* new LocationRebindError({
-                message: `Location revision changed: expected ${input.expectedRevision}, actual ${before.locationRevision}`,
-              })
-            if (
-              before.location.directory === input.destination.directory &&
-              before.location.workspaceID === input.destination.workspaceID &&
-              JSON.stringify(before.location.target) === JSON.stringify(input.destination.target)
-            )
-              return { status: "unchanged" as const, revision: before.locationRevision, warnings: [] }
-            const active = yield* execution.active
-            if (active.has(input.sessionID))
-              return yield* new LocationRebindError({ message: "Session has an active Agent turn" })
-            const blockers = yield* locationBlockers(input.sessionID, before.location)
-            if (blockers.length)
-              return yield* new LocationRebindError({ message: `Session is not idle: ${blockers.join(", ")}` })
-
-            // Materializing every Location-scoped service validates the candidate without
-            // mutating Session state. The scoped lease is released if validation fails.
-            yield* Effect.scoped(locations.contextEffect(input.destination))
-            const current = yield* store.get(input.sessionID)
-            if (!current) return yield* new NotFoundError({ sessionID: input.sessionID })
-            if (current.locationRevision !== input.expectedRevision)
-              return yield* new LocationRebindError({ message: "Location revision changed during validation" })
-            if ((yield* execution.active).has(input.sessionID))
-              return yield* new LocationRebindError({ message: "Session became active during validation" })
-            const finalBlockers = yield* locationBlockers(input.sessionID, current.location)
-            if (finalBlockers.length)
-              return yield* new LocationRebindError({
-                message: `Session became non-idle during validation: ${finalBlockers.join(", ")}`,
-              })
-            const revision = input.expectedRevision + 1
-            yield* events.publish(SessionEvent.LocationRebound, {
-              sessionID: input.sessionID,
-              timestamp: DateTime.makeUnsafe(Date.now()),
-              previous: current.location,
-              location: input.destination,
-              revision,
+            const sessionID = input.id ?? SessionSchema.ID.create()
+            const recorded = yield* store.get(sessionID)
+            if (recorded) return recorded
+            const project = yield* projects.resolve(input.location.directory)
+            yield* db
+              .insert(ProjectTable)
+              .values({ id: project.id, worktree: project.directory, vcs: project.vcs?.type, sandboxes: [] })
+              .onConflictDoNothing()
+              .run()
+              .pipe(Effect.orDie)
+            const now = Date.now()
+            // Ownership is captured exactly once at creation. A disabled scheduler
+            // still retains the active space so offline changes stay in its outbox.
+            const syncSpaceID = (yield* syncSetup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+              ?.namespaceID
+            const info = SessionV1.SessionInfo.make({
+              id: sessionID,
+              slug: Slug.create(),
+              version: InstallationVersion,
+              projectID: project.id,
+              directory: input.location.directory,
+              target: input.location.target,
+              lastKnownTargetName: input.location.lastKnownTargetName,
+              syncSpaceID,
+              path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
+              workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
+              title: `New session - ${new Date(now).toISOString()}`,
+              approvalMode: input.approvalMode ?? "normal",
+              agent: input.agent,
+              model: input.model
+                ? {
+                    id: ModelV2.ID.make(input.model.id),
+                    providerID: input.model.providerID,
+                    variant: input.model.variant,
+                  }
+                : undefined,
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              time: { created: now, updated: now },
             })
-            const warnings: string[] = []
-            yield* locations.invalidate(current.location).pipe(
-              Effect.catch((cause) =>
-                Effect.sync(() => {
-                  warnings.push(`Old Location cleanup failed: ${String(cause)}`)
+            const projected = yield* events
+              .publish(SessionV1.Event.Created, { sessionID, info }, { location: input.location })
+              .pipe(
+                Effect.as({ type: "created" } as const),
+                Effect.catchDefect((defect) => {
+                  if (!(defect instanceof SessionProjector.SessionAlreadyProjected)) {
+                    return Effect.die(defect)
+                  }
+                  // Concurrent creation lost the projection race. The existing Session identity wins.
+                  return store
+                    .get(sessionID)
+                    .pipe(
+                      Effect.flatMap((session) =>
+                        session ? Effect.succeed({ type: "existing", session } as const) : Effect.die(defect),
+                      ),
+                    )
                 }),
-              ),
-            )
-            return { status: "rebound" as const, revision, warnings }
+              )
+            if (projected.type === "existing") return projected.session
+            // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
+            return yield* result.get(sessionID).pipe(Effect.orDie)
           }),
+        ),
+      ),
+      rebindLocation: Effect.fn("V2Session.rebindLocation")((input) =>
+        locationMutation.withLock(
+          activity.withExclusive(
+            [input.sessionID],
+            Effect.gen(function* () {
+              const before = yield* store.get(input.sessionID)
+              if (!before) return yield* new NotFoundError({ sessionID: input.sessionID })
+              if (before.locationRevision !== input.expectedRevision)
+                return yield* new LocationRebindError({
+                  message: `Location revision changed: expected ${input.expectedRevision}, actual ${before.locationRevision}`,
+                })
+              if (
+                before.location.directory === input.destination.directory &&
+                before.location.workspaceID === input.destination.workspaceID &&
+                JSON.stringify(before.location.target) === JSON.stringify(input.destination.target)
+              )
+                return { status: "unchanged" as const, revision: before.locationRevision, warnings: [] }
+              const blockers = yield* locationBlockers(input.sessionID)
+              if (blockers.length)
+                return yield* new LocationRebindError({ message: `Session is not idle: ${blockers.join(", ")}` })
+
+              // Materializing every Location-scoped service validates the candidate without
+              // mutating Session state. The scoped lease is released if validation fails.
+              yield* Effect.scoped(locations.contextEffect(input.destination))
+              const current = yield* store.get(input.sessionID)
+              if (!current) return yield* new NotFoundError({ sessionID: input.sessionID })
+              if (current.locationRevision !== input.expectedRevision)
+                return yield* new LocationRebindError({ message: "Location revision changed during validation" })
+              const finalBlockers = yield* locationBlockers(input.sessionID)
+              if (finalBlockers.length)
+                return yield* new LocationRebindError({
+                  message: `Session became non-idle during validation: ${finalBlockers.join(", ")}`,
+                })
+              const revision = input.expectedRevision + 1
+              yield* events.publish(SessionEvent.LocationRebound, {
+                sessionID: input.sessionID,
+                timestamp: DateTime.makeUnsafe(Date.now()),
+                previous: current.location,
+                location: input.destination,
+                revision,
+              })
+              const warnings: string[] = []
+              yield* locations.invalidate(current.location).pipe(
+                Effect.catch((cause) =>
+                  Effect.sync(() => {
+                    warnings.push(`Old Location cleanup failed: ${String(cause)}`)
+                  }),
+                ),
+              )
+              return { status: "rebound" as const, revision, warnings }
+            }),
+          ),
         ),
       ),
       get: Effect.fn("V2Session.get")(function* (sessionID) {
@@ -512,30 +539,44 @@ const layer = Layer.effect(
       skill: Effect.fn("V2Session.skill")(function* () {
         return yield* new OperationUnavailableError({ operation: "skill" })
       }),
-      switchAgent: Effect.fn("V2Session.switchAgent")(function* (input) {
-        yield* result.get(input.sessionID)
-        yield* events.publish(SessionEvent.AgentSwitched, {
-          sessionID: input.sessionID,
-          messageID: SessionMessage.ID.create(),
-          timestamp: yield* DateTime.now,
-          agent: input.agent,
-        })
-      }),
-      switchModel: Effect.fn("V2Session.switchModel")(function* (input) {
-        const session = yield* result.get(input.sessionID)
-        if (
-          session.model?.providerID === input.model.providerID &&
-          session.model.id === input.model.id &&
-          (session.model.variant ?? "default") === (input.model.variant ?? "default")
-        )
-          return
-        yield* events.publish(SessionEvent.ModelSwitched, {
-          sessionID: input.sessionID,
-          messageID: SessionMessage.ID.create(),
-          timestamp: yield* DateTime.now,
-          model: input.model,
-        })
-      }),
+      switchAgent: Effect.fn("V2Session.switchAgent")((input) =>
+        activity.withActivity(
+          input.sessionID,
+          "session_mutation",
+          Effect.gen(function* () {
+            yield* requireLocation(input.sessionID)
+            yield* result.get(input.sessionID)
+            yield* events.publish(SessionEvent.AgentSwitched, {
+              sessionID: input.sessionID,
+              messageID: SessionMessage.ID.create(),
+              timestamp: yield* DateTime.now,
+              agent: input.agent,
+            })
+          }),
+        ),
+      ),
+      switchModel: Effect.fn("V2Session.switchModel")((input) =>
+        activity.withActivity(
+          input.sessionID,
+          "session_mutation",
+          Effect.gen(function* () {
+            yield* requireLocation(input.sessionID)
+            const session = yield* result.get(input.sessionID)
+            if (
+              session.model?.providerID === input.model.providerID &&
+              session.model.id === input.model.id &&
+              (session.model.variant ?? "default") === (input.model.variant ?? "default")
+            )
+              return
+            yield* events.publish(SessionEvent.ModelSwitched, {
+              sessionID: input.sessionID,
+              messageID: SessionMessage.ID.create(),
+              timestamp: yield* DateTime.now,
+              model: input.model,
+            })
+          }),
+        ),
+      ),
       compact: Effect.fn("V2Session.compact")(function* (input) {
         yield* result.get(input.sessionID)
         return yield* new OperationUnavailableError({ operation: "compact" })
@@ -545,46 +586,62 @@ const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "wait" })
       }),
       active: execution.active,
-      resume: Effect.fn("V2Session.resume")(function* (sessionID) {
-        yield* requireLocation(sessionID)
-        yield* result.get(sessionID)
-        yield* execution.resume(sessionID)
-      }),
+      locationBlockers,
+      resume: Effect.fn("V2Session.resume")((sessionID) =>
+        activity.withActivity(
+          sessionID,
+          "session_mutation",
+          Effect.gen(function* () {
+            yield* requireLocation(sessionID)
+            yield* result.get(sessionID)
+            yield* execution.resume(sessionID)
+          }),
+        ),
+      ),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
         Effect.uninterruptible(execution.interrupt(sessionID)),
       ),
       revert: {
-        stage: Effect.fn("V2Session.revert.stage")(function* (input) {
-          const session = yield* result.get(input.sessionID)
-          return yield* activity.withActivity(
+        stage: Effect.fn("V2Session.revert.stage")((input) =>
+          activity.withActivity(
             input.sessionID,
             "session_mutation",
-            SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
-              Effect.provideService(Database.Service, database),
-              Effect.provideService(EventV2.Service, events),
-              Effect.provide(locations.get(session.location)),
-            ),
-          )
-        }),
-        clear: Effect.fn("V2Session.revert.clear")(function* (sessionID) {
-          const session = yield* result.get(sessionID)
-          yield* activity.withActivity(
+            Effect.gen(function* () {
+              yield* requireLocation(input.sessionID)
+              const session = yield* result.get(input.sessionID)
+              return yield* SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
+                Effect.provideService(Database.Service, database),
+                Effect.provideService(EventV2.Service, events),
+                Effect.provide(locations.get(session.location)),
+              )
+            }),
+          ),
+        ),
+        clear: Effect.fn("V2Session.revert.clear")((sessionID) =>
+          activity.withActivity(
             sessionID,
             "session_mutation",
-            SessionRevert.clear(session).pipe(
-              Effect.provideService(EventV2.Service, events),
-              Effect.provide(locations.get(session.location)),
-            ),
-          )
-        }),
-        commit: Effect.fn("V2Session.revert.commit")(function* (sessionID) {
-          const session = yield* result.get(sessionID)
-          yield* activity.withActivity(
+            Effect.gen(function* () {
+              yield* requireLocation(sessionID)
+              const session = yield* result.get(sessionID)
+              yield* SessionRevert.clear(session).pipe(
+                Effect.provideService(EventV2.Service, events),
+                Effect.provide(locations.get(session.location)),
+              )
+            }),
+          ),
+        ),
+        commit: Effect.fn("V2Session.revert.commit")((sessionID) =>
+          activity.withActivity(
             sessionID,
             "session_mutation",
-            SessionRevert.commit(session).pipe(Effect.provideService(EventV2.Service, events)),
-          )
-        }),
+            Effect.gen(function* () {
+              yield* requireLocation(sessionID)
+              const session = yield* result.get(sessionID)
+              yield* SessionRevert.commit(session).pipe(Effect.provideService(EventV2.Service, events))
+            }),
+          ),
+        ),
       },
     })
 
@@ -619,6 +676,7 @@ export const node = makeGlobalNode({
     SessionProjector.node,
     SessionActivity.node,
     SessionLocationAccess.node,
+    SessionLocationMutation.node,
     SyncSetup.node,
   ],
 })

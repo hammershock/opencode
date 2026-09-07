@@ -4,6 +4,8 @@ import { SessionLocationRebinding } from "@opencode-ai/core/session-location-reb
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
 import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
+import { SessionLocationMutation } from "@opencode-ai/core/session/location-mutation"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
 import { Location } from "@opencode-ai/core/location"
 import {
   ConflictError,
@@ -43,6 +45,13 @@ function mapDomainError(cause: unknown) {
     return new InvalidRequestError({ message: "Portable target label is invalid", kind: "target_binding" })
   if (cause instanceof PortableScopeChangedError)
     return new ConflictError({ message: cause.message, resource: cause.label })
+  if (cause instanceof PortableBindingAlreadyExistsError)
+    return new ConflictError({ message: cause.message, resource: cause.label })
+  if (cause instanceof SessionLocationRebinding.SessionNotIdleError)
+    return new ConflictError({
+      message: `Session recovery is blocked: ${cause.blockers.join(", ")}`,
+      resource: "session-recovery",
+    })
   if (cause instanceof SessionLocationRebinding.RecoveryScopeChangedError)
     return new ConflictError({ message: "Session recovery scope changed", resource: "session-recovery" })
   if (cause instanceof SessionLocationRebinding.BindingRevisionConflictError)
@@ -65,6 +74,21 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
     const bindings = yield* TargetBindingRegistry.Service
     const sessions = yield* SessionV2.Service
     const access = yield* SessionLocationAccess.Service
+    const locationMutation = yield* SessionLocationMutation.Service
+    const activity = yield* SessionActivity.Service
+    const lockedSessions = <A>(sessionIDs: readonly SessionSchema.ID[], operation: () => Promise<A>) =>
+      locationMutation
+        .withLock(
+          activity.withExclusive(sessionIDs, Effect.tryPromise({ try: operation, catch: (cause): unknown => cause })),
+        )
+        .pipe(Effect.mapError(mapDomainError))
+    const assertSessionsIdle = async (sessionIDs: readonly SessionSchema.ID[]) => {
+      const blockers = new Set<string>()
+      for (const sessionID of sessionIDs) {
+        for (const blocker of await Effect.runPromise(sessions.locationBlockers(sessionID))) blockers.add(blocker)
+      }
+      if (blockers.size) throw new SessionLocationRebinding.SessionNotIdleError({ blockers: [...blockers] })
+    }
     const referencedSessions = async (reference: {
       readonly targetID?: Location.TargetID
       readonly portableTargetLabel?: string
@@ -97,6 +121,7 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
         revision: (await bindings.bind(input.portableTargetLabel, input.targetID, input.expectedRevision)).revision,
       }),
       readPortableBindingRevision: async () => (await bindings.load()).revision,
+      assertSessionsIdle,
       publishGlobalDeletion: async () => {
         throw new Error("Global Session deletion is not part of target recovery")
       },
@@ -122,7 +147,7 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
       )
       .handle("target.remove", (ctx) => invoke(() => target.remove(ctx.params.targetID, ctx.payload.expectedRevision)))
       .handle("target.restore", (ctx) =>
-        invoke(async () => {
+        lockedSessions(ctx.payload.referencedSessionIDs, async () => {
           const all = await Effect.runPromise(sessions.list())
           const result = await recovery.restoreMissing({
             targetID: ctx.params.targetID,
@@ -150,7 +175,10 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
         }),
       )
       .handle("target.bindPortable", (ctx) =>
-        invoke(async () => {
+        lockedSessions(ctx.payload.expectedSessionIDs, async () => {
+          const before = await bindings.load()
+          if (before.bindings.has(ctx.params.portableTargetLabel))
+            throw new PortableBindingAlreadyExistsError(ctx.params.portableTargetLabel)
           const all = await Effect.runPromise(sessions.list())
           const result = await recovery.bindPortable({
             portableTargetLabel: ctx.params.portableTargetLabel,
@@ -177,8 +205,9 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
         }),
       )
       .handle("target.unbindPortable", (ctx) =>
-        invoke(async () => {
+        lockedSessions(ctx.payload.expectedSessionIDs, async () => {
           await validatePortableScope(sessions, ctx.params.portableTargetLabel, ctx.payload.expectedSessionIDs)
+          await assertSessionsIdle(ctx.payload.expectedSessionIDs)
           const snapshot = await bindings.unbind(ctx.params.portableTargetLabel, ctx.payload.expectedRevision)
           return { revision: snapshot.revision, bindings: Object.fromEntries(snapshot.bindings) }
         }),
@@ -198,6 +227,12 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
 class PortableScopeChangedError extends Error {
   constructor(readonly label: string) {
     super("Portable target recovery scope changed; review the affected Sessions again")
+  }
+}
+
+class PortableBindingAlreadyExistsError extends Error {
+  constructor(readonly label: string) {
+    super("Portable target label is already bound; unbind it explicitly before choosing a different target")
   }
 }
 

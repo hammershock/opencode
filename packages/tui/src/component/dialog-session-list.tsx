@@ -470,7 +470,7 @@ export function DialogSessionList() {
           )
           const resolution = result.data
           if (resolution.status === "resolved") {
-            route.navigate({ type: "session", sessionID: option.value })
+            route.navigate({ type: "session", sessionID: option.value, accessMode: "read-write" })
             dialog.clear()
             return
           }

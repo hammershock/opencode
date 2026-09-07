@@ -14,6 +14,8 @@ import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
 import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
+import { SessionLocationMutation } from "@opencode-ai/core/session/location-mutation"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Layer, Option } from "effect"
@@ -40,6 +42,8 @@ const applicationServices = LayerNode.group([
   TargetRegistry.node,
   TargetBindingRegistry.node,
   SessionLocationAccess.node,
+  SessionLocationMutation.node,
+  SessionActivity.node,
 ])
 
 export function createRoutes(password?: string) {

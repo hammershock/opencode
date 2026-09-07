@@ -20,7 +20,7 @@ test("closing the diff viewer returns to the route it opened from", async () => 
   try {
     expect(viewer.current()).toEqual({
       name: "diff",
-      params: { mode: "git", sessionID: "session-1", returnRoute: startRoute },
+      params: { mode: "git", sessionID: "session-1", returnRoute: startRoute, locationAccess: "read-write" },
     })
     expect(viewer.vcsDiffInput()).toEqual({ directory: "/repo/session", mode: "git", context: 12 })
 
@@ -183,7 +183,10 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: 
   }
 }
 
-const startRoute: TuiRouteCurrent = { name: "session", params: { sessionID: "session-1" } }
+const startRoute: TuiRouteCurrent = {
+  name: "session",
+  params: { sessionID: "session-1", accessMode: "read-write" },
+}
 
 function findScrollBox(root: Renderable): ScrollBoxRenderable | undefined {
   if (root instanceof ScrollBoxRenderable && containsDiff(root)) return root
@@ -211,12 +214,12 @@ const session = {
 test("branch diff source requests branch VCS diff", async () => {
   const viewer = await renderDiffViewer([], 20, {
     name: "diff",
-    params: { mode: "branch", sessionID: "session-1", returnRoute: startRoute },
+    params: { mode: "branch", sessionID: "session-1", returnRoute: startRoute, locationAccess: "read-write" },
   })
   try {
     expect(viewer.current()).toEqual({
       name: "diff",
-      params: { mode: "branch", sessionID: "session-1", returnRoute: startRoute },
+      params: { mode: "branch", sessionID: "session-1", returnRoute: startRoute, locationAccess: "read-write" },
     })
     expect(viewer.vcsDiffInput()).toEqual({ directory: "/repo/session", mode: "branch", context: 12 })
     expect(viewer.sessionDiffInput()).toBeUndefined()
@@ -228,12 +231,24 @@ test("branch diff source requests branch VCS diff", async () => {
 test("last-turn diff source requests session diff", async () => {
   const viewer = await renderDiffViewer([], 20, {
     name: "diff",
-    params: { mode: "last-turn", sessionID: "session-1", messageID: "message-1", returnRoute: startRoute },
+    params: {
+      mode: "last-turn",
+      sessionID: "session-1",
+      messageID: "message-1",
+      returnRoute: startRoute,
+      locationAccess: "read-write",
+    },
   })
   try {
     expect(viewer.current()).toEqual({
       name: "diff",
-      params: { mode: "last-turn", sessionID: "session-1", messageID: "message-1", returnRoute: startRoute },
+      params: {
+        mode: "last-turn",
+        sessionID: "session-1",
+        messageID: "message-1",
+        returnRoute: startRoute,
+        locationAccess: "read-write",
+      },
     })
     expect(viewer.sessionDiffInput()).toEqual({ sessionID: "session-1", messageID: "message-1" })
     expect(viewer.vcsDiffInput()).toBeUndefined()

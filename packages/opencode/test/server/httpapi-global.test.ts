@@ -19,6 +19,31 @@ import { testEffect } from "../lib/effect"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
+import { SyncState } from "@opencode-ai/core/sync/state"
+import { SyncSpace } from "@opencode-ai/core/sync/space"
+
+const descriptor = SyncSpace.Descriptor.make({
+  namespaceID: "space-a",
+  name: "Space A",
+  protocol: { major: 1, minor: 0 },
+  encryption: "none",
+  createdAt: 1,
+  updatedAt: 1,
+  summary: { sessions: 0, devices: 1, updatedAt: 1 },
+  revision: 1,
+})
+const syncState = SyncState.State.make({
+  version: 2,
+  revision: 1,
+  provider: "baidu",
+  deviceID: "device-a",
+  deviceName: "Mac",
+  account: { id: "account-a", maskedDisplay: "ha***@example.com" },
+  activeSpaceID: descriptor.namespaceID,
+  enabled: true,
+  intervalSeconds: 30,
+  spaces: [{ accountID: "account-a", descriptor, remoteRoot: "spaces/space-a", joinedAt: 1 }],
+})
 
 const remoteSession = SyncMetadata.Item.make({
   sessionID: "ses_remote",
@@ -48,8 +73,22 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(Layer.mock(MoveSession.Service)({})),
   Layer.provide(
     Layer.mock(SyncSetup.Service)({
-      config: () => Effect.succeed(undefined),
-      inspectLegacy: () => Effect.succeed({ available: false }),
+      state: () => Effect.succeed(syncState),
+      initialize: () => Effect.succeed(syncState),
+      begin: (input) =>
+        Effect.succeed({ attemptID: "attempt-a", authorizationURL: input.redirectURI, completion: input.completion }),
+      complete: () => Effect.succeed(syncState),
+      switchAccount: () => Effect.succeed(syncState),
+      logout: () => Effect.succeed(syncState),
+      discover: () => Effect.succeed({ spaces: [{ status: "compatible", descriptor }], deletions: [] }),
+      create: () => Effect.succeed({ state: syncState, descriptor }),
+      join: () => Effect.succeed(syncState),
+      activate: () => Effect.succeed(syncState),
+      leave: () => Effect.succeed(syncState),
+      setEnabled: () => Effect.succeed(syncState),
+      setInterval: () => Effect.succeed(syncState),
+      deleteSpace: (namespaceID) => Effect.succeed(namespaceID),
+      removeFromDevice: () => Effect.succeed([descriptor.namespaceID]),
     }),
   ),
   Layer.provide(
@@ -74,6 +113,61 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("exposes the account and multi-space setup lifecycle", () =>
+    Effect.gen(function* () {
+      const state = yield* HttpClientRequest.get(GlobalPaths.syncState).pipe(HttpClient.execute)
+      expect(state.status).toBe(200)
+      expect(yield* state.json).toEqual(syncState)
+
+      const requests = [
+        HttpClientRequest.post(GlobalPaths.syncInitialize).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ deviceName: "Mac" }),
+        ),
+        HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ redirectURI: "http://127.0.0.1/callback", completion: "loopback" }),
+        ),
+        HttpClientRequest.post(GlobalPaths.syncOAuthComplete).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ attemptID: "attempt-a", response: { type: "manual", code: "code" } }),
+        ),
+        HttpClientRequest.post(GlobalPaths.syncOAuthSwitchAccount).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ attemptID: "attempt-a", response: { type: "manual", code: "code" } }),
+        ),
+        HttpClientRequest.post(GlobalPaths.syncLogout),
+        HttpClientRequest.get(GlobalPaths.syncSpaces),
+        HttpClientRequest.post(GlobalPaths.syncSpaces).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ name: "Space A", encryption: "none" }),
+        ),
+        HttpClientRequest.post(GlobalPaths.syncSpaceJoin).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ namespaceID: descriptor.namespaceID }),
+        ),
+        HttpClientRequest.post(GlobalPaths.syncSpaceActivate).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ namespaceID: descriptor.namespaceID }),
+        ),
+        HttpClientRequest.post(GlobalPaths.syncSpaceLeave).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ namespaceID: descriptor.namespaceID }),
+        ),
+        HttpClientRequest.patch(GlobalPaths.syncEnabled).pipe(HttpClientRequest.bodyJsonUnsafe({ enabled: false })),
+        HttpClientRequest.patch(GlobalPaths.syncInterval).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ intervalSeconds: 60 }),
+        ),
+        HttpClientRequest.delete(GlobalPaths.syncSpaceDelete.replace(":namespaceID", descriptor.namespaceID)),
+        HttpClientRequest.delete(GlobalPaths.syncRemove),
+      ]
+      const responses = yield* Effect.all(requests.map((request) => request.pipe(HttpClient.execute)))
+      expect(responses.map((response) => response.status)).toEqual(Array.from({ length: requests.length }, () => 200))
+    }),
+  )
+
+  it.live("does not expose the obsolete reuse-legacy or reset routes", () =>
+    Effect.gen(function* () {
+      const responses = yield* Effect.all([
+        HttpClientRequest.post("/global/sync/setup/reuse-legacy").pipe(HttpClient.execute),
+        HttpClientRequest.post("/global/sync/reset").pipe(HttpClient.execute),
+      ])
+      expect(responses.map((response) => response.status)).toEqual([404, 404])
+    }),
+  )
+
   it.live("reports redacted sync control status", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.get(GlobalPaths.syncStatus).pipe(HttpClient.execute)

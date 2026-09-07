@@ -17,6 +17,11 @@ export type Credential = {
   readonly accessToken: string
   readonly refreshToken: string
   readonly expiresAt: number
+  readonly account?: {
+    readonly id: string
+    readonly displayName: string
+    readonly maskedDisplay: string
+  }
 }
 
 export type Request = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>
@@ -33,16 +38,6 @@ export async function saveCredential(store: SyncSecureStore.Store, deviceID: str
 
 export async function readCredential(store: SyncSecureStore.Store, deviceID: string) {
   const value = await store.get(credentialAccount(deviceID))
-  if (!value) return
-  return parseCredential(value)
-}
-
-export async function readLegacyCredential(
-  deviceID: string,
-  options?: Parameters<typeof SyncSecureStore.detectLegacyBaidu>[0],
-) {
-  const store = await SyncSecureStore.detectLegacyBaidu(options)
-  const value = await store.get(deviceID)
   if (!value) return
   return parseCredential(value)
 }
@@ -94,13 +89,14 @@ export async function refreshCredential(input: {
   )
 }
 
-export function authorizationURL(appKey: string, redirectURI: string) {
+export function authorizationURL(appKey: string, redirectURI: string, state?: string) {
   const url = new URL("https://openapi.baidu.com/oauth/2.0/authorize")
   url.search = new URLSearchParams({
     response_type: "code",
     client_id: appKey,
     redirect_uri: redirectURI,
     scope: "basic,netdisk",
+    ...(state ? { state } : {}),
   }).toString()
   return url.toString()
 }

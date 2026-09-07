@@ -47,6 +47,20 @@ describe("SyncSecureStore", () => {
     )
   })
 
+  test("reads deployment-provisioned Baidu app credentials from the secure store", async () => {
+    const values = new Map([
+      [SyncSecureStore.BAIDU_APP_ACCOUNT, JSON.stringify({ appKey: "app", secretKey: "secret" })],
+    ])
+    const secure: SyncSecureStore.Store = {
+      platform: "macos-keychain",
+      get: async (account) => values.get(account),
+      set: async (account, secret) => void values.set(account, secret),
+      remove: async (account) => void values.delete(account),
+    }
+    expect(await SyncSecureStore.readProvisionedBaiduApp(secure)).toEqual({ appKey: "app", secretKey: "secret" })
+    expect([...values.keys()]).toEqual([SyncSecureStore.BAIDU_APP_ACCOUNT])
+  })
+
   test.skipIf(process.env.OPENCODE_REAL_SECURE_STORE !== "1")(
     "round trips a disposable record through the host secure store",
     async () => {

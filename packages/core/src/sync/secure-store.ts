@@ -5,6 +5,12 @@ import fs from "node:fs/promises"
 
 export const SERVICE = "opencode-rexd-sync"
 export const LEGACY_BAIDU_SERVICE = "opencode-rexd-baidu"
+export const BAIDU_APP_ACCOUNT = "baidu:app"
+
+export type BaiduAppCredential = {
+  readonly appKey: string
+  readonly secretKey: string
+}
 
 export interface Store {
   readonly platform: "macos-keychain" | "windows-password-vault"
@@ -44,6 +50,7 @@ export async function detect(
   return detectService(SERVICE, options)
 }
 
+/** @deprecated Test-only bridge until the legacy SyncSetup flow is removed. */
 export async function detectLegacyBaidu(
   options: {
     readonly platform?: NodeJS.Platform
@@ -53,6 +60,15 @@ export async function detectLegacyBaidu(
   } = {},
 ): Promise<Store> {
   return detectService(LEGACY_BAIDU_SERVICE, options)
+}
+
+export async function readProvisionedBaiduApp(store: Store) {
+  const value = await store.get(BAIDU_APP_ACCOUNT)
+  if (!value) return
+  const parsed = JSON.parse(value) as BaiduAppCredential
+  if (!parsed?.appKey || !parsed.secretKey || /[\r\n\0]/.test(parsed.appKey) || /[\r\n\0]/.test(parsed.secretKey))
+    throw new SecureStoreOperationError("Invalid provisioned Baidu app credential")
+  return parsed
 }
 
 async function detectService(

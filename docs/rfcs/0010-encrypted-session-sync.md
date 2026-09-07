@@ -168,7 +168,7 @@ tombstone 对同一 space ID 与 Session ID 组合永久、单调地占优。删
 
 所有未撤销设备 ack 后可以回收 payload 和冗余 tombstone object，但必须在该空间的 deletion set 永久保留最小 marker。撤销设备只改变成员与 ack 语义。加密 space 若要排除已持有 key 的设备，必须全局删除旧 space 并创建使用新 key 的空间。
 
-全局删除 space 同样使用永久 deletion marker。删除完成后本机该空间不再 active，后台任务停止；残留本地 Session 可保留为已物化、不可继续同步的记录，但不得自动改为未归属或加入其他空间。
+全局删除 space 同样使用永久 deletion marker。删除完成后本机该空间不再 active，后台任务停止；每台设备应用该 marker 时保留已经物化的本地 Session，并清除这些 Session 的 `syncSpaceID`，使其成为未归属 Session。它们不会自动加入其他空间；未来若要重新同步，必须走显式的新归属 workflow。尚未物化的 cloud-only metadata 可以清除。
 
 ## 冲突与可移植 Location
 
@@ -213,7 +213,7 @@ tombstone 对同一 space ID 与 Session ID 组合永久、单调地占优。删
 5. 百度产品 OAuth、refresh、分页、上传、下载、限流和结果未知恢复通过 adapter 与 Mac/WSL 真实测试；用户无需提供 AppKey/SecretKey。
 6. 正式产品代码不发现或迁移旧登录态；旧 identity 只存在于显式、脱敏的测试 fixture 和兼容验收中。
 7. 两设备离线追加、同 seq 分叉、metadata revision 冲突和 sibling 收敛在不同拉取顺序下结果一致。
-8. Session 删除和 space 删除经乱序、离线迟交、旧 outbox、重启、hydration 和 compaction 后均不能复活。
+8. Session 删除和 space 删除经乱序、离线迟交、旧 outbox、重启、hydration 和 compaction 后均不能复活；space 删除在所有设备保留已物化 Session 并将其转为未归属。
 9. `/sessions` 按规范显示搜索、两行 Filter/Scope、右对齐状态和简短无 emoji 文案；键盘焦点与筛选不修改 durable state。
 10. portable label 未绑定时保持 unresolved；绑定后通过 RFC-0002 验证才能执行，连接详情从未上传。
 11. 同步失败、locked 或 disabled 时本地 Session 使用仍可用，原所属空间 outbox 保留可恢复状态。

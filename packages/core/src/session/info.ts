@@ -43,6 +43,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     }),
     locationRevision: row.location_revision,
     portableTargetLabel: row.portable_target_label ?? undefined,
+    syncSpaceID: row.sync_space_id ?? undefined,
     subpath: row.path ? RelativePath.make(row.path) : undefined,
     revert: row.revert ? { ...row.revert, messageID: SessionMessage.ID.make(row.revert.messageID) } : undefined,
     time: {

@@ -45,6 +45,8 @@ export const Info = Schema.Struct({
   ),
   /** Synchronized logical target identity; never contains a device-local target ID or connection data. */
   portableTargetLabel: Schema.String.pipe(optional),
+  /** Stable sync-space ownership. Missing means this Session is device-local and is never uploaded. */
+  syncSpaceID: Schema.String.pipe(optional),
   subpath: RelativePath.pipe(optional),
   revert: Revert.State.pipe(optional),
 }).annotate({ identifier: "SessionV2.Info" })

@@ -6,6 +6,7 @@ import { SyncEvent } from "./event"
 import { SyncEventStore } from "./event-store"
 import { SyncProvider } from "./provider"
 import { NonNegativeInt } from "../schema"
+import { SyncCodec } from "./codec"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true })
@@ -63,7 +64,8 @@ export interface AttachmentPipeline {
 
 export function make(input: {
   readonly config: { readonly deviceID: SyncEvent.DeviceID; readonly deviceName?: string; readonly enabled: boolean }
-  readonly rootKey: Uint8Array
+  readonly rootKey?: Uint8Array
+  readonly codec?: SyncCodec.Interface
   readonly provider: SyncProvider.Adapter
   readonly store: SyncEventStore.Interface
   readonly projector: SyncEvent.DurableProjector | ((deviceID: SyncEvent.DeviceID) => SyncEvent.DurableProjector)
@@ -77,6 +79,8 @@ export function make(input: {
   readonly owner?: string
 }) {
   const now = input.now ?? Date.now
+  const codec = input.codec ?? (input.rootKey ? SyncCodec.encrypted(input.rootKey) : undefined)
+  if (!codec) throw new Error("SyncRuntime requires a codec or root key")
   const owner = input.owner ?? `${process.pid}:${crypto.randomUUID()}`
   let status: Status = { enabled: input.config.enabled, running: "idle" }
   let uploadFlight: Promise<void> | undefined
@@ -103,20 +107,15 @@ export function make(input: {
       const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
       if (segment) {
         const wire = input.attachment ? await externalizeSegment(segment, input.attachment) : segment
-        const path = segmentPath(segment.deviceID, segment.generation)
-        const bytes = await encrypt(
-          "event",
-          input.rootKey,
-          segmentContext(segment.deviceID, segment.generation, path),
-          wire,
-        )
+        const path = segmentPath(segment.deviceID, segment.generation, codec.suffix)
+        const bytes = await encode(codec, "event", segmentContext(segment.deviceID, segment.generation, path), wire)
         const existing = await input.provider.stat(path, signal)
         if (existing) {
           const downloaded = await input.provider.download(path, existing.version, signal)
-          const committed = await decrypt(
+          const committed = await decode(
             (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+            codec,
             "event",
-            input.rootKey,
             segmentContext(segment.deviceID, segment.generation, path),
             downloaded.bytes,
           )
@@ -136,8 +135,8 @@ export function make(input: {
         revoked: input.revoked ? [...(await Effect.runPromise(input.revoked()))] : [],
       }
       localHead = head
-      const path = headPath(input.config.deviceID)
-      const bytes = await encrypt("metadata", input.rootKey, headContext(input.config.deviceID, path), head)
+      const path = headPath(input.config.deviceID, codec.suffix)
+      const bytes = await encode(codec, "metadata", headContext(input.config.deviceID, path), head)
       const existing = await input.provider.stat(path, signal)
       await input.provider.uploadAtomic(
         path,
@@ -163,15 +162,15 @@ export function make(input: {
     try {
       const objects = await SyncProvider.listAll(input.provider, "devices", signal)
       const heads: Head[] = []
-      for (const object of objects.filter((item) => item.path.endsWith(".head.enc"))) {
-        const deviceID = deviceFromHeadPath(object.path)
+      for (const object of objects.filter((item) => item.path.endsWith(`.head${codec.suffix}`))) {
+        const deviceID = deviceFromHeadPath(object.path, codec.suffix)
         if (deviceID === input.config.deviceID) continue
         const downloaded = await input.provider.download(object.path, object.version, signal)
         heads.push(
-          await decrypt(
+          await decode(
             (value) => Schema.decodeUnknownSync(Head)(value),
+            codec,
             "metadata",
-            input.rootKey,
             headContext(deviceID, object.path),
             downloaded.bytes,
           ),
@@ -209,14 +208,14 @@ export function make(input: {
         while (cursor < head.generation) {
           signal?.throwIfAborted()
           const generation = cursor + 1
-          const path = segmentPath(head.deviceID, generation)
+          const path = segmentPath(head.deviceID, generation, codec.suffix)
           const object = await input.provider.stat(path, signal)
           if (!object) throw new Error("Remote sync segment is missing")
           const downloaded = await input.provider.download(path, object.version, signal)
-          const segment = await decrypt(
+          const segment = await decode(
             (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+            codec,
             "event",
-            input.rootKey,
             segmentContext(head.deviceID, generation, path),
             downloaded.bytes,
           )
@@ -235,16 +234,15 @@ export function make(input: {
   const collectAttachments = async (signal?: AbortSignal) => {
     if (!input.attachment) return
     const generation = await Effect.runPromise(input.store.head(input.config.deviceID))
-    const local: Head =
-      localHead ?? {
-        version: 1,
-        deviceID: input.config.deviceID,
-        deviceName: input.config.deviceName ?? String(input.config.deviceID),
-        generation,
-        acknowledged: input.acknowledged ? await Effect.runPromise(input.acknowledged()) : {},
-        metadata: [],
-        revoked: [],
-      }
+    const local: Head = localHead ?? {
+      version: 1,
+      deviceID: input.config.deviceID,
+      deviceName: input.config.deviceName ?? String(input.config.deviceID),
+      generation,
+      acknowledged: input.acknowledged ? await Effect.runPromise(input.acknowledged()) : {},
+      metadata: [],
+      revoked: [],
+    }
     const active = [local, ...indexedHeads]
     // A device inherently knows its own generation. Every *other* active
     // device must explicitly acknowledge it before a referenced object can be
@@ -263,15 +261,15 @@ export function make(input: {
     const liveObjectIDs = new Set<string>()
     const segments: SyncEvent.Segment[] = []
     for (const object of objects) {
-      const location = segmentFromPath(object.path)
+      const location = segmentFromPath(object.path, codec.suffix)
       if (!location) continue
       segments.push(
-        await decrypt(
-        (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
-        "event",
-        input.rootKey,
-        segmentContext(location.deviceID, location.generation, object.path),
-        (await input.provider.download(object.path, object.version, signal)).bytes,
+        await decode(
+          (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+          codec,
+          "event",
+          segmentContext(location.deviceID, location.generation, object.path),
+          (await input.provider.download(object.path, object.version, signal)).bytes,
         ),
       )
     }
@@ -280,7 +278,8 @@ export function make(input: {
     // alive merely because that event was encountered before its tombstone.
     const deleted = new Set<string>()
     for (const segment of segments)
-      for (const operation of segment.operations) if (operation.kind === "tombstone") deleted.add(operation.tombstone.sessionID)
+      for (const operation of segment.operations)
+        if (operation.kind === "tombstone") deleted.add(operation.tombstone.sessionID)
     for (const segment of segments) {
       for (const operation of segment.operations) {
         if (operation.kind !== "event" || deleted.has(operation.event.aggregateID)) continue
@@ -311,22 +310,22 @@ export function make(input: {
   }
 }
 
-function headPath(deviceID: string) {
-  return SyncProvider.objectPath(`devices/${deviceID}.head.enc`)
+function headPath(deviceID: string, suffix: SyncCodec.Interface["suffix"]) {
+  return SyncProvider.objectPath(`devices/${deviceID}.head${suffix}`)
 }
 
-function segmentPath(deviceID: string, generation: number) {
-  return SyncProvider.objectPath(`segments/${deviceID}/${generation}-${generation}.enc`)
+function segmentPath(deviceID: string, generation: number, suffix: SyncCodec.Interface["suffix"]) {
+  return SyncProvider.objectPath(`segments/${deviceID}/${generation}-${generation}${suffix}`)
 }
 
-function segmentFromPath(path: string) {
-  const match = /^segments\/([^/]+)\/(\d+)-\d+\.enc$/.exec(path)
+function segmentFromPath(path: string, suffix: SyncCodec.Interface["suffix"]) {
+  const match = new RegExp(`^segments/([^/]+)/(\\d+)-\\d+\\${suffix}$`).exec(path)
   if (!match?.[1] || !match[2]) return
   return { deviceID: SyncEvent.DeviceID.make(match[1]), generation: Number.parseInt(match[2], 10) }
 }
 
-function deviceFromHeadPath(path: string) {
-  const match = /^devices\/(.+)\.head\.enc$/.exec(path)
+function deviceFromHeadPath(path: string, suffix: SyncCodec.Interface["suffix"]) {
+  const match = new RegExp(`^devices/(.+)\\.head\\${suffix}$`).exec(path)
   if (!match?.[1]) throw new Error("Invalid remote sync head path")
   return SyncEvent.DeviceID.make(match[1])
 }
@@ -339,17 +338,19 @@ function segmentContext(deviceID: string, generation: number, path: string): Syn
   return { path, type: "segment", deviceID, generation, range: `${generation}-${generation}`, schemaVersion: 1 }
 }
 
-async function encrypt(
+async function encode(
+  codec: SyncCodec.Interface,
   purpose: "metadata" | "event",
-  rootKey: Uint8Array,
   context: SyncCrypto.ObjectContext,
   value: unknown,
 ) {
-  const envelope = await SyncCrypto.encrypt(rootKey, purpose, 1, context, encoder.encode(JSON.stringify(value)))
-  return encoder.encode(JSON.stringify(envelope))
+  return codec.seal(purpose, context, encoder.encode(JSON.stringify(value)))
 }
 
-async function externalizeSegment(segment: SyncEvent.Segment, attachment: AttachmentPipeline): Promise<SyncEvent.Segment> {
+async function externalizeSegment(
+  segment: SyncEvent.Segment,
+  attachment: AttachmentPipeline,
+): Promise<SyncEvent.Segment> {
   const operations = await Promise.all(
     segment.operations.map(async (operation) =>
       operation.kind === "event"
@@ -360,14 +361,14 @@ async function externalizeSegment(segment: SyncEvent.Segment, attachment: Attach
   return SyncEvent.Segment.make({ ...segment, operations })
 }
 
-async function decrypt<A>(
+async function decode<A>(
   decode: (value: unknown) => A,
+  codec: SyncCodec.Interface,
   purpose: "metadata" | "event",
-  rootKey: Uint8Array,
   context: SyncCrypto.ObjectContext,
   bytes: Uint8Array,
 ) {
-  const plaintext = await SyncCrypto.decrypt(rootKey, purpose, context, JSON.parse(decoder.decode(bytes)))
+  const plaintext = await codec.open(purpose, context, bytes)
   return decode(JSON.parse(decoder.decode(plaintext)))
 }
 

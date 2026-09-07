@@ -7,6 +7,10 @@ import { SyncEvent } from "./event"
 import { SyncEventStore } from "./event-store"
 import { Context } from "effect"
 import { makeGlobalNode } from "../effect/app-node"
+import { SyncOwnership } from "./ownership"
+import { Database } from "../database/database"
+import { SessionTable } from "../session/sql"
+import { isNotNull } from "drizzle-orm"
 
 type DurablePayload = {
   readonly id: string
@@ -75,12 +79,15 @@ export function projector(
   }) => Effect.Effect<void, unknown>,
   attachment?: Pick<SyncAttachment.Interface, "get">,
   onDelete?: (sessionID: string) => Effect.Effect<void, unknown>,
+  spaceID?: string,
+  onOwned?: (sessionID: string, spaceID: string) => Effect.Effect<void, unknown>,
 ): SyncEvent.DurableProjector {
   const siblings = new Map<string, string>()
   return {
     project: (event) =>
       Effect.gen(function* () {
-        const hydrated = attachment ? yield* Effect.tryPromise(() => hydrate(event, attachment)) : event
+        const restored = attachment ? yield* Effect.tryPromise(() => hydrate(event, attachment)) : event
+        const hydrated = spaceID ? bindCreatedSpace(restored, spaceID) : restored
         const existing = siblings.get(hydrated.aggregateID)
         if (existing) return yield* replayAs(events, hydrated, existing, sourceDeviceID)
         const replay = events.replay(serialized(hydrated), {
@@ -88,7 +95,11 @@ export function projector(
           ...(sourceDeviceID ? { ownerID: sourceDeviceID, strictOwner: true } : {}),
         })
         const exit = yield* Effect.exit(replay)
-        if (exit._tag === "Success") return
+        if (exit._tag === "Success") {
+          if (spaceID && onOwned && isCreatedEnvelope(hydrated))
+            yield* onOwned(hydrated.aggregateID, spaceID).pipe(Effect.orDie)
+          return
+        }
         const failure = Cause.squash(exit.cause)
         if (
           !sourceDeviceID ||
@@ -98,6 +109,7 @@ export function projector(
           return yield* Effect.failCause(exit.cause)
         const sibling = yield* Effect.promise(() => siblingID(hydrated.aggregateID, sourceDeviceID, hydrated.seq))
         siblings.set(hydrated.aggregateID, sibling)
+        if (spaceID && onOwned) yield* onOwned(sibling, spaceID).pipe(Effect.orDie)
         if (onConflict)
           yield* onConflict({ sessionID: hydrated.aggregateID, siblingID: sibling, sourceDeviceID }).pipe(Effect.orDie)
         const prefix = yield* events.durable({ aggregateID: hydrated.aggregateID }).pipe(
@@ -168,6 +180,20 @@ function replaceSessionID(value: unknown, source: string, target: string): any {
   )
 }
 
+function isCreatedEnvelope(event: SyncEvent.Envelope) {
+  return event.type === "session.created" || event.type.startsWith("session.created@")
+}
+
+function bindCreatedSpace(event: SyncEvent.Envelope, spaceID: string) {
+  if (!isCreatedEnvelope(event)) return event
+  const info = event.data.info
+  if (!info || typeof info !== "object") return event
+  return SyncEvent.Envelope.make({
+    ...event,
+    data: { ...event.data, info: { ...(info as Record<string, unknown>), syncSpaceID: spaceID } },
+  })
+}
+
 async function siblingID(sessionID: string, deviceID: string, firstConflictSeq: number) {
   const bytes = await crypto.subtle.digest(
     "SHA-256",
@@ -181,8 +207,32 @@ export const captureLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const store = yield* SyncEventStore.Service
+    const ownership = yield* SyncOwnership.Service
+    const db = (yield* Database.Service).db
+    const existing = yield* db
+      .select({
+        sessionID: SessionTable.id,
+        spaceID: SessionTable.sync_space_id,
+        assignedAt: SessionTable.time_created,
+      })
+      .from(SessionTable)
+      .where(isNotNull(SessionTable.sync_space_id))
+      .all()
+    yield* Effect.forEach(existing, (item) => ownership.assign(item.sessionID, item.spaceID!, item.assignedAt), {
+      discard: true,
+    })
     yield* events.all().pipe(
-      Stream.runForEach((event) => capture(store, event as DurablePayload)),
+      Stream.runForEach((event) =>
+        Effect.gen(function* () {
+          const payload = event as DurablePayload
+          if (!payload.durable) return
+          const createdSpaceID = sessionCreatedSpace(payload)
+          if (createdSpaceID) yield* ownership.assign(payload.durable.aggregateID, createdSpaceID, Date.now())
+          const owned = createdSpaceID ? { spaceID: createdSpaceID } : yield* ownership.get(payload.durable.aggregateID)
+          if (!owned) return
+          yield* capture(store.scope(owned.spaceID), payload)
+        }),
+      ),
       Effect.forkScoped,
     )
   }),
@@ -193,9 +243,17 @@ const captureServiceLayer = Layer.provideMerge(Layer.succeed(Capture, true), cap
 export const node = makeGlobalNode({
   service: Capture,
   layer: captureServiceLayer,
-  deps: [EventV2.node, SyncEventStore.node],
+  deps: [EventV2.node, SyncEventStore.node, SyncOwnership.node, Database.node],
 })
 
 function isSessionDeleted(payload: DurablePayload) {
   return payload.type === "session.deleted" || payload.type.startsWith("session.deleted@")
+}
+
+function sessionCreatedSpace(payload: DurablePayload) {
+  if (payload.type !== "session.created" && !payload.type.startsWith("session.created@")) return
+  const info = payload.data.info
+  if (!info || typeof info !== "object") return
+  const value = (info as Record<string, unknown>).syncSpaceID
+  return typeof value === "string" && value ? value : undefined
 }

@@ -41,6 +41,7 @@ import { Pty } from "./pty"
 import { PermissionV2 } from "./permission"
 import { QuestionV2 } from "./question"
 import { SessionActivity } from "./session/activity"
+import { SyncSetup } from "./sync/setup"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -209,6 +210,7 @@ const layer = Layer.effect(
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const locationMutation = yield* Semaphore.make(1)
     const activity = yield* SessionActivity.Service
+    const syncSetup = yield* SyncSetup.Service
     const locationBlockers = (sessionID: SessionSchema.ID, ref: Location.Ref) =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -249,6 +251,9 @@ const layer = Layer.effect(
           .run()
           .pipe(Effect.orDie)
         const now = Date.now()
+        // Ownership is captured exactly once at creation. A disabled scheduler
+        // still retains the active space so offline changes stay in its outbox.
+        const syncSpaceID = (yield* syncSetup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))?.namespaceID
         const info = SessionV1.SessionInfo.make({
           id: sessionID,
           slug: Slug.create(),
@@ -257,6 +262,7 @@ const layer = Layer.effect(
           directory: input.location.directory,
           target: input.location.target,
           lastKnownTargetName: input.location.lastKnownTargetName,
+          syncSpaceID,
           path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
           title: `New session - ${new Date(now).toISOString()}`,
@@ -573,5 +579,6 @@ export const node = makeGlobalNode({
     LocationServiceMap.node,
     SessionProjector.node,
     SessionActivity.node,
+    SyncSetup.node,
   ],
 })

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { SyncAttachment } from "@opencode-ai/core/sync/attachment"
 import { SyncCrypto } from "@opencode-ai/core/sync/crypto"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
+import { SyncCodec } from "@opencode-ai/core/sync/codec"
 
 function provider() {
   const files = new Map<string, Uint8Array>()
@@ -28,6 +29,19 @@ function provider() {
 }
 
 describe("SyncAttachment", () => {
+  test("stores and validates attachments in plaintext spaces without a key", async () => {
+    const remote = provider()
+    const service = SyncAttachment.make({
+      codec: SyncCodec.plaintext(),
+      namespaceID: "space",
+      provider: remote.adapter,
+    })
+    const bytes = new TextEncoder().encode("plain attachment")
+    const id = await service.put(bytes, "text/plain")
+    expect([...remote.files.keys()].every((item) => item.endsWith(".json"))).toBeTrue()
+    expect(await service.get(id)).toEqual(bytes)
+  })
+
   test("encrypts, deduplicates and hydrates persisted attachment payloads", async () => {
     const remote = provider()
     const service = SyncAttachment.make({

@@ -52,6 +52,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     directory: info.directory,
     target: info.target ?? null,
     last_known_target_name: info.lastKnownTargetName ?? null,
+    sync_space_id: info.syncSpaceID ?? null,
     path: info.path,
     title: info.title,
     agent: info.agent,

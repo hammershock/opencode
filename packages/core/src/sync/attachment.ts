@@ -4,6 +4,7 @@ import { Schema } from "effect"
 import { SyncChunk } from "./chunk"
 import { SyncCrypto } from "./crypto"
 import { SyncProvider } from "./provider"
+import { SyncCodec } from "./codec"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true })
@@ -74,16 +75,20 @@ export async function hydrate(value: unknown, attachment: Pick<Interface, "get">
     const reference = parseReference(item)
     if (!reference) return item
     const bytes = await attachment.get(reference.objectID)
-    if (reference.encoding === "base64") return `data:${reference.mediaType};base64,${Buffer.from(bytes).toString("base64")}`
+    if (reference.encoding === "base64")
+      return `data:${reference.mediaType};base64,${Buffer.from(bytes).toString("base64")}`
     return decoder.decode(bytes)
   })
 }
 
 export function make(input: {
-  readonly rootKey: Uint8Array
+  readonly rootKey?: Uint8Array
+  readonly codec?: SyncCodec.Interface
   readonly namespaceID: string
   readonly provider: SyncProvider.Adapter
 }): Interface {
+  const codec = input.codec ?? (input.rootKey ? SyncCodec.encrypted(input.rootKey) : undefined)
+  if (!codec) throw new Error("SyncAttachment requires a codec or root key")
   const context = (path: string, type: string): SyncCrypto.ObjectContext => ({
     path,
     type,
@@ -93,25 +98,25 @@ export function make(input: {
     schemaVersion: 1,
   })
   const seal = async (path: string, type: "chunk" | "manifest", value: Uint8Array) =>
-    encoder.encode(JSON.stringify(await SyncCrypto.encrypt(input.rootKey, "attachment", 1, context(path, type), value)))
+    codec.seal("attachment", context(path, type), value)
   const open = async (path: string, type: "chunk" | "manifest", value: Uint8Array) =>
-    SyncCrypto.decrypt(input.rootKey, "attachment", context(path, type), JSON.parse(decoder.decode(value)))
+    codec.open("attachment", context(path, type), value)
 
   const put = async (bytes: Uint8Array, mediaType: string, signal?: AbortSignal) => {
-    const split = await SyncChunk.split({ rootKey: input.rootKey, keyEpoch: 1, bytes, mediaType })
+    const split = await SyncChunk.split({ objectID: codec.objectID, keyEpoch: 1, bytes, mediaType })
     for (const chunk of new Map(split.chunks.map((item) => [item.id, item])).values()) {
-      const path = chunkPath(chunk.id)
+      const path = chunkPath(chunk.id, codec.suffix)
       const existing = await input.provider.stat(path, signal)
       if (existing) {
         const downloaded = await input.provider.download(path, existing.version, signal)
         const plaintext = await open(path, "chunk", downloaded.bytes)
-        if ((await SyncCrypto.objectID(input.rootKey, 1, plaintext)) !== chunk.id)
-          throw new SyncChunk.InvalidChunkError("Existing encrypted chunk is corrupt")
+        if ((await codec.objectID(plaintext)) !== chunk.id)
+          throw new SyncChunk.InvalidChunkError("Existing chunk is corrupt")
         continue
       }
       await input.provider.uploadAtomic(path, await seal(path, "chunk", chunk.bytes), { type: "absent" }, signal)
     }
-    const path = manifestPath(split.manifest.objectID)
+    const path = manifestPath(split.manifest.objectID, codec.suffix)
     if (!(await input.provider.stat(path, signal)))
       await input.provider.uploadAtomic(
         path,
@@ -123,7 +128,7 @@ export function make(input: {
   }
 
   const get = async (objectID: string, signal?: AbortSignal) => {
-    const path = manifestPath(objectID)
+    const path = manifestPath(objectID, codec.suffix)
     const info = await input.provider.stat(path, signal)
     if (!info) throw new SyncChunk.InvalidChunkError("Attachment manifest is missing")
     const downloaded = await input.provider.download(path, info.version, signal)
@@ -131,10 +136,10 @@ export function make(input: {
       JSON.parse(decoder.decode(await open(path, "manifest", downloaded.bytes))),
     )
     return SyncChunk.assemble({
-      rootKey: input.rootKey,
+      objectID: codec.objectID,
       manifest,
       read: async (id) => {
-        const path = chunkPath(id)
+        const path = chunkPath(id, codec.suffix)
         const info = await input.provider.stat(path, signal)
         if (!info) throw new SyncChunk.InvalidChunkError("Attachment chunk is missing")
         return open(path, "chunk", (await input.provider.download(path, info.version, signal)).bytes)
@@ -151,7 +156,7 @@ export function make(input: {
     const manifests = await SyncProvider.listAll(input.provider, "chunks/manifests", inputGC.signal)
     const referenced = new Set<string>()
     for (const item of manifests) {
-      const id = /^chunks\/manifests\/(.+)\.enc$/.exec(item.path)?.[1]
+      const id = new RegExp(`^chunks/manifests/(.+)\\${codec.suffix}$`).exec(item.path)?.[1]
       if (!id || !inputGC.liveObjectIDs.has(id)) continue
       const manifest = Schema.decodeUnknownSync(SyncChunk.Manifest)(
         JSON.parse(
@@ -167,12 +172,12 @@ export function make(input: {
       for (const chunk of manifest.chunks) referenced.add(chunk.id)
     }
     const stale = manifests.filter((item) => {
-      const id = /^chunks\/manifests\/(.+)\.enc$/.exec(item.path)?.[1]
+      const id = new RegExp(`^chunks/manifests/(.+)\\${codec.suffix}$`).exec(item.path)?.[1]
       return id && !inputGC.liveObjectIDs.has(id)
     })
     const chunks = await SyncProvider.listAll(input.provider, "chunks", inputGC.signal)
     const staleChunks = chunks.filter((item) => {
-      const id = /^chunks\/([^/]+)\.enc$/.exec(item.path)?.[1]
+      const id = new RegExp(`^chunks/([^/]+)\\${codec.suffix}$`).exec(item.path)?.[1]
       return id && !referenced.has(id)
     })
     const remove = [...stale, ...staleChunks]
@@ -186,12 +191,12 @@ export function make(input: {
   return { put, get, collect }
 }
 
-function chunkPath(id: string) {
-  return SyncProvider.objectPath(`chunks/${id}.enc`)
+function chunkPath(id: string, suffix: SyncCodec.Interface["suffix"]) {
+  return SyncProvider.objectPath(`chunks/${id}${suffix}`)
 }
 
-function manifestPath(id: string) {
-  return SyncProvider.objectPath(`chunks/manifests/${id}.enc`)
+function manifestPath(id: string, suffix: SyncCodec.Interface["suffix"]) {
+  return SyncProvider.objectPath(`chunks/manifests/${id}${suffix}`)
 }
 
 function formatReference(reference: Reference) {
@@ -223,11 +228,18 @@ function parseDataURL(value: string): { readonly mediaType: string; readonly byt
   }
 }
 
-async function transform(value: unknown, leaf: (value: unknown, key?: string) => Promise<unknown>, key?: string): Promise<unknown> {
+async function transform(
+  value: unknown,
+  leaf: (value: unknown, key?: string) => Promise<unknown>,
+  key?: string,
+): Promise<unknown> {
   if (Array.isArray(value)) return Promise.all(value.map((item) => transform(item, leaf)))
   if (value && typeof value === "object") {
     const entries = await Promise.all(
-      Object.entries(value as Record<string, unknown>).map(async ([childKey, item]) => [childKey, await transform(item, leaf, childKey)]),
+      Object.entries(value as Record<string, unknown>).map(async ([childKey, item]) => [
+        childKey,
+        await transform(item, leaf, childKey),
+      ]),
     )
     return Object.fromEntries(entries)
   }
@@ -240,5 +252,6 @@ function visit(value: unknown, fn: (value: unknown) => void) {
     for (const item of value) visit(item, fn)
     return
   }
-  if (value && typeof value === "object") for (const item of Object.values(value as Record<string, unknown>)) visit(item, fn)
+  if (value && typeof value === "object")
+    for (const item of Object.values(value as Record<string, unknown>)) visit(item, fn)
 }

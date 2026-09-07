@@ -23,6 +23,7 @@ import { SyncDatabase } from "./database"
 import { NonNegativeInt } from "../schema"
 import { SyncCrypto } from "./crypto"
 import { SyncAttachment } from "./attachment"
+import { SyncOwnership } from "./ownership"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -80,6 +81,7 @@ const layer = Layer.effect(
     const events = yield* EventV2.Service
     const metadataStore = yield* SyncMetadata.Service
     const syncDB = (yield* SyncDatabase.Service).db
+    const ownership = yield* SyncOwnership.Service
     const sessionDB = (yield* Database.Service).db
     const global = yield* Global.Service
     const devicesFor = (namespaceID: string) =>
@@ -134,6 +136,8 @@ const layer = Layer.effect(
                 .where(eq(SessionTable.id, SessionV2.ID.make(sessionID)))
                 .run()
                 .pipe(Effect.andThen(metadata.remove(sessionID)), Effect.asVoid),
+            config.namespaceID,
+            (sessionID, spaceID) => ownership.assign(sessionID, spaceID),
           ),
         attachment: {
           externalize: (event) => SessionSync.externalize(event, attachment),
@@ -144,6 +148,7 @@ const layer = Layer.effect(
           sessionDB
             .select()
             .from(SessionTable)
+            .where(eq(SessionTable.sync_space_id, config.namespaceID))
             .all()
             .pipe(
               Effect.map((rows) =>
@@ -379,5 +384,6 @@ export const node = makeGlobalNode({
     SyncEventStore.node,
     SyncMetadata.node,
     SyncDatabase.node,
+    SyncOwnership.node,
   ],
 })

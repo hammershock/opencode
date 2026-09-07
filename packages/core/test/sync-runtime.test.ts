@@ -4,6 +4,7 @@ import { SyncCrypto } from "@opencode-ai/core/sync/crypto"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncRuntime } from "@opencode-ai/core/sync/runtime"
+import { SyncCodec } from "@opencode-ai/core/sync/codec"
 
 function provider() {
   const files = new Map<string, { bytes: Uint8Array; version: number }>()
@@ -81,6 +82,30 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
 }
 
 describe("SyncRuntime", () => {
+  test("uses the plaintext codec without requiring a recovery key", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("mac")
+    const event = SyncEvent.Envelope.make({
+      id: "plain-event",
+      aggregateID: "plain-session",
+      seq: 0,
+      type: "session.created",
+      data: { title: "visible title" },
+    })
+    const local = store(id, event)
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: local.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(runtime.upload())
+    expect([...remote.files.keys()].some((item) => item.endsWith(".json"))).toBeTrue()
+  })
+
   test("uploads encrypted heads and segments, then hydrates metadata and events", async () => {
     const remote = provider()
     const space = SyncCrypto.createSpace()
@@ -210,7 +235,9 @@ describe("SyncRuntime", () => {
       externalize: async (value: SyncEvent.Envelope) =>
         SyncEvent.Envelope.make({ ...value, data: { part: { url: "opencode-sync-attachment://image" } } }),
       references: (value: unknown) =>
-        JSON.stringify(value).includes("opencode-sync-attachment://image") ? new Set<string>(["image"]) : new Set<string>(),
+        JSON.stringify(value).includes("opencode-sync-attachment://image")
+          ? new Set<string>(["image"])
+          : new Set<string>(),
       collect: async (input: unknown) => void collected.push(input),
     }
     const uploader = SyncRuntime.make({

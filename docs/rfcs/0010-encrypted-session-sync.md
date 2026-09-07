@@ -68,6 +68,8 @@ Session domain 持久化可选的 `syncSpaceID`。缺少该字段表示未归属
 
 `config.json` 只保存 provider、账户引用、本设备 ID/name、active space ID、enabled 和调度参数。`state.json` 保存可重建的空间摘要和诊断。`sync.db` 使用 WAL，所有 outbox、cursor、object cache、lease 和 deletion marker 都以 sync space ID 分区。普通文件不保存 OAuth token、可选 root key 或 recovery string。
 
+正式实现只解码当前 `config.json` schema。文件声明旧的或不受支持的版本时，Core 必须在访问安全存储前停止，并通过稳定的 `incompatible-local-state` reason 告知 TUI；TUI 显示简短的手动归档与重启说明。检测不得读取、迁移或复用旧登录态，也不得自动删除、改写、移动或解释旧文件。当前 `Remove sync from this device` 依赖已经成功解码的 v2 state，因此不能作为不兼容文件的恢复路径；事务性的 archive/reset workflow 若需要加入，必须由后续 RFC 定义其文件范围、回滚与失败语义。
+
 账户下的每个 space 至少具有随机稳定 ID、用户可见名称、协议版本、编码模式和成员摘要。规则如下：
 
 - OAuth 登录只建立百度账户连接并发现 space catalog，不创建、加入或激活任何 space；用户必须在登录完成后显式创建或进入一个 space；
@@ -85,7 +87,7 @@ Session domain 持久化可选的 `syncSpaceID`。缺少该字段表示未归属
 
 产品 OAuth client 由发布流程在候选构建验证后从标准输入静默写入系统安全存储的固定 `opencode-rexd-sync` / `baidu:app` 记录。输入不经过参数、环境变量、配置、manifest、日志或临时文件；写入后必须回读验证，失败时恢复旧记录且不替换已安装版本。该入口不出现在普通 CLI help 或 TUI 中。运行时缺少产品记录时只提示重新安装官方构建或联系分发者，不引导用户输入应用凭据。
 
-HTTP/SDK 边界只公开稳定的 `missing-app` 原因码和上述固定提示；其他 setup 失败统一为不携带内部原因的 `bad-request`。
+HTTP/SDK 边界只公开稳定的 `missing-app`、`incompatible-local-state` 原因码及各自固定提示；其他 setup 失败统一为不携带内部原因的 `bad-request`。后者只描述设备本地格式不兼容，不携带旧文件内容、版本细节、路径或安全存储信息。
 
 授权优先使用本机 loopback callback。无法自动回调时可以展示并复制授权 URL，再由用户粘贴授权码；该 installed-app fallback 只允许百度协议要求的精确 literal `oob` redirect。除明确的 loopback 与 `oob` 两种情况外，redirect 必须是 HTTPS，不能接受任意 HTTP URL、自定义 scheme 或调用方提供的其他非 HTTPS redirect。
 

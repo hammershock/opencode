@@ -450,11 +450,12 @@ export function createPromptState(input: PromptInput): PromptState {
       return []
     }
     const candidates = result.candidates.map(
-      (candidate): ShellOption => ({
+      (candidate, index): ShellOption => ({
         kind: "shell",
         value: candidate.value,
         display: candidate.display,
         description: candidate.description ?? candidate.kind,
+        footer: `${index + 1}/${result.candidates.length}`,
         replacement: candidate.replacement,
       }),
     )

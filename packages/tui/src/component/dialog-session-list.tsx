@@ -31,6 +31,8 @@ export type DialogSessionListFilters = {
   readonly scope: "current" | "all"
 }
 
+export const SESSION_FILTER_FOOTER_HINT = { title: "tab", label: "filters" } as const
+
 type SyncAvailability = "metadata-only" | "hydrating" | "ready" | "partial" | "conflict" | "unresolved"
 type SyncedSession = {
   readonly sessionID: string
@@ -587,7 +589,7 @@ export function DialogSessionList() {
           },
         },
       ]}
-      footerHints={quickSwitchFooterHints()}
+      footerHints={[SESSION_FILTER_FOOTER_HINT, ...quickSwitchFooterHints()]}
       bindings={(["tab", "left", "right"] as const).map((key) => ({
         key,
         desc: key === "tab" ? "Switch Session filter row" : "Change Session filter",

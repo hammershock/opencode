@@ -3,6 +3,7 @@ import { DialogSelect } from "../ui/dialog-select"
 import { useRoute } from "../context/route"
 import { useSync } from "../context/sync"
 import { createMemo, createResource, createSignal, onCleanup, onMount } from "solid-js"
+import { useTerminalDimensions } from "@opentui/solid"
 import { useProject } from "../context/project"
 import { useTheme } from "../context/theme"
 import { useSDK } from "../context/sdk"
@@ -16,7 +17,12 @@ import { errorMessage } from "../util/error"
 import { DialogSessionDeleteFailed } from "./dialog-session-delete-failed"
 import { useCommandShortcut } from "../keymap"
 import { useEvent } from "../context/event"
-import { sessionListLocation, sessionListMatches, type SessionListLocationRecord } from "./session-list-location"
+import {
+  sessionListFooter,
+  sessionListLocation,
+  sessionListMatches,
+  type SessionListLocationRecord,
+} from "./session-list-location"
 import { DialogSessionLocationRecovery, forceRebindSession } from "./dialog-session-location-recovery"
 import { useKV } from "../context/kv"
 import { SESSION_FORCE_REBIND_SETTING } from "../command-toolkit/experimental-settings"
@@ -155,6 +161,7 @@ export function DialogSessionList() {
   const kv = useKV()
   const local = useLocal()
   const toast = useToast()
+  const dimensions = useTerminalDimensions()
   const [toDelete, setToDelete] = createSignal<string>()
   const [deleted, setDeleted] = createSignal(new Set<string>())
   const [search, setSearch] = createDebouncedSignal("", 150)
@@ -232,7 +239,7 @@ export function DialogSessionList() {
       .map(fromSyncedSession)
     const localEntry = (session: (typeof sync.data.session)[number]): DialogSessionEntry => ({
       ...session,
-      targetLabel: remote.get(session.id)?.targetLabel,
+      targetLabel: remote.get(session.id)?.targetLabel ?? session.lastKnownTargetName,
       sourceDeviceID: remote.get(session.id)?.sourceDeviceID,
       syncMetadata: remote.get(session.id),
     })
@@ -380,8 +387,12 @@ export function DialogSessionList() {
       const x = sessionMap.get(id)
       if (!x) return undefined
       const location = sessionListLocation(x as typeof x & SessionListLocationRecord)
-      const footer = location.label
       const syncStatus = x.syncMetadata ? syncAvailabilityLabel(x.syncMetadata.availability) : undefined
+      const footer = sessionListFooter(
+        location,
+        syncStatus,
+        Math.max(12, Math.floor((Math.min(88, dimensions().width - 2) - 8) * 0.6)),
+      )
 
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]
@@ -397,7 +408,7 @@ export function DialogSessionList() {
         bg: isDeleting ? theme.error : undefined,
         value: x.id,
         category,
-        footer: [footer, syncStatus].filter(Boolean).join(" · "),
+        footer: footer.text,
         gutter,
       }
     }

@@ -159,9 +159,13 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       | undefined
     let loopback: ReturnType<typeof createLoopbackCallback> | undefined
     let bindingRevision = ""
-    let remoteRefresh: Promise<void> | undefined
+    let remoteGeneration = 0
+    let remoteAbort: AbortController | undefined
 
-    onCleanup(() => loopback?.close())
+    onCleanup(() => {
+      loopback?.close()
+      remoteAbort?.abort()
+    })
 
     type LocalState = GlobalSyncStateResponse | null | undefined
 
@@ -175,7 +179,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         return
       }
       const previous = new Map(model().spaces.map((space) => [space.id, space]))
-      const spaces = state.spaces.map((item): SyncSpace => {
+      const local = state.spaces.map((item): SyncSpace => {
         const cached = previous.get(item.descriptor.namespaceID)
         const active = state.activeSpaceID === item.descriptor.namespaceID
         return {
@@ -191,6 +195,27 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
           state: state.enabled ? "idle" : "off",
         }
       })
+      const localIDs = new Set(local.map((space) => space.id))
+      const spaces = [
+        ...local,
+        ...discovered
+          .filter((item) => !localIDs.has(item.descriptor.namespaceID))
+          .map(
+            (item) =>
+              previous.get(item.descriptor.namespaceID) ??
+              ({
+                id: item.descriptor.namespaceID,
+                name: item.descriptor.name,
+                supported: item.status === "compatible",
+                protocol: `${item.descriptor.protocol.major}.${item.descriptor.protocol.minor}`,
+                encryption: item.descriptor.encryption === "none" ? "off" : "encrypted",
+                updatedAt: new Date(item.descriptor.updatedAt).toLocaleString(),
+                membership: "available",
+                state: state.enabled ? "idle" : "off",
+                detail: item.status === "unsupported" ? "Unsupported protocol" : undefined,
+              } satisfies SyncSpace),
+          ),
+      ]
       setModel((current) => ({
         ...current,
         account: state.account
@@ -224,10 +249,14 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     const refresh = async (discover = false, notify = false) => {
       const state = await refreshLocal(notify)
       if (!state?.account) return
-      if (remoteRefresh) return remoteRefresh
+      remoteAbort?.abort()
+      const controller = new AbortController()
+      remoteAbort = controller
+      const generation = ++remoteGeneration
       setModel((current) => ({ ...current, remote: "checking", detail: undefined }))
 
-      remoteRefresh = withSyncRefreshTimeout(async (signal) => {
+      const current = withSyncRefreshTimeout(async (timeoutSignal) => {
+        const signal = AbortSignal.any([controller.signal, timeoutSignal])
         const status = await sdk.client.global.syncStatus({ throwOnError: true, signal }).then(
           (result) => result.data,
           () => undefined,
@@ -281,6 +310,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
               )
             : [],
         ])
+        if (generation !== remoteGeneration) return
         if (discovery) discovered = discovery.spaces
         if (bindingResult) bindingRevision = bindingResult.revision
         const local = new Map(state.spaces.map((item) => [item.descriptor.namespaceID, item]))
@@ -364,14 +394,17 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         if (attention && notify) toast.show({ message: "Some sync information is unavailable", variant: "warning" })
       })
         .catch(() => {
+          if (generation !== remoteGeneration) return
           const detail = "Sync status is unavailable"
           setModel((current) => ({ ...current, state: "attention", remote: "unavailable", detail }))
           if (notify) toast.show({ message: detail, variant: "warning" })
         })
         .finally(() => {
-          remoteRefresh = undefined
+          if (generation === remoteGeneration) {
+            remoteAbort = undefined
+          }
         })
-      return remoteRefresh
+      return current
     }
 
     const completeOAuth = async (

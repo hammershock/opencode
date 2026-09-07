@@ -45,6 +45,7 @@ import { useEditorContext } from "../../context/editor"
 import { openEditor } from "../../editor"
 import { useDialog } from "../../ui/dialog"
 import { DialogAlert } from "../../ui/dialog-alert"
+import { showEnvironment } from "../../component/dialog-environment"
 import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
 import type { PromptInfo } from "../../component/prompt/history"
@@ -566,22 +567,26 @@ export function Session() {
           environment: {
             list: () => metadata("list"),
             reload: () => metadata("reload"),
+            reveal: async () => {
+              const result = await sdk.client.v2.environment.reveal(
+                { location: queryLocation, confirmed: true },
+                { throwOnError: true },
+              )
+              return { generation: Number(result.data.data.generation), values: result.data.data.values }
+            },
             ensureTemplate: async () => {
               const result = await sdk.client.v2.environment.init({ location: queryLocation }, { throwOnError: true })
               return result.data.data.status
             },
           },
-          presentEnvironment: async (snapshot) => {
-            const variables =
-              snapshot.variables.map((item) => `${item.name} · ${item.origin}`).join("\n") || "No variables"
-            await DialogAlert.show(dialog, `Environment generation ${snapshot.generation}`, variables)
-          },
+          presentEnvironment: (snapshot, reveal) => showEnvironment(dialog, snapshot, reveal, toast.error),
           invokeAgent: async (prompt) => {
             try {
-              await sdk.client.session.promptAsync(
+              const result = await sdk.client.session.prompt(
                 { sessionID: route.sessionID, noReply: false, parts: [{ type: "text", text: prompt }] },
                 { throwOnError: true },
               )
+              if (result.data.info.error) return "failed"
               return "completed"
             } catch {
               return "failed"

@@ -45,3 +45,11 @@ export function reportOverrideDiagnostic(id: string, diagnostic: OverrideDiagnos
 export function overrideDiagnostic(id: string) {
   return diagnostics.get(id)
 }
+
+export async function persistLocationEnvironment(
+  enabled: boolean,
+  update: (config: { experimental: { location_env: boolean } }) => Promise<void>,
+) {
+  await update({ experimental: { location_env: enabled } })
+  return enabled
+}

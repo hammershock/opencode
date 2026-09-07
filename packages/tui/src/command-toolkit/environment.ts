@@ -6,13 +6,16 @@ export type EnvironmentMetadata = {
   variables: ReadonlyArray<{ name: string; origin: string; source?: string }>
 }
 
+export type EnvironmentValues = { generation: number; values: Record<string, string> }
+
 export type EnvironmentCommandContext = InvocationContext & {
   environment: {
     list: () => Promise<EnvironmentMetadata>
     reload: () => Promise<EnvironmentMetadata>
+    reveal: () => Promise<EnvironmentValues>
     ensureTemplate: () => Promise<"created" | "existing">
   }
-  presentEnvironment: (snapshot: EnvironmentMetadata) => Promise<void>
+  presentEnvironment: (snapshot: EnvironmentMetadata, reveal: () => Promise<EnvironmentValues>) => Promise<void>
   invokeAgent: (prompt: string) => Promise<"completed" | "cancelled" | "failed">
 }
 
@@ -38,7 +41,7 @@ export const environmentCommands = [
     capabilities: ["environment.metadata.read"],
     parse: empty,
     execute: async (ctx) => {
-      await ctx.presentEnvironment(await ctx.environment.list())
+      await ctx.presentEnvironment(await ctx.environment.list(), ctx.environment.reveal)
       return { status: "completed" }
     },
   }),
@@ -54,7 +57,7 @@ export const environmentCommands = [
     parse: empty,
     execute: async (ctx) => {
       const snapshot = await ctx.environment.reload()
-      await ctx.presentEnvironment(snapshot)
+      await ctx.presentEnvironment(snapshot, ctx.environment.reveal)
       return { status: "completed", message: `Environment generation ${snapshot.generation} loaded` }
     },
   }),
@@ -85,3 +88,18 @@ export const environmentCommands = [
     },
   }),
 ] as const
+
+export async function revealEnvironment(input: {
+  confirm: () => Promise<boolean>
+  reveal: () => Promise<EnvironmentValues>
+  present: (values: EnvironmentValues) => Promise<void>
+}) {
+  if (!(await input.confirm())) return false
+  const revealed = await input.reveal()
+  try {
+    await input.present(revealed)
+  } finally {
+    Object.keys(revealed.values).forEach((name) => delete revealed.values[name])
+  }
+  return true
+}

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { CommandRegistry } from "@opencode-ai/command-kit"
-import { environmentCommands, type EnvironmentCommandContext } from "../../src/command-toolkit/environment"
+import {
+  environmentCommands,
+  revealEnvironment,
+  type EnvironmentCommandContext,
+} from "../../src/command-toolkit/environment"
 
 const raw = { source: "/env init", value: "", range: { start: 9, end: 9 } }
 
@@ -15,6 +19,7 @@ function context(overrides: Partial<EnvironmentCommandContext> = {}): Environmen
     environment: {
       list: async () => ({ enabled: true, generation: 1, variables: [] }),
       reload: async () => ({ enabled: true, generation: 2, variables: [] }),
+      reveal: async () => ({ generation: 1, values: {} }),
       ensureTemplate: async () => "created",
     },
     presentEnvironment: async () => {},
@@ -43,6 +48,7 @@ describe("environment command toolkit", () => {
             reloads++
             return { enabled: true, generation: 2, variables: [] }
           },
+          reveal: async () => ({ generation: 1, values: {} }),
           ensureTemplate: async () => "existing",
         },
         invokeAgent: async () => "cancelled",
@@ -58,6 +64,7 @@ describe("environment command toolkit", () => {
             reloads++
             return { enabled: true, generation: 2, variables: [] }
           },
+          reveal: async () => ({ generation: 1, values: {} }),
           ensureTemplate: async () => "created",
         },
       }),
@@ -65,5 +72,56 @@ describe("environment command toolkit", () => {
     )
     expect(result.status).toBe("completed")
     expect(reloads).toBe(1)
+  })
+
+  test("init waits for the exact admitted Agent turn before reloading", async () => {
+    let finish!: (value: "completed") => void
+    const turn = new Promise<"completed">((resolve) => (finish = resolve))
+    let reloads = 0
+    const execution = environmentCommands[2].execute(
+      context({
+        invokeAgent: () => turn,
+        environment: {
+          list: async () => ({ enabled: true, generation: 1, variables: [] }),
+          reload: async () => {
+            reloads++
+            return { enabled: true, generation: 2, variables: [] }
+          },
+          reveal: async () => ({ generation: 1, values: {} }),
+          ensureTemplate: async () => "existing",
+        },
+      }),
+      undefined,
+    )
+    await Promise.resolve()
+    expect(reloads).toBe(0)
+    finish("completed")
+    await execution
+    expect(reloads).toBe(1)
+  })
+
+  test("reveal requires confirmation and clears values after presentation", async () => {
+    let requests = 0
+    const denied = await revealEnvironment({
+      confirm: async () => false,
+      reveal: async () => {
+        requests++
+        return { generation: 1, values: { SECRET: "hidden" } }
+      },
+      present: async () => {},
+    })
+    expect(denied).toBeFalse()
+    expect(requests).toBe(0)
+
+    const snapshot: { generation: number; values: Record<string, string> } = {
+      generation: 1,
+      values: { SECRET: "hidden" },
+    }
+    await revealEnvironment({
+      confirm: async () => true,
+      reveal: async () => snapshot,
+      present: async (current) => expect(current.values.SECRET).toBe("hidden"),
+    })
+    expect(snapshot.values).toEqual({})
   })
 })

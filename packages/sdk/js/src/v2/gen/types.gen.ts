@@ -157,6 +157,8 @@ export type SnapshotFileDiff = {
   status?: "added" | "deleted" | "modified"
 }
 
+export type ApprovalMode = "normal" | "auto"
+
 export type PermissionAction = "allow" | "deny" | "ask"
 
 export type PermissionRule = {
@@ -197,6 +199,7 @@ export type Session = {
     url: string
   }
   title: string
+  approvalMode?: ApprovalMode
   agent?: string
   model?: {
     id: string
@@ -2235,6 +2238,7 @@ export type GlobalSession = {
     url: string
   }
   title: string
+  approvalMode?: ApprovalMode
   agent?: string
   model?: {
     id: string
@@ -3989,6 +3993,7 @@ export type SessionV2Info = {
     archived?: number
   }
   title: string
+  approvalMode?: ApprovalMode
   location: LocationRef
   locationRevision?: number
   portableTargetLabel?: string
@@ -10211,6 +10216,7 @@ export type SessionCreateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
+    approvalMode?: ApprovalMode
     workspaceID?: string
   }
   path?: never
@@ -10344,6 +10350,7 @@ export type SessionUpdateData = {
       [key: string]: unknown
     }
     permission?: PermissionRuleset
+    approvalMode?: ApprovalMode
     time?: {
       archived?: number
     }
@@ -12155,6 +12162,7 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
+    approvalMode?: ApprovalMode
   }
   path?: never
   query?: never

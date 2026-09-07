@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "bf1caa3f-e19a-466c-a723-274a78ea6bc9",
+  "id": "f98b9d51-a04f-4266-a796-8cc188ee5e81",
   "prevIds": [
-    "223d1f5d-a5fe-4328-aeb9-aa5ef950cac2"
+    "bf1caa3f-e19a-466c-a723-274a78ea6bc9"
   ],
   "ddl": [
     {
@@ -1179,6 +1179,16 @@
       "default": null,
       "generated": null,
       "name": "title",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'normal'",
+      "generated": null,
+      "name": "approval_mode",
       "entityType": "columns",
       "table": "session"
     },

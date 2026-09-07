@@ -28,13 +28,18 @@ describe("TUI command toolkit host", () => {
             },
           }),
         ),
-      context: () => context,
+      context: (source) => ({ ...context, source }),
       upstream: () => undefined,
       invalid: () => undefined,
       outcome: (message) => calls.push(message),
     })
     expect(await host("/test value")).toBe(true)
     expect(calls).toEqual(["value", "done"])
+    expect(host.commands()).toEqual([
+      expect.objectContaining({ name: "fork.test.run", slashName: "test", title: "test" }),
+    ])
+    await host.commands()[0]!.run()
+    expect(calls).toEqual(["value", "done", "", "done"])
   })
 
   test("preserves upstream-first compatibility", async () => {
@@ -55,7 +60,7 @@ describe("TUI command toolkit host", () => {
             },
           }),
         ),
-      context: () => context,
+      context: (source) => ({ ...context, source }),
       upstream: () => ({
         id: "upstream.test",
         path: ["test"],
@@ -85,7 +90,7 @@ describe("TUI command toolkit host", () => {
             },
           }),
         ),
-      context: () => context,
+      context: (source) => ({ ...context, source }),
       upstream: () => undefined,
       invalid: () => undefined,
       outcome: (message, status) => outcomes.push(`${status}:${message}`),

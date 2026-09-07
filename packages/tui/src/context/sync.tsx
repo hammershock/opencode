@@ -195,7 +195,8 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto") {
+          const approvalMode = store.session.find((item) => item.id === request.sessionID)?.approvalMode ?? "normal"
+          if (permission.effective(approvalMode) === "auto") {
             void sdk.client.permission.reply({
               requestID: request.id,
               reply: "once",

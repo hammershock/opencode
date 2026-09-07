@@ -55,6 +55,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     sync_space_id: info.syncSpaceID ?? null,
     path: info.path,
     title: info.title,
+    approval_mode: info.approvalMode ?? "normal",
     agent: info.agent,
     model: info.model,
     version: info.version,

@@ -275,6 +275,7 @@ export type SessionsListOutput = {
     }
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
+    readonly approvalMode?: "normal" | "auto"
     readonly location: {
       readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
       readonly directory: string
@@ -312,6 +313,7 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["id"]
   readonly agent?: {
     readonly id?: string | null
@@ -323,6 +325,7 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
@@ -334,6 +337,7 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
@@ -345,7 +349,20 @@ export type SessionsCreateInput = {
       readonly workspaceID?: string
       readonly lastKnownTargetName?: string
     } | null
+    readonly approvalMode?: ("normal" | "auto") | null
   }["location"]
+  readonly approvalMode?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: {
+      readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+      readonly directory: string
+      readonly workspaceID?: string
+      readonly lastKnownTargetName?: string
+    } | null
+    readonly approvalMode?: ("normal" | "auto") | null
+  }["approvalMode"]
 }
 
 export type SessionsCreateOutput = {
@@ -364,6 +381,7 @@ export type SessionsCreateOutput = {
     }
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
+    readonly approvalMode?: "normal" | "auto"
     readonly location: {
       readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
       readonly directory: string
@@ -409,6 +427,7 @@ export type SessionsGetOutput = {
     }
     readonly time: { readonly created: number; readonly updated: number; readonly archived?: number }
     readonly title: string
+    readonly approvalMode?: "normal" | "auto"
     readonly location: {
       readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
       readonly directory: string

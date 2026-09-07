@@ -73,8 +73,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               id: ctx.payload.id,
               agent: ctx.payload.agent,
               model: ctx.payload.model,
-              location:
-                ctx.payload.location ?? Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) }),
+              approvalMode: ctx.payload.approvalMode,
+              location: ctx.payload.location ?? Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) }),
             }),
           }
         }),

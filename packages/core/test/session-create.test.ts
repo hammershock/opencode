@@ -97,11 +97,13 @@ describe("SessionV2.create", () => {
           }),
           agent: AgentV2.ID.make("build"),
           model,
+          approvalMode: "auto",
         }),
       ).toMatchObject({
         location: { target, directory: location.directory, workspaceID, lastKnownTargetName: "gpu" },
         agent: "build",
         model,
+        approvalMode: "auto",
       })
     }),
   )

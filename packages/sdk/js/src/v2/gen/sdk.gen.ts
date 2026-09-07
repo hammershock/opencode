@@ -8,6 +8,7 @@ import type {
   AppAgentsResponses,
   AppLogErrors,
   AppLogResponses,
+  ApprovalMode,
   AppSkillsErrors,
   AppSkillsResponses,
   Auth as Auth3,
@@ -3794,6 +3795,7 @@ export class Session2 extends HeyApiClient {
         [key: string]: unknown
       }
       permission?: PermissionRuleset
+      approvalMode?: ApprovalMode
       workspaceID?: string
     },
     options?: Options<never, ThrowOnError>,
@@ -3811,6 +3813,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "model" },
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
+            { in: "body", key: "approvalMode" },
             { in: "body", key: "workspaceID" },
           ],
         },
@@ -3937,6 +3940,7 @@ export class Session2 extends HeyApiClient {
         [key: string]: unknown
       }
       permission?: PermissionRuleset
+      approvalMode?: ApprovalMode
       time?: {
         archived?: number
       }
@@ -3954,6 +3958,7 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "title" },
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
+            { in: "body", key: "approvalMode" },
             { in: "body", key: "time" },
           ],
         },
@@ -5895,6 +5900,7 @@ export class Session3 extends HeyApiClient {
       agent?: string
       model?: ModelRef
       location?: LocationRef
+      approvalMode?: ApprovalMode
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -5907,6 +5913,7 @@ export class Session3 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "location" },
+            { in: "body", key: "approvalMode" },
           ],
         },
       ],

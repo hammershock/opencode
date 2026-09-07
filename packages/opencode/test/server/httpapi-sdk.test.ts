@@ -360,12 +360,15 @@ describe("HttpApi SDK", () => {
       Effect.gen(function* () {
         const file = yield* call(() => sdk.file.read({ path: "hello.txt" }))
         const session = yield* call(() => sdk.session.create({ title: "sdk" }))
+        expect(session.response.status).toBe(200)
+        const updated = yield* call(() => sdk.session.update({ sessionID: session.data!.id, approvalMode: "auto" }))
         const listed = yield* call(() => sdk.session.list({ roots: true, limit: 10 }))
 
         expect(file.response.status).toBe(200)
         expect(file.data).toMatchObject({ content: "hello" })
         expect(session.response.status).toBe(200)
-        expect(session.data).toMatchObject({ title: "sdk" })
+        expect(session.data).toMatchObject({ title: "sdk", approvalMode: "normal" })
+        expect(updated.data).toMatchObject({ approvalMode: "auto" })
         expect(listed.response.status).toBe(200)
         expect(listed.data?.map((item) => item.id)).toContain(session.data?.id)
 

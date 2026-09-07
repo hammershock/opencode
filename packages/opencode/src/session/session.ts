@@ -45,6 +45,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { ApprovalMode } from "@opencode-ai/schema/approval-mode"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -85,6 +86,7 @@ export function fromRow(row: SessionRow): Info {
     path: row.path ?? undefined,
     parentID: row.parent_id ?? undefined,
     title: row.title,
+    approvalMode: row.approval_mode,
     agent: row.agent ?? undefined,
     model: row.model
       ? {
@@ -237,6 +239,7 @@ export const Info = Schema.Struct({
   tokens: optional(Tokens),
   share: optional(Share),
   title: Schema.String,
+  approvalMode: optional(ApprovalMode.Mode),
   agent: optional(Schema.String),
   model: optional(Model),
   version: Schema.String,
@@ -268,6 +271,7 @@ export const CreateInput = Schema.optional(
     model: Schema.optional(Model),
     metadata: Schema.optional(Metadata),
     permission: Schema.optional(PermissionV1.Ruleset),
+    approvalMode: Schema.optional(ApprovalMode.Mode),
     workspaceID: Schema.optional(WorkspaceV2.ID),
   }),
 )
@@ -427,6 +431,7 @@ export interface Interface {
     model?: Schema.Schema.Type<typeof Model>
     metadata?: typeof Metadata.Type
     permission?: PermissionV1.Ruleset
+    approvalMode?: ApprovalMode.Mode
     workspaceID?: WorkspaceV2.ID
     target?: Location.Target
     lastKnownTargetName?: string
@@ -444,6 +449,7 @@ export interface Interface {
     time: number
   }) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: PermissionV1.Ruleset }) => Effect.Effect<void>
+  readonly setApprovalMode: (input: { sessionID: SessionID; approvalMode: ApprovalMode.Mode }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
@@ -518,6 +524,7 @@ const layer: Layer.Layer<
       path?: string
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
+      approvalMode?: ApprovalMode.Mode
     }) {
       const ctx = yield* InstanceState.context
       const result: Info = {
@@ -536,6 +543,7 @@ const layer: Layer.Layer<
         model: input.model,
         metadata: input.metadata,
         permission: input.permission ? [...input.permission] : undefined,
+        approvalMode: input.approvalMode ?? "normal",
         cost: 0,
         tokens: EmptyTokens,
         time: {
@@ -684,6 +692,7 @@ const layer: Layer.Layer<
       model?: Schema.Schema.Type<typeof Model>
       metadata?: typeof Metadata.Type
       permission?: PermissionV1.Ruleset
+      approvalMode?: ApprovalMode.Mode
       workspaceID?: WorkspaceV2.ID
       target?: Location.Target
       lastKnownTargetName?: string
@@ -702,6 +711,7 @@ const layer: Layer.Layer<
         model: input?.model,
         metadata: input?.metadata,
         permission: input?.permission,
+        approvalMode: input?.approvalMode,
         workspaceID: input?.workspaceID ?? workspace,
       })
     })
@@ -798,6 +808,15 @@ const layer: Layer.Layer<
       permission: PermissionV1.Ruleset
     }) {
       yield* patch(input.sessionID, { permission: [...input.permission], time: { updated: Date.now() } }).pipe(
+        Effect.orDie,
+      )
+    })
+
+    const setApprovalMode = Effect.fn("Session.setApprovalMode")(function* (input: {
+      sessionID: SessionID
+      approvalMode: ApprovalMode.Mode
+    }) {
+      yield* patch(input.sessionID, { approvalMode: input.approvalMode, time: { updated: Date.now() } }).pipe(
         Effect.orDie,
       )
     })
@@ -933,6 +952,7 @@ const layer: Layer.Layer<
       setMetadata,
       setAgentModel,
       setPermission,
+      setApprovalMode,
       setRevert,
       clearRevert,
       setSummary,

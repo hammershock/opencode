@@ -9,6 +9,7 @@ import { DateTimeUtcFromMillis, NonNegativeInt, optional, RelativePath } from ".
 import { SessionEvent } from "./session-event"
 import { SessionID } from "./session-id"
 import { Revert } from "./revert"
+import { ApprovalMode } from "./approval-mode"
 
 export const ID = SessionID
 export type ID = SessionID
@@ -38,6 +39,10 @@ export const Info = Schema.Struct({
     archived: DateTimeUtcFromMillis.pipe(optional),
   }),
   title: Schema.String,
+  approvalMode: ApprovalMode.Mode.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("normal" as const)),
+    Schema.withConstructorDefault(Effect.succeed("normal" as const)),
+  ),
   location: Location.Ref,
   locationRevision: NonNegativeInt.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(0)),

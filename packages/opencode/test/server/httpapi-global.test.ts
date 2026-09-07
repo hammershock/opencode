@@ -1,6 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import { describe, expect } from "bun:test"
-import { Context, Effect, Layer, Option } from "effect"
+import { Context, Effect, Fiber, Layer, Option, Scope } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Auth } from "../../src/auth"
@@ -19,7 +19,7 @@ import { controlPlaneHandlers } from "../../src/server/routes/instance/httpapi/h
 import { globalHandlers } from "../../src/server/routes/instance/httpapi/handlers/global"
 import { authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
 import { schemaErrorLayer } from "../../src/server/routes/instance/httpapi/middleware/schema-error"
-import { testEffect } from "../lib/effect"
+import { pollWithTimeout, testEffect } from "../lib/effect"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
@@ -175,8 +175,42 @@ const failedSyncIt = testEffect(
     ),
   ),
 )
+let syncStarted = false
+let resumeSync = () => {}
+const hangingSyncIt = testEffect(
+  makeApiLayer(undefined, () =>
+    Effect.promise(
+      () =>
+        new Promise<void>((resolve) => {
+          syncStarted = true
+          resumeSync = resolve
+        }),
+    ),
+  ),
+)
 
 describe("global HttpApi", () => {
+  hangingSyncIt.live("serves local status while Sync Now is waiting and recovers afterward", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.Scope
+      const sync = yield* HttpClientRequest.post(GlobalPaths.syncNow).pipe(HttpClient.execute, Effect.forkIn(scope))
+      yield* pollWithTimeout(
+        Effect.sync(() => (syncStarted ? true : undefined)),
+        "Sync Now request did not start",
+      )
+
+      const status = yield* HttpClientRequest.get(GlobalPaths.syncStatus).pipe(
+        HttpClient.execute,
+        Effect.timeout("250 millis"),
+      )
+      expect(status.status).toBe(200)
+
+      resumeSync()
+      expect((yield* Fiber.join(sync)).status).toBe(200)
+      expect((yield* HttpClientRequest.get(GlobalPaths.syncStatus).pipe(HttpClient.execute)).status).toBe(200)
+    }),
+  )
+
   failedSyncIt.live("returns a redacted structured Sync Now diagnostic", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.post(GlobalPaths.syncNow).pipe(HttpClient.execute)

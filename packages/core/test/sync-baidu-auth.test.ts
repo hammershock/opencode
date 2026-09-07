@@ -37,6 +37,37 @@ function request(accountID: string, displayName: string): BaiduSyncProvider.Requ
 }
 
 describe("BaiduAuth", () => {
+  test("bounds the account identity request after OAuth exchange", async () => {
+    const store = memoryStore()
+    provision(store)
+    const ids = ["attempt", "state"]
+    const begun = await BaiduAuth.begin({
+      store,
+      deviceID: "device",
+      redirectURI: "oob",
+      completion: "manual",
+      randomUUID: () => ids.shift()!,
+    })
+    await expect(
+      BaiduAuth.complete({
+        store,
+        deviceID: "device",
+        attemptID: begun.attemptID,
+        response: { type: "manual", code: "code" },
+        requestTimeoutMs: 10,
+        request: async (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : input)
+          if (url.pathname.endsWith("/token"))
+            return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 })
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+          })
+        },
+      }),
+    ).rejects.toMatchObject({ kind: "provider" })
+    expect(await BaiduAuth.pending(store, "device")).toBeDefined()
+  })
+
   test("requires product app credentials provisioned in secure storage", async () => {
     const store = memoryStore()
     await expect(

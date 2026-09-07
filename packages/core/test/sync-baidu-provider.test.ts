@@ -27,7 +27,104 @@ function listed(path: string, fsID: number, size: number, modified = 10) {
   return { path, fs_id: fsID, size, server_mtime: modified, isdir: 0 }
 }
 
+const hungRequest: BaiduSyncProvider.Request = async (_input, init) =>
+  new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+  })
+
 describe("BaiduSyncProvider", () => {
+  test("times out a hung request, releases it, and lets a later request recover", async () => {
+    let hung = true
+    let aborted = 0
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      requestTimeoutMs: 10,
+      sleep: async () => undefined,
+      request: async (_input, init) => {
+        if (!hung) return Response.json({ errno: 0, list: [], has_more: 0 })
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              aborted++
+              reject(init.signal?.reason)
+            },
+            { once: true },
+          )
+        })
+      },
+    })
+
+    const failure = await provider.stat("hung").catch((cause) => cause)
+    expect(failure).toMatchObject({
+      providerID: "baidu",
+      operation: "stat",
+      kind: "network",
+      retryable: true,
+    })
+    expect(String(failure)).not.toContain("/apps/")
+    expect(aborted).toBeGreaterThan(0)
+
+    hung = false
+    expect(await provider.stat("recovered")).toBeUndefined()
+  })
+
+  test("composes caller cancellation with the request deadline", async () => {
+    const controller = new AbortController()
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      requestTimeoutMs: 1_000,
+      request: async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+          controller.abort()
+        }),
+    })
+
+    await expect(provider.stat("cancelled", controller.signal)).rejects.toMatchObject({
+      kind: "cancelled",
+      retryable: false,
+    })
+  })
+
+  test("classifies hung initial credential refresh and exported OAuth requests", async () => {
+    const expired = { ...credential, expiresAt: 0 }
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(expired),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      now: () => 1_000,
+      requestTimeoutMs: 10,
+      request: hungRequest,
+    })
+    await expect(provider.stat("refresh-required")).rejects.toMatchObject({
+      operation: "stat",
+      kind: "network",
+      retryable: true,
+    })
+    await expect(
+      BaiduSyncProvider.refreshCredential({
+        credential: expired,
+        request: hungRequest,
+        requestTimeoutMs: 10,
+      }),
+    ).rejects.toMatchObject({ operation: "stat", kind: "network", retryable: true })
+    await expect(
+      BaiduSyncProvider.exchangeCode({
+        appKey: "app",
+        secretKey: "secret",
+        code: "code",
+        redirectURI: "oob",
+        request: hungRequest,
+        requestTimeoutMs: 10,
+      }),
+    ).rejects.toMatchObject({ operation: "stat", kind: "network", retryable: true })
+  })
+
   test("refreshes OAuth through SecureStore and never exposes credentials", async () => {
     const store = memoryStore({ ...credential, expiresAt: 0 })
     const urls: string[] = []

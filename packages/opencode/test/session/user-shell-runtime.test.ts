@@ -11,7 +11,7 @@ function provider(input?: { finalCwd?: string; valid?: boolean }): Provider {
   return {
     execute: () => Effect.succeed({ exitCode: 0, finalCwd: input?.finalCwd }),
     validateDirectory: (directory) => Effect.succeed(input?.valid === false ? undefined : directory),
-    complete: () => Effect.succeed([]),
+    complete: () => Effect.succeed({ candidates: [] }),
   }
 }
 
@@ -99,7 +99,9 @@ describe("UserShellRuntime", () => {
           ...provider(),
           complete: () =>
             Deferred.await(gate).pipe(
-              Effect.as([{ value: "old", display: "old", replacement: { start: 0, end: 1 }, kind: "file" }]),
+              Effect.as({
+                candidates: [{ value: "old", display: "old", replacement: { start: 0, end: 1 }, kind: "file" }],
+              }),
             ),
         }
         const completion = yield* service

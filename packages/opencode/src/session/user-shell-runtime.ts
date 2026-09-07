@@ -31,10 +31,20 @@ export type CompletionCandidate = {
   readonly description?: string
 }
 
+export type CompletionDegradedReason = "native_unavailable" | "native_timeout" | "native_failed"
+
+export type CompletionProviderResult = {
+  readonly candidates: ReadonlyArray<CompletionCandidate>
+  readonly degraded?: {
+    readonly reason: CompletionDegradedReason
+  }
+}
+
 export type CompletionResult = {
   readonly generation: number
   readonly stale: boolean
   readonly candidates: ReadonlyArray<CompletionCandidate>
+  readonly degraded?: CompletionProviderResult["degraded"]
 }
 
 export interface Provider {
@@ -52,7 +62,7 @@ export interface Provider {
     readonly cursor: number
     readonly environment: Environment
     readonly signal?: AbortSignal
-  }) => Effect.Effect<ReadonlyArray<CompletionCandidate>, unknown>
+  }) => Effect.Effect<CompletionProviderResult, unknown>
 }
 
 export interface Interface {
@@ -181,7 +191,7 @@ export const layer = Layer.effect(
           "user_shell",
           Effect.gen(function* () {
             const before = state(input)
-            const candidates = yield* input.provider.complete({
+            const result = yield* input.provider.complete({
               cwd: before.cwd,
               input: input.input,
               cursor: input.cursor,
@@ -194,7 +204,8 @@ export const layer = Layer.effect(
             return {
               generation: before.generation,
               stale,
-              candidates: stale ? [] : candidates,
+              candidates: stale ? [] : result.candidates,
+              ...(!stale && result.degraded ? { degraded: result.degraded } : {}),
             }
           }),
         ),

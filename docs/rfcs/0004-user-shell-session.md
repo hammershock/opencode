@@ -26,7 +26,7 @@ superseded-by: []
 1. `cd`、zoxide 等改变当前命令 Shell cwd 的操作，可以影响当前 OpenCode 运行期间该 Session 的下一条 User Shell 命令。
 2. 每条 User Shell 命令仍是独立进程，保持 upstream 的有界执行、取消和清理模型。
 3. cwd 连续性在 local 与 Rexd Location 上具有相同语义。
-4. Shell completion 使用当前 User Shell runtime cwd，并提供 Shell 原生配置能够产生的完整候选。
+4. Shell completion 使用当前 User Shell runtime cwd，并在不执行 startup files 的边界内提供原生候选。
 5. Agent execution、Terminal panel 与 Session Location 不受 User Shell runtime cwd 影响。
 
 ## 非目标
@@ -102,11 +102,12 @@ Location process contract 应返回独立的 `finalCwd` control result；该值�
 
 ## Completion
 
-完整补全是 User Shell 的默认能力，不放入 experimental panel，也不依赖 CWD Continuity 是否开启。补全只针对每次请求重新构造的 Shell 环境。补全 helper 为发现 alias、function 和原生 completion 可以在隔离进程中加载目标用户的 completion/startup 配置；该进程仅生成候选，其环境修改不得进入 EnvironmentSnapshot 或后续命令。至少覆盖：
+完整补全是 User Shell 的默认能力，不放入 experimental panel，也不依赖 CWD Continuity 是否开启。补全只针对每次请求重新构造的裸 Shell 环境；helper 不执行用户或系统 startup files，避免不可控副作用和额外启动开销。它可以显式加载目标机器安装的 completion framework，并在短生命周期隔离进程中调用已注册的原生 completion；该进程的环境修改不得进入 EnvironmentSnapshot 或后续命令。至少覆盖：
 
 - 当前 User Shell runtime cwd 下的文件和目录；
 - 当前基础环境 `PATH` 中的可执行命令；
-- Shell startup 配置提供的 aliases、functions 和原生 completion；
+- Bash 常见 `complete -F`、`-W`、`-C`、`-A` 与等价 action flags，以及 zsh compdef completion；
+- `PATH` 命令与当前 Location 的文件、目录候选；startup files 中声明的 aliases、functions 或自定义 registration 不在 v1 承诺范围内；
 - 带空格、引号、转义及光标位于行中间时的正确替换；
 - 结构化候选、展示文本、replacement range 和候选类型。
 
@@ -119,7 +120,7 @@ Location process contract 应返回独立的 `finalCwd` control result；该值�
 - native completion 不可用、超时或失败时退化为同一 Location 上的文件、目录和 `PATH` 命令补全，并以简短非阻塞状态说明降级；
 - target wizard 与 Location path prompt 应复用同一 candidate-panel 交互和 replacement contract，但它们只能请求对应 Location 的路径候选，不能借用控制设备文件系统。
 
-前一条一次性命令动态创建的 alias、function 或 completion 不在承诺范围内。completion helper 可以为每次请求启动短生命周期 Shell，但不能成为隐藏的持久 User Shell；不能向用户命令 PTY 发送 Tab 后解析 ANSI 屏幕文本。
+前一条一次性命令动态创建的 alias、function 或 completion 不在承诺范围内。completion helper 可以为每次请求启动短生命周期裸 Shell，但不能成为隐藏的持久 User Shell；不能执行 startup files，也不能向用户命令 PTY 发送 Tab 后解析 ANSI 屏幕文本。
 
 所有 completion 请求使用当前 runtime cwd。候选生成期间 cwd state 发生变化时，旧 generation 的结果必须丢弃。
 

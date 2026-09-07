@@ -9,6 +9,8 @@ import type { SessionLocationRebindingResolution } from "@opencode-ai/sdk/v2"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { useTuiPaths } from "../context/runtime"
 import { promptLocationDirectory, targetWizardServices } from "./location-directory-workflow"
+import { useKV } from "../context/kv"
+import { SESSION_FORCE_REBIND_SETTING } from "../command-toolkit/experimental-settings"
 
 export type TargetResolution = SessionLocationRebindingResolution
 export type UnresolvedTargetResolution = Exclude<TargetResolution, { status: "resolved" }>
@@ -145,6 +147,7 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
   const route = useRoute()
   const toast = useToast()
   const paths = useTuiPaths()
+  const kv = useKV()
   const resolution = props.resolution
   const services = targetWizardServices(sdk)
 
@@ -277,11 +280,15 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
             description: `Restore its identity for ${resolution.referencedSessionIDs.length} Sessions`,
             value: "restore" as const,
           },
-          {
-            title: "Rebind this Session…",
-            description: "Experimental · changes only this Session",
-            value: "rebind" as const,
-          },
+          ...(kv.get(SESSION_FORCE_REBIND_SETTING, false)
+            ? [
+                {
+                  title: "Rebind this Session…",
+                  description: "Experimental · not recommended · changes only this Session",
+                  value: "rebind" as const,
+                },
+              ]
+            : []),
         ]
       : []),
     ...(resolution.status === "unbound_portable_target"
@@ -291,11 +298,15 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
             description: `${resolution.referencedSessionIDs.length} Sessions will be validated before binding`,
             value: "bind" as const,
           },
-          {
-            title: "Rebind this Session…",
-            description: "Experimental · changes only this Session",
-            value: "rebind" as const,
-          },
+          ...(kv.get(SESSION_FORCE_REBIND_SETTING, false)
+            ? [
+                {
+                  title: "Rebind this Session…",
+                  description: "Experimental · not recommended · changes only this Session",
+                  value: "rebind" as const,
+                },
+              ]
+            : []),
         ]
       : []),
     ...(resolution.status === "target_unavailable"

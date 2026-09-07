@@ -7,10 +7,12 @@ export type SessionListLocationRecord = {
   }
   target?: string | { type?: string; name?: string; targetName?: string; targetID?: string }
   targetName?: string
+  targetLabel?: string
   lastKnownTargetName?: string
   locationStatus?: string
   device?: string
   deviceName?: string
+  sourceDeviceID?: string
   sync?: { device?: string; deviceName?: string }
   metadata?: Record<string, unknown>
 }
@@ -31,6 +33,7 @@ export function sessionListLocation(session: SessionListLocationRecord): Session
   const target =
     nonempty(session.lastKnownTargetName) ??
     nonempty(session.targetName) ??
+    nonempty(session.targetLabel) ??
     (typeof targetValue === "object"
       ? (nonempty(targetValue.name) ?? nonempty(targetValue.targetName) ?? nonempty(targetValue.targetID))
       : nonempty(targetValue))
@@ -39,6 +42,7 @@ export function sessionListLocation(session: SessionListLocationRecord): Session
   const device =
     nonempty(session.deviceName) ??
     nonempty(session.device) ??
+    nonempty(session.sourceDeviceID) ??
     nonempty(session.sync?.deviceName) ??
     nonempty(session.sync?.device) ??
     nonempty(session.metadata?.deviceName) ??

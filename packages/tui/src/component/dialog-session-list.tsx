@@ -36,6 +36,7 @@ type SyncedSession = {
   readonly sessionID: string
   readonly title: string
   readonly targetLabel?: string
+  readonly sourceDeviceID: string
   readonly deleted?: boolean
   readonly directory: string
   readonly updatedAt: number
@@ -50,6 +51,8 @@ type DialogSessionEntry = {
   readonly parentID?: string
   readonly workspaceID?: string
   readonly syncSpaceID?: string
+  readonly targetLabel?: string
+  readonly sourceDeviceID?: string
   readonly time: { readonly updated: number }
   readonly syncMetadata?: SyncedSession
 }
@@ -77,12 +80,17 @@ export function sessionInDialogSyncScope(
   scope: DialogSessionListFilters["scope"],
   activeSpaceID?: string,
 ) {
-  if (scope === "all") return true
+  // Without an active space there is no meaningful "current" scope.  Keep
+  // the default view useful by degrading it to the locally-held All view.
+  if (scope === "all" || activeSpaceID === undefined) return true
   return activeSpaceID !== undefined && session.syncSpaceID === activeSpaceID
 }
 
 export function includeCloudSessionInDialogScope(scope: DialogSessionListFilters["scope"], activeSpaceID?: string) {
-  return scope === "current" && activeSpaceID !== undefined
+  // The API exposes cloud-only metadata for the active space only.  Both
+  // views may include that already-fetched metadata; All must never fetch a
+  // non-active space to fill the list.
+  return activeSpaceID !== undefined
 }
 
 export function syncAvailabilityLabel(availability: SyncAvailability) {
@@ -101,6 +109,8 @@ function fromSyncedSession(session: SyncedSession): DialogSessionEntry {
     id: session.sessionID,
     title: session.title,
     directory: session.directory,
+    targetLabel: session.targetLabel,
+    sourceDeviceID: session.sourceDeviceID,
     time: { updated: session.updatedAt },
     syncMetadata: session,
   }
@@ -213,10 +223,11 @@ export function DialogSessionList() {
     const remoteOnly = (includeCloudSessionInDialogScope(filters().scope, activeSpaceID) ? [...remote.values()] : [])
       .filter((session) => !ids.has(session.sessionID))
       .filter((session) => !session.deleted)
-      .filter((session) => !query || session.title.toLowerCase().includes(query))
       .map(fromSyncedSession)
     const localEntry = (session: (typeof sync.data.session)[number]): DialogSessionEntry => ({
       ...session,
+      targetLabel: remote.get(session.id)?.targetLabel,
+      sourceDeviceID: remote.get(session.id)?.sourceDeviceID,
       syncMetadata: remote.get(session.id),
     })
     return [
@@ -419,7 +430,7 @@ export function DialogSessionList() {
           <SessionFilterRow
             title="Scope"
             values={["Current Sync Space", "All"]}
-            selected={filters().scope === "current" ? 0 : 1}
+            selected={filters().scope === "current" && syncScope()?.activeSpaceID !== undefined ? 0 : 1}
             focused={filters().focus === "scope"}
           />
         </box>

@@ -2,6 +2,8 @@ export * as SyncSecureStore from "./secure-store"
 
 import path from "node:path"
 import fs from "node:fs/promises"
+import { dlopen, ptr, toArrayBuffer } from "bun:ffi"
+import type { Pointer } from "bun:ffi"
 
 export const SERVICE = "opencode-rexd-sync"
 export const BAIDU_APP_ACCOUNT = "baidu:app"
@@ -29,6 +31,12 @@ export type Runner = (
   stdin?: string,
   env?: Record<string, string>,
 ) => Promise<CommandResult>
+
+export interface MacosBackend {
+  readonly get: (service: string, account: string) => string | undefined | Promise<string | undefined>
+  readonly set: (service: string, account: string, secret: string) => void | Promise<void>
+  readonly remove: (service: string, account: string) => void | Promise<void>
+}
 
 export class SecureStoreUnavailableError extends Error {
   override readonly name = "SyncSecureStore.UnavailableError"
@@ -128,40 +136,166 @@ async function detectService(
 ): Promise<Store> {
   const platform = options.platform ?? process.platform
   const runner = options.runner ?? run
-  if (platform === "darwin") return macos(runner, service)
+  if (platform === "darwin") return macos(service)
   const procVersion = options.procVersion ?? (await fs.readFile("/proc/version", "utf8").catch(() => ""))
   if (platform === "linux" && /microsoft|wsl/i.test(procVersion))
     return windowsVault(runner, options.findInterop ?? findWslInterop, service)
   throw new SecureStoreUnavailableError("Sync secure storage requires macOS Keychain or WSL PasswordVault")
 }
 
-export function macos(runner: Runner, service = SERVICE): Store {
-  const security = "/usr/bin/security"
+export function macos(service = SERVICE, backend: MacosBackend = macosKeychain): Store {
   return {
     platform: "macos-keychain",
     async get(account) {
       validateAccount(account)
-      const result = await runner([security, "find-generic-password", "-a", account, "-s", service, "-w"])
-      if (result.exitCode === 44) return undefined
-      ensure(result)
-      return trimOneNewline(result.stdout)
+      return backend.get(service, account)
     },
     async set(account, secret) {
       validateAccount(account)
-      // With -w as the final option and no value, security(1) reads the value
-      // from its prompt. Feeding that prompt over stdin keeps it out of argv.
-      // Keychain asks for the value and a confirmation, even for an update.
-      ensure(
-        await runner(
-          [security, "add-generic-password", "-U", "-a", account, "-s", service, "-w"],
-          `${secret}\n${secret}\n`,
-        ),
-      )
+      await backend.set(service, account, secret)
     },
     async remove(account) {
       validateAccount(account)
-      const result = await runner([security, "delete-generic-password", "-a", account, "-s", service])
-      if (result.exitCode !== 0 && result.exitCode !== 44) ensure(result)
+      await backend.remove(service, account)
+    },
+  }
+}
+
+const macosKeychain: MacosBackend = {
+  get(service, account) {
+    const native = openMacosKeychain()
+    const serviceBytes = Buffer.from(service, "utf8")
+    const accountBytes = Buffer.from(account, "utf8")
+    const passwordLength = new Uint32Array(1)
+    const passwordData = new BigUint64Array(1)
+    try {
+      const status = native.security.symbols.SecKeychainFindGenericPassword(
+        null,
+        serviceBytes.byteLength,
+        ptr(serviceBytes),
+        accountBytes.byteLength,
+        ptr(accountBytes),
+        ptr(passwordLength),
+        ptr(passwordData),
+        null,
+      )
+      if (status === -25300) return undefined
+      ensureKeychain(status)
+      const reference = Number(passwordData[0]) as Pointer
+      try {
+        if (passwordLength[0] === 0) return ""
+        return Buffer.from(toArrayBuffer(reference, 0, passwordLength[0])).toString("utf8")
+      } finally {
+        ensureKeychain(native.security.symbols.SecKeychainItemFreeContent(null, reference))
+      }
+    } finally {
+      native.close()
+    }
+  },
+  set(service, account, secret) {
+    const native = openMacosKeychain()
+    const serviceBytes = Buffer.from(service, "utf8")
+    const accountBytes = Buffer.from(account, "utf8")
+    const secretBytes = Buffer.from(secret, "utf8")
+    const item = new BigUint64Array(1)
+
+    try {
+      const found = native.security.symbols.SecKeychainFindGenericPassword(
+        null,
+        serviceBytes.byteLength,
+        ptr(serviceBytes),
+        accountBytes.byteLength,
+        ptr(accountBytes),
+        null,
+        null,
+        ptr(item),
+      )
+      if (found === -25300) {
+        ensureKeychain(
+          native.security.symbols.SecKeychainAddGenericPassword(
+            null,
+            serviceBytes.byteLength,
+            ptr(serviceBytes),
+            accountBytes.byteLength,
+            ptr(accountBytes),
+            secretBytes.byteLength,
+            ptr(secretBytes),
+            null,
+          ),
+        )
+        return
+      }
+      ensureKeychain(found)
+      const reference = Number(item[0]) as Pointer
+      try {
+        ensureKeychain(
+          native.security.symbols.SecKeychainItemModifyAttributesAndData(
+            reference,
+            null,
+            secretBytes.byteLength,
+            ptr(secretBytes),
+          ),
+        )
+      } finally {
+        native.coreFoundation.symbols.CFRelease(reference)
+      }
+    } finally {
+      native.close()
+    }
+  },
+  remove(service, account) {
+    const native = openMacosKeychain()
+    const serviceBytes = Buffer.from(service, "utf8")
+    const accountBytes = Buffer.from(account, "utf8")
+    const item = new BigUint64Array(1)
+    try {
+      const found = native.security.symbols.SecKeychainFindGenericPassword(
+        null,
+        serviceBytes.byteLength,
+        ptr(serviceBytes),
+        accountBytes.byteLength,
+        ptr(accountBytes),
+        null,
+        null,
+        ptr(item),
+      )
+      if (found === -25300) return
+      ensureKeychain(found)
+      const reference = Number(item[0]) as Pointer
+      try {
+        ensureKeychain(native.security.symbols.SecKeychainItemDelete(reference))
+      } finally {
+        native.coreFoundation.symbols.CFRelease(reference)
+      }
+    } finally {
+      native.close()
+    }
+  },
+}
+
+function openMacosKeychain() {
+  const security = dlopen("/System/Library/Frameworks/Security.framework/Security", {
+    SecKeychainFindGenericPassword: {
+      args: ["ptr", "u32", "ptr", "u32", "ptr", "ptr", "ptr", "ptr"],
+      returns: "i32",
+    },
+    SecKeychainItemModifyAttributesAndData: { args: ["ptr", "ptr", "u32", "ptr"], returns: "i32" },
+    SecKeychainAddGenericPassword: {
+      args: ["ptr", "u32", "ptr", "u32", "ptr", "u32", "ptr", "ptr"],
+      returns: "i32",
+    },
+    SecKeychainItemFreeContent: { args: ["ptr", "ptr"], returns: "i32" },
+    SecKeychainItemDelete: { args: ["ptr"], returns: "i32" },
+  })
+  const coreFoundation = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", {
+    CFRelease: { args: ["ptr"], returns: "void" },
+  })
+  return {
+    security,
+    coreFoundation,
+    close() {
+      coreFoundation.close()
+      security.close()
     },
   }
 }
@@ -227,6 +361,11 @@ function ensure(result: CommandResult) {
   if (result.exitCode === 0) return
   // stderr is intentionally not included: platform tooling may echo secrets.
   throw new SecureStoreOperationError(`Secure-store command failed with exit code ${result.exitCode}`)
+}
+
+function ensureKeychain(status: number) {
+  if (status === 0) return
+  throw new SecureStoreOperationError(`Secure-store Keychain operation failed with status ${status}`)
 }
 
 function trimOneNewline(value: string) {

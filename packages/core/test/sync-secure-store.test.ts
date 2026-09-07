@@ -3,21 +3,40 @@ import { SyncSecureStore } from "@opencode-ai/core/sync/secure-store"
 
 describe("SyncSecureStore", () => {
   test("uses an exact macOS Keychain service without a shell", async () => {
-    const calls: Array<{ command: readonly string[]; stdin?: string }> = []
-    const store = SyncSecureStore.macos(async (command, stdin) => {
-      calls.push({ command, stdin })
-      if (command[1] === "find-generic-password") return { exitCode: 0, stdout: "secret\n", stderr: "" }
-      return { exitCode: 0, stdout: "", stderr: "" }
+    const calls: Array<{ operation: string; service: string; account: string; secret?: string }> = []
+    const values = new Map<string, string>()
+    const store = SyncSecureStore.macos(SyncSecureStore.SERVICE, {
+      async get(service, account) {
+        calls.push({ operation: "get", service, account })
+        return values.get(account)
+      },
+      async set(service, account, secret) {
+        calls.push({ operation: "set", service, account, secret })
+        values.set(account, secret)
+      },
+      async remove(service, account) {
+        calls.push({ operation: "remove", service, account })
+        values.delete(account)
+      },
     })
     await store.set("space:key", "secret")
     expect(await store.get("space:key")).toBe("secret")
     await store.remove("space:key")
-    expect(calls.every((call) => call.command[0] === "/usr/bin/security")).toBe(true)
-    expect(calls.every((call) => call.command.includes(SyncSecureStore.SERVICE))).toBe(true)
-    const write = calls.find((call) => call.command.includes("add-generic-password"))!
-    expect(write.command.at(-1)).toBe("-w")
-    expect(write.command.join(" ")).not.toContain("secret")
-    expect(write.stdin).toBe("secret\nsecret\n")
+    expect(calls.every((call) => call.service === SyncSecureStore.SERVICE)).toBe(true)
+    expect(calls.map((call) => call.operation)).toEqual(["set", "get", "remove"])
+  })
+
+  test("passes long UTF-8 macOS secrets only to the native backend", async () => {
+    const secret = `credential-${"汉字".repeat(100)}`
+    let written: string | undefined
+    const store = SyncSecureStore.macos("opencode-rexd-sync-test", {
+      get: async () => undefined,
+      set: async (_service, _account, value) => void (written = value),
+      remove: async () => undefined,
+    })
+    await store.set("long-secret", secret)
+    expect(Buffer.byteLength(secret, "utf8")).toBeGreaterThan(128)
+    expect(written).toBe(secret)
   })
 
   test("passes PasswordVault secrets over stdin and recovers WSL interop for tmux", async () => {
@@ -37,10 +56,20 @@ describe("SyncSecureStore", () => {
   })
 
   test("maps missing records and redacts platform failures", async () => {
-    const missing = SyncSecureStore.macos(async () => ({ exitCode: 44, stdout: "", stderr: "secret leak" }))
+    const missing = SyncSecureStore.macos("test", {
+      get: async () => undefined,
+      set: async () => undefined,
+      remove: async () => undefined,
+    })
     expect(await missing.get("missing")).toBeUndefined()
-    const broken = SyncSecureStore.macos(async () => ({ exitCode: 9, stdout: "", stderr: "secret leak" }))
-    await expect(broken.get("broken")).rejects.toThrow("exit code 9")
+    const broken = SyncSecureStore.macos("test", {
+      get: async () => {
+        throw new SyncSecureStore.SecureStoreOperationError("Keychain status -1")
+      },
+      set: async () => undefined,
+      remove: async () => undefined,
+    })
+    await expect(broken.get("broken")).rejects.toThrow("status -1")
     await expect(broken.get("broken")).rejects.not.toThrow("secret leak")
   })
 
@@ -120,13 +149,20 @@ describe("SyncSecureStore", () => {
   test.skipIf(process.env.OPENCODE_REAL_SECURE_STORE !== "1")(
     "round trips a disposable record through the host secure store",
     async () => {
-      const store = await SyncSecureStore.detect()
-      const account = `acceptance-${crypto.randomUUID()}`
+      const store =
+        process.platform === "darwin"
+          ? SyncSecureStore.macos(`opencode-rexd-sync-acceptance-${crypto.randomUUID()}`)
+          : await SyncSecureStore.detect()
+      const account = `long-secret-${crypto.randomUUID()}`
+      const secret = `nonsecret-${"roundtrip".repeat(40)}`
       try {
-        await store.set(account, "nonsecret-acceptance")
-        expect(await store.get(account)).toBe("nonsecret-acceptance")
+        await store.set(account, "nonsecret-before-update")
+        await store.set(account, secret)
+        expect(Buffer.byteLength(secret, "utf8")).toBeGreaterThan(128)
+        expect(await store.get(account)).toBe(secret)
       } finally {
         await store.remove(account)
+        expect(await store.get(account)).toBeUndefined()
       }
     },
   )

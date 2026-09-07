@@ -1,0 +1,33 @@
+import { describe, expect, test } from "bun:test"
+import { createLoopbackCallback, unassignedFingerprint } from "../../src/context/sync-settings"
+
+describe("sync settings OAuth loopback", () => {
+  test("accepts only the callback path and responds after completion", async () => {
+    const loopback = createLoopbackCallback(2_000)
+    expect((await fetch(loopback.redirectURI.replace("/callback", "/other"))).status).toBe(404)
+
+    const page = fetch(`${loopback.redirectURI}?code=abc`)
+    const callback = await loopback.callback
+    expect(callback?.callbackURL).toBe(`${loopback.redirectURI}?code=abc`)
+    callback?.respond({ status: "success" })
+    const response = await page
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain("Baidu Netdisk")
+    loopback.close()
+  })
+
+  test("times out without claiming authorization succeeded", async () => {
+    const loopback = createLoopbackCallback(5)
+    expect(await loopback.callback).toBeUndefined()
+    loopback.close()
+  })
+})
+
+describe("unassigned Session prompt identity", () => {
+  test("is stable by ID order and isolated by active space", () => {
+    expect(unassignedFingerprint("space-a", ["session-b", "session-a"])).toBe(
+      unassignedFingerprint("space-a", ["session-a", "session-b"]),
+    )
+    expect(unassignedFingerprint("space-a", ["session-a"])).not.toBe(unassignedFingerprint("space-b", ["session-a"]))
+  })
+})

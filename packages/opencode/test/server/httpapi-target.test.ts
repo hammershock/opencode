@@ -101,4 +101,32 @@ describe("target registry HttpApi", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({ bindings: {} })
   })
+
+  test("unbinds through the canonical registry only when revision and affected Session snapshot match", async () => {
+    await fs.mkdir(path.dirname(bindingFile), { recursive: true })
+    await fs.writeFile(bindingFile, JSON.stringify({ version: 1, bindings: { "lab-gpu": crypto.randomUUID() } }))
+    const listed = (await (await request("/api/target-binding")).json()) as { revision: string }
+
+    const changedScope = await request("/api/target-binding/lab-gpu", {
+      method: "DELETE",
+      body: JSON.stringify({ expectedRevision: listed.revision, expectedSessionIDs: ["ses_fabricated"] }),
+    })
+    expect(changedScope.status).toBe(409)
+    expect(await changedScope.json()).toMatchObject({ _tag: "ConflictError", resource: "lab-gpu" })
+
+    const removed = await request("/api/target-binding/lab-gpu", {
+      method: "DELETE",
+      body: JSON.stringify({ expectedRevision: listed.revision, expectedSessionIDs: [] }),
+    })
+    expect(removed.status).toBe(200)
+    const snapshot = (await removed.json()) as { revision: string; bindings: Record<string, string> }
+    expect(snapshot.bindings).toEqual({})
+
+    const stale = await request("/api/target-binding/lab-gpu", {
+      method: "DELETE",
+      body: JSON.stringify({ expectedRevision: listed.revision, expectedSessionIDs: [] }),
+    })
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toMatchObject({ _tag: "ConflictError", resource: "target-bindings.json" })
+  })
 })

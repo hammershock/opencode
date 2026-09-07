@@ -9073,9 +9073,6 @@ export type GlobalSyncDevicesResponses = {
       updatedAt: number
       revoked: boolean
     }>
-    bindings: {
-      [key: string]: string
-    }
   }
 }
 
@@ -9114,53 +9111,10 @@ export type GlobalSyncDeviceUpdateResponses = {
       updatedAt: number
       revoked: boolean
     }>
-    bindings: {
-      [key: string]: string
-    }
   }
 }
 
 export type GlobalSyncDeviceUpdateResponse = GlobalSyncDeviceUpdateResponses[keyof GlobalSyncDeviceUpdateResponses]
-
-export type GlobalSyncBindingUpdateData = {
-  body?: {
-    label: string
-    targetID?: string
-  }
-  path?: never
-  query?: never
-  url: "/global/sync/bindings"
-}
-
-export type GlobalSyncBindingUpdateErrors = {
-  /**
-   * BadRequest | InvalidRequestError
-   */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
-}
-
-export type GlobalSyncBindingUpdateError = GlobalSyncBindingUpdateErrors[keyof GlobalSyncBindingUpdateErrors]
-
-export type GlobalSyncBindingUpdateResponses = {
-  /**
-   * Success
-   */
-  200: {
-    version: 1
-    devices: Array<{
-      id: string
-      name: string
-      revision: number
-      updatedAt: number
-      revoked: boolean
-    }>
-    bindings: {
-      [key: string]: string
-    }
-  }
-}
-
-export type GlobalSyncBindingUpdateResponse = GlobalSyncBindingUpdateResponses[keyof GlobalSyncBindingUpdateResponses]
 
 export type GlobalSyncRecoveryExportData = {
   body?: never
@@ -15937,6 +15891,56 @@ export type V2TargetBindingListResponses = {
 }
 
 export type V2TargetBindingListResponse = V2TargetBindingListResponses[keyof V2TargetBindingListResponses]
+
+export type V2TargetBindingUnbindData = {
+  body: {
+    expectedRevision: string
+    expectedSessionIDs: Array<string>
+  }
+  path: {
+    portableTargetLabel: string
+  }
+  query?: never
+  url: "/api/target-binding/{portableTargetLabel}"
+}
+
+export type V2TargetBindingUnbindErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * TargetNotFoundError
+   */
+  404: TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetBindingUnbindError = V2TargetBindingUnbindErrors[keyof V2TargetBindingUnbindErrors]
+
+export type V2TargetBindingUnbindResponses = {
+  /**
+   * SessionLocationRebinding.PortableBindingSnapshot
+   */
+  200: SessionLocationRebindingPortableBindingSnapshot
+}
+
+export type V2TargetBindingUnbindResponse = V2TargetBindingUnbindResponses[keyof V2TargetBindingUnbindResponses]
 
 export type V2TargetBindingBindData = {
   body: {

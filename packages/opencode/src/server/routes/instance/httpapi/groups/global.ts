@@ -120,7 +120,6 @@ export const GlobalPaths = {
   syncSessions: "/global/sync/sessions",
   syncHydrate: "/global/sync/hydrate",
   syncDevices: "/global/sync/devices",
-  syncBindings: "/global/sync/bindings",
   syncRecovery: "/global/sync/recovery-key",
 } as const
 
@@ -257,11 +256,6 @@ export const GlobalApi = HttpApi.make("global").add(
       }),
       HttpApiEndpoint.patch("syncDeviceUpdate", GlobalPaths.syncDevices, {
         payload: SyncControl.DeviceUpdate,
-        success: SyncDevice.State,
-        error: HttpApiError.BadRequest,
-      }),
-      HttpApiEndpoint.patch("syncBindingUpdate", GlobalPaths.syncBindings, {
-        payload: SyncControl.BindingUpdate,
         success: SyncDevice.State,
         error: HttpApiError.BadRequest,
       }),

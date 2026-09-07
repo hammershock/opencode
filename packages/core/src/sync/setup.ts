@@ -54,6 +54,7 @@ export interface Interface {
   readonly state: () => Effect.Effect<SyncState.State | undefined, SetupError>
   /** Returns the single active runtime scope, separately from full lifecycle state. */
   readonly config: () => Effect.Effect<SyncState.Active | undefined, SetupError>
+  readonly authenticated: () => Effect.Effect<boolean, SetupError>
   readonly initialize: (deviceName: string) => Effect.Effect<SyncState.State, SetupError>
   readonly begin: (input: BeginInput) => Effect.Effect<BaiduAuth.BeginResult, SetupError>
   readonly complete: (input: CompleteInput) => Effect.Effect<SyncState.State, SetupError>
@@ -70,10 +71,11 @@ export interface Interface {
   >
   readonly join: (input: JoinInput) => Effect.Effect<SyncState.State, SetupError>
   readonly activate: (namespaceID: string) => Effect.Effect<SyncState.State, SetupError>
-  readonly leave: () => Effect.Effect<SyncState.State, SetupError>
+  readonly leave: (namespaceID: string) => Effect.Effect<SyncState.State, SetupError>
   readonly setEnabled: (enabled: boolean) => Effect.Effect<SyncState.State, SetupError>
   readonly setInterval: (seconds: SyncState.IntervalSeconds) => Effect.Effect<SyncState.State, SetupError>
   readonly deleteSpace: (namespaceID: string) => Effect.Effect<string, SetupError>
+  readonly applyRemoteDeletion: (namespaceID: string) => Effect.Effect<boolean, SetupError>
   readonly removeFromDevice: () => Effect.Effect<readonly string[], SetupError>
 }
 
@@ -94,6 +96,12 @@ export function make(input: {
   const config = Effect.fn("SyncSetup.config")(function* () {
     const current = yield* state()
     return current ? SyncState.active(current) : undefined
+  })
+  const authenticated = Effect.fn("SyncSetup.authenticated")(function* () {
+    const current = yield* state()
+    if (!current?.account) return false
+    const account = yield* effect("storage", () => BaiduAuth.account(input.store, current.deviceID))
+    return account?.id === current.account.id
   })
   const initialize = Effect.fn("SyncSetup.initialize")((deviceName: string) =>
     effect("storage", async () => {
@@ -149,7 +157,9 @@ export function make(input: {
         input.store.remove(BaiduAuth.pendingAccount(current.deviceID)),
       ]).then(() => undefined),
     )
-    return yield* effect("storage", () => states.write({ ...current, enabled: false }, current.revision))
+    return yield* effect("storage", () =>
+      states.write({ ...current, enabled: false, activeSpaceID: undefined }, current.revision),
+    )
   })
   const remote = async () => {
     const current = await states.read()
@@ -219,8 +229,15 @@ export function make(input: {
   const activate = Effect.fn("SyncSetup.activate")((namespaceID: string) =>
     update(states, (current) => SyncState.activate(current, namespaceID)),
   )
-  const leave = Effect.fn("SyncSetup.leave")(() =>
-    update(states, (current) => ({ ...current, activeSpaceID: undefined })),
+  const leave = Effect.fn("SyncSetup.leave")((namespaceID: string) =>
+    effect("storage", async () => {
+      const current = await states.read()
+      if (!current) throw new SetupError({ kind: "uninitialized" })
+      const binding = current.spaces.find((item) => item.descriptor.namespaceID === namespaceID)
+      if (!binding) throw new SetupError({ kind: "invalid" })
+      if (binding.descriptor.encryption === "aes-256-gcm") await input.store.remove(rootAccount(namespaceID))
+      return states.write(SyncState.remove(current, namespaceID), current.revision)
+    }),
   )
   const setEnabled = Effect.fn("SyncSetup.setEnabled")((enabled: boolean) =>
     update(states, (current) => ({ ...current, enabled })),
@@ -231,16 +248,31 @@ export function make(input: {
   const deleteSpace = Effect.fn("SyncSetup.deleteSpace")((namespaceID: string) =>
     effect("remote", async () => {
       const context = await remote()
-      if (
-        !context.current.spaces.some(
-          (item) => item.descriptor.namespaceID === namespaceID && item.accountID === context.current.account?.id,
-        )
+      const binding = context.current.spaces.find(
+        (item) => item.descriptor.namespaceID === namespaceID && item.accountID === context.current.account?.id,
       )
-        throw new SetupError({ kind: "invalid" })
+      if (!binding) throw new SetupError({ kind: "invalid" })
       await context.catalog.remove(namespaceID)
+      if (binding.descriptor.encryption === "aes-256-gcm") await input.store.remove(rootAccount(namespaceID))
       await states.write(SyncState.remove(context.current, namespaceID), context.current.revision)
-      await input.store.remove(rootAccount(namespaceID))
       return namespaceID
+    }),
+  )
+  const applyRemoteDeletion = Effect.fn("SyncSetup.applyRemoteDeletion")((namespaceID: string) =>
+    effect("remote", async () => {
+      const context = await remote()
+      const deleted = await context.catalog.inspect(namespaceID).then(
+        () => false,
+        (cause) => {
+          if (cause instanceof SyncSpaceCatalog.CatalogError && cause.kind === "deleted") return true
+          throw cause
+        },
+      )
+      if (!deleted) return false
+      const binding = context.current.spaces.find((item) => item.descriptor.namespaceID === namespaceID)
+      if (binding?.descriptor.encryption === "aes-256-gcm") await input.store.remove(rootAccount(namespaceID))
+      await states.write(SyncState.remove(context.current, namespaceID), context.current.revision)
+      return true
     }),
   )
   const removeFromDevice = Effect.fn("SyncSetup.removeFromDevice")(() =>
@@ -251,7 +283,9 @@ export function make(input: {
       await Promise.all([
         input.store.remove(BaiduSyncProvider.credentialAccount(current.deviceID)),
         input.store.remove(BaiduAuth.pendingAccount(current.deviceID)),
-        ...ids.map((namespaceID) => input.store.remove(rootAccount(namespaceID))),
+        ...current.spaces
+          .filter((item) => item.descriptor.encryption === "aes-256-gcm")
+          .map((item) => input.store.remove(rootAccount(item.descriptor.namespaceID))),
       ])
       await states.clear()
       return ids
@@ -260,6 +294,7 @@ export function make(input: {
   return Service.of({
     state,
     config,
+    authenticated,
     initialize,
     begin,
     complete,
@@ -273,6 +308,7 @@ export function make(input: {
     setEnabled,
     setInterval,
     deleteSpace,
+    applyRemoteDeletion,
     removeFromDevice,
   })
 }

@@ -36,6 +36,7 @@ export interface Interface {
   readonly list: () => Effect.Effect<readonly Item[], unknown>
   readonly availability: (sessionID: string, value: Availability) => Effect.Effect<void, unknown>
   readonly remove: (sessionID: string) => Effect.Effect<void, unknown>
+  readonly clear: () => Effect.Effect<void, unknown>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncMetadata") {}
@@ -89,7 +90,8 @@ export const layer = Layer.effect(
         db
           .run(sql`DELETE FROM sync_session_metadata WHERE session_id = ${sessionID} AND space_id = ${spaceID}`)
           .pipe(Effect.asVoid)
-      return { scope: scoped, apply, list, availability, remove }
+      const clear = () => db.run(sql`DELETE FROM sync_session_metadata WHERE space_id = ${spaceID}`).pipe(Effect.asVoid)
+      return { scope: scoped, apply, list, availability, remove, clear }
     }
     return scoped("legacy")
   }),

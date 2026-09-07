@@ -52,7 +52,11 @@ describe("SyncSetup lifecycle", () => {
     expect(await run(setup.config())).toMatchObject({ namespaceID: "plain", encryption: "none" })
     expect((await run(setup.setInterval(300))).intervalSeconds).toBe(300)
     expect((await run(setup.setEnabled(false))).enabled).toBe(false)
-    expect((await run(setup.leave())).activeSpaceID).toBeUndefined()
+    const left = await run(setup.leave("plain"))
+    expect(left.activeSpaceID).toBeUndefined()
+    expect(left.spaces.map((item) => item.descriptor.namespaceID)).toEqual(["secret"])
+    expect((await run(setup.leave("secret"))).spaces).toEqual([])
+    expect(secure.values.has("space:secret:root")).toBe(false)
   })
 
   test("joins plain spaces without keys and requires the matching recovery key for encrypted spaces", async () => {
@@ -111,7 +115,8 @@ describe("SyncSetup lifecycle", () => {
     await run(setup.create({ name: "Secret", encryption: "aes-256-gcm" }))
     await run(setup.activate("secret"))
     const loggedOut = await run(setup.logout())
-    expect(loggedOut).toMatchObject({ enabled: false, account: { id: "account-a" }, activeSpaceID: "secret" })
+    expect(loggedOut).toMatchObject({ enabled: false, account: { id: "account-a" } })
+    expect(loggedOut.activeSpaceID).toBeUndefined()
     expect(loggedOut.spaces).toHaveLength(1)
     expect(secure.values.has(BaiduSyncProvider.credentialAccount("device"))).toBe(false)
     expect(secure.values.has("space:secret:root")).toBe(true)
@@ -148,6 +153,25 @@ describe("SyncSetup lifecycle", () => {
     await expect(run(offline.deleteSpace("kept"))).rejects.toMatchObject({ kind: "remote" })
     expect((await run(offline.state()))?.spaces).toHaveLength(1)
     expect(secure.values.has("space:kept:root")).toBe(true)
+  })
+
+  test("applies a remote deletion marker locally before the active runtime can upload its old outbox", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    const setup = await authenticated(tmp.path, secure, provider, () => key("remote-gone"))
+    await run(setup.create({ name: "Remote gone", encryption: "aes-256-gcm" }))
+    await run(setup.activate("remote-gone"))
+    await provider.uploadAtomic(
+      "deleted-spaces/remote-gone.json",
+      new TextEncoder().encode(JSON.stringify({ namespaceID: "remote-gone", deletedAt: 20, revision: 1 })),
+      { type: "absent" },
+    )
+
+    expect(await run(setup.applyRemoteDeletion("remote-gone"))).toBe(true)
+    expect((await run(setup.state()))?.spaces).toEqual([])
+    expect(await run(setup.config())).toBeUndefined()
+    expect(secure.values.has("space:remote-gone:root")).toBe(false)
   })
 
   test("full device removal returns every bound ID and clears OAuth, config and keys without remote deletion", async () => {

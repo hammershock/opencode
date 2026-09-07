@@ -8588,6 +8588,7 @@ export type GlobalSyncJoinResponse = GlobalSyncJoinResponses[keyof GlobalSyncJoi
 export type GlobalSyncActivateData = {
   body?: {
     namespaceID: string
+    force?: boolean
   }
   path?: never
   query?: never
@@ -8607,42 +8608,17 @@ export type GlobalSyncActivateResponses = {
   /**
    * Success
    */
-  200: {
-    version: 2
-    revision: number
-    provider: "baidu"
-    deviceID: string
-    deviceName: string
-    account?: {
-      id: string
-      maskedDisplay: string
-    }
-    activeSpaceID?: string
-    enabled: boolean
-    intervalSeconds: 30 | 60 | 300
-    spaces: Array<{
-      accountID: string
-      descriptor: {
+  200:
+    | {
+        status: "switched"
         namespaceID: string
-        name: string
-        protocol: {
-          major: number
-          minor: number
-        }
-        encryption: "none" | "aes-256-gcm"
-        createdAt: number
-        updatedAt: number
-        summary: {
-          sessions: number
-          devices: number
-          updatedAt: number
-        }
-        revision: number
       }
-      remoteRoot: string
-      joinedAt: number
-    }>
-  }
+    | {
+        status: "blocked"
+        reason: "pending-outbox"
+        outbox: number
+        error?: string
+      }
 }
 
 export type GlobalSyncActivateResponse = GlobalSyncActivateResponses[keyof GlobalSyncActivateResponses]
@@ -8669,42 +8645,7 @@ export type GlobalSyncLeaveResponses = {
   /**
    * Success
    */
-  200: {
-    version: 2
-    revision: number
-    provider: "baidu"
-    deviceID: string
-    deviceName: string
-    account?: {
-      id: string
-      maskedDisplay: string
-    }
-    activeSpaceID?: string
-    enabled: boolean
-    intervalSeconds: 30 | 60 | 300
-    spaces: Array<{
-      accountID: string
-      descriptor: {
-        namespaceID: string
-        name: string
-        protocol: {
-          major: number
-          minor: number
-        }
-        encryption: "none" | "aes-256-gcm"
-        createdAt: number
-        updatedAt: number
-        summary: {
-          sessions: number
-          devices: number
-          updatedAt: number
-        }
-        revision: number
-      }
-      remoteRoot: string
-      joinedAt: number
-    }>
-  }
+  200: Array<string>
 }
 
 export type GlobalSyncLeaveResponse = GlobalSyncLeaveResponses[keyof GlobalSyncLeaveResponses]
@@ -8855,7 +8796,7 @@ export type GlobalSyncDeleteResponses = {
   /**
    * Success
    */
-  200: string
+  200: Array<string>
 }
 
 export type GlobalSyncDeleteResponse = GlobalSyncDeleteResponses[keyof GlobalSyncDeleteResponses]
@@ -8885,6 +8826,63 @@ export type GlobalSyncRemoveResponses = {
 
 export type GlobalSyncRemoveResponse = GlobalSyncRemoveResponses[keyof GlobalSyncRemoveResponses]
 
+export type GlobalSyncUnassignedData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/unassigned"
+}
+
+export type GlobalSyncUnassignedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ServiceUnavailable
+   */
+  503: EffectHttpApiErrorServiceUnavailable
+}
+
+export type GlobalSyncUnassignedError = GlobalSyncUnassignedErrors[keyof GlobalSyncUnassignedErrors]
+
+export type GlobalSyncUnassignedResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncUnassignedResponse = GlobalSyncUnassignedResponses[keyof GlobalSyncUnassignedResponses]
+
+export type GlobalSyncAssignUnassignedData = {
+  body?: {
+    sessionIDs: Array<string>
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/unassigned"
+}
+
+export type GlobalSyncAssignUnassignedErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type GlobalSyncAssignUnassignedError = GlobalSyncAssignUnassignedErrors[keyof GlobalSyncAssignUnassignedErrors]
+
+export type GlobalSyncAssignUnassignedResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncAssignUnassignedResponse =
+  GlobalSyncAssignUnassignedResponses[keyof GlobalSyncAssignUnassignedResponses]
+
 export type GlobalSyncStatusData = {
   body?: never
   path?: never
@@ -8911,11 +8909,23 @@ export type GlobalSyncStatusResponses = {
    */
   200: {
     configured: boolean
+    initialized: boolean
+    authenticated: boolean
     enabled: boolean
     locked: boolean
     provider?: string
     namespaceID?: string
     deviceID?: string
+    account?: {
+      id: string
+      maskedDisplay: string
+    }
+    activeSpace?: {
+      namespaceID: string
+      name: string
+      encryption: "none" | "aes-256-gcm"
+    }
+    intervalSeconds?: 30 | 60 | 300
     outbox: number
     cursors: {
       [key: string]: number

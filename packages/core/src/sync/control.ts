@@ -136,11 +136,13 @@ const layer = Layer.effect(
       yield* clearSpace(namespaceID)
       return sessions
     })
-    const localState = yield* setup.state().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
-    const stale = yield* membership
-      .stale(new Set(localState?.spaces.map((item) => item.descriptor.namespaceID) ?? []))
-      .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
-    yield* Effect.forEach(stale, purgeSpace, { discard: true })
+    yield* Effect.gen(function* () {
+      const localState = yield* setup.state().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      const stale = yield* membership
+        .stale(new Set(localState?.spaces.map((item) => item.descriptor.namespaceID) ?? []))
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      yield* Effect.forEach(stale, purgeSpace, { discard: true })
+    }).pipe(Effect.catch((error) => Effect.logWarning("Failed to reconcile stale sync spaces", { error })))
 
     const load = Effect.fn("SyncControl.load")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))

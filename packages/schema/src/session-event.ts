@@ -110,6 +110,23 @@ export const PromptAdmitted = Event.define({
 })
 export type PromptAdmitted = typeof PromptAdmitted.Type
 
+export namespace Turn {
+  export const Outcome = Schema.Literals(["completed", "failed", "cancelled"])
+  export type Outcome = typeof Outcome.Type
+
+  /** Terminal settlement for the exact durable input that admitted a logical Agent turn. */
+  export const Settled = Event.define({
+    type: "session.next.turn.settled",
+    ...options,
+    schema: {
+      ...Base,
+      messageID: SessionMessage.ID,
+      outcome: Outcome,
+    },
+  })
+  export type Settled = typeof Settled.Type
+}
+
 export const ContextUpdated = Event.define({
   type: "session.next.context.updated",
   ...options,
@@ -463,6 +480,7 @@ export const DurableDefinitions = Event.inventory(
   Moved,
   Prompted,
   PromptAdmitted,
+  Turn.Settled,
   ContextUpdated,
   Synthetic,
   Shell.Started,
@@ -494,6 +512,7 @@ export const Definitions = Event.inventory(
   Moved,
   Prompted,
   PromptAdmitted,
+  Turn.Settled,
   ContextUpdated,
   Synthetic,
   Shell.Started,

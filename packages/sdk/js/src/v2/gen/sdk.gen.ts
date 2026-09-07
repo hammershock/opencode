@@ -8476,23 +8476,19 @@ export class Environment extends HeyApiClient {
   }
 
   /**
-   * Ensure a project .env template
+   * Initialize a Session environment
    *
-   * Creates a deterministic template if absent; does not invoke an agent or reload by itself.
+   * Ensures the project template, waits for one Agent turn, then reloads on successful completion.
    */
   public init<ThrowOnError extends boolean = false>(
-    parameters?: {
-      location?: {
-        directory?: string
-        workspace?: string
-        target?: string
-      }
+    parameters: {
+      sessionID: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
     return (options?.client ?? this.client).post<V2EnvironmentInitResponses, V2EnvironmentInitErrors, ThrowOnError>({
-      url: "/api/environment/init",
+      url: "/api/session/{sessionID}/environment/init",
       ...options,
       ...params,
     })

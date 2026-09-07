@@ -1299,14 +1299,13 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
-      init: (input?: EnvironmentInitInput, requestOptions?: RequestOptions) =>
+      init: (input: EnvironmentInitInput, requestOptions?: RequestOptions) =>
         request<EnvironmentInitOutput>(
           {
             method: "POST",
-            path: `/api/environment/init`,
-            query: { location: input?.["location"] },
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/environment/init`,
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 404, 401],
             empty: false,
           },
           requestOptions,

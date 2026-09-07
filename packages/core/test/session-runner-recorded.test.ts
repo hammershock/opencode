@@ -95,6 +95,7 @@ const execution = Layer.effect(
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,
+      wakeAndWait: coordinator.wakeAndWait,
       interrupt: coordinator.interrupt,
     })
   }),
@@ -187,6 +188,7 @@ describe("SessionRunnerLLM recorded", () => {
         "session.next.text.started.1",
         "session.next.text.ended.1",
         "session.next.step.ended.2",
+        "session.next.turn.settled.1",
       ])
     }),
   )

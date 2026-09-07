@@ -20,10 +20,9 @@ function context(overrides: Partial<EnvironmentCommandContext> = {}): Environmen
       list: async () => ({ enabled: true, generation: 1, variables: [] }),
       reload: async () => ({ enabled: true, generation: 2, variables: [] }),
       reveal: async () => ({ generation: 1, values: {} }),
-      ensureTemplate: async () => "created",
+      init: async () => ({ status: "completed", template: "created", generation: 2 }),
     },
     presentEnvironment: async () => {},
-    invokeAgent: async () => "completed",
     ...overrides,
   }
 }
@@ -35,69 +34,42 @@ describe("environment command toolkit", () => {
     expect(registry.routes().map((route) => route.path.join(" "))).toEqual(["env list", "env reload", "env init"])
   })
 
-  test("init reloads only after the agent completes", async () => {
-    let reloads = 0
+  test("init presents the Core workflow outcome", async () => {
+    let calls = 0
     const init = environmentCommands[2]
     const prepared = init.parse(raw)
     expect(prepared.status).toBe("parsed")
-    await init.execute(
+    const cancelled = await init.execute(
       context({
         environment: {
           list: async () => ({ enabled: true, generation: 1, variables: [] }),
-          reload: async () => {
-            reloads++
-            return { enabled: true, generation: 2, variables: [] }
-          },
+          reload: async () => ({ enabled: true, generation: 2, variables: [] }),
           reveal: async () => ({ generation: 1, values: {} }),
-          ensureTemplate: async () => "existing",
+          init: async () => {
+            calls++
+            return { status: "cancelled", template: "existing" }
+          },
         },
-        invokeAgent: async () => "cancelled",
       }),
       undefined,
     )
-    expect(reloads).toBe(0)
+    expect(cancelled).toEqual({ status: "cancelled", message: "Environment was not reloaded" })
     const result = await init.execute(
       context({
         environment: {
           list: async () => ({ enabled: true, generation: 1, variables: [] }),
-          reload: async () => {
-            reloads++
-            return { enabled: true, generation: 2, variables: [] }
-          },
+          reload: async () => ({ enabled: true, generation: 2, variables: [] }),
           reveal: async () => ({ generation: 1, values: {} }),
-          ensureTemplate: async () => "created",
+          init: async () => {
+            calls++
+            return { status: "completed", template: "created", generation: 3 }
+          },
         },
       }),
       undefined,
     )
-    expect(result.status).toBe("completed")
-    expect(reloads).toBe(1)
-  })
-
-  test("init waits for the exact admitted Agent turn before reloading", async () => {
-    let finish!: (value: "completed") => void
-    const turn = new Promise<"completed">((resolve) => (finish = resolve))
-    let reloads = 0
-    const execution = environmentCommands[2].execute(
-      context({
-        invokeAgent: () => turn,
-        environment: {
-          list: async () => ({ enabled: true, generation: 1, variables: [] }),
-          reload: async () => {
-            reloads++
-            return { enabled: true, generation: 2, variables: [] }
-          },
-          reveal: async () => ({ generation: 1, values: {} }),
-          ensureTemplate: async () => "existing",
-        },
-      }),
-      undefined,
-    )
-    await Promise.resolve()
-    expect(reloads).toBe(0)
-    finish("completed")
-    await execution
-    expect(reloads).toBe(1)
+    expect(result).toEqual({ status: "completed", message: "Created .env and loaded generation 3" })
+    expect(calls).toBe(2)
   })
 
   test("reveal requires confirmation and clears values after presentation", async () => {

@@ -1,7 +1,7 @@
 export * as SessionV2 from "./session"
 export * from "./session/schema"
 
-import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
+import { Cause, DateTime, Effect, Exit, Layer, Schema, Context, Stream } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
 import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
@@ -32,6 +32,7 @@ import { LocationServiceMap } from "./location-service-map"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
+import { SessionTurn } from "./session/turn"
 import { Snapshot } from "./snapshot"
 import { SessionRevert } from "./session/revert"
 import { Revert } from "@opencode-ai/schema/revert"
@@ -166,6 +167,15 @@ export interface Interface {
     delivery?: SessionInput.Delivery
     resume?: boolean
   }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | OperationUnavailableError>
+  /** Admits one queued prompt and resolves only from that exact input's durable terminal settlement. */
+  readonly promptTurn: (input: {
+    id?: SessionMessage.ID
+    sessionID: SessionSchema.ID
+    prompt: PromptInput.Prompt
+  }) => Effect.Effect<
+    SessionTurn.Outcome,
+    NotFoundError | PromptConflictError | OperationUnavailableError | SessionRunner.RunError
+  >
   readonly shell: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
@@ -281,6 +291,46 @@ const layer = Layer.effect(
             }),
         ),
       )
+
+    const prompt = Effect.fn("V2Session.prompt")(
+      (input: {
+        id?: SessionMessage.ID
+        sessionID: SessionSchema.ID
+        prompt: PromptInput.Prompt
+        delivery?: SessionInput.Delivery
+        resume?: boolean
+      }) =>
+        activity.withActivity(
+          input.sessionID,
+          "session_mutation",
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              yield* requireLocation(input.sessionID)
+              yield* result.get(input.sessionID)
+              const resolved = resolvePrompt(input.prompt)
+              const messageID = input.id ?? SessionMessage.ID.create()
+              const delivery = input.delivery ?? "steer"
+              const expected = { sessionID: input.sessionID, messageID, prompt: resolved, delivery }
+              const admitted = yield* SessionInput.admit(db, events, {
+                id: messageID,
+                sessionID: input.sessionID,
+                prompt: resolved,
+                delivery,
+              }).pipe(
+                Effect.catchDefect((defect) =>
+                  defect instanceof SessionInput.LifecycleConflict
+                    ? new PromptConflictError({ sessionID: input.sessionID, messageID })
+                    : Effect.die(defect),
+                ),
+              )
+              if (!SessionInput.equivalent(admitted, expected))
+                return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+              if (input.resume !== false) yield* execution.wake(admitted.sessionID)
+              return admitted
+            }),
+          ),
+        ),
+    )
 
     const result = Service.of({
       create: Effect.fn("V2Session.create")((input) =>
@@ -501,36 +551,35 @@ const layer = Layer.effect(
           manifest: SessionDurable,
         })
       }),
-      prompt: Effect.fn("V2Session.prompt")((input) =>
-        activity.withActivity(
-          input.sessionID,
-          "session_mutation",
-          Effect.uninterruptible(
-            Effect.gen(function* () {
-              yield* requireLocation(input.sessionID)
-              yield* result.get(input.sessionID)
-              const prompt = resolvePrompt(input.prompt)
-              const messageID = input.id ?? SessionMessage.ID.create()
-              const delivery = input.delivery ?? "steer"
-              const expected = { sessionID: input.sessionID, messageID, prompt, delivery }
-              const admitted = yield* SessionInput.admit(db, events, {
-                id: messageID,
-                sessionID: input.sessionID,
-                prompt,
-                delivery,
-              }).pipe(
-                Effect.catchDefect((defect) =>
-                  defect instanceof SessionInput.LifecycleConflict
-                    ? new PromptConflictError({ sessionID: input.sessionID, messageID })
-                    : Effect.die(defect),
-                ),
-              )
-              if (!SessionInput.equivalent(admitted, expected))
-                return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-              if (input.resume !== false) yield* execution.wake(admitted.sessionID)
-              return admitted
-            }),
-          ),
+      prompt,
+      promptTurn: Effect.fn("V2Session.promptTurn")((input) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const admitted = yield* prompt({ ...input, delivery: "queue", resume: false })
+            const turn = { sessionID: admitted.sessionID, messageID: admitted.id }
+            const cancel = Effect.gen(function* () {
+              if (yield* SessionTurn.cancelPending(db, events, turn)) return
+              if ((yield* SessionTurn.find(db, turn)) !== undefined) return
+              yield* execution.interrupt(admitted.sessionID)
+            })
+            // Install cancellation cleanup before restoring interruption. The wake ticket
+            // follows the generation guaranteed to observe this admission, even when an
+            // unrelated active run fails while handing off.
+            const exit = yield* restore(execution.wakeAndWait(admitted.sessionID)).pipe(
+              Effect.onInterrupt(() => cancel),
+              Effect.exit,
+            )
+            const settled = yield* SessionTurn.find(db, turn)
+            if (settled !== undefined) return settled
+            if (Exit.isSuccess(exit)) return yield* Effect.die("Session execution completed without settling its input")
+            const outcome = Cause.hasInterrupts(exit.cause) ? ("cancelled" as const) : ("failed" as const)
+            yield* SessionTurn.settle(db, events, {
+              sessionID: admitted.sessionID,
+              messageIDs: [admitted.id],
+              outcome,
+            })
+            return outcome
+          }),
         ),
       ),
       shell: Effect.fn("V2Session.shell")(function* () {

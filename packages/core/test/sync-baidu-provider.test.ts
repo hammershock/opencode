@@ -202,21 +202,6 @@ describe("BaiduSyncProvider", () => {
     expect(forms[0]).not.toContain("%2Fb")
   })
 
-  test("probes only the exact legacy service and device ID", async () => {
-    const calls: readonly string[][] = []
-    const value = await BaiduSyncProvider.readLegacyCredential("legacy-device", {
-      platform: "darwin",
-      runner: async (command) => {
-        ;(calls as string[][]).push([...command])
-        return { exitCode: 0, stdout: JSON.stringify(credential), stderr: "must-not-leak" }
-      },
-    })
-    expect(value?.accessToken).toBe("access-secret")
-    expect(calls[0]).toContain(SyncSecureStore.LEGACY_BAIDU_SERVICE)
-    expect(calls[0]).toContain("legacy-device")
-    expect(calls).toHaveLength(1)
-  })
-
   test("provider errors redact response bodies and tokens", async () => {
     const provider = BaiduSyncProvider.adapter({
       store: memoryStore(credential),

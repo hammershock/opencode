@@ -15,11 +15,6 @@ describe("experimental command settings", () => {
         defaultValue: false,
       }),
       expect.objectContaining({
-        id: "fork.target.manage",
-        key: "experimental.commands.target_manager",
-        defaultValue: false,
-      }),
-      expect.objectContaining({
         id: "fork.session.force-rebind",
         key: "experimental.session.force_rebind",
         defaultValue: false,

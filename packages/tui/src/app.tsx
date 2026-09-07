@@ -852,7 +852,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "System",
       },
       {
-        name: "app.exit",
+        name: appExitMetadata.name,
         title: appExitMetadata.title,
         slashName: appExitMetadata.slash.aliases[0],
         slashAliases: appExitMetadata.slash.aliases.slice(1),

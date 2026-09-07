@@ -21,6 +21,8 @@ import { useToast } from "../ui/toast"
 import { syncCommands, type SyncCommandContext } from "../command-toolkit/sync"
 import { useSyncSettings } from "../context/sync-settings"
 import { useTheme } from "../context/theme"
+import { targetCommand, type TargetCommandContext } from "../command-toolkit/target"
+import { useTargetManager } from "../component/target-manager"
 
 let once = false
 const placeholder = {
@@ -43,6 +45,7 @@ export function Home() {
   const toast = useToast()
   const syncSettings = useSyncSettings()
   const { theme } = useTheme()
+  const targetManager = useTargetManager()
   const syncColor = createMemo(() => {
     const state = syncSettings.model().state
     if (state === "idle") return theme.success
@@ -51,9 +54,10 @@ export function Home() {
     return theme.textMuted
   })
   const commandHost = createMemo(() =>
-    createCommandHost<ApprovalModeCommandContext & SyncCommandContext>({
+    createCommandHost<ApprovalModeCommandContext & SyncCommandContext & TargetCommandContext>({
       register: (registry) => {
         registry.register(approvalModeCommand)
+        registry.register(targetCommand)
         syncCommands.forEach((command) => registry.register(command))
       },
       context: (source) => ({
@@ -73,6 +77,7 @@ export function Home() {
               />
             )),
         },
+        openTargetManager: targetManager.open,
         openSyncSettings: syncSettings.open,
       }),
       upstream: () => undefined,

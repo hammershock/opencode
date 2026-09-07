@@ -18,6 +18,15 @@ function createResolvedKeymapConfig(input: TuiKeybind.KeybindOverrides = {}) {
   }
 }
 
+test("RFC-0008 keeps cycle, directional, and Shell exit defaults independently configurable", () => {
+  expect(TuiKeybind.Definitions.variant_cycle.default).toBe("ctrl+t")
+  expect(TuiKeybind.Definitions.variant_increase.default).toBe("shift+up")
+  expect(TuiKeybind.Definitions.variant_decrease.default).toBe("shift+down")
+  expect(TuiKeybind.Definitions.prompt_shell_exit.default).toBe("escape")
+  expect(TuiKeybind.CommandMap.input_backspace).toBe("input.backspace")
+  expect(TuiKeybind.CommandMap.prompt_shell_exit).toBe("prompt.shell.exit")
+})
+
 test("legacy page key aliases compile as page keys", async () => {
   const sequences: Record<string, string[][]> = {}
 

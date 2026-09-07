@@ -13,6 +13,7 @@ import { useTheme } from "./theme"
 import { useToast } from "../ui/toast"
 import { useRoute } from "./route"
 import { usePermission } from "./permission"
+import { declaredVariantOrder, effectiveVariant, moveVariant } from "../model-variant"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -390,13 +391,22 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             if (!this.list().includes(v)) return undefined
             return v
           },
+          effective() {
+            const m = currentModel()
+            const a = agent.current()
+            const configured = (() => {
+              if (!a?.model || !m) return
+              if (a.model.providerID !== m.providerID || a.model.modelID !== m.modelID) return
+              return a.variant
+            })()
+            return effectiveVariant({ selected: this.selected(), configured, variants: this.list() })
+          },
           list() {
             const m = currentModel()
             if (!m) return []
             const provider = sync.data.provider.find((item) => item.id === m.providerID)
             const info = provider?.models[m.modelID]
-            if (!info?.variants) return []
-            return Object.keys(info.variants)
+            return declaredVariantOrder(info)
           },
           set(value: string | undefined) {
             const m = currentModel()
@@ -422,15 +432,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           },
           move(direction: -1 | 1) {
             const variants = this.list()
-            if (variants.length === 0) return false
-            const current = this.current()
-            if (!current) {
-              if (direction === 1) this.set(variants[0])
-              return true
-            }
-            const index = variants.indexOf(current)
-            this.set(variants[Math.max(0, Math.min(variants.length - 1, index + direction))])
-            return true
+            const current = this.effective()
+            const moved = moveVariant({ current, variants, direction })
+            if (!moved.available) return false
+            if (moved.value !== current) this.set(moved.value)
+            return moved.available
           },
         },
       }

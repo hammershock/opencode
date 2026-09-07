@@ -215,6 +215,10 @@ function validateDevice(deviceID: string) {
 }
 
 function validateRedirect(value: string, completion: Attempt["completion"]) {
+  // Baidu's installed-app authorization flow uses the literal `oob` redirect
+  // to display a copyable authorization code. Keep it as the only non-URL
+  // manual fallback; loopback attempts remain origin-bound below.
+  if (completion === "manual" && value === "oob") return
   const url = new URL(value)
   if (completion === "loopback" && !isLoopback(url)) throw new AuthError("invalid-callback")
   if (completion === "manual" && url.protocol !== "https:") throw new AuthError("invalid-callback")

@@ -98,6 +98,20 @@ describe("BaiduAuth", () => {
     expect(store.values.get(BaiduSyncProvider.credentialAccount("device"))).not.toContain("code")
   })
 
+  test("accepts Baidu's installed-app out-of-band manual redirect", async () => {
+    const store = memoryStore()
+    provision(store)
+    const ids = ["attempt", "state"]
+    const begun = await BaiduAuth.begin({
+      store,
+      deviceID: "device",
+      redirectURI: "oob",
+      completion: "manual",
+      randomUUID: () => ids.shift()!,
+    })
+    expect(new URL(begun.authorizationURL).searchParams.get("redirect_uri")).toBe("oob")
+  })
+
   test("rejects another account during reauthentication and permits an explicit switch", async () => {
     const store = memoryStore()
     provision(store)

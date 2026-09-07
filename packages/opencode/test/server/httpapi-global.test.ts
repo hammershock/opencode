@@ -9,7 +9,11 @@ import { Installation } from "../../src/installation"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
-import { GlobalPaths, SyncMissingAppMessage } from "../../src/server/routes/instance/httpapi/groups/global"
+import {
+  GlobalPaths,
+  SyncIncompatibleLocalStateMessage,
+  SyncMissingAppMessage,
+} from "../../src/server/routes/instance/httpapi/groups/global"
 import { controlHandlers } from "../../src/server/routes/instance/httpapi/handlers/control"
 import { controlPlaneHandlers } from "../../src/server/routes/instance/httpapi/handlers/control-plane"
 import { globalHandlers } from "../../src/server/routes/instance/httpapi/handlers/global"
@@ -58,93 +62,111 @@ const remoteSession = SyncMetadata.Item.make({
   availability: "metadata-only",
 })
 
-const apiLayer = HttpRouter.serve(
-  HttpApiBuilder.layer(RootHttpApi).pipe(
-    Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
-    Layer.provide([authorizationLayer, schemaErrorLayer]),
-    // Raw HttpApi routes expose an opaque handler context at the request boundary.
-    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-    HttpRouter.provideRequest(Layer.succeedContext(Context.empty() as Context.Context<unknown>)),
-  ),
-  { disableListenLog: true, disableLogger: true },
-).pipe(
-  Layer.provideMerge(NodeHttpServer.layerTest),
-  Layer.provide(Layer.mock(Auth.Service)({})),
-  Layer.provide(Layer.mock(Config.Service)({})),
-  Layer.provide(Layer.mock(MoveSession.Service)({})),
-  Layer.provide(
-    Layer.mock(SyncSetup.Service)({
-      state: () => Effect.succeed(syncState),
-      initialize: () => Effect.succeed(syncState),
-      begin: (input) =>
-        input.redirectURI.endsWith("/missing-app")
-          ? Effect.fail(new SyncSetup.SetupError({ kind: "missing-app" }))
-          : input.redirectURI.endsWith("/internal-storage-failure")
-            ? Effect.fail(new SyncSetup.SetupError({ kind: "storage" }))
-            : Effect.succeed({
-                attemptID: "attempt-a",
-                authorizationURL: input.redirectURI,
-                completion: input.completion,
-              }),
-      complete: () => Effect.succeed(syncState),
-      switchAccount: () => Effect.succeed(syncState),
-      logout: () => Effect.succeed(syncState),
-      discover: () => Effect.succeed({ spaces: [{ status: "compatible", descriptor }], deletions: [] }),
-      create: () => Effect.succeed({ state: syncState, descriptor }),
-      join: () => Effect.succeed(syncState),
-      activate: () => Effect.succeed(syncState),
-      leave: () => Effect.succeed(syncState),
-      setEnabled: () => Effect.succeed(syncState),
-      setInterval: () => Effect.succeed(syncState),
-      deleteSpace: (namespaceID) => Effect.succeed(namespaceID),
-      removeFromDevice: () => Effect.succeed([descriptor.namespaceID]),
-    }),
-  ),
-  Layer.provide(
-    Layer.mock(SyncControl.Service)({
-      status: () =>
-        Effect.succeed(
-          SyncControl.Status.make({
-            configured: false,
-            initialized: false,
-            authenticated: false,
-            enabled: false,
-            locked: false,
-            outbox: 0,
-            cursors: {},
-          }),
-        ),
-      sessions: () => Effect.succeed([remoteSession]),
-      hydrate: (input) => Effect.succeed(SyncControl.HydrateResult.make({ ...input, availability: "ready" })),
-      switchAccount: () => Effect.succeed(syncState),
-      logout: () => Effect.void,
-      switchSpace: (input) =>
-        Effect.succeed(
-          input.namespaceID === "blocked"
-            ? SyncControl.SwitchResult.make({ status: "blocked", reason: "pending-outbox", outbox: 2 })
-            : SyncControl.SwitchResult.make({ status: "switched", namespaceID: input.namespaceID }),
-        ),
-      leaveSpace: () => Effect.succeed(["session-a"]),
-      enable: () => Effect.void,
-      setInterval: () => Effect.void,
-      deleteSpace: () => Effect.succeed(["session-a"]),
-      removeFromDevice: () => Effect.succeed(["session-a"]),
-      unassigned: () => Effect.succeed(["session-unassigned"]),
-      assignUnassigned: (input) => Effect.succeed(input.sessionIDs),
-    }),
-  ),
-  Layer.provide(
-    Layer.mock(Installation.Service)({
-      method: () => Effect.succeed("npm"),
-      latest: () => Effect.succeed("9.9.9"),
-      upgrade: () => Effect.void,
-    }),
-  ),
-  Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })),
-)
+const makeApiLayer = (state: SyncSetup.Interface["state"] = () => Effect.succeed(syncState)) =>
+  HttpRouter.serve(
+    HttpApiBuilder.layer(RootHttpApi).pipe(
+      Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
+      Layer.provide([authorizationLayer, schemaErrorLayer]),
+      // Raw HttpApi routes expose an opaque handler context at the request boundary.
+      // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+      HttpRouter.provideRequest(Layer.succeedContext(Context.empty() as Context.Context<unknown>)),
+    ),
+    { disableListenLog: true, disableLogger: true },
+  ).pipe(
+    Layer.provideMerge(NodeHttpServer.layerTest),
+    Layer.provide(Layer.mock(Auth.Service)({})),
+    Layer.provide(Layer.mock(Config.Service)({})),
+    Layer.provide(Layer.mock(MoveSession.Service)({})),
+    Layer.provide(
+      Layer.mock(SyncSetup.Service)({
+        state,
+        initialize: () => Effect.succeed(syncState),
+        begin: (input) =>
+          input.redirectURI.endsWith("/missing-app")
+            ? Effect.fail(new SyncSetup.SetupError({ kind: "missing-app" }))
+            : input.redirectURI.endsWith("/incompatible-local-state")
+              ? Effect.fail(new SyncSetup.SetupError({ kind: "incompatible-local-state" }))
+              : input.redirectURI.endsWith("/internal-storage-failure")
+                ? Effect.fail(new SyncSetup.SetupError({ kind: "storage" }))
+                : Effect.succeed({
+                    attemptID: "attempt-a",
+                    authorizationURL: input.redirectURI,
+                    completion: input.completion,
+                  }),
+        complete: () => Effect.succeed(syncState),
+        switchAccount: () => Effect.succeed(syncState),
+        logout: () => Effect.succeed(syncState),
+        discover: () => Effect.succeed({ spaces: [{ status: "compatible", descriptor }], deletions: [] }),
+        create: () => Effect.succeed({ state: syncState, descriptor }),
+        join: () => Effect.succeed(syncState),
+        activate: () => Effect.succeed(syncState),
+        leave: () => Effect.succeed(syncState),
+        setEnabled: () => Effect.succeed(syncState),
+        setInterval: () => Effect.succeed(syncState),
+        deleteSpace: (namespaceID) => Effect.succeed(namespaceID),
+        removeFromDevice: () => Effect.succeed([descriptor.namespaceID]),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(SyncControl.Service)({
+        status: () =>
+          Effect.succeed(
+            SyncControl.Status.make({
+              configured: false,
+              initialized: false,
+              authenticated: false,
+              enabled: false,
+              locked: false,
+              outbox: 0,
+              cursors: {},
+            }),
+          ),
+        sessions: () => Effect.succeed([remoteSession]),
+        hydrate: (input) => Effect.succeed(SyncControl.HydrateResult.make({ ...input, availability: "ready" })),
+        switchAccount: () => Effect.succeed(syncState),
+        logout: () => Effect.void,
+        switchSpace: (input) =>
+          Effect.succeed(
+            input.namespaceID === "blocked"
+              ? SyncControl.SwitchResult.make({ status: "blocked", reason: "pending-outbox", outbox: 2 })
+              : SyncControl.SwitchResult.make({ status: "switched", namespaceID: input.namespaceID }),
+          ),
+        leaveSpace: () => Effect.succeed(["session-a"]),
+        enable: () => Effect.void,
+        setInterval: () => Effect.void,
+        deleteSpace: () => Effect.succeed(["session-a"]),
+        removeFromDevice: () => Effect.succeed(["session-a"]),
+        unassigned: () => Effect.succeed(["session-unassigned"]),
+        assignUnassigned: (input) => Effect.succeed(input.sessionIDs),
+      }),
+    ),
+    Layer.provide(
+      Layer.mock(Installation.Service)({
+        method: () => Effect.succeed("npm"),
+        latest: () => Effect.succeed("9.9.9"),
+        upgrade: () => Effect.void,
+      }),
+    ),
+    Layer.provide(ServerAuth.Config.configLayer({ password: Option.none(), username: "opencode" })),
+  )
+const apiLayer = makeApiLayer()
 const it = testEffect(apiLayer)
+const incompatibleStateIt = testEffect(
+  makeApiLayer(() => Effect.fail(new SyncSetup.SetupError({ kind: "incompatible-local-state" }))),
+)
 
 describe("global HttpApi", () => {
+  incompatibleStateIt.live("returns the typed incompatible reason from sync state", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get(GlobalPaths.syncState).pipe(HttpClient.execute)
+      expect(response.status).toBe(400)
+      expect(yield* response.json).toEqual({
+        name: "SyncSetupError",
+        data: { kind: "incompatible-local-state", message: SyncIncompatibleLocalStateMessage },
+      })
+    }),
+  )
+
   it.live("preserves the redacted missing-app code through the generated SDK boundary", () =>
     Effect.gen(function* () {
       const raw = yield* HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
@@ -190,6 +212,19 @@ describe("global HttpApi", () => {
         data: { kind: "missing-app", message: SyncMissingAppMessage },
       })
       expect(JSON.stringify(cause.body)).not.toContain("secret")
+
+      const incompatible = yield* HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
+        HttpClientRequest.bodyJsonUnsafe({
+          redirectURI: "http://127.0.0.1/incompatible-local-state",
+          completion: "loopback",
+        }),
+        HttpClient.execute,
+      )
+      expect(incompatible.status).toBe(400)
+      expect(yield* incompatible.json).toEqual({
+        name: "SyncSetupError",
+        data: { kind: "incompatible-local-state", message: SyncIncompatibleLocalStateMessage },
+      })
 
       const generic = yield* HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
         HttpClientRequest.bodyJsonUnsafe({

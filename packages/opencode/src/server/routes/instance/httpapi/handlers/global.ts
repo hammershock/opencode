@@ -11,7 +11,12 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
-import { GlobalUpgradeInput, SyncMissingAppMessage, SyncSetupApiError } from "../groups/global"
+import {
+  GlobalUpgradeInput,
+  SyncIncompatibleLocalStateMessage,
+  SyncMissingAppMessage,
+  SyncSetupApiError,
+} from "../groups/global"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { HttpApiError } from "effect/unstable/httpapi"
 import { SyncControl } from "@opencode-ai/core/sync/control"
@@ -93,17 +98,22 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const badSetup = <A>(effect: Effect.Effect<A, SyncSetup.SetupError>) =>
       effect.pipe(
-        Effect.mapError((error) =>
-          error.kind === "missing-app"
-            ? new SyncSetupApiError({
-                name: "SyncSetupError",
-                data: { kind: "missing-app", message: SyncMissingAppMessage },
-              })
-            : new SyncSetupApiError({
-                name: "SyncSetupError",
-                data: { kind: "bad-request", message: "Sync setup request failed" },
-              }),
-        ),
+        Effect.mapError((error) => {
+          if (error.kind === "missing-app")
+            return new SyncSetupApiError({
+              name: "SyncSetupError",
+              data: { kind: "missing-app", message: SyncMissingAppMessage },
+            })
+          if (error.kind === "incompatible-local-state")
+            return new SyncSetupApiError({
+              name: "SyncSetupError",
+              data: { kind: "incompatible-local-state", message: SyncIncompatibleLocalStateMessage },
+            })
+          return new SyncSetupApiError({
+            name: "SyncSetupError",
+            data: { kind: "bad-request", message: "Sync setup request failed" },
+          })
+        }),
       )
     const badControl = <A>(effect: Effect.Effect<A, SyncControl.ControlError>) =>
       effect.pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
@@ -115,10 +125,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       )
 
     const getSyncState = Effect.fn("GlobalHttpApi.syncState")(() =>
-      syncSetup.state().pipe(
-        Effect.map((state) => state ?? null),
-        Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
-      ),
+      badSetup(syncSetup.state()).pipe(Effect.map((state) => state ?? null)),
     )
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {

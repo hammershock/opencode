@@ -15,6 +15,23 @@ describe("SyncSetup lifecycle", () => {
     await expect(run(setup.begin(manual))).rejects.toMatchObject({ kind: "missing-app" })
   })
 
+  test("rejects unsupported local state without mutation or secure-store access", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const setup = SyncSetup.make({ configDirectory: tmp.path, store: secure })
+    await run(setup.initialize("Mac"))
+    const filename = `${tmp.path}/sync/config.json`
+    const legacy = '{"version":1,"deviceID":"legacy-device","credential":"must-not-be-read"}\n'
+    await Bun.write(filename, legacy)
+    secure.reads = 0
+
+    await expect(run(setup.state())).rejects.toMatchObject({ kind: "incompatible-local-state" })
+    await expect(run(setup.initialize("Mac"))).rejects.toMatchObject({ kind: "incompatible-local-state" })
+    await expect(run(setup.begin(manual))).rejects.toMatchObject({ kind: "incompatible-local-state" })
+    expect(secure.reads).toBe(0)
+    expect(await Bun.file(filename).text()).toBe(legacy)
+  })
+
   test("reads config without secure storage and login survives restart without creating a space", async () => {
     await using tmp = await tmpdir()
     const secure = store()

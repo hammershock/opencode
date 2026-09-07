@@ -6,6 +6,8 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { Database } from "@opencode-ai/core/database/database"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
+import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
+import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { testEffect } from "./lib/effect"
 
 let remoteStarted = false
@@ -57,6 +59,89 @@ const realControlIt = testEffect(
   ]),
 )
 
+const encrypted = {
+  ...active,
+  encryption: "aes-256-gcm" as const,
+}
+const encryptedState = {
+  ...state,
+  spaces: [
+    {
+      accountID: active.account.id,
+      descriptor: {
+        namespaceID: active.namespaceID,
+        name: active.name,
+        protocol: { major: 1 as const, minor: 0 },
+        encryption: "aes-256-gcm" as const,
+        createdAt: 1,
+        updatedAt: 1,
+        summary: { sessions: 0, devices: 1, updatedAt: 1 },
+        revision: 1,
+      },
+      remoteRoot: active.remoteRoot,
+      joinedAt: 1,
+    },
+  ],
+}
+const recoveryStore = store()
+recoveryStore.values.set(
+  BaiduSyncProvider.credentialAccount(active.deviceID),
+  JSON.stringify({
+    appKey: "app",
+    secretKey: "secret",
+    accessToken: "access",
+    refreshToken: "refresh",
+    expiresAt: Number.MAX_SAFE_INTEGER,
+  }),
+)
+recoveryStore.values.set(
+  `space:${active.namespaceID}:root`,
+  Buffer.from(new Uint8Array(32).fill(1)).toString("base64url"),
+)
+let runtimeConstructions = 0
+const unavailableProvider = (): SyncProvider.Adapter => {
+  runtimeConstructions++
+  const unavailable = () => Promise.reject(new Error("offline"))
+  return {
+    id: "memory",
+    list: unavailable,
+    stat: unavailable,
+    download: unavailable,
+    uploadAtomic: unavailable,
+    deleteBatch: unavailable,
+  }
+}
+const recoveryControlNode = {
+  ...SyncControl.node,
+  implementation: SyncControl.layerWith({
+    secureStore: async () => recoveryStore,
+    provider: unavailableProvider,
+  }),
+}
+const recoveryControlIt = testEffect(
+  LayerNode.compile(recoveryControlNode, [
+    [Database.node, Database.layerFromPath(":memory:")],
+    [SyncDatabase.node, SyncDatabase.layerFromPath(":memory:")],
+    [
+      SyncSetup.node,
+      Layer.mock(SyncSetup.Service, {
+        state: () => Effect.succeed(encryptedState),
+        config: () => Effect.succeed(encrypted),
+        authenticated: () => Effect.succeed(true),
+        applyRemoteDeletion: () => Effect.succeed(false),
+        join: () =>
+          Effect.promise(async () => {
+            await recoveryStore.set(
+              `space:${active.namespaceID}:root`,
+              Buffer.from(new Uint8Array(32).fill(2)).toString("base64url"),
+            )
+            return encryptedState
+          }),
+      }),
+    ],
+  ]),
+)
+
 describe("SyncControl lifecycle policy", () => {
   realControlIt.live("keeps real local status responsive while a remote check is hung and after release", () =>
     Effect.gen(function* () {
@@ -69,6 +154,20 @@ describe("SyncControl lifecycle policy", () => {
       releaseRemote()
       expect((yield* Fiber.join(running))._tag).toBe("Failure")
       expect((yield* control.status().pipe(Effect.timeout("250 millis"))).namespaceID).toBe(active.namespaceID)
+    }),
+  )
+
+  recoveryControlIt.live("rebuilds the active encrypted runtime after a successful recovery-key import", () =>
+    Effect.gen(function* () {
+      runtimeConstructions = 0
+      const control = yield* SyncControl.Service
+
+      expect((yield* control.now().pipe(Effect.exit))._tag).toBe("Failure")
+      expect(runtimeConstructions).toBe(1)
+
+      yield* control.join({ namespaceID: active.namespaceID, recoveryString: "redacted-recovery" })
+      expect((yield* control.now().pipe(Effect.exit))._tag).toBe("Failure")
+      expect(runtimeConstructions).toBe(2)
     }),
   )
 

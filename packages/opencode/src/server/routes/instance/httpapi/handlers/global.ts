@@ -173,7 +173,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         syncSetup.discover().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
       )
       .handle("syncCreate", (ctx) => badSetup(syncSetup.create(ctx.payload)))
-      .handle("syncJoin", (ctx) => badSetup(syncSetup.join(ctx.payload)))
+      .handle("syncJoin", (ctx) => badSetup(syncControl.join(ctx.payload)))
       .handle("syncActivate", (ctx) => badControl(syncControl.switchSpace(ctx.payload)))
       .handle("syncLeave", (ctx) => badControl(syncControl.leaveSpace(ctx.payload.namespaceID)))
       .handle("syncEnabled", (ctx) => stateAfter(syncControl.enable(ctx.payload.enabled)))

@@ -11,6 +11,7 @@ import { SyncSecureStore } from "./secure-store"
 import { SyncSpace } from "./space"
 import { SyncSpaceCatalog } from "./space-catalog"
 import { SyncState } from "./state"
+import { SyncRuntime } from "./runtime"
 
 export const BeginInput = Schema.Struct({
   redirectURI: Schema.NonEmptyString,
@@ -52,6 +53,7 @@ export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetup
     "storage",
     "locked",
   ]),
+  diagnostic: Schema.optional(SyncRuntime.Diagnostic),
 }) {}
 
 export interface Interface {
@@ -191,45 +193,53 @@ export function make(input: {
     }
   }
   const discover = Effect.fn("SyncSetup.discover")(() =>
-    effect("remote", async () => (await remote()).catalog.discover()),
+    effect("remote", async () => (await remote()).catalog.discover(), "catalog"),
   )
   const create = Effect.fn("SyncSetup.create")((values: CreateInput) =>
-    effect("remote", async () => {
-      const context = await remote()
-      const created = await context.catalog.create(values)
-      if (created.descriptor.encryption === "aes-256-gcm") {
-        const key = await SyncCrypto.importRecoveryString(created.recoveryString!)
-        await input.store.set(rootAccount(key.namespaceID), Buffer.from(key.rootKey).toString("base64url"))
-      }
-      const next = await states.write(
-        SyncState.bind(context.current, binding(context.current, created.descriptor, now())),
-        context.current.revision,
-      )
-      return {
-        state: next,
-        descriptor: created.descriptor,
-        ...(created.recoveryString ? { recoveryString: created.recoveryString } : {}),
-      }
-    }),
+    effect(
+      "remote",
+      async () => {
+        const context = await remote()
+        const created = await context.catalog.create(values)
+        if (created.descriptor.encryption === "aes-256-gcm") {
+          const key = await SyncCrypto.importRecoveryString(created.recoveryString!)
+          await input.store.set(rootAccount(key.namespaceID), Buffer.from(key.rootKey).toString("base64url"))
+        }
+        const next = await states.write(
+          SyncState.bind(context.current, binding(context.current, created.descriptor, now())),
+          context.current.revision,
+        )
+        return {
+          state: next,
+          descriptor: created.descriptor,
+          ...(created.recoveryString ? { recoveryString: created.recoveryString } : {}),
+        }
+      },
+      "catalog",
+    ),
   )
   const join = Effect.fn("SyncSetup.join")((values: JoinInput) =>
-    effect("remote", async () => {
-      const context = await remote()
-      const joined = await context.catalog.join(values.namespaceID)
-      if (joined.descriptor.encryption === "aes-256-gcm") {
-        if (!values.recoveryString) throw new SetupError({ kind: "locked" })
-        const key = await SyncCrypto.importRecoveryString(values.recoveryString).catch(() => {
-          throw new SetupError({ kind: "locked" })
-        })
-        if (key.namespaceID !== values.namespaceID) throw new SetupError({ kind: "locked" })
-        await input.store.set(rootAccount(values.namespaceID), Buffer.from(key.rootKey).toString("base64url"))
-      }
-      if (joined.descriptor.encryption === "none" && values.recoveryString) throw new SetupError({ kind: "invalid" })
-      return states.write(
-        SyncState.bind(context.current, binding(context.current, joined.descriptor, now())),
-        context.current.revision,
-      )
-    }),
+    effect(
+      "remote",
+      async () => {
+        const context = await remote()
+        const joined = await context.catalog.join(values.namespaceID)
+        if (joined.descriptor.encryption === "aes-256-gcm") {
+          if (!values.recoveryString) throw new SetupError({ kind: "locked" })
+          const key = await SyncCrypto.importRecoveryString(values.recoveryString).catch(() => {
+            throw new SetupError({ kind: "locked" })
+          })
+          if (key.namespaceID !== values.namespaceID) throw new SetupError({ kind: "locked" })
+          await input.store.set(rootAccount(values.namespaceID), Buffer.from(key.rootKey).toString("base64url"))
+        }
+        if (joined.descriptor.encryption === "none" && values.recoveryString) throw new SetupError({ kind: "invalid" })
+        return states.write(
+          SyncState.bind(context.current, binding(context.current, joined.descriptor, now())),
+          context.current.revision,
+        )
+      },
+      "catalog",
+    ),
   )
   const activate = Effect.fn("SyncSetup.activate")((namespaceID: string) =>
     update(states, (current) => SyncState.activate(current, namespaceID)),
@@ -255,10 +265,9 @@ export function make(input: {
     const binding = context.current.spaces.find(
       (item) => item.descriptor.namespaceID === namespaceID && item.accountID === context.current.account?.id,
     )
-    if (binding && !SyncSpace.compatible(binding.descriptor.protocol))
-      return yield* new SetupError({ kind: "invalid" })
+    if (binding && !SyncSpace.compatible(binding.descriptor.protocol)) return yield* new SetupError({ kind: "invalid" })
     if (!binding) {
-      const inspection = yield* effect("remote", () =>
+      const inspection = yield* deleteEffect(() =>
         context.catalog.inspect(namespaceID).catch((cause) => {
           if (cause instanceof SyncSpaceCatalog.CatalogError && cause.kind === "deleted") return undefined
           throw cause
@@ -266,7 +275,7 @@ export function make(input: {
       )
       if (inspection?.status === "unsupported") return yield* new SetupError({ kind: "invalid" })
     }
-    yield* effect("remote", () => context.catalog.remove(namespaceID))
+    yield* deleteEffect(() => context.catalog.remove(namespaceID))
     yield* effect("storage", () =>
       states.update((current) => {
         if (current.account?.id !== context.current.account?.id) throw new SetupError({ kind: "account-mismatch" })
@@ -362,7 +371,7 @@ function rootAccount(namespaceID: string) {
 function update(store: ReturnType<typeof SyncState.make>, change: (current: SyncState.State) => SyncState.State) {
   return effect("storage", () => store.update(change))
 }
-function effect<A>(kind: SetupError["kind"], run: () => Promise<A>) {
+function effect<A>(kind: SetupError["kind"], run: () => Promise<A>, stage?: SyncRuntime.Diagnostic["stage"]) {
   return Effect.tryPromise({
     try: run,
     catch: (cause) =>
@@ -370,7 +379,16 @@ function effect<A>(kind: SetupError["kind"], run: () => Promise<A>) {
         ? cause
         : cause instanceof SyncState.IncompatibleLocalStateError
           ? new SetupError({ kind: "incompatible-local-state" })
-          : new SetupError({ kind }),
+          : new SetupError({ kind, diagnostic: stage ? SyncRuntime.diagnostic(stage, cause) : undefined }),
+  })
+}
+function deleteEffect<A>(run: () => Promise<A>) {
+  return Effect.tryPromise({
+    try: run,
+    catch: (cause) =>
+      cause instanceof SetupError
+        ? cause
+        : new SetupError({ kind: "remote", diagnostic: SyncRuntime.diagnostic("delete", cause) }),
   })
 }
 function authEffect<A>(run: () => Promise<A>) {

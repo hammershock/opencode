@@ -35,12 +35,35 @@ export const Head = Schema.Struct({
 })
 export type Head = typeof Head.Type
 
+export const Diagnostic = Schema.Struct({
+  stage: Schema.Literals(["attachment", "segment", "head", "pull", "hydrate", "collect"]),
+  operation: Schema.optional(Schema.Literals(["list", "stat", "download", "upload", "delete"])),
+  kind: Schema.optional(
+    Schema.Literals([
+      "unauthenticated",
+      "permission",
+      "not-found",
+      "conflict",
+      "rate-limit",
+      "network",
+      "provider",
+      "cancelled",
+      "invalid-response",
+    ]),
+  ),
+  retryable: Schema.Boolean,
+  outcome: Schema.optional(Schema.Literals(["failed", "unknown"])),
+  retryAfter: Schema.optional(NonNegativeInt),
+  message: Schema.String,
+})
+export type Diagnostic = typeof Diagnostic.Type
+
 export type Status = {
   readonly enabled: boolean
   readonly running: "idle" | "upload" | "pull"
   readonly lastUploadAt?: number
   readonly lastPullAt?: number
-  readonly lastError?: { readonly stage: "upload" | "pull"; readonly retryable: boolean; readonly message: string }
+  readonly lastError?: Diagnostic
 }
 
 export interface MetadataProjector {
@@ -104,10 +127,13 @@ export function make(input: {
     const acquired = await Effect.runPromise(input.store.acquire("upload", owner, 60_000, now()))
     if (!acquired) return
     status = { ...status, running: "upload" }
+    let stage: Diagnostic["stage"] = "segment"
     try {
       const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
       if (segment) {
+        stage = "attachment"
         const wire = input.attachment ? await externalizeSegment(segment, input.attachment) : segment
+        stage = "segment"
         const path = segmentPath(segment.deviceID, segment.generation, codec.suffix)
         const bytes = await encode(codec, "event", segmentContext(segment.deviceID, segment.generation, path), wire)
         const existing = await input.provider.stat(path, signal)
@@ -137,6 +163,7 @@ export function make(input: {
         revoked: input.revoked ? [...(await Effect.runPromise(input.revoked()))] : [],
       }
       localHead = head
+      stage = "head"
       const path = headPath(input.config.deviceID, codec.suffix)
       const bytes = await encode(codec, "metadata", headContext(input.config.deviceID, path), head)
       const existing = await input.provider.stat(path, signal)
@@ -146,10 +173,11 @@ export function make(input: {
         existing ? { type: "version", version: existing.version } : { type: "absent" },
         signal,
       )
+      stage = "collect"
       await collectAttachments(signal)
       status = { ...status, running: "idle", lastUploadAt: now(), lastError: undefined }
     } catch (cause) {
-      status = { ...status, running: "idle", lastError: diagnostic("upload", cause) }
+      status = { ...status, running: "idle", lastError: diagnostic(stage, cause) }
       throw cause
     } finally {
       await Effect.runPromise(input.store.release("upload", owner)).catch(() => undefined)
@@ -237,7 +265,7 @@ export function make(input: {
         }
       }
     } catch (cause) {
-      status = { ...status, lastError: diagnostic("pull", cause) }
+      status = { ...status, lastError: diagnostic("hydrate", cause) }
       throw cause
     } finally {
       await Effect.runPromise(input.store.release("hydrate", owner)).catch(() => undefined)
@@ -391,11 +419,15 @@ async function decode<A>(
   return decode(JSON.parse(decoder.decode(plaintext)))
 }
 
-function diagnostic(stage: "upload" | "pull", cause: unknown): Status["lastError"] {
+export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnostic {
   const provider = cause instanceof SyncProvider.ProviderError ? cause : undefined
   return {
     stage,
+    operation: provider?.operation,
+    kind: provider?.kind,
     retryable: provider?.retryable ?? false,
-    message: provider ? provider.message : "Sync operation failed",
+    outcome: provider?.outcome,
+    retryAfter: provider?.retryAfter,
+    message: `Sync ${stage} failed`,
   }
 }

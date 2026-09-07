@@ -2088,6 +2088,31 @@ export type EffectHttpApiErrorServiceUnavailable = {
   _tag: "ServiceUnavailable"
 }
 
+export type SyncControlApiError = {
+  name: "SyncControlError"
+  data: {
+    kind: "unconfigured" | "locked" | "provider" | "storage" | "invalid" | "pending" | "deleted"
+    diagnostic?: {
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect"
+      operation?: "list" | "stat" | "download" | "upload" | "delete"
+      kind?:
+        | "unauthenticated"
+        | "permission"
+        | "not-found"
+        | "conflict"
+        | "rate-limit"
+        | "network"
+        | "provider"
+        | "cancelled"
+        | "invalid-response"
+      retryable: boolean
+      outcome?: "failed" | "unknown"
+      retryAfter?: number
+      message: string
+    }
+  }
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -8662,6 +8687,24 @@ export type GlobalSyncStatusResponses = {
     }
     lastSuccessAt?: number
     error?: string
+    diagnostic?: {
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect"
+      operation?: "list" | "stat" | "download" | "upload" | "delete"
+      kind?:
+        | "unauthenticated"
+        | "permission"
+        | "not-found"
+        | "conflict"
+        | "rate-limit"
+        | "network"
+        | "provider"
+        | "cancelled"
+        | "invalid-response"
+      retryable: boolean
+      outcome?: "failed" | "unknown"
+      retryAfter?: number
+      message: string
+    }
   }
 }
 
@@ -8680,9 +8723,9 @@ export type GlobalSyncNowErrors = {
    */
   400: BadRequestError
   /**
-   * ServiceUnavailable
+   * SyncControlApiError
    */
-  503: EffectHttpApiErrorServiceUnavailable
+  503: SyncControlApiError
 }
 
 export type GlobalSyncNowError = GlobalSyncNowErrors[keyof GlobalSyncNowErrors]

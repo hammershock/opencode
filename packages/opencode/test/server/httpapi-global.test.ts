@@ -62,7 +62,10 @@ const remoteSession = SyncMetadata.Item.make({
   availability: "metadata-only",
 })
 
-const makeApiLayer = (state: SyncSetup.Interface["state"] = () => Effect.succeed(syncState)) =>
+const makeApiLayer = (
+  state: SyncSetup.Interface["state"] = () => Effect.succeed(syncState),
+  now: SyncControl.Interface["now"] = () => Effect.void,
+) =>
   HttpRouter.serve(
     HttpApiBuilder.layer(RootHttpApi).pipe(
       Layer.provide([controlHandlers, controlPlaneHandlers, globalHandlers]),
@@ -109,6 +112,7 @@ const makeApiLayer = (state: SyncSetup.Interface["state"] = () => Effect.succeed
     ),
     Layer.provide(
       Layer.mock(SyncControl.Service)({
+        now,
         status: () =>
           Effect.succeed(
             SyncControl.Status.make({
@@ -154,8 +158,46 @@ const it = testEffect(apiLayer)
 const incompatibleStateIt = testEffect(
   makeApiLayer(() => Effect.fail(new SyncSetup.SetupError({ kind: "incompatible-local-state" }))),
 )
+const failedSyncIt = testEffect(
+  makeApiLayer(undefined, () =>
+    Effect.fail(
+      new SyncControl.ControlError({
+        kind: "provider",
+        diagnostic: {
+          stage: "segment",
+          operation: "upload",
+          kind: "network",
+          retryable: true,
+          outcome: "unknown",
+          message: "Sync segment failed",
+        },
+      }),
+    ),
+  ),
+)
 
 describe("global HttpApi", () => {
+  failedSyncIt.live("returns a redacted structured Sync Now diagnostic", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.post(GlobalPaths.syncNow).pipe(HttpClient.execute)
+      expect(response.status).toBe(503)
+      expect(yield* response.json).toEqual({
+        name: "SyncControlError",
+        data: {
+          kind: "provider",
+          diagnostic: {
+            stage: "segment",
+            operation: "upload",
+            kind: "network",
+            retryable: true,
+            outcome: "unknown",
+            message: "Sync segment failed",
+          },
+        },
+      })
+    }),
+  )
+
   incompatibleStateIt.live("returns the typed incompatible reason from sync state", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.get(GlobalPaths.syncState).pipe(HttpClient.execute)

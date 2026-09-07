@@ -16,6 +16,7 @@ import {
   SyncIncompatibleLocalStateMessage,
   SyncMissingAppMessage,
   SyncSetupApiError,
+  SyncControlApiError,
 } from "../groups/global"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { HttpApiError } from "effect/unstable/httpapi"
@@ -189,7 +190,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncNow", () =>
         syncControl.now().pipe(
           Effect.as(true),
-          Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
+          Effect.mapError((error) =>
+            new SyncControlApiError({
+              name: "SyncControlError",
+              data: { kind: error.kind, diagnostic: error.diagnostic },
+            }),
+          ),
         ),
       )
       .handle("syncSessions", () =>

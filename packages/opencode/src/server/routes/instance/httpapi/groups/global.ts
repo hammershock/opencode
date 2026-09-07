@@ -14,6 +14,7 @@ import { SyncDevice } from "@opencode-ai/core/sync/device"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
 import { SyncState } from "@opencode-ai/core/sync/state"
 import { SyncSpace } from "@opencode-ai/core/sync/space"
+import { SyncRuntime } from "@opencode-ai/core/sync/runtime"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 
 const GlobalHealth = Schema.Struct({
@@ -117,6 +118,17 @@ export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("Syn
     ]),
   },
   { httpApiStatus: 400 },
+) {}
+
+export class SyncControlApiError extends Schema.ErrorClass<SyncControlApiError>("SyncControlApiError")(
+  {
+    name: Schema.Literal("SyncControlError"),
+    data: Schema.Struct({
+      kind: Schema.Literals(["unconfigured", "locked", "provider", "storage", "invalid", "pending", "deleted"]),
+      diagnostic: Schema.optional(SyncRuntime.Diagnostic),
+    }),
+  },
+  { httpApiStatus: 503 },
 ) {}
 
 export const GlobalPaths = {
@@ -264,7 +276,7 @@ export const GlobalApi = HttpApi.make("global").add(
       }),
       HttpApiEndpoint.post("syncNow", GlobalPaths.syncNow, {
         success: Schema.Boolean,
-        error: HttpApiError.ServiceUnavailable,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.get("syncSessions", GlobalPaths.syncSessions, {
         success: Schema.Array(SyncMetadata.Item),

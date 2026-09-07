@@ -61,7 +61,7 @@ describe("target registry HttpApi", () => {
     expect(await removed.json()).toMatchObject({ targets: [] })
   })
 
-  test("maps missing, unauthorized restore, and unavailable transport without leaking credentials", async () => {
+  test("maps missing, changed restore scope, and unavailable transport without leaking credentials", async () => {
     const initial = (await (await request("/api/target")).json()) as { revision: string }
     const created = (await (
       await request("/api/target", {
@@ -78,12 +78,12 @@ describe("target registry HttpApi", () => {
       method: "POST",
       body: JSON.stringify({
         input,
-        referencedSessionIDs: ["fabricated"],
+        referencedSessionIDs: ["ses_fabricated"],
         expectedRevision: created.snapshot.revision,
       }),
     })
-    expect(restore.status).toBe(403)
-    expect(await restore.json()).toMatchObject({ _tag: "ForbiddenError" })
+    expect(restore.status).toBe(409)
+    expect(await restore.json()).toMatchObject({ _tag: "ConflictError", resource: "session-recovery" })
 
     const missing = await request(`/api/target/${crypto.randomUUID()}/test`, { method: "POST" })
     expect(missing.status).toBe(404)
@@ -100,6 +100,62 @@ describe("target registry HttpApi", () => {
     const response = await request("/api/target-binding")
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({ bindings: {} })
+  })
+
+  test("keeps unresolved Session history readable and denies prompt admission", async () => {
+    const targetID = "bbbf7f19-ab10-4f5d-94ab-fd9225b8f3e9"
+    const created = await request("/api/session", {
+      method: "POST",
+      body: JSON.stringify({
+        location: { target: { type: "rexd", targetID }, directory: "/historical/worktree" },
+      }),
+    })
+    expect(created.status).toBe(200)
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+
+    expect((await request(`/api/session/${sessionID}`)).status).toBe(200)
+    expect((await request(`/api/session/${sessionID}/history`)).status).toBe(200)
+    expect((await request(`/api/session/${sessionID}/message`)).status).toBe(200)
+
+    const prompt = await request(`/api/session/${sessionID}/prompt`, {
+      method: "POST",
+      body: JSON.stringify({ id: "msg_unresolved", prompt: { text: "must not run" }, resume: false }),
+    })
+    expect(prompt.status).toBe(400)
+    expect(await prompt.json()).toMatchObject({
+      _tag: "InvalidRequestError",
+      kind: "session_location_missing_local_target",
+    })
+
+    const shell = await request(`/session/${sessionID}/shell`, {
+      method: "POST",
+      body: JSON.stringify({ agent: "build", command: "pwd" }),
+    })
+    expect(shell.status).toBe(400)
+    const completion = await request(`/session/${sessionID}/shell/completion`, {
+      method: "POST",
+      body: JSON.stringify({ input: "pw", cursor: 2 }),
+    })
+    expect(completion.status).toBe(400)
+
+    const location = new URLSearchParams({
+      "location[target]": targetID,
+      "location[directory]": "/historical/worktree",
+    })
+    const directory = await request(`/api/fs/directory/status?${location}`, {
+      method: "POST",
+      body: JSON.stringify({ path: "." }),
+    })
+    expect(directory.status).toBeGreaterThanOrEqual(400)
+    const pty = await request(`/api/pty?${location}`, {
+      method: "POST",
+      body: JSON.stringify({ command: "pwd" }),
+    })
+    expect(pty.status).toBeGreaterThanOrEqual(400)
+
+    const messages = (await (await request(`/api/session/${sessionID}/message`)).json()) as { data: unknown[] }
+    expect(messages.data).toEqual([])
+    expect((await request(`/session/${sessionID}`, { method: "DELETE" })).status).toBe(200)
   })
 
   test("unbinds through the canonical registry only when revision and affected Session snapshot match", async () => {

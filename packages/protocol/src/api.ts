@@ -41,7 +41,7 @@ const makeApiFromGroup = <
     .add(LocationGroup.middleware(locationMiddleware))
     .add(AgentGroup.middleware(locationMiddleware))
     .add(makeSessionGroup(sessionLocationMiddleware))
-    .add(MessageGroup.middleware(sessionLocationMiddleware))
+    .add(MessageGroup)
     .add(ModelGroup.middleware(locationMiddleware))
     .add(ProviderGroup.middleware(locationMiddleware))
     .add(IntegrationGroup.middleware(locationMiddleware))

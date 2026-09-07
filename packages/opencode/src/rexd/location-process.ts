@@ -3,6 +3,7 @@ import { LocationProcess } from "@opencode-ai/core/location-process"
 import { AppProcess } from "@opencode-ai/core/process"
 import { Duration, Effect, Layer, Result, Schema } from "effect"
 import { RexdLocationSession } from "./location-session"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
 
 const Started = Schema.Struct({ process_id: Schema.String })
 const Output = Schema.Struct({
@@ -24,9 +25,10 @@ export function rexdProcessNode(session: ReturnType<typeof import("./location-se
       LocationProcess.Service,
       Effect.gen(function* () {
         const lease = yield* RexdLocationSession
+        const activity = yield* SessionActivity.Service
         return LocationProcess.Service.of({
-          runShell: (command, options) =>
-            Effect.tryPromise({
+          runShell: (command, options) => {
+            const run = Effect.tryPromise({
               try: () =>
                 runRexdProcess(lease, {
                   command,
@@ -38,11 +40,13 @@ export function rexdProcessNode(session: ReturnType<typeof import("./location-se
                   signal: options.signal,
                 }),
               catch: (cause) => new AppProcess.AppProcessError({ command, cause }),
-            }),
+            })
+            return options.sessionID ? activity.withActivity(options.sessionID, "process_execution", run) : run
+          },
         })
       }),
     ),
-    deps: [session],
+    deps: [session, SessionActivity.node],
   })
 }
 

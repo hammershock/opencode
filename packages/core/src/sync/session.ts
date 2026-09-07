@@ -11,6 +11,7 @@ import { SyncOwnership } from "./ownership"
 import { Database } from "../database/database"
 import { SessionTable } from "../session/sql"
 import { SessionV2 } from "../session"
+import { SessionActivity } from "../session/activity"
 import { eq, isNotNull } from "drizzle-orm"
 import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 
@@ -21,9 +22,7 @@ type DurablePayload = {
   readonly data: Record<string, unknown>
 }
 
-export type PersistedOwnership =
-  | { readonly exists: true; readonly spaceID?: string }
-  | { readonly exists: false }
+export type PersistedOwnership = { readonly exists: true; readonly spaceID?: string } | { readonly exists: false }
 
 /**
  * Captures the authoritative durable event stream. Deletion is translated to
@@ -144,11 +143,12 @@ export function projector(
   onDelete?: (sessionID: string) => Effect.Effect<void, unknown>,
   spaceID?: string,
   onOwned?: (sessionID: string, spaceID: string) => Effect.Effect<void, unknown>,
+  activity?: SessionActivity.Interface,
 ): SyncEvent.DurableProjector {
   const siblings = new Map<string, string>()
   return {
-    project: (event) =>
-      Effect.gen(function* () {
+    project: (event) => {
+      const replay = Effect.gen(function* () {
         const restored = attachment ? yield* Effect.tryPromise(() => hydrate(event, attachment)) : event
         const hydrated = spaceID ? bindCreatedSpace(restored, spaceID) : restored
         const existing = siblings.get(hydrated.aggregateID)
@@ -196,12 +196,16 @@ export function projector(
           )
         }
         yield* replayAs(events, hydrated, sibling, sourceDeviceID)
-      }),
-    delete: (tombstone) =>
-      Effect.gen(function* () {
+      })
+      return activity ? activity.withActivity(SessionV2.ID.make(event.aggregateID), "sync_replay", replay) : replay
+    },
+    delete: (tombstone) => {
+      const remove = Effect.gen(function* () {
         if (onDelete) yield* onDelete(tombstone.sessionID)
         yield* events.remove(tombstone.sessionID)
-      }),
+      })
+      return activity ? activity.withActivity(SessionV2.ID.make(tombstone.sessionID), "sync_replay", remove) : remove
+    },
   }
 }
 
@@ -279,10 +283,9 @@ export const captureLayer = Layer.effectDiscard(
         .where(eq(SessionTable.id, SessionV2.ID.make(sessionID)))
         .get()
         .pipe(
-          Effect.map((row): PersistedOwnership =>
-            row
-              ? { exists: true, ...(row.spaceID ? { spaceID: row.spaceID } : {}) }
-              : { exists: false },
+          Effect.map(
+            (row): PersistedOwnership =>
+              row ? { exists: true, ...(row.spaceID ? { spaceID: row.spaceID } : {}) } : { exists: false },
           ),
         )
     const existing = yield* db

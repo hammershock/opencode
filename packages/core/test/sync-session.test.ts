@@ -61,9 +61,7 @@ describe("SessionSync", () => {
       data: { sessionID: "session" },
     }
     await Effect.runPromise(
-      SessionSync.captureOwned(owner as any, store, updated, 10, () =>
-        Effect.succeed({ exists: true } as const),
-      ),
+      SessionSync.captureOwned(owner as any, store, updated, 10, () => Effect.succeed({ exists: true } as const)),
     )
     expect(spaces).toEqual([])
 
@@ -140,6 +138,53 @@ describe("SessionSync", () => {
       { publish: true },
     ])
     expect(calls[1]).toEqual(["remove", "s1"])
+  })
+
+  test("marks projection and deletion as sync replay activity", async () => {
+    const calls: string[] = []
+    const activity = {
+      blockers: () => Effect.succeed([]),
+      withActivity: (sessionID: string, kind: string, effect: Effect.Effect<unknown>) =>
+        Effect.acquireUseRelease(
+          Effect.sync(() => calls.push(`start:${sessionID}:${kind}`)),
+          () => effect,
+          () => Effect.sync(() => calls.push(`end:${sessionID}:${kind}`)),
+        ),
+    } as any
+    const events = {
+      replay: () => Effect.sync(() => calls.push("replay")),
+      remove: () => Effect.sync(() => calls.push("remove")),
+    } as any
+    const projector = SessionSync.projector(
+      events,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      activity,
+    )
+
+    await Effect.runPromise(
+      projector.project({
+        id: "evt_00000000000000000000000000",
+        aggregateID: "ses_sync_activity",
+        seq: 0,
+        type: "session.created",
+        data: {},
+      }),
+    )
+    await Effect.runPromise(projector.delete({ id: "d1", sessionID: "ses_sync_activity", deletedAt: 1 }))
+
+    expect(calls).toEqual([
+      "start:ses_sync_activity:sync_replay",
+      "replay",
+      "end:ses_sync_activity:sync_replay",
+      "start:ses_sync_activity:sync_replay",
+      "remove",
+      "end:ses_sync_activity:sync_replay",
+    ])
   })
 
   test("materializes a deterministic sibling when a remote history diverges", async () => {

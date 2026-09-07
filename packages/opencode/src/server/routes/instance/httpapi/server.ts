@@ -110,6 +110,7 @@ import { rexdLocationProvider } from "@/rexd/location"
 import { rexdTargetRegistryNode } from "@/rexd/target-registry"
 import { layer as locationLayer } from "@opencode-ai/server/location"
 import { sessionLocationLayer } from "@opencode-ai/server/middleware/session-location"
+import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
 import { PtyEnvironment } from "@opencode-ai/server/pty-environment"
 import { schemaErrorLayer as v2SchemaErrorLayer } from "@opencode-ai/server/middleware/schema-error"
 import { workspaceHandlers } from "./handlers/workspace"
@@ -279,6 +280,7 @@ const app = LayerNode.group([
   PtyTicket.node,
   TargetRegistry.node,
   TargetBindingRegistry.node,
+  SessionLocationAccess.node,
 ])
 
 export function createRoutes(

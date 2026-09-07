@@ -1,11 +1,6 @@
-import { Database } from "@opencode-ai/core/database/database"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
-import { Location } from "@opencode-ai/core/location"
-import { AbsolutePath } from "@opencode-ai/core/schema"
+import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
 import { SessionV2 } from "@opencode-ai/core/session"
-import { SessionTable } from "@opencode-ai/core/session/sql"
-import { WorkspaceV2 } from "@opencode-ai/core/workspace"
-import { eq } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
@@ -24,8 +19,8 @@ const decodeSessionID = Schema.decodeUnknownEffect(SessionV2.ID)
 export const sessionLocationLayer = Layer.effect(
   SessionLocationMiddleware,
   Effect.gen(function* () {
-    const { db } = yield* Database.Service
     const locations = yield* LocationServiceMap.Service
+    const access = yield* SessionLocationAccess.Service
 
     return SessionLocationMiddleware.of((effect) =>
       Effect.gen(function* () {
@@ -39,35 +34,23 @@ export const sessionLocationLayer = Layer.effect(
               }),
           ),
         )
-        const row = yield* db
-          .select({
-            target: SessionTable.target,
-            directory: SessionTable.directory,
-            workspaceID: SessionTable.workspace_id,
-            lastKnownTargetName: SessionTable.last_known_target_name,
-          })
-          .from(SessionTable)
-          .where(eq(SessionTable.id, sessionID))
-          .get()
-          .pipe(Effect.orDie)
-        if (!row)
-          return yield* new SessionNotFoundError({
-            sessionID,
-            message: `Session not found: ${sessionID}`,
-          })
-
-        return yield* effect.pipe(
-          Effect.provide(
-            locations.get(
-              Location.Ref.make({
-                target: row.target ?? { type: "local" },
-                directory: AbsolutePath.make(row.directory),
-                workspaceID: row.workspaceID ? WorkspaceV2.ID.make(row.workspaceID) : undefined,
-                lastKnownTargetName: row.lastKnownTargetName ?? undefined,
+        const location = yield* access.require(sessionID).pipe(
+          Effect.catchTag(
+            "SessionLocationAccess.NotFoundError",
+            () => new SessionNotFoundError({ sessionID, message: `Session not found: ${sessionID}` }),
+          ),
+          Effect.catchTag(
+            "SessionLocationAccess.UnresolvedError",
+            (error) =>
+              new InvalidRequestError({
+                message: error.message,
+                field: "sessionID",
+                kind: `session_location_${error.status}`,
               }),
-            ),
           ),
         )
+
+        return yield* effect.pipe(Effect.provide(locations.get(location)))
       }),
     )
   }),

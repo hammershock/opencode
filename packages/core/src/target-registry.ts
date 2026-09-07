@@ -72,7 +72,7 @@ export type ImportPreview = {
 /** Implemented by the Rexd transport task. Registry and UI callers never execute SSH directly. */
 export interface ConnectionProbe {
   readonly test: (target: Definition) => Promise<ProbeResult>
-  readonly prepare: (target: Definition) => Promise<ProbeResult>
+  readonly prepare: (target: Definition, directory?: string) => Promise<ProbeResult>
   readonly inspect?: (target: Input) => Promise<{ readonly home: string }>
   readonly complete?: (
     target: Input,
@@ -129,7 +129,8 @@ export interface Interface {
     expectedRevision: string,
   ) => Promise<{ target: Definition; snapshot: Snapshot }>
   readonly testConnection: (targetID: Location.TargetID) => Promise<ProbeResult>
-  readonly prepare: (targetID: Location.TargetID) => Promise<ProbeResult>
+  readonly prepare: (targetID: Location.TargetID, directory?: string) => Promise<ProbeResult>
+  readonly validate: (input: Input) => Promise<void>
   readonly inspect: (input: Input) => Promise<{ readonly home: string }>
   readonly complete: (
     target: Input,
@@ -240,11 +241,14 @@ export function make(options: {
       if (!options.probe) return { status: "unavailable", stage: "ssh", message: "Rexd transport is not registered" }
       return options.probe.test(target)
     },
-    async prepare(targetID) {
+    async prepare(targetID, directory) {
       const target = await find(targetID)
       if (!options.probe)
         return { status: "unavailable", stage: "prepare", message: "Rexd transport is not registered" }
-      return options.probe.prepare(target)
+      return options.probe.prepare(target, directory)
+    },
+    async validate(input) {
+      validateInput(input, (await load()).targets)
     },
     async inspect(input) {
       if (!options.probe?.inspect) throw new Error("Rexd transport is not registered")

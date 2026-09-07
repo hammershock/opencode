@@ -28,6 +28,7 @@ import { SyncCodec } from "./codec"
 import { SyncMembership } from "./membership"
 import { SyncState } from "./state"
 import { TargetBindingRegistry } from "../target-binding-registry"
+import { SessionActivity } from "../session/activity"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -119,6 +120,7 @@ const layer = Layer.effect(
     const sessionDB = (yield* Database.Service).db
     const global = yield* Global.Service
     const targetBindings = yield* TargetBindingRegistry.Service
+    const activity = yield* SessionActivity.Service
     const devicesFor = (namespaceID: string) =>
       SyncDevice.make(path.join(global.config, "sync", "spaces", namespaceID, "state.json"))
     let lastSuccessAt: number | undefined
@@ -194,6 +196,7 @@ const layer = Layer.effect(
                 .pipe(Effect.andThen(metadata.remove(sessionID)), Effect.asVoid),
             config.namespaceID,
             (sessionID, spaceID) => ownership.assign(sessionID, spaceID),
+            activity,
           ),
         attachment: {
           externalize: (event) => SessionSync.externalize(event, attachment),
@@ -574,6 +577,7 @@ export const node = makeGlobalNode({
     SyncOwnership.node,
     SyncMembership.node,
     TargetBindingRegistry.node,
+    SessionActivity.node,
   ],
 })
 

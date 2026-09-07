@@ -40,6 +40,7 @@ import {
 } from "../groups/session"
 import { PermissionNotFoundError } from "../errors"
 import * as SessionError from "./session-errors"
+import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -61,6 +62,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todoSvc = yield* Todo.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
+    const locationAccess = yield* SessionLocationAccess.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -82,6 +84,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const requireSession = Effect.fn("SessionHttpApi.requireSession")(function* (sessionID: SessionID) {
       return yield* SessionError.mapStorageNotFound(session.get(sessionID))
+    })
+
+    const requireWritableLocation = Effect.fn("SessionHttpApi.requireWritableLocation")(function* (
+      sessionID: SessionID,
+    ) {
+      // Preserve the public 404 contract before translating an unresolved
+      // Location into a writable-operation 400.
+      yield* requireSession(sessionID)
+      yield* locationAccess.require(sessionID).pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
     })
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -251,6 +262,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof InitPayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       yield* promptSvc
         .command({
@@ -287,6 +299,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof SummarizePayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
       const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
       const defaultAgent = yield* agentSvc.defaultAgent()
@@ -309,6 +322,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       const message = yield* promptSvc
         .prompt({
@@ -325,6 +339,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
         Effect.catchCause((cause) =>
@@ -345,6 +360,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof CommandPayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       return yield* promptSvc
         .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
@@ -355,6 +371,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof ShellPayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
     })
@@ -363,6 +380,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof ShellCompletionPayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       return yield* promptSvc
         .completeShell({ ...ctx.payload, sessionID: ctx.params.sessionID })
@@ -373,11 +391,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof RevertPayload.Type
     }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       return yield* SessionError.mapBusy(revertSvc.revert({ sessionID: ctx.params.sessionID, ...ctx.payload }))
     })
 
     const unrevert = Effect.fn("SessionHttpApi.unrevert")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* requireWritableLocation(ctx.params.sessionID)
       yield* requireSession(ctx.params.sessionID)
       return yield* SessionError.mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID }))
     })

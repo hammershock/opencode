@@ -49,6 +49,11 @@ This document defines the normative interaction and presentation rules for fork-
 
 ## Async and error behavior
 
+- Sync 与 Rexd Target 共享右上角唯一的远端操作状态栏；各面板不得各自实现一套全局进度浮层。
+- 用户触发远端操作后必须立即显示模块、操作和当前阶段。有效数据传输还应显示方向、对象种类、数量与字节增量；操作成功后对应状态立即消失。
+- 失败状态保留到同模块的下一次操作或显式清除，并展示经过脱敏的阶段、transport/provider operation、稳定错误类别和可重试性。只显示 `failed`、`unavailable` 或 HTTP 状态码不构成充分诊断。
+- 并发操作使用独立 identity；迟到的完成或失败只能更新自己的状态，不能清除或覆盖较新的操作。
+- 状态栏是临时客户端运行态，不写入配置或 Session，不进入模型上下文。不得展示 credential、token、OAuth code、SSH secret、含秘密的命令、provider 原始响应或不必要的私有 URL。
 - Opening a list may start bounded, non-blocking health checks. Render `checking` in place and retain navigation.
 - A failed health check changes status and exposes a concise, redacted detail; it does not crash, close the panel, change selection or silently choose a fallback target/provider.
 - Deduplicate concurrent checks for the same identity. Ignore results belonging to a closed view or stale generation.

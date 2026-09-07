@@ -35,7 +35,8 @@ import { useEvent } from "./context/event"
 import { SDKProvider, useSDK } from "./context/sdk"
 import { StartupLoading } from "./component/startup-loading"
 import { SyncProvider, useSync } from "./context/sync"
-import { SyncSettingsProvider, useSyncSettings } from "./context/sync-settings"
+import { SyncSettingsProvider } from "./context/sync-settings"
+import { RemoteStatusProvider } from "./context/remote-status"
 import { DataProvider } from "./context/data"
 import { LocationProvider } from "./context/location"
 import { LocalProvider, useLocal } from "./context/local"
@@ -58,7 +59,7 @@ import { DialogConsoleOrg } from "./component/dialog-console-org"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { Home } from "./routes/home"
 import { Session } from "./routes/session"
-import { SyncTransferSummary } from "./component/sync-transfer-summary"
+import { RemoteStatusBar } from "./component/remote-status-bar"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
@@ -301,46 +302,48 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                   >
                                     <TuiConfigProvider config={input.config}>
                                       <PluginRuntimeProvider value={pluginRuntime}>
-                                        <SDKProvider
-                                          url={input.url}
-                                          directory={input.directory}
-                                          fetch={input.fetch}
-                                          headers={input.headers}
-                                          events={input.events}
-                                        >
-                                          <PermissionProvider>
-                                            <ProjectProvider>
-                                              <SyncProvider>
-                                                <DataProvider>
-                                                  <ThemeProvider mode={mode}>
-                                                    <LocalProvider>
-                                                      <PromptStashProvider>
-                                                        <PromptRefProvider>
-                                                          <DialogProvider>
-                                                            <SyncSettingsProvider>
-                                                              <FrecencyProvider>
-                                                                <PromptHistoryProvider>
-                                                                  <EditorContextProvider>
-                                                                    <LocationProvider>
-                                                                      <App
-                                                                        onSnapshot={input.onSnapshot}
-                                                                        pluginHost={input.pluginHost}
-                                                                      />
-                                                                    </LocationProvider>
-                                                                  </EditorContextProvider>
-                                                                </PromptHistoryProvider>
-                                                              </FrecencyProvider>
-                                                            </SyncSettingsProvider>
-                                                          </DialogProvider>
-                                                        </PromptRefProvider>
-                                                      </PromptStashProvider>
-                                                    </LocalProvider>
-                                                  </ThemeProvider>
-                                                </DataProvider>
-                                              </SyncProvider>
-                                            </ProjectProvider>
-                                          </PermissionProvider>
-                                        </SDKProvider>
+                                        <RemoteStatusProvider>
+                                          <SDKProvider
+                                            url={input.url}
+                                            directory={input.directory}
+                                            fetch={input.fetch}
+                                            headers={input.headers}
+                                            events={input.events}
+                                          >
+                                            <PermissionProvider>
+                                              <ProjectProvider>
+                                                <SyncProvider>
+                                                  <DataProvider>
+                                                    <ThemeProvider mode={mode}>
+                                                      <LocalProvider>
+                                                        <PromptStashProvider>
+                                                          <PromptRefProvider>
+                                                            <DialogProvider>
+                                                              <SyncSettingsProvider>
+                                                                <FrecencyProvider>
+                                                                  <PromptHistoryProvider>
+                                                                    <EditorContextProvider>
+                                                                      <LocationProvider>
+                                                                        <App
+                                                                          onSnapshot={input.onSnapshot}
+                                                                          pluginHost={input.pluginHost}
+                                                                        />
+                                                                      </LocationProvider>
+                                                                    </EditorContextProvider>
+                                                                  </PromptHistoryProvider>
+                                                                </FrecencyProvider>
+                                                              </SyncSettingsProvider>
+                                                            </DialogProvider>
+                                                          </PromptRefProvider>
+                                                        </PromptStashProvider>
+                                                      </LocalProvider>
+                                                    </ThemeProvider>
+                                                  </DataProvider>
+                                                </SyncProvider>
+                                              </ProjectProvider>
+                                            </PermissionProvider>
+                                          </SDKProvider>
+                                        </RemoteStatusProvider>
                                       </PluginRuntimeProvider>
                                     </TuiConfigProvider>
                                   </RouteProvider>
@@ -404,7 +407,6 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   const pluginRuntime = usePluginRuntime()
   const attention = createTuiAttention({ renderer, config: tuiConfig, kv })
   const clipboard = useClipboard()
-  const syncSettings = useSyncSettings()
 
   const api = createTuiApi(
     createTuiApiAdapters({
@@ -1180,13 +1182,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       <Show when={!startup.skipInitialLoading}>
         <StartupLoading ready={ready} />
       </Show>
-      <Show when={syncSettings.transfer()}>
-        {(progress) => (
-          <box position="absolute" top={0} right={1} flexShrink={0}>
-            <SyncTransferSummary progress={progress()} />
-          </box>
-        )}
-      </Show>
+      <RemoteStatusBar />
     </box>
   )
 }

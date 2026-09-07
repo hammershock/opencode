@@ -66,6 +66,7 @@ import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncControl } from "@opencode-ai/core/sync/control"
+import { SessionSync } from "@opencode-ai/core/sync/session"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -220,7 +221,7 @@ type RouteRequirements =
   | HttpRouter.Request<"Requires", unknown>
   | HttpRouter.Request<"GlobalRequires", never>
 
-const app = LayerNode.group([
+export const app = LayerNode.group([
   Npm.node,
   FSUtil.node,
   Database.node,
@@ -237,6 +238,7 @@ const app = LayerNode.group([
   Provider.node,
   ProviderUsage.node,
   SyncSetup.node,
+  SessionSync.node,
   SyncControl.node,
   ProviderAuth.node,
   Agent.node,

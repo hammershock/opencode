@@ -32,6 +32,7 @@ export const PtyPaths = {
   create: root,
   get: `${root}/:ptyID`,
   update: `${root}/:ptyID`,
+  restart: `${root}/:ptyID/restart`,
   remove: `${root}/:ptyID`,
   connectToken: `${root}/:ptyID/connect-token`,
   connect: `${root}/:ptyID/connect`,
@@ -96,6 +97,20 @@ export const PtyApi = HttpApi.make("pty")
             identifier: "pty.update",
             summary: "Update PTY session",
             description: "Update properties of an existing pseudo-terminal (PTY) session.",
+          }),
+        ),
+        HttpApiEndpoint.post("restart", PtyPaths.restart, {
+          params: { ptyID: PtyID },
+          query: WorkspaceRoutingQuery,
+          payload: Pty.RestartInput,
+          success: described(Pty.Info, "Restarted session"),
+          error: [PtyNotFoundError, HttpApiError.BadRequest],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "pty.restart",
+            summary: "Restart PTY session",
+            description:
+              "Replace a running pseudo-terminal (PTY) session using the current Location environment generation.",
           }),
         ),
         HttpApiEndpoint.delete("remove", PtyPaths.remove, {

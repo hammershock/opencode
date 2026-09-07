@@ -63,7 +63,7 @@ afterEach(async () => {
 })
 
 describe("v2 pty HttpApi", () => {
-  testPty("rejects a stale Session Location admission token before creating a PTY", async () => {
+  testPty("rejects a stale Session Location admission token before creating or restarting a PTY", async () => {
     await using first = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     await using second = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
     const createdSession = await request("/api/session", first.path, {
@@ -73,6 +73,13 @@ describe("v2 pty HttpApi", () => {
     })
     expect(createdSession.status).toBe(200)
     const sessionID = ((await createdSession.json()) as { data: { id: string } }).data.id
+    const createdPty = await request("/api/pty", first.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionID, command: "/bin/sh" }),
+    })
+    expect(createdPty.status).toBe(200)
+    const original = Schema.decodeUnknownSync(Location.response(Pty.Info))(await createdPty.json()).data
 
     const stale = await request("/api/pty", second.path, {
       method: "POST",
@@ -89,6 +96,60 @@ describe("v2 pty HttpApi", () => {
         await (await request("/api/pty", second.path)).json(),
       ).data,
     ).toEqual([])
+
+    const staleRestart = await request(`/api/pty/${original.id}/restart`, second.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionID }),
+    })
+    expect(staleRestart.status).toBe(400)
+    expect(await staleRestart.json()).toMatchObject({
+      _tag: "InvalidRequestError",
+      kind: "session_location_changed",
+    })
+    expect((await request(`/api/pty/${original.id}`, first.path)).status).toBe(200)
+    await request(`/api/pty/${original.id}`, first.path, { method: "DELETE" })
+  })
+
+  testPty("restarts one running PTY through the canonical route", async () => {
+    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    const createdSession = await request("/api/session", tmp.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: tmp.path } }),
+    })
+    expect(createdSession.status).toBe(200)
+    const sessionID = ((await createdSession.json()) as { data: { id: string } }).data.id
+    const created = await request("/api/pty", tmp.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionID, command: "/bin/sh", title: "restart-me" }),
+    })
+    expect(created.status).toBe(200)
+    const original = Schema.decodeUnknownSync(Location.response(Pty.Info))(await created.json()).data
+
+    const restarted = await request(`/api/pty/${original.id}/restart`, tmp.path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionID }),
+    })
+    expect(restarted.status).toBe(200)
+    const replacement = Schema.decodeUnknownSync(Location.response(Pty.Info))(await restarted.json()).data
+    expect(replacement.id).not.toBe(original.id)
+    expect(replacement.title).toBe("restart-me")
+    expect(replacement.environmentStale).toBe(false)
+
+    expect((await request(`/api/pty/${original.id}`, tmp.path)).status).toBe(404)
+    expect(
+      (
+        await request(`/api/pty/pty_missing/restart`, tmp.path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionID }),
+        })
+      ).status,
+    ).toBe(404)
+    await request(`/api/pty/${replacement.id}`, tmp.path, { method: "DELETE" })
   })
 
   testPty("serves location-wrapped PTY routes and retains exited sessions", async () => {

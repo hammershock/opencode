@@ -141,6 +141,7 @@ export function TerminalPanelV2(props: { stacked?: boolean } = {}) {
   const ids = createMemo(() => all().map((pty) => pty.id))
 
   const recoverTerminal = (key: string, id: string, clone: (id: string) => Promise<void>) => {
+    if (terminal.restarting(id)) return
     if (store.recovered[key]) return
     setStore("recovered", key, true)
     void clone(id)

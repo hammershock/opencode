@@ -12,18 +12,21 @@ const Output = Schema.Struct({ pty_id: Schema.String, data: Schema.String, encod
 const Exit = Schema.Struct({ pty_id: Schema.String, exit_code: Schema.Number })
 const BUFFER_LIMIT = 2 * 1024 * 1024
 
+type Subscriber = {
+  active: boolean
+  pending: string[]
+  onData(chunk: string): void
+  onEnd(event: { exitCode?: number }): void
+}
+
 type Session = {
   info: Pty.Info
   remoteID: string
+  size: { rows: number; cols: number }
   buffer: string
   start: number
   cursor: number
-  subscribers: Set<{
-    active: boolean
-    pending: string[]
-    onData(chunk: string): void
-    onEnd(event: { exitCode?: number }): void
-  }>
+  subscribers: Set<Subscriber>
 }
 
 export function rexdPtyNode(session: ReturnType<typeof import("./location-session").rexdSessionNode>) {
@@ -37,6 +40,13 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
         const environment = yield* LocationEnvironment.Service
         const events = yield* EventV2.Service
         const sessions = new Map<PtyID, Session>()
+        const unsubscribeEnvironment = yield* environment.subscribe((generation) => {
+          sessions.forEach((item) => {
+            if (item.info.status !== "running" || item.info.environmentGeneration === generation) return
+            item.info.environmentStale = true
+            Effect.runFork(events.publish(Pty.Event.Updated, { info: item.info }))
+          })
+        })
         const notify = lease.client.onNotification((method, params) => {
           if (method === "pty.output") {
             const decoded = Schema.decodeUnknownResult(Output)(params)
@@ -81,6 +91,7 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
         })
         yield* Effect.addFinalizer(() =>
           Effect.promise(async () => {
+            unsubscribeEnvironment()
             notify()
             closed()
             await Promise.all(
@@ -95,10 +106,14 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
           if (!found) return yield* new Pty.NotFoundError({ ptyID: id })
           return found
         })
-        const create = Effect.fn("RexdPty.create")(function* (input: Pty.CreateInput) {
-          const id = PtyID.ascending()
+        const start = Effect.fnUntraced(function* (
+          id: PtyID,
+          input: Pty.CreateInput,
+          size: Session["size"] = { cols: 120, rows: 32 },
+        ) {
           const command = input.command ?? "/bin/sh"
-          const env = yield* environment.environment(input.env)
+          const snapshot = yield* environment.snapshot()
+          const env = { ...snapshot.values, ...input.env }
           const opened = yield* Effect.promise(() =>
             lease.client.request(
               "pty.open",
@@ -107,12 +122,13 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
                 argv: [command, ...(input.args ?? [])],
                 cwd: input.cwd ?? location.directory,
                 env,
-                cols: 120,
-                rows: 32,
+                cols: size.cols,
+                rows: size.rows,
               },
               { sideEffect: true },
             ),
           ).pipe(Effect.map(Schema.decodeUnknownSync(Opened)))
+          const latest = yield* environment.snapshot()
           const info: Pty.Info = {
             id,
             title: input.title ?? `Terminal ${id.slice(-4)}`,
@@ -121,10 +137,65 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
             cwd: input.cwd ?? location.directory,
             status: "running",
             pid: numericID(opened.process_id),
+            environmentGeneration: snapshot.generation,
+            environmentStale: latest.generation !== snapshot.generation,
           }
-          sessions.set(id, { info, remoteID: opened.pty_id, buffer: "", start: 0, cursor: 0, subscribers: new Set() })
+          return {
+            info,
+            remoteID: opened.pty_id,
+            size,
+            buffer: "",
+            start: 0,
+            cursor: 0,
+            subscribers: new Set<Subscriber>(),
+          } satisfies Session
+        })
+        const create = Effect.fn("RexdPty.create")(function* (input: Pty.CreateInput) {
+          const id = PtyID.ascending()
+          const created = yield* start(id, input)
+          sessions.set(id, created)
+          const info = created.info
           yield* events.publish(Pty.Event.Created, { info })
           return info
+        })
+        const restart = Effect.fn("RexdPty.restart")(function* (
+          id: PtyID,
+          input: { readonly env?: Readonly<Record<string, string>> } = {},
+        ) {
+          const previous = yield* requireSession(id)
+          if (previous.info.status !== "running") return yield* new Pty.ExitedError({ ptyID: id })
+          const nextID = PtyID.ascending()
+          const replacement = yield* start(
+            nextID,
+            {
+              command: previous.info.command,
+              args: [...previous.info.args],
+              cwd: previous.info.cwd,
+              title: previous.info.title,
+              env: input.env ? { ...input.env } : undefined,
+            },
+            previous.size,
+          )
+
+          // Hide the old remote ID before close so its exit notification cannot
+          // race the replacement into an exited UI state. Roll back on close failure.
+          sessions.delete(id)
+          const closed = yield* Effect.promise(() => request(lease, "pty.close", previous.remoteID)).pipe(Effect.exit)
+          if (closed._tag === "Failure") {
+            sessions.set(id, previous)
+            yield* Effect.promise(() => request(lease, "pty.close", replacement.remoteID)).pipe(Effect.ignore)
+            return yield* Effect.failCause(closed.cause)
+          }
+          sessions.set(nextID, replacement)
+          previous.subscribers.forEach((subscriber) => {
+            try {
+              subscriber.onEnd({})
+            } catch {}
+          })
+          previous.subscribers.clear()
+          yield* events.publish(Pty.Event.Deleted, { id })
+          yield* events.publish(Pty.Event.Created, { info: replacement.info })
+          return replacement.info
         })
         const remove = Effect.fn("RexdPty.remove")(function* (id: PtyID) {
           const found = yield* requireSession(id)
@@ -140,12 +211,14 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
               return (yield* requireSession(id)).info
             }),
           create,
+          restart,
           remove,
           update: (id, input) =>
             Effect.gen(function* () {
               const found = yield* requireSession(id)
               if (input.title) found.info.title = input.title
-              if (input.size && found.info.status === "running")
+              if (input.size && found.info.status === "running") {
+                found.size = { ...input.size }
                 yield* Effect.promise(() =>
                   lease.client.request(
                     "pty.resize",
@@ -153,6 +226,7 @@ export function rexdPtyNode(session: ReturnType<typeof import("./location-sessio
                     { sideEffect: true },
                   ),
                 )
+              }
               yield* events.publish(Pty.Event.Updated, { info: found.info })
               return found.info
             }),

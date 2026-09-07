@@ -88,6 +88,7 @@ describe("pty HttpApi bridge", () => {
     })
     expect(created.status).toBe(200)
     const info = await created.json()
+    let activeID = info.id
 
     try {
       expect(info).toMatchObject({ title: "demo", command: "/usr/bin/env", status: "running" })
@@ -103,8 +104,19 @@ describe("pty HttpApi bridge", () => {
       })
       expect(updated.status).toBe(200)
       expect(await updated.json()).toMatchObject({ id: info.id, title: "renamed" })
+
+      const restarted = await app().request(PtyPaths.restart.replace(":ptyID", info.id), {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      expect(restarted.status).toBe(200)
+      const replacement = await restarted.json()
+      expect(replacement).toMatchObject({ title: "renamed", environmentStale: false })
+      expect(replacement.id).not.toBe(info.id)
+      activeID = replacement.id
     } finally {
-      await app().request(PtyPaths.remove.replace(":ptyID", info.id), { method: "DELETE", headers })
+      await app().request(PtyPaths.remove.replace(":ptyID", activeID), { method: "DELETE", headers })
     }
 
     const missing = await app().request(PtyPaths.get.replace(":ptyID", info.id), { headers })
@@ -122,6 +134,18 @@ describe("pty HttpApi bridge", () => {
     })
     expect(missingUpdate.status).toBe(404)
     expect(await missingUpdate.json()).toEqual({
+      _tag: "PtyNotFoundError",
+      ptyID: info.id,
+      message: `PTY session not found: ${info.id}`,
+    })
+
+    const missingRestart = await app().request(PtyPaths.restart.replace(":ptyID", info.id), {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    })
+    expect(missingRestart.status).toBe(404)
+    expect(await missingRestart.json()).toEqual({
       _tag: "PtyNotFoundError",
       ptyID: info.id,
       message: `PTY session not found: ${info.id}`,

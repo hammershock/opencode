@@ -51,6 +51,12 @@ export const CreateInput = Schema.Struct({
 })
 export interface CreateInput extends Schema.Schema.Type<typeof CreateInput> {}
 
+export const RestartInput = Schema.Struct({
+  /** Optional admission token used when a terminal is restarted from a Session. */
+  sessionID: optional(SessionID),
+})
+export interface RestartInput extends Schema.Schema.Type<typeof RestartInput> {}
+
 export const UpdateInput = Schema.Struct({
   title: optional(Schema.String),
   size: optional(

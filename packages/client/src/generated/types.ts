@@ -3310,6 +3310,42 @@ export type PtysUpdateOutput = {
   }
 }
 
+export type PtysRestartInput = {
+  readonly ptyID: { readonly ptyID: string }["ptyID"]
+  readonly location?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+  }["location"]
+  readonly sessionID?: { readonly sessionID?: string }["sessionID"]
+}
+
+export type PtysRestartOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly id: string
+    readonly title: string
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly status: "running" | "exited"
+    readonly pid: number
+    readonly exitCode?: number
+    readonly environmentGeneration?: number
+    readonly environmentStale?: boolean
+  }
+}
+
 export type PtysRemoveInput = {
   readonly ptyID: { readonly ptyID: string }["ptyID"]
   readonly location?: {

@@ -1,27 +1,70 @@
 import { describe, expect } from "bun:test"
 import { Cause, Deferred, Effect, Exit, Layer, Queue } from "effect"
+import { chmod, mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import { Config } from "@opencode-ai/core/config"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
+import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Pty } from "@opencode-ai/core/pty"
 import type { PtyID } from "@opencode-ai/core/pty/schema"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { location } from "../fixture/location"
 import { testEffect } from "../lib/effect"
 
-type PtyEvent = { type: "created" | "exited" | "deleted"; id: PtyID }
+type PtyEvent = { type: "created" | "updated" | "exited" | "deleted"; id: PtyID }
 
 const locationLayer = Layer.succeed(
   Location.Service,
   Location.Service.of(location({ directory: AbsolutePath.make("/tmp") })),
 )
 const configLayer = Layer.mock(Config.Service)({ entries: () => Effect.succeed([]) })
+let environmentGeneration = 1
+let environmentValues: Record<string, string> = { PTY_ENV_GENERATION: "one" }
+const environmentListeners = new Set<(generation: number) => void>()
+function reloadEnvironment() {
+  environmentGeneration += 1
+  environmentValues = { PTY_ENV_GENERATION: environmentGeneration === 2 ? "two" : String(environmentGeneration) }
+  environmentListeners.forEach((listener) => listener(environmentGeneration))
+}
+const environmentLayer = Layer.mock(LocationEnvironment.Service)({
+  snapshot: () =>
+    Effect.succeed({
+      enabled: true,
+      generation: environmentGeneration,
+      values: Object.freeze({ ...environmentValues }),
+      variables: [],
+      sources: [],
+    }),
+  reload: () =>
+    Effect.sync(() => {
+      reloadEnvironment()
+      return {
+        enabled: true,
+        generation: environmentGeneration,
+        values: Object.freeze({ ...environmentValues }),
+        variables: [],
+        sources: [],
+      }
+    }),
+  environment: (explicit = {}) => Effect.succeed({ ...environmentValues, ...explicit }),
+  list: () => Effect.succeed({ enabled: true, generation: environmentGeneration, variables: [], sources: [] }),
+  reveal: () => Effect.succeed({ values: () => ({}), close: () => undefined }),
+  ensureTemplate: () => Effect.succeed("existing" as const),
+  subscribe: (listener) =>
+    Effect.sync(() => {
+      environmentListeners.add(listener)
+      return () => environmentListeners.delete(listener)
+    }),
+})
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Pty.node, EventV2.node]), [
     [Config.node, configLayer],
     [Location.node, locationLayer],
+    [LocationEnvironment.node, environmentLayer],
   ]),
 )
 const ptyTest = process.platform === "win32" ? it.live.skip : it.live
@@ -32,6 +75,8 @@ const subscribePtyEvents = Effect.fn("PtySessionTest.subscribePtyEvents")(functi
   const unsubscribe = yield* source.listen((event) => {
     if (event.type === Pty.Event.Created.type)
       Queue.offerUnsafe(events, { type: "created", id: (event.data as typeof Pty.Event.Created.data.Type).info.id })
+    if (event.type === Pty.Event.Updated.type)
+      Queue.offerUnsafe(events, { type: "updated", id: (event.data as typeof Pty.Event.Updated.data.Type).info.id })
     if (event.type === Pty.Event.Exited.type)
       Queue.offerUnsafe(events, { type: "exited", id: (event.data as typeof Pty.Event.Exited.data.Type).id })
     if (event.type === Pty.Event.Deleted.type)
@@ -202,6 +247,65 @@ describe("pty", () => {
         expect(Cause.squash(result.cause)).toMatchObject({ _tag: "Pty.ExitedError", ptyID: info.id })
     }),
   )
+
+  ptyTest("keeps running terminals stale after reload and restarts with the latest generation", () =>
+    Effect.gen(function* () {
+      environmentGeneration = 1
+      environmentValues = { PTY_ENV_GENERATION: "one" }
+      const pty = yield* Pty.Service
+      const events = yield* subscribePtyEvents()
+      const original = yield* createPty("/bin/sh")
+      const originalAttachment = yield* attachCollecting(original.id, -1)
+
+      expect(original.environmentGeneration).toBe(1)
+      expect(original.environmentStale).toBe(false)
+      yield* Effect.sync(reloadEnvironment)
+      expect(yield* waitForEvents(events, original.id, 2)).toEqual(["created", "updated"])
+
+      const stale = yield* pty.get(original.id)
+      expect(stale.environmentGeneration).toBe(1)
+      expect(stale.environmentStale).toBe(true)
+      yield* pty.write(original.id, "printf 'still-running\\n'\n")
+      expect(yield* waitForOutput(originalAttachment.output, "still-running")).toContain("still-running")
+
+      const fresh = yield* createPty("/usr/bin/env", ["sh", "-c", 'printf %s \\"$PTY_ENV_GENERATION\\"'])
+      expect(fresh.environmentGeneration).toBe(2)
+      expect(fresh.environmentStale).toBe(false)
+
+      const replacement = yield* pty.restart(original.id)
+      expect(replacement.id).not.toBe(original.id)
+      expect(replacement.environmentGeneration).toBe(2)
+      expect(replacement.environmentStale).toBe(false)
+      expect(Exit.isFailure(yield* pty.get(original.id).pipe(Effect.exit))).toBe(true)
+      expect((yield* pty.get(fresh.id)).id).toBe(fresh.id)
+      const replacementAttachment = yield* attachCollecting(replacement.id, -1)
+      yield* pty.write(replacement.id, "printf 'generation=%s\\n' \"$PTY_ENV_GENERATION\"\n")
+      expect(yield* waitForOutput(replacementAttachment.output, "generation=two")).toContain("generation=two")
+    }),
+  )
+
+  ptyTest("preserves the original terminal when replacement spawn fails", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "opencode-pty-restart-")))
+      const command = join(directory, "terminal-shell")
+      yield* Effect.promise(() => writeFile(command, "#!/bin/sh\nexec cat\n"))
+      yield* Effect.promise(() => chmod(command, 0o700))
+
+      const pty = yield* Pty.Service
+      const original = yield* createPty(command)
+      const attached = yield* attachCollecting(original.id, -1)
+      yield* pty.write(original.id, "ready\n")
+      expect(yield* waitForOutput(attached.output, "ready")).toContain("ready")
+      yield* Effect.promise(() => unlink(command))
+
+      const restarted = yield* pty.restart(original.id).pipe(Effect.exit)
+      expect(Exit.isFailure(restarted)).toBe(true)
+      expect((yield* pty.get(original.id)).status).toBe("running")
+      yield* pty.write(original.id, "preserved\n")
+      expect(yield* waitForOutput(attached.output, "preserved")).toContain("preserved")
+      yield* Effect.promise(() => rmdir(directory))
+    }),
+  )
 })
 
 const configuredShell = process.platform === "win32" ? undefined : Bun.which("bash")
@@ -219,6 +323,7 @@ const configuredIt = testEffect(
       }),
     ],
     [Location.node, locationLayer],
+    [LocationEnvironment.node, environmentLayer],
   ]),
 )
 const configuredTest = process.platform === "win32" ? configuredIt.live.skip : configuredIt.live

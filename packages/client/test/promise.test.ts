@@ -36,8 +36,8 @@ test("exposes every standard HTTP API group", () => {
     "attemptComplete",
     "attemptCancel",
   ])
-  expect(Object.keys(client.files)).toEqual(["list", "find"])
-  expect(Object.keys(client.ptys)).toEqual(["list", "create", "get", "update", "remove"])
+  expect(Object.keys(client.files)).toEqual(["directoryStatus", "ensureDirectory", "list", "find"])
+  expect(Object.keys(client.ptys)).toEqual(["list", "create", "get", "update", "restart", "remove"])
   expect(Object.keys(client.environment)).toEqual(["list", "reload", "reveal", "init"])
 })
 

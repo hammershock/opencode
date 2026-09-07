@@ -147,6 +147,38 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
       )
     })
 
+    const restart = Effect.fn("PtyHttpApi.restart")(function* (ctx: {
+      params: { ptyID: PtyID }
+      payload: typeof Pty.RestartInput.Type
+    }) {
+      const run = Effect.gen(function* () {
+        const active = yield* Location.Service
+        if (ctx.payload.sessionID) {
+          const resolution = yield* access
+            .require(ctx.payload.sessionID)
+            .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+          if (!sameLocation(resolution, Location.Ref.make(active))) return yield* new HttpApiError.BadRequest({})
+        }
+        const current = yield* get(ctx)
+        const shell = yield* plugin.trigger("shell.env", { cwd: current.cwd }, { env: {} as Record<string, string> })
+        return yield* pty(Pty.Service.use((service) => service.restart(ctx.params.ptyID, { env: shell.env }))).pipe(
+          Effect.catchTags({
+            "Pty.NotFoundError": (error) =>
+              new ApiError.PtyNotFoundError({
+                ptyID: error.ptyID,
+                message: `PTY session not found: ${error.ptyID}`,
+              }),
+            "Pty.ExitedError": (error) =>
+              new ApiError.PtyNotFoundError({
+                ptyID: error.ptyID,
+                message: `PTY session not found: ${error.ptyID}`,
+              }),
+          }),
+        )
+      })
+      return yield* ctx.payload.sessionID ? activity.withActivity(ctx.payload.sessionID, "session_mutation", run) : run
+    })
+
     const remove = Effect.fn("PtyHttpApi.remove")(function* (ctx: { params: { ptyID: PtyID } }) {
       yield* get(ctx)
       yield* pty(Pty.Service.use((service) => service.remove(ctx.params.ptyID))).pipe(
@@ -176,6 +208,7 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
       .handle("create", create)
       .handle("get", get)
       .handle("update", update)
+      .handle("restart", restart)
       .handle("remove", remove)
       .handle("connectToken", connectToken)
   }),

@@ -431,6 +431,19 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
             ),
           true,
         ),
+      removeBinding: (portableTargetLabel, expectedSessionIDs) =>
+        mutate(
+          () =>
+            sdk.client.v2.targetBinding.unbind(
+              {
+                portableTargetLabel,
+                expectedRevision: bindingRevision,
+                expectedSessionIDs: [...expectedSessionIDs],
+              },
+              { throwOnError: true },
+            ),
+          true,
+        ),
       targets: () =>
         sdk.client.v2.target.list({ throwOnError: true }).then((result) =>
           result.data.targets.map((target) => ({

@@ -89,6 +89,7 @@ export type SyncSettingsActions = {
   exportRecoveryKey: () => Promise<string>
   renameDevice: (deviceID: string, name: string) => Promise<void>
   updateBinding: (label: string, targetID: string, sessionIDs: readonly string[]) => Promise<void>
+  removeBinding: (label: string, sessionIDs: readonly string[]) => Promise<void>
   targets: () => Promise<readonly { id: string; name: string; description?: string }[]>
   assignUnassigned: (sessionIDs: readonly string[]) => Promise<void>
   promptUnassigned: (force: boolean) => Promise<void>
@@ -537,20 +538,37 @@ async function editBinding(
   open: () => void,
 ) {
   const targets = await actions.targets()
-  const targetID = await new Promise<string | undefined>((resolve) =>
+  const choice = await new Promise<{ type: "bind"; targetID: string } | { type: "unbind" } | undefined>((resolve) =>
     dialog.replace(
       () => (
-        <DialogSelect
+        <DialogSelect<{ type: "bind"; targetID: string } | { type: "unbind" }>
           title={`Bind ${binding.label}`}
-          options={targets.map((target) => ({ title: target.name, description: target.description, value: target.id }))}
+          options={[
+            ...targets.map((target) => ({
+              title: target.name,
+              description: target.description,
+              value: { type: "bind" as const, targetID: target.id },
+            })),
+            ...(binding.targetID ? [{ title: "Unbind", value: { type: "unbind" as const } }] : []),
+          ]}
           onSelect={(option) => resolve(option.value)}
         />
       ),
       () => resolve(undefined),
     ),
   )
-  if (!targetID) return open()
-  await actions.updateBinding(binding.label, targetID, binding.sessionIDs)
+  if (!choice) return open()
+  if (choice.type === "unbind") {
+    const confirmed = await DialogConfirm.show(
+      dialog,
+      `Unbind ${binding.label}?`,
+      "Affected Sessions become unresolved until this label is bound again.",
+    )
+    if (!confirmed) return open()
+    await actions.removeBinding(binding.label, binding.sessionIDs)
+    return open()
+  }
+  await actions.updateBinding(binding.label, choice.targetID, binding.sessionIDs)
   open()
 }
 

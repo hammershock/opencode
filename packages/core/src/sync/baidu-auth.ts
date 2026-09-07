@@ -140,6 +140,8 @@ type CompletionInput = {
     | { readonly type: "manual"; readonly code: string }
   readonly request?: BaiduSyncProvider.Request
   readonly now?: () => number
+  readonly signal?: AbortSignal
+  readonly requestTimeoutMs?: number
 }
 
 async function finish(input: CompletionInput, allowSwitch: boolean) {
@@ -161,10 +163,16 @@ async function finish(input: CompletionInput, allowSwitch: boolean) {
     redirectURI: attempt.redirectURI,
     request: input.request,
     now,
+    signal: input.signal,
+    requestTimeoutMs: input.requestTimeoutMs,
   }).catch(() => {
     throw new AuthError("provider")
   })
-  const identity = await identify(credential, input.request ?? fetch).catch(() => {
+  const identity = await identify(
+    credential,
+    BaiduSyncProvider.boundedRequest(input.request ?? fetch, input.requestTimeoutMs),
+    input.signal,
+  ).catch(() => {
     throw new AuthError("provider")
   })
   const current = await account(input.store, input.deviceID)
@@ -180,10 +188,14 @@ async function finish(input: CompletionInput, allowSwitch: boolean) {
   return identity
 }
 
-async function identify(credential: BaiduSyncProvider.Credential, request: BaiduSyncProvider.Request) {
+async function identify(
+  credential: BaiduSyncProvider.Credential,
+  request: BaiduSyncProvider.Request,
+  signal?: AbortSignal,
+) {
   const url = new URL(ACCOUNT_API)
   url.search = new URLSearchParams({ method: "uinfo", access_token: credential.accessToken }).toString()
-  const response = await request(url)
+  const response = await request(url, { signal })
   const body = (await response.json().catch(() => undefined)) as Record<string, unknown> | undefined
   if (!response.ok || !body || Number(body.errno ?? 0) !== 0) throw new AuthError("provider")
   const rawID = body.uk

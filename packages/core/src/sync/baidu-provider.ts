@@ -10,6 +10,7 @@ const MEDIA_API = "https://pan.baidu.com/rest/2.0/xpan/multimedia"
 const UPLOAD_API = "https://d.pcs.baidu.com/rest/2.0/pcs/superfile2"
 const TOKEN_API = "https://openapi.baidu.com/oauth/2.0/token"
 const PART_SIZE = 4 * 1024 * 1024
+export const REQUEST_TIMEOUT_MS = 30_000
 
 export type Credential = {
   readonly appKey: string
@@ -49,6 +50,8 @@ export async function exchangeCode(input: {
   readonly redirectURI: string
   readonly request?: Request
   readonly now?: () => number
+  readonly signal?: AbortSignal
+  readonly requestTimeoutMs?: number
 }) {
   return token(
     {
@@ -60,11 +63,13 @@ export async function exchangeCode(input: {
     },
     input.appKey,
     input.secretKey,
-    input.request ?? fetch,
+    boundedRequest(input.request ?? fetch, input.requestTimeoutMs),
     input.now ?? Date.now,
+    input.signal,
     undefined,
-    undefined,
-  )
+  ).catch((cause) => {
+    throw classify("stat", cause)
+  })
 }
 
 export async function refreshCredential(input: {
@@ -72,6 +77,7 @@ export async function refreshCredential(input: {
   readonly request?: Request
   readonly now?: () => number
   readonly signal?: AbortSignal
+  readonly requestTimeoutMs?: number
 }) {
   return token(
     {
@@ -82,11 +88,13 @@ export async function refreshCredential(input: {
     },
     input.credential.appKey,
     input.credential.secretKey,
-    input.request ?? fetch,
+    boundedRequest(input.request ?? fetch, input.requestTimeoutMs),
     input.now ?? Date.now,
     input.signal,
     input.credential.refreshToken,
-  )
+  ).catch((cause) => {
+    throw classify("stat", cause)
+  })
 }
 
 export function authorizationURL(appKey: string, redirectURI: string, state?: string) {
@@ -108,8 +116,9 @@ export function adapter(input: {
   readonly request?: Request
   readonly now?: () => number
   readonly sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
+  readonly requestTimeoutMs?: number
 }): SyncProvider.Adapter {
-  const request = input.request ?? fetch
+  const request = boundedRequest(input.request ?? fetch, input.requestTimeoutMs)
   const now = input.now ?? Date.now
   const sleep = input.sleep ?? delay
   const root = normalizeRoot(input.root)
@@ -132,7 +141,9 @@ export function adapter(input: {
       now,
       signal,
       current.refreshToken,
-    )
+    ).catch((cause) => {
+      throw classify("stat", cause)
+    })
     await saveCredential(input.store, input.deviceID, refreshed)
     return refreshed
   }
@@ -482,8 +493,18 @@ function responseFailure(
 
 function classify(operation: SyncProvider.ProviderError["operation"], cause: unknown) {
   if (cause instanceof SyncProvider.ProviderError) return cause
+  if (cause instanceof DOMException && cause.name === "TimeoutError") return error(operation, "network", true)
   if (cause instanceof DOMException && cause.name === "AbortError") return error(operation, "cancelled", false)
   return error(operation, "network", true)
+}
+
+export function boundedRequest(request: Request, timeoutMs = REQUEST_TIMEOUT_MS): Request {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new Error("Invalid Baidu request timeout")
+  return (input, init) => {
+    const timeout = AbortSignal.timeout(timeoutMs)
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+    return request(input, { ...init, signal })
+  }
 }
 
 function error(

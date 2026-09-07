@@ -6,7 +6,8 @@ authors:
   - hammershock
 created: 2026-09-06
 updated: 2026-09-07
-implemented-by: []
+implemented-by:
+  - https://github.com/hammershock/opencode/pull/86
 depends-on:
   - 0001
   - 0002

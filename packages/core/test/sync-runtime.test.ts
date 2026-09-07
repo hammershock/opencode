@@ -5,6 +5,8 @@ import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncRuntime } from "@opencode-ai/core/sync/runtime"
 import { SyncCodec } from "@opencode-ai/core/sync/codec"
+import { SyncAttachment } from "@opencode-ai/core/sync/attachment"
+import { SessionSync } from "@opencode-ai/core/sync/session"
 
 function provider() {
   const files = new Map<string, { bytes: Uint8Array; version: number }>()
@@ -226,6 +228,122 @@ describe("SyncRuntime", () => {
     const objects = remote.files.size
     await Effect.runPromise(runtime.upload())
     expect(remote.files.size).toBe(objects + 1) // only the newly written head
+  })
+
+  test("resumes a partial large-attachment upload through segment, head, acknowledgement and hydration", async () => {
+    const remote = provider()
+    const macID = SyncEvent.DeviceID.make("mac")
+    const windowsID = SyncEvent.DeviceID.make("windows")
+    const output = "large persistent output ".repeat(8_000)
+    const events = [0, 1].map((seq) =>
+      SyncEvent.Envelope.make({
+        id: `large-event-${seq}`,
+        aggregateID: "large-session",
+        seq,
+        type: "session.part.updated",
+        data: { part: { type: "tool", state: { status: "completed", output } } },
+      }),
+    )
+    const mac = store(
+      macID,
+      undefined,
+      events.map((event) => SyncEvent.EventOperation.make({ kind: "event", event })),
+    )
+    let acknowledgements = 0
+    const acknowledge = mac.service.acknowledge
+    mac.service.acknowledge = (segmentID: SyncEvent.SegmentID) => {
+      acknowledgements++
+      return acknowledge(segmentID)
+    }
+    mac.service.head = () => Effect.succeed(acknowledgements ? 1 : 0)
+    let failManifest = true
+    const adapter: SyncProvider.Adapter = {
+      ...remote.adapter,
+      uploadAtomic: async (...args) => {
+        if (args[0].startsWith("chunks/manifests/") && failManifest) {
+          failManifest = false
+          throw new SyncProvider.ProviderError("memory", "upload", "network", true, "unknown")
+        }
+        return remote.adapter.uploadAtomic(...args)
+      },
+    }
+    const sourceAttachment = SyncAttachment.make({
+      codec: SyncCodec.plaintext(),
+      namespaceID: "space",
+      provider: adapter,
+    })
+    const metadata = [
+      {
+        sessionID: "large-session",
+        title: "large",
+        ownerDeviceID: "mac",
+        directory: "/project",
+        revision: 1,
+        updatedAt: 1,
+      },
+    ]
+    const source = SyncRuntime.make({
+      config: { deviceID: macID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: adapter,
+      store: mac.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed(metadata),
+      metadataProjector: { apply: () => Effect.void },
+      attachment: {
+        externalize: (item) => SessionSync.externalize(item, sourceAttachment),
+        references: SyncAttachment.references,
+        collect: sourceAttachment.collect,
+      },
+    })
+
+    await expect(Effect.runPromise(source.now())).rejects.toBeDefined()
+    expect(source.status().lastError).toEqual({
+      stage: "attachment",
+      operation: "upload",
+      kind: "network",
+      retryable: true,
+      outcome: "unknown",
+      retryAfter: undefined,
+      message: "Sync attachment failed",
+    })
+    expect(acknowledgements).toBe(0)
+    expect([...remote.files.keys()].some((path) => path.startsWith("chunks/"))).toBeTrue()
+    expect([...remote.files.keys()].some((path) => path.startsWith("chunks/manifests/"))).toBeFalse()
+
+    await Effect.runPromise(source.now())
+    expect(acknowledgements).toBe(1)
+    expect([...remote.files.keys()].some((path) => path.startsWith("segments/"))).toBeTrue()
+    expect([...remote.files.keys()].some((path) => path.startsWith("devices/"))).toBeTrue()
+
+    const windows = store(windowsID)
+    const targetAttachment = SyncAttachment.make({
+      codec: SyncCodec.plaintext(),
+      namespaceID: "space",
+      provider: adapter,
+    })
+    let discovered: readonly SyncRuntime.Metadata[] = []
+    const target = SyncRuntime.make({
+      config: { deviceID: windowsID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: adapter,
+      store: windows.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: (items) => Effect.sync(() => void (discovered = items)) },
+      attachment: {
+        externalize: (item) => SessionSync.externalize(item, targetAttachment),
+        references: SyncAttachment.references,
+        collect: targetAttachment.collect,
+      },
+    })
+    await Effect.runPromise(target.pull())
+    expect(discovered).toEqual(metadata)
+    await Effect.runPromise(target.hydrate())
+    expect(windows.applied).toHaveLength(2)
+    expect(
+      await Promise.all(windows.applied.map((event) => SyncAttachment.hydrate(event.data, targetAttachment))),
+    ).toEqual(events.map((event) => event.data))
   })
 
   test("commits attachment references before segments and gates collection on device acknowledgements", async () => {

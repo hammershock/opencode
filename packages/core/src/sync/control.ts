@@ -53,6 +53,7 @@ export const Status = Schema.Struct({
   cursors: Schema.Record(Schema.String, NonNegativeInt),
   lastSuccessAt: Schema.optional(NonNegativeInt),
   error: Schema.optional(Schema.String),
+  diagnostic: Schema.optional(SyncRuntime.Diagnostic),
 })
 export type Status = typeof Status.Type
 export const DeviceUpdate = Schema.Struct({
@@ -83,6 +84,7 @@ export const AssignInput = Schema.Struct({ sessionIDs: Schema.Array(Schema.NonEm
 
 export class ControlError extends Schema.TaggedErrorClass<ControlError>()("SyncControlError", {
   kind: Schema.Literals(["unconfigured", "locked", "provider", "storage", "invalid", "pending", "deleted"]),
+  diagnostic: Schema.optional(SyncRuntime.Diagnostic),
 }) {}
 
 export interface Interface {
@@ -126,7 +128,7 @@ const layer = Layer.effect(
     const devicesFor = (namespaceID: string) =>
       SyncDevice.make(path.join(global.config, "sync", "spaces", namespaceID, "state.json"))
     let lastSuccessAt: number | undefined
-    let lastError: string | undefined
+    let lastDiagnostic: SyncRuntime.Diagnostic | undefined
     let engine: ReturnType<typeof SyncRuntime.make> | undefined
     let engineIdentity: string | undefined
     let scheduler: ReturnType<typeof SyncScheduler.make> | undefined
@@ -148,7 +150,7 @@ const layer = Layer.effect(
       Effect.catch(() =>
         Effect.sync(() => {
           // Sync recovery must never make the local application unavailable.
-          lastError = "storage"
+          lastDiagnostic = SyncRuntime.diagnostic("pull", new Error("storage"))
         }),
       ),
     )
@@ -288,7 +290,8 @@ const layer = Layer.effect(
         outbox,
         cursors: Object.fromEntries(cursorRows.map((row) => [row.device_id, row.cursor])),
         lastSuccessAt,
-        error: lastError,
+        error: lastDiagnostic?.message,
+        diagnostic: lastDiagnostic,
       })
     })
     const status = () => readStatus().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
@@ -305,9 +308,14 @@ const layer = Layer.effect(
         return yield* new ControlError({ kind: "deleted" })
       }
       const runtime = yield* load()
-      yield* runtime.now().pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      yield* runtime.now().pipe(
+        Effect.mapError(() => {
+          lastDiagnostic = runtime.status().lastError
+          return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
+        }),
+      )
       lastSuccessAt = Date.now()
-      lastError = undefined
+      lastDiagnostic = undefined
     })
     const restartScheduler = (config?: SyncState.Active) => {
       scheduler?.stop()
@@ -320,7 +328,7 @@ const layer = Layer.effect(
             now().pipe(
               Effect.catch((error) =>
                 Effect.sync(() => {
-                  lastError = error.kind
+                  lastDiagnostic = error.diagnostic ?? SyncRuntime.diagnostic("pull", error)
                   return undefined
                 }),
               ),
@@ -513,7 +521,7 @@ const layer = Layer.effect(
       // browsing. Selecting one of these rows calls hydrate below.
       yield* runtime.pull().pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
       lastSuccessAt = Date.now()
-      lastError = undefined
+      lastDiagnostic = undefined
       return yield* availability()
     })
     const hydrateRaw = Effect.fn("SyncControl.hydrate")(function* (input: typeof HydrateInput.Type) {
@@ -537,7 +545,7 @@ const layer = Layer.effect(
         ),
       )
       lastSuccessAt = Date.now()
-      lastError = undefined
+      lastDiagnostic = undefined
       return HydrateResult.make({ sessionID: input.sessionID, availability: result?.availability ?? "partial" })
     })
     const hydrate = (input: typeof HydrateInput.Type) =>

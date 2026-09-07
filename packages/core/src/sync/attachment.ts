@@ -101,29 +101,41 @@ export function make(input: {
     codec.seal("attachment", context(path, type), value)
   const open = async (path: string, type: "chunk" | "manifest", value: Uint8Array) =>
     codec.open("attachment", context(path, type), value)
+  const writes = new Map<string, Promise<void>>()
+
+  const ensure = (path: string, type: "chunk" | "manifest", plaintext: Uint8Array, signal?: AbortSignal) => {
+    const running = writes.get(path)
+    if (running) return running
+    const write = (async () => {
+      const verify = async () => {
+        const info = await input.provider.stat(path, signal)
+        if (!info) return false
+        const downloaded = await input.provider.download(path, info.version, signal)
+        const existing = await open(path, type, downloaded.bytes)
+        if (!Buffer.from(existing).equals(Buffer.from(plaintext)))
+          throw new SyncChunk.InvalidChunkError(`Existing attachment ${type} is corrupt`)
+        return true
+      }
+      if (await verify()) return
+      try {
+        await input.provider.uploadAtomic(path, await seal(path, type, plaintext), { type: "absent" }, signal)
+      } catch (cause) {
+        if (!(cause instanceof SyncProvider.ProviderError) || cause.kind !== "conflict" || !(await verify()))
+          throw cause
+      }
+    })().finally(() => writes.delete(path))
+    writes.set(path, write)
+    return write
+  }
 
   const put = async (bytes: Uint8Array, mediaType: string, signal?: AbortSignal) => {
     const split = await SyncChunk.split({ objectID: codec.objectID, keyEpoch: 1, bytes, mediaType })
     for (const chunk of new Map(split.chunks.map((item) => [item.id, item])).values()) {
       const path = chunkPath(chunk.id, codec.suffix)
-      const existing = await input.provider.stat(path, signal)
-      if (existing) {
-        const downloaded = await input.provider.download(path, existing.version, signal)
-        const plaintext = await open(path, "chunk", downloaded.bytes)
-        if ((await codec.objectID(plaintext)) !== chunk.id)
-          throw new SyncChunk.InvalidChunkError("Existing chunk is corrupt")
-        continue
-      }
-      await input.provider.uploadAtomic(path, await seal(path, "chunk", chunk.bytes), { type: "absent" }, signal)
+      await ensure(path, "chunk", chunk.bytes, signal)
     }
     const path = manifestPath(split.manifest.objectID, codec.suffix)
-    if (!(await input.provider.stat(path, signal)))
-      await input.provider.uploadAtomic(
-        path,
-        await seal(path, "manifest", encoder.encode(JSON.stringify(split.manifest))),
-        { type: "absent" },
-        signal,
-      )
+    await ensure(path, "manifest", encoder.encode(JSON.stringify(split.manifest)), signal)
     return split.manifest.objectID
   }
 

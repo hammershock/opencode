@@ -23,6 +23,8 @@ type Entry<E> = {
 
 export const make = <Key, E>(options: {
   readonly drain: (key: Key, force: boolean) => Effect.Effect<void, E>
+  /** Test/diagnostic observation only; callback failures never affect execution. */
+  readonly onAdmission?: (event: { readonly key: Key; readonly type: "started" | "joined" }) => void
 }): Effect.Effect<Coordinator<Key, E>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const active = new Map<Key, Entry<E>>()
@@ -33,6 +35,13 @@ export const make = <Key, E>(options: {
       pendingWake: false,
       stopping: false,
     })
+    const observe = (key: Key, type: "started" | "joined") => {
+      try {
+        options.onAdmission?.({ key, type })
+      } catch {
+        // Admission observation must not alter coordinator semantics.
+      }
+    }
 
     const start = (key: Key, entry: Entry<E>, force: boolean, successor = false) => {
       const ready = Deferred.makeUnsafe<void>()
@@ -68,12 +77,14 @@ export const make = <Key, E>(options: {
       Effect.uninterruptibleMask((restore) => {
         const entry = active.get(key)
         if (entry !== undefined) {
+          observe(key, "joined")
           if (entry.stopping) return restore(Deferred.await(entry.done).pipe(Effect.andThen(run(key))))
           return restore(Deferred.await(entry.done))
         }
 
         const next = makeEntry()
         active.set(key, next)
+        observe(key, "started")
         start(key, next, true)
         return restore(Deferred.await(next.done))
       })

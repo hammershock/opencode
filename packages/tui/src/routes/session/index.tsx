@@ -1282,7 +1282,7 @@ export function Session() {
   ])
 
   const sessionCommands = createMemo(() =>
-    [...sessionCommandList(), ...coreCommandHost().commands()].map((command) => ({
+    [...sessionCommandList(), ...coreCommandHost().registrations()].map((command) => ({
       namespace: "palette",
       name: "value" in command ? command.value : command.name,
       desc: "description" in command ? command.description : undefined,

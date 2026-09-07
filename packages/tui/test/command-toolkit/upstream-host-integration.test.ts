@@ -6,6 +6,7 @@ import {
   resolveUpstreamCandidates,
 } from "../../src/command-toolkit/host"
 import { adaptKeymapCommands, adaptServerCommands } from "../../src/command-toolkit/upstream"
+import { commandPaletteWinners } from "../../src/command-toolkit/palette"
 
 const context: InvocationContext = {
   source: "slash",
@@ -41,7 +42,7 @@ describe("Home and Session command host integration", () => {
     })
 
     expect(host.slashes()[0]).toMatchObject({ identity: "fork.sync.settings", provenance: { type: "core" } })
-    expect(host.commands()[0]).toMatchObject({ name: "fork.sync.settings", commandKitIdentity: "fork.sync.settings" })
+    expect(host.commands()[0]).toMatchObject({ identity: "fork.sync.settings", provenance: { type: "core" } })
     expect(await host("/sync now")).toMatchObject({ status: "handled", identity: "fork.sync.settings" })
     await host.commands()[0]!.run()
     host.slashes()[0]!.onSelect?.()
@@ -129,7 +130,7 @@ describe("Home and Session command host integration", () => {
     const direct = await host("/deploy release")
     expect(direct).toMatchObject({ status: "handled", identity: "plugin.deploy" })
     expect(resolveUpstreamCandidates("/deploy", upstream)[0]?.id).toBe("plugin.deploy")
-    expect(host.commands()[0]).toMatchObject({ name: "fork.deploy", commandKitPath: ["deploy"] })
+    expect(host.registrations()[0]).toMatchObject({ name: "fork.deploy", commandKitPath: ["deploy"] })
     expect(dispatched).toEqual(["plugin.deploy"])
   })
 
@@ -148,5 +149,52 @@ describe("Home and Session command host integration", () => {
       confirm: ["fork.target.manage"],
       deniedCapabilities: ["sync.configure"],
     })
+  })
+
+  test("updates every host surface when a dynamic upstream collision appears", async () => {
+    let upstream: ReturnType<typeof adaptServerCommands> = []
+    const host = createCommandHost({
+      register: (registry) =>
+        registry.register(
+          defineCommand({
+            id: "fork.dynamic",
+            path: ["dynamic"],
+            title: "Core dynamic",
+            provenance: { type: "core", feature: "fixture" },
+            capabilities: [],
+            parse: () => ({ status: "parsed", input: undefined }),
+            execute: async () => ({ status: "completed" }),
+          }),
+        ),
+      context: (source) => ({ ...context, source }),
+      upstream: () => upstream,
+      invalid: () => undefined,
+      outcome: () => undefined,
+    })
+
+    expect(host.commands()[0]?.identity).toBe("fork.dynamic")
+    expect(host.slashes()[0]?.identity).toBe("fork.dynamic")
+    expect(commandPaletteWinners(host.commands())[0]?.identity).toBe("fork.dynamic")
+    expect(await host("/dynamic")).toMatchObject({ identity: "fork.dynamic" })
+
+    upstream = adaptServerCommands([{ name: "dynamic", source: "mcp", provenance: { type: "mcp", serverID: "docs" } }])
+    expect(host.commands()[0]).toMatchObject({ identity: "session.command:dynamic", provenance: { type: "mcp" } })
+    expect(host.slashes()[0]?.identity).toBe("session.command:dynamic")
+    expect(commandPaletteWinners(host.commands())[0]?.identity).toBe("session.command:dynamic")
+    expect(await host("/dynamic")).toMatchObject({ identity: "session.command:dynamic" })
+  })
+
+  test("preserves server command provenance instead of granting Core trust", () => {
+    expect(
+      adaptServerCommands([
+        { name: "prompt", source: "command", provenance: { type: "custom" } },
+        { name: "docs", source: "mcp", provenance: { type: "mcp", serverID: "docs-server" } },
+        { name: "review", source: "skill", provenance: { type: "skill", location: "/skills/review/SKILL.md" } },
+      ]).map((command) => command.provenance),
+    ).toEqual([
+      { type: "custom-command" },
+      { type: "mcp", serverID: "docs-server" },
+      { type: "skill", location: "/skills/review/SKILL.md" },
+    ])
   })
 })

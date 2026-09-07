@@ -106,7 +106,7 @@ export function Home() {
     }),
   )
 
-  useBindings(() => ({ commands: commandHost().commands() }))
+  useBindings(() => ({ commands: commandHost().registrations() }))
   const promptMaxWidth = createMemo(() => {
     const configured = tuiConfig.prompt?.max_width
     if (configured === "auto") return Math.max(75, Math.floor(dimensions().width * 0.7))

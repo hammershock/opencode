@@ -47,10 +47,10 @@ describe("target command", () => {
       invalid: () => undefined,
       outcome: () => undefined,
     })
-    expect(host.commands()).toEqual([expect.objectContaining({ name: "fork.target.manage", slashName: "target" })])
-    expect(host.commands()[0]?.enabled()).toBe(true)
+    expect(host.registrations()).toEqual([expect.objectContaining({ name: "fork.target.manage", slashName: "target" })])
+    expect(host.registrations()[0]?.enabled()).toBe(true)
     expect(await host("/target add")).toMatchObject({ status: "handled", identity: "fork.target.manage" })
-    await host.commands()[0]!.run()
+    await host.registrations()[0]!.run()
     expect(opened).toEqual(["add", "manage"])
   })
 })

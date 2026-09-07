@@ -3,6 +3,7 @@ export type CommandProvenance =
   | { type: "upstream"; host: string; identity: string }
   | { type: "user-config" }
   | { type: "project-config" }
+  | { type: "custom-command" }
   | { type: "mcp"; serverID: string }
   | { type: "skill"; location: string }
   | { type: "plugin" | "legacy-plugin"; pluginID: string; version?: string }

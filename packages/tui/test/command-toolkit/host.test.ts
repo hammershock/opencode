@@ -35,10 +35,10 @@ describe("TUI command toolkit host", () => {
     })
     expect(await host("/test value")).toMatchObject({ status: "handled", identity: "fork.test.run" })
     expect(calls).toEqual(["value", "done"])
-    expect(host.commands()).toEqual([
+    expect(host.registrations()).toEqual([
       expect.objectContaining({ name: "fork.test.run", slashName: "test", title: "test" }),
     ])
-    await host.commands()[0]!.run()
+    await host.registrations()[0]!.run()
     expect(calls).toEqual(["value", "done", "", "done"])
   })
 
@@ -79,7 +79,7 @@ describe("TUI command toolkit host", () => {
     expect(upstream).toEqual(["value"])
     expect(diagnostics).toHaveLength(1)
     expect(host.diagnostics()).toEqual(diagnostics)
-    expect(host.commands()[0]).toMatchObject({
+    expect(host.registrations()[0]).toMatchObject({
       name: "fork.test.run",
       commandKitPath: ["test"],
     })
@@ -140,6 +140,6 @@ describe("TUI command toolkit host", () => {
     expect(await host("/write")).toMatchObject({ status: "handled", identity: "fork.test.write" })
     expect(ran).toBe(false)
     expect(outcomes).toEqual(["failed:Capability denied by user policy: workspace.write"])
-    expect(host.commands()[0]?.enabled()).toBe(false)
+    expect(host.registrations()[0]?.enabled()).toBe(false)
   })
 })

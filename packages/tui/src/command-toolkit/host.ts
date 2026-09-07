@@ -43,6 +43,38 @@ export type TuiSlashCommand = {
   onSelect?: () => void
 }
 
+export type TuiCommandWinner = {
+  identity: string
+  path: readonly string[]
+  title: string
+  description?: string
+  category?: string
+  hidden: boolean
+  enabled: boolean
+  provenance: CommandProvenance
+  shadowed: readonly ResolutionDiagnostic[]
+  dispatch: "client" | "session"
+  run: (source?: InvocationContext["source"]) => Promise<TuiCommandDispatch>
+}
+
+type TuiCommandWinnerSource = { commands: () => readonly TuiCommandWinner[] }
+const activeHosts = new WeakMap<object, TuiCommandWinnerSource[]>()
+
+export function activateCommandHost(keymap: object, host: TuiCommandWinnerSource) {
+  const stack = activeHosts.get(keymap) ?? []
+  stack.push(host)
+  activeHosts.set(keymap, stack)
+  return () => {
+    const index = stack.lastIndexOf(host)
+    if (index !== -1) stack.splice(index, 1)
+    if (stack.length === 0) activeHosts.delete(keymap)
+  }
+}
+
+export function getActiveCommandHost(keymap: object) {
+  return activeHosts.get(keymap)?.at(-1)
+}
+
 export type TuiCommandDispatch =
   | {
       status: "handled"
@@ -81,6 +113,7 @@ export function provenanceLabel(provenance: CommandProvenance) {
   if (provenance.type === "upstream") return "upstream"
   if (provenance.type === "user-config") return "user"
   if (provenance.type === "project-config") return "project"
+  if (provenance.type === "custom-command") return "custom"
   if (provenance.type === "mcp") return "mcp"
   if (provenance.type === "skill") return "skill"
   return provenance.type === "legacy-plugin" ? "plugin" : provenance.type
@@ -222,7 +255,7 @@ export function createCommandHost<Context extends InvocationContext>(input: {
     }
   }
 
-  const commands = () => {
+  const registrations = () => {
     const restrictions = input.restrictions?.()
     return registry.list().flatMap((command) => {
       if (restrictions?.hidden?.includes(command.id)) return []
@@ -252,51 +285,74 @@ export function createCommandHost<Context extends InvocationContext>(input: {
     })
   }
 
-  const slashes = (): TuiSlashCommand[] => {
+  const commands = (): TuiCommandWinner[] => {
     const restrictions = input.restrictions?.()
+    const upstream = upstreamList(input.upstream())
     const routes = [
-      ...upstreamList(input.upstream()).flatMap((command) => [command.path, ...(command.aliases ?? [])]),
+      ...upstream.flatMap((command) => [command.path, ...(command.aliases ?? [])]),
       ...registry.routes().map((route) => route.path),
     ]
     const unique = new Map<string, readonly string[]>()
     for (const route of routes) unique.set(route.join("\u0000"), route)
-    return [...unique.values()]
-      .flatMap((route) => {
-        const source = `/${route.join(" ")}`
-        const resolution = resolve(source)
-        if (resolution.status === "passthrough") return []
-        if (resolution.status === "core") {
-          const command = resolution.resolution.command
-          if (restrictions?.hidden?.includes(command.id)) return []
-          return [
-            {
-              identity: command.id,
-              display: source,
-              description: withProvenance(command.description ?? command.title, command.provenance),
-              provenance: command.provenance,
-              shadowed: resolution.diagnostics,
-              onSelect: () => void dispatch(source, "slash"),
-            },
-          ]
-        }
-        const command = resolution.candidate as TuiUpstreamCommand
-        if (command.hidden) return []
+    return [...unique.values()].flatMap((route): TuiCommandWinner[] => {
+      const source = `/${route.join(" ")}`
+      const resolution = resolveAgainst(source, upstream)
+      if (resolution.status === "passthrough") return []
+      if (resolution.status === "core") {
+        const command = resolution.resolution.command
+        const decision = evaluateCommandRestrictions(command, restrictions)
         return [
           {
             identity: command.id,
-            display: source,
-            description: withProvenance(
-              command.description ?? command.title,
-              command.provenance,
-              resolution.diagnostics.length,
-            ),
+            path: route,
+            title: command.title,
+            description: withProvenance(command.description, command.provenance, resolution.diagnostics.length),
+            category: command.category,
+            hidden: restrictions?.hidden?.includes(command.id) === true,
+            enabled:
+              decision.status === "allowed" && (command.available ? command.available(input.context("palette")) : true),
             provenance: command.provenance,
             shadowed: resolution.diagnostics,
-            ...(command.dispatch.type === "session"
-              ? { insertText: `${source} ` }
-              : { onSelect: () => void dispatch(source, "slash") }),
+            dispatch: "client" as const,
+            run: (invocationSource: InvocationContext["source"] = "palette") => dispatch(source, invocationSource),
           },
         ]
+      }
+      const command = resolution.candidate as TuiUpstreamCommand
+      return [
+        {
+          identity: command.id,
+          path: route,
+          title: command.title,
+          description: withProvenance(command.description, command.provenance, resolution.diagnostics.length),
+          category: command.category,
+          hidden: command.hidden === true,
+          enabled: true,
+          provenance: command.provenance,
+          shadowed: resolution.diagnostics,
+          dispatch: command.dispatch.type,
+          run: (invocationSource: InvocationContext["source"] = "palette") => dispatch(source, invocationSource),
+        },
+      ]
+    })
+  }
+
+  const slashes = (): TuiSlashCommand[] => {
+    return commands()
+      .filter((command) => !command.hidden)
+      .map((command) => {
+        const source = `/${command.path.join(" ")}`
+        return {
+          identity: command.identity,
+          display: source,
+          description:
+            command.description ?? withProvenance(command.title, command.provenance, command.shadowed.length),
+          provenance: command.provenance,
+          shadowed: command.shadowed,
+          ...(command.dispatch === "session"
+            ? { insertText: `${source} ` }
+            : { onSelect: () => void command.run("slash") }),
+        }
       })
       .sort((a, b) => a.display.localeCompare(b.display))
   }
@@ -304,6 +360,7 @@ export function createCommandHost<Context extends InvocationContext>(input: {
   return Object.assign(dispatch, {
     resolve,
     commands,
+    registrations,
     slashes,
     diagnostics: () => [...diagnosticHistory],
   })

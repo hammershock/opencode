@@ -12,6 +12,7 @@ import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
 import { DialogLocationDirectory } from "../../component/dialog-location-directory"
 import { DialogPrompt } from "../../ui/dialog-prompt"
+import { DialogConfirm } from "../../ui/dialog-confirm"
 import type { TargetDefinition } from "../../component/target-wizard"
 import { TargetHealth, useTargetManager } from "../../component/target-manager"
 
@@ -56,6 +57,32 @@ function Directory(props: { api: TuiPluginApi }) {
     ))
   }
 
+  const preflightDirectory = async (target: HomeSessionTarget, directory: string, workspaceRoots: string[]) => {
+    if (!path.isAbsolute(directory)) throw new Error("Working directory must be absolute")
+    const normalized = path.normalize(directory)
+    const anchor = workspaceRoots
+      .map((root) => path.normalize(root))
+      .filter((root) => normalized === root || normalized.startsWith(root.endsWith(path.sep) ? root : root + path.sep))
+      .sort((a, b) => b.length - a.length)[0]
+    if (!anchor) throw new Error("Working directory is outside the configured workspace roots")
+    const location = {
+      directory: anchor,
+      ...(target.type === "rexd" ? { target: target.targetID } : {}),
+    }
+    const relative = path.relative(anchor, normalized) || "."
+    const checked = await sdk.client.v2.fs.directoryStatus({ location, path: relative }, { throwOnError: true })
+    if (checked.data.data.status === "directory") return checked.data.data.path
+    if (checked.data.data.status === "not-directory") throw new Error("The selected path is not a directory")
+    const create = await DialogConfirm.show(
+      dialog,
+      "Create working directory?",
+      `${normalized} does not exist. Create it now?`,
+    )
+    if (!create) return
+    const created = await sdk.client.v2.fs.ensureDirectory({ location, path: relative }, { throwOnError: true })
+    return created.data.data.path
+  }
+
   const chooseLocal = () => {
     void (async () => {
       const starting = paths.cwd
@@ -88,8 +115,12 @@ function Directory(props: { api: TuiPluginApi }) {
         },
       })
       if (!directory?.trim()) return
+      const selected = await preflightDirectory({ type: "local" }, directory.trim(), [
+        path.parse(directory.trim()).root,
+      ])
+      if (!selected) return
       destination?.setTarget({ type: "local" })
-      destination?.setDestination({ type: "directory", directory: directory.trim(), subdirectory: false })
+      destination?.setDestination({ type: "directory", directory: selected, subdirectory: false })
       dialog.clear()
     })().catch((error) =>
       toast.show({ title: "Cannot select local directory", message: errorMessage(error), variant: "error" }),
@@ -127,8 +158,10 @@ function Directory(props: { api: TuiPluginApi }) {
         })
         if (!directory?.trim()) return
         const selected = { type: "rexd" as const, targetID: target.id, name: target.name }
+        const validated = await preflightDirectory(selected, directory.trim(), target.workspaceRoots)
+        if (!validated) return
         destination?.setTarget(selected)
-        destination?.setDestination({ type: "directory", directory: directory.trim(), subdirectory: false })
+        destination?.setDestination({ type: "directory", directory: validated, subdirectory: false })
         dialog.clear()
       } catch (error) {
         toast.show({ title: "Target unavailable", message: errorMessage(error), variant: "error" })

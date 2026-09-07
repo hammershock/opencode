@@ -5066,6 +5066,11 @@ export type PermissionSavedInfo = {
   resource: string
 }
 
+export type FileSystemDirectoryStatus = {
+  status: "directory" | "missing" | "not-directory"
+  path: string
+}
+
 export type FileSystemEntry = {
   path: string
   type: "file" | "directory"
@@ -13600,6 +13605,86 @@ export type V2FsReadResponses = {
 }
 
 export type V2FsReadResponse = V2FsReadResponses[keyof V2FsReadResponses]
+
+export type V2FsDirectoryStatusData = {
+  body: {
+    path: string
+  }
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+  }
+  url: "/api/fs/directory/status"
+}
+
+export type V2FsDirectoryStatusErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2FsDirectoryStatusError = V2FsDirectoryStatusErrors[keyof V2FsDirectoryStatusErrors]
+
+export type V2FsDirectoryStatusResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: FileSystemDirectoryStatus
+  }
+}
+
+export type V2FsDirectoryStatusResponse = V2FsDirectoryStatusResponses[keyof V2FsDirectoryStatusResponses]
+
+export type V2FsEnsureDirectoryData = {
+  body: {
+    path: string
+  }
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+  }
+  url: "/api/fs/directory"
+}
+
+export type V2FsEnsureDirectoryErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2FsEnsureDirectoryError = V2FsEnsureDirectoryErrors[keyof V2FsEnsureDirectoryErrors]
+
+export type V2FsEnsureDirectoryResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: FileSystemDirectoryStatus
+  }
+}
+
+export type V2FsEnsureDirectoryResponse = V2FsEnsureDirectoryResponses[keyof V2FsEnsureDirectoryResponses]
 
 export type V2FsListData = {
   body?: never

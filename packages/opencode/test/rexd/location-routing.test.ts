@@ -257,6 +257,8 @@ describe("Rexd Location routing contract", () => {
       glob: () => Effect.succeed([]),
       grep: () => Effect.succeed([]),
       read: () => Effect.die("not used"),
+      directoryStatus: () => Effect.die("not used"),
+      ensureDirectory: () => Effect.die("not used"),
     })
     const location = Location.Service.of({
       target: { type: "rexd", targetID },

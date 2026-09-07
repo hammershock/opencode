@@ -2892,6 +2892,54 @@ export type PermissionsReplyInput = {
 
 export type PermissionsReplyOutput = void
 
+export type FilesDirectoryStatusInput = {
+  readonly location?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+  }["location"]
+  readonly path: { readonly path: string }["path"]
+}
+
+export type FilesDirectoryStatusOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly status: "directory" | "missing" | "not-directory"; readonly path: string }
+}
+
+export type FilesEnsureDirectoryInput = {
+  readonly location?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+  }["location"]
+  readonly path: { readonly path: string }["path"]
+}
+
+export type FilesEnsureDirectoryOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: { readonly status: "directory" | "missing" | "not-directory"; readonly path: string }
+}
+
 export type FilesListInput = {
   readonly location?: {
     readonly location?:

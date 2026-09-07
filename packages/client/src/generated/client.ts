@@ -77,6 +77,10 @@ import type {
   PermissionsGetOutput,
   PermissionsReplyInput,
   PermissionsReplyOutput,
+  FilesDirectoryStatusInput,
+  FilesDirectoryStatusOutput,
+  FilesEnsureDirectoryInput,
+  FilesEnsureDirectoryOutput,
   FilesListInput,
   FilesListOutput,
   FilesFindInput,
@@ -790,6 +794,32 @@ export function make(options: ClientOptions) {
         ),
     },
     files: {
+      directoryStatus: (input: FilesDirectoryStatusInput, requestOptions?: RequestOptions) =>
+        request<FilesDirectoryStatusOutput>(
+          {
+            method: "POST",
+            path: `/api/fs/directory/status`,
+            query: { location: input["location"] },
+            body: { path: input["path"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      ensureDirectory: (input: FilesEnsureDirectoryInput, requestOptions?: RequestOptions) =>
+        request<FilesEnsureDirectoryOutput>(
+          {
+            method: "POST",
+            path: `/api/fs/directory`,
+            query: { location: input["location"] },
+            body: { path: input["path"] },
+            successStatus: 200,
+            declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
       list: (input?: FilesListInput, requestOptions?: RequestOptions) =>
         request<FilesListOutput>(
           {

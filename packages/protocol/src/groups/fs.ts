@@ -17,6 +17,8 @@ const FindQuery = Schema.Struct({
   limit: Schema.NumberFromString.pipe(Schema.decodeTo(PositiveInt), Schema.optional),
 })
 
+const DirectoryPayload = Schema.Struct({ path: RelativePath })
+
 export const FileSystemGroup = HttpApiGroup.make("server.fs")
   .add(
     HttpApiEndpoint.get("fs.read", "/api/fs/read/*", {
@@ -31,6 +33,24 @@ export const FileSystemGroup = HttpApiGroup.make("server.fs")
           description: "Serve one file relative to the requested location.",
         }),
       ),
+  )
+  .add(
+    HttpApiEndpoint.post("fs.directoryStatus", "/api/fs/directory/status", {
+      query: LocationQuery,
+      payload: DirectoryPayload,
+      success: Location.response(FileSystem.DirectoryStatus),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(OpenApi.annotations({ identifier: "v2.fs.directoryStatus", summary: "Inspect a directory path" })),
+  )
+  .add(
+    HttpApiEndpoint.post("fs.ensureDirectory", "/api/fs/directory", {
+      query: LocationQuery,
+      payload: DirectoryPayload,
+      success: Location.response(FileSystem.DirectoryStatus),
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(OpenApi.annotations({ identifier: "v2.fs.ensureDirectory", summary: "Create a directory" })),
   )
   .add(
     HttpApiEndpoint.get("fs.list", "/api/fs/list", {

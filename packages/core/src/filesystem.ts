@@ -7,7 +7,7 @@ import { FSUtil } from "./fs-util"
 import { Location } from "./location"
 import { PositiveInt, RelativePath } from "./schema"
 import { FileSystemSearch } from "./filesystem/search"
-import { Entry, FileSystem, FindInput, Match } from "@opencode-ai/schema/filesystem"
+import { DirectoryStatus, Entry, FileSystem, FindInput, Match } from "@opencode-ai/schema/filesystem"
 export { Entry, Match, Submatch } from "@opencode-ai/schema/filesystem"
 
 export const ReadInput = Schema.Struct({
@@ -28,6 +28,9 @@ export const ListInput = Schema.Struct({
   path: RelativePath.pipe(Schema.optional),
 })
 export type ListInput = typeof ListInput.Type
+
+export { DirectoryStatus }
+export type DirectoryStatus = typeof DirectoryStatus.Type
 
 export { FindInput }
 
@@ -52,6 +55,8 @@ export interface Interface {
   readonly find: (input: FindInput) => Effect.Effect<Entry[]>
   readonly glob: (input: GlobInput) => Effect.Effect<readonly Entry[]>
   readonly grep: (input: GrepInput) => Effect.Effect<readonly Match[]>
+  readonly directoryStatus: (path: RelativePath) => Effect.Effect<DirectoryStatus>
+  readonly ensureDirectory: (path: RelativePath) => Effect.Effect<DirectoryStatus>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/FileSystem") {}
@@ -106,6 +111,26 @@ const baseLayer = Layer.effect(
               .sort((a, b) => (a.type === b.type ? a.path.localeCompare(b.path) : a.type === "directory" ? -1 : 1)),
           ),
         )
+      }),
+      directoryStatus: Effect.fn("FileSystem.directoryStatus")(function* (input) {
+        const absolute = path.resolve(location.directory, input)
+        if (!FSUtil.contains(location.directory, absolute))
+          return yield* Effect.die(new Error("Path escapes the location"))
+        const exists = yield* fs.existsSafe(absolute)
+        if (!exists) return { status: "missing", path: absolute }
+        const real = yield* fs.realPath(absolute).pipe(Effect.orDie)
+        if (!FSUtil.contains(root, real)) return yield* Effect.die(new Error("Path escapes the location"))
+        const info = yield* fs.stat(real).pipe(Effect.orDie)
+        return { status: info.type === "Directory" ? "directory" : "not-directory", path: real }
+      }),
+      ensureDirectory: Effect.fn("FileSystem.ensureDirectory")(function* (input) {
+        const absolute = path.resolve(location.directory, input)
+        if (!FSUtil.contains(location.directory, absolute))
+          return yield* Effect.die(new Error("Path escapes the location"))
+        yield* fs.ensureDir(absolute).pipe(Effect.orDie)
+        const real = yield* fs.realPath(absolute).pipe(Effect.orDie)
+        if (!FSUtil.contains(root, real)) return yield* Effect.die(new Error("Path escapes the location"))
+        return { status: "directory", path: real }
       }),
     })
   }),

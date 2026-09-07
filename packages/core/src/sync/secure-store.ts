@@ -4,7 +4,6 @@ import path from "node:path"
 import fs from "node:fs/promises"
 
 export const SERVICE = "opencode-rexd-sync"
-export const LEGACY_BAIDU_SERVICE = "opencode-rexd-baidu"
 export const BAIDU_APP_ACCOUNT = "baidu:app"
 
 export type BaiduAppCredential = {
@@ -48,18 +47,6 @@ export async function detect(
   } = {},
 ): Promise<Store> {
   return detectService(SERVICE, options)
-}
-
-/** @deprecated Test-only bridge until the legacy SyncSetup flow is removed. */
-export async function detectLegacyBaidu(
-  options: {
-    readonly platform?: NodeJS.Platform
-    readonly runner?: Runner
-    readonly procVersion?: string
-    readonly findInterop?: () => Promise<string | undefined>
-  } = {},
-): Promise<Store> {
-  return detectService(LEGACY_BAIDU_SERVICE, options)
 }
 
 export async function readProvisionedBaiduApp(store: Store) {

@@ -1,286 +1,277 @@
 import { describe, expect, test } from "bun:test"
-import path from "node:path"
-import fs from "node:fs/promises"
+import { Effect } from "effect"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
+import { SyncCrypto } from "@opencode-ai/core/sync/crypto"
+import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncSecureStore } from "@opencode-ai/core/sync/secure-store"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
-import { Effect } from "effect"
+import { tmpdir } from "./fixture/tmpdir"
 
-function store(): SyncSecureStore.Store & { values: Map<string, string> } {
-  const values = new Map<string, string>()
-  return {
-    platform: "macos-keychain",
-    values,
-    get: async (key) => values.get(key),
-    set: async (key, value) => void values.set(key, value),
-    remove: async (key) => void values.delete(key),
-  }
-}
-
-function baidu() {
-  const files = new Map<string, { bytes: Uint8Array; id: number; time: number }>()
-  const parts = new Map<string, Uint8Array[]>()
-  let next = 1
-  const request: BaiduSyncProvider.Request = async (input, init) => {
-    const url = new URL(input instanceof Request ? input.url : input)
-    const method = url.searchParams.get("method")
-    if (url.hostname === "openapi.baidu.com")
-      return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 })
-    if (url.hostname === "download.test") return new Response(files.get(url.searchParams.get("path")!)?.bytes)
-    if (url.pathname.includes("multimedia")) {
-      const id = Number(JSON.parse(url.searchParams.get("fsids")!)[0])
-      const entry = [...files.entries()].find(([, value]) => value.id === id)
-      return Response.json({
-        errno: 0,
-        list: entry ? [{ dlink: `https://download.test/file?path=${encodeURIComponent(entry[0])}` }] : [],
-      })
-    }
-    if (method === "list") {
-      const directory = url.searchParams.get("dir")!
-      return Response.json({
-        errno: 0,
-        has_more: 0,
-        list: [...files.entries()].flatMap(([file, value]) =>
-          path.posix.dirname(file) === directory
-            ? [{ path: file, fs_id: value.id, size: value.bytes.length, server_mtime: value.time, isdir: 0 }]
-            : [],
-        ),
-      })
-    }
-    if (method === "filemanager") {
-      const form = new URLSearchParams(init?.body as URLSearchParams)
-      for (const file of JSON.parse(form.get("filelist")!) as string[]) files.delete(file)
-      return Response.json({ errno: 0 })
-    }
-    if (method === "precreate") {
-      const form = new URLSearchParams(init?.body as URLSearchParams)
-      parts.set(form.get("path")!, [])
-      return Response.json({ errno: 0, uploadid: form.get("path") })
-    }
-    if (url.hostname === "d.pcs.baidu.com") {
-      const form = init?.body as FormData
-      const bytes = new Uint8Array(await (form.get("file") as Blob).arrayBuffer())
-      parts.get(url.searchParams.get("path")!)![Number(url.searchParams.get("partseq"))] = bytes
-      return Response.json({ errno: 0 })
-    }
-    if (method === "create") {
-      const form = new URLSearchParams(init?.body as URLSearchParams)
-      const file = form.get("path")!
-      const bytes = Buffer.concat(parts.get(file)!.map((item) => Buffer.from(item)))
-      const value = { bytes: new Uint8Array(bytes), id: next++, time: 10 }
-      files.set(file, value)
-      return Response.json({ errno: 0, path: file, fs_id: value.id, size: bytes.length, server_mtime: value.time })
-    }
-    throw new Error(`Unexpected request ${url}`)
-  }
-  return { request, files }
-}
-
-async function temp() {
-  return fs.mkdtemp(path.join(process.env.TMPDIR ?? "/tmp", "sync-setup-"))
-}
-
-describe("SyncSetup", () => {
-  test("creates an encrypted namespace without writing credentials to config", async () => {
-    const configDirectory = await temp()
+describe("SyncSetup lifecycle", () => {
+  test("reads config without secure storage and login survives restart without creating a space", async () => {
+    await using tmp = await tmpdir()
     const secure = store()
-    const remote = baidu()
-    const setup = SyncSetup.make({
-      configDirectory,
-      store: secure,
-      legacyStore: store(),
-      request: remote.request,
-      now: () => 1_000,
-    })
-    const begin = await Effect.runPromise(setup.begin({ appKey: "app", secretKey: "secret", deviceName: "Mac" }))
-    expect(begin.authorizationURL).toContain("client_id=app")
-    const result = await Effect.runPromise(setup.complete({ attemptID: begin.attemptID, code: "code" }))
-    expect(result.recoveryString).toStartWith("ocr1.")
-    expect(remote.files.has(`${result.config.remoteRoot}/protocol.json`)).toBe(true)
-    const raw = await fs.readFile(path.join(configDirectory, "sync", "config.json"), "utf8")
-    expect(raw).not.toContain("secret")
-    expect(raw).not.toContain("access")
-    expect(secure.values.has(`space:${result.config.namespaceID}:root`)).toBe(true)
-    expect(secure.values.has(`baidu:${result.config.deviceID}`)).toBe(true)
-    expect((await Effect.runPromise(setup.setEnabled(false))).enabled).toBe(false)
-    expect((await Effect.runPromise(setup.config()))?.enabled).toBe(false)
-    await expect(
-      Effect.runPromise(setup.complete({ attemptID: begin.attemptID, code: "again" })),
-    ).rejects.toMatchObject({ kind: "expired" })
-  })
-
-  test("imports a recovery string only when the remote protocol matches", async () => {
-    const remote = baidu()
+    provision(secure)
+    const ids = ["device", "attempt", "state"]
     const first = SyncSetup.make({
-      configDirectory: await temp(),
-      store: store(),
-      legacyStore: store(),
-      request: remote.request,
-    })
-    const pending = await Effect.runPromise(first.begin({ appKey: "app", secretKey: "secret", deviceName: "Mac" }))
-    const created = await Effect.runPromise(first.complete({ attemptID: pending.attemptID, code: "code" }))
-    const second = SyncSetup.make({
-      configDirectory: await temp(),
-      store: store(),
-      legacyStore: store(),
-      request: remote.request,
-    })
-    const imported = await Effect.runPromise(
-      second.begin({
-        appKey: "app",
-        secretKey: "secret",
-        deviceName: "Windows",
-        recoveryString: created.recoveryString,
-      }),
-    )
-    const completed = await Effect.runPromise(second.complete({ attemptID: imported.attemptID, code: "code" }))
-    expect(completed.config.namespaceID).toBe(created.config.namespaceID)
-    expect(completed.config.deviceID).not.toBe(created.config.deviceID)
-  })
-
-  test("reuses only the exact legacy device credential and leaves it intact", async () => {
-    const configDirectory = await temp()
-    await fs.mkdir(path.join(configDirectory, "cloud-sync"), { recursive: true })
-    await fs.writeFile(
-      path.join(configDirectory, "cloud-sync", "legacy-config.json"),
-      JSON.stringify({ provider: "baidu", deviceID: "old-device" }),
-    )
-    const legacy = store()
-    legacy.values.set(
-      "old-device",
-      JSON.stringify({ appKey: "app", secretKey: "secret", accessToken: "old", refreshToken: "refresh", expiresAt: 1 }),
-    )
-    legacy.values.set("unrelated", "must-not-read")
-    const setup = SyncSetup.make({ configDirectory, store: store(), legacyStore: legacy, request: baidu().request })
-    expect(await Effect.runPromise(setup.inspectLegacy())).toEqual({ available: true, deviceID: "old-device" })
-    const result = await Effect.runPromise(setup.reuseLegacy({ deviceName: "Migrated" }))
-    expect(result.config.namespaceID).toBeTruthy()
-    expect(legacy.values.has("old-device")).toBe(true)
-    expect(legacy.values.has("unrelated")).toBe(true)
-  })
-
-  test("reuses a still-valid legacy access token without forcing OAuth refresh", async () => {
-    const configDirectory = await temp()
-    await fs.mkdir(path.join(configDirectory, "cloud-sync"), { recursive: true })
-    await fs.writeFile(
-      path.join(configDirectory, "cloud-sync", "legacy-config.json"),
-      JSON.stringify({ provider: "baidu", deviceID: "old-device" }),
-    )
-    const legacy = store()
-    legacy.values.set(
-      "old-device",
-      JSON.stringify({
-        appKey: "app",
-        secretKey: "secret",
-        accessToken: "valid",
-        refreshToken: "refresh",
-        expiresAt: Date.now() + 3_600_000,
-      }),
-    )
-    const provider = baidu()
-    const setup = SyncSetup.make({
-      configDirectory,
-      store: store(),
-      legacyStore: legacy,
-      request: async (input, init) => {
-        const url = new URL(input instanceof Request ? input.url : input)
-        if (url.hostname === "openapi.baidu.com") throw new Error("refresh must not be called")
-        return provider.request(input, init)
-      },
-    })
-
-    await expect(Effect.runPromise(setup.reuseLegacy({ deviceName: "Migrated" }))).resolves.toBeDefined()
-  })
-
-  test("does not leave local half configuration after remote initialization failure", async () => {
-    const configDirectory = await temp()
-    const secure = store()
-    const setup = SyncSetup.make({
-      configDirectory,
+      configDirectory: tmp.path,
       store: secure,
-      legacyStore: store(),
-      request: async (input) => {
-        const url = new URL(input instanceof Request ? input.url : input)
-        if (url.hostname === "openapi.baidu.com")
-          return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 3600 })
-        throw new Error("offline")
-      },
+      randomUUID: () => ids.shift()!,
+      request: authRequest("account-a"),
     })
-    const pending = await Effect.runPromise(setup.begin({ appKey: "app", secretKey: "secret", deviceName: "Mac" }))
-    await expect(
-      Effect.runPromise(setup.complete({ attemptID: pending.attemptID, code: "code" })),
-    ).rejects.toMatchObject({ kind: "remote" })
-    expect(secure.values.size).toBe(0)
-    await expect(fs.stat(path.join(configDirectory, "sync", "config.json"))).rejects.toMatchObject({ code: "ENOENT" })
+    await run(first.initialize("Mac"))
+    secure.reads = 0
+    expect(await run(first.state())).toMatchObject({ deviceID: "device", spaces: [] })
+    expect(await run(first.config())).toBeUndefined()
+    expect(secure.reads).toBe(0)
+    const begun = await run(first.begin(manual))
+
+    const restarted = SyncSetup.make({ configDirectory: tmp.path, store: secure, request: authRequest("account-a") })
+    const loggedIn = await run(
+      restarted.complete({ attemptID: begun.attemptID, response: { type: "manual", code: "code" } }),
+    )
+    expect(loggedIn).toMatchObject({ account: { id: "account-a" }, spaces: [], activeSpaceID: undefined })
+    expect(await run(restarted.config())).toBeUndefined()
   })
 
-  test("requires explicit reset confirmation before starting setup over an existing config", async () => {
-    const configDirectory = await temp()
-    await fs.mkdir(path.join(configDirectory, "sync"), { recursive: true })
-    await fs.writeFile(
-      path.join(configDirectory, "sync", "config.json"),
-      JSON.stringify({
-        version: 1,
-        provider: "baidu",
-        namespaceID: "existing-space",
-        deviceID: "existing-device",
-        deviceName: "Existing",
-        enabled: true,
-        intervalSeconds: 30,
-        remoteRoot: "/apps/opencode-sync/existing-space",
+  test("creates, binds and activates plain or encrypted spaces with immutable key handling", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    const keys = [key("plain"), key("secret")]
+    const setup = await authenticated(tmp.path, secure, provider, () => keys.shift()!)
+    const plain = await run(setup.create({ name: "Plain" }))
+    expect(plain.recoveryString).toBeUndefined()
+    expect(secure.values.has("space:plain:root")).toBe(false)
+    const encrypted = await run(setup.create({ name: "Secret", encryption: "aes-256-gcm" }))
+    expect(encrypted.recoveryString).toStartWith("ocr1.")
+    expect(secure.values.has("space:secret:root")).toBe(true)
+    expect((await run(setup.discover())).spaces).toHaveLength(2)
+
+    expect((await run(setup.activate("plain"))).activeSpaceID).toBe("plain")
+    expect(await run(setup.config())).toMatchObject({ namespaceID: "plain", encryption: "none" })
+    expect((await run(setup.setInterval(300))).intervalSeconds).toBe(300)
+    expect((await run(setup.setEnabled(false))).enabled).toBe(false)
+    expect((await run(setup.leave())).activeSpaceID).toBeUndefined()
+  })
+
+  test("joins plain spaces without keys and requires the matching recovery key for encrypted spaces", async () => {
+    await using ownerDir = await tmpdir()
+    await using joinerDir = await tmpdir()
+    const provider = memoryProvider()
+    const ownerStore = store()
+    const owner = await authenticated(ownerDir.path, ownerStore, provider, () => key("encrypted"))
+    const created = await run(owner.create({ name: "Encrypted", encryption: "aes-256-gcm" }))
+    const joinerStore = store()
+    const joiner = await authenticated(joinerDir.path, joinerStore, provider)
+    await expect(run(joiner.join({ namespaceID: "encrypted" }))).rejects.toMatchObject({ kind: "locked" })
+    await expect(
+      run(
+        joiner.join({ namespaceID: "encrypted", recoveryString: await SyncCrypto.exportRecoveryString(key("other")) }),
+      ),
+    ).rejects.toMatchObject({ kind: "locked" })
+    const joined = await run(joiner.join({ namespaceID: "encrypted", recoveryString: created.recoveryString }))
+    expect(joined.spaces[0]?.descriptor.namespaceID).toBe("encrypted")
+    expect(joinerStore.values.has("space:encrypted:root")).toBe(true)
+  })
+
+  test("keeps account mismatch strict and explicit switching preserves bindings but leaves active space", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    const setup = await authenticated(tmp.path, secure, provider, () => key("space"))
+    await run(setup.create({ name: "Space" }))
+    await run(setup.activate("space"))
+    const other = SyncSetup.make({
+      configDirectory: tmp.path,
+      store: secure,
+      provider,
+      request: authRequest("account-b"),
+    })
+    const begun = await run(other.begin(manual))
+    const response = { attemptID: begun.attemptID, response: { type: "manual" as const, code: "code" } }
+    await expect(run(other.complete(response))).rejects.toMatchObject({ kind: "account-mismatch" })
+    expect((await run(setup.state()))?.account?.id).toBe("account-a")
+    const switchAttempt = await run(other.begin(manual))
+    const switched = await run(
+      other.switchAccount({
+        attemptID: switchAttempt.attemptID,
+        response: { type: "manual", code: "code" },
       }),
     )
-    const setup = SyncSetup.make({
-      configDirectory,
-      store: store(),
-      legacyStore: store(),
-      request: async () => {
-        throw new Error("OAuth must not begin")
-      },
-    })
-    await expect(
-      Effect.runPromise(setup.begin({ appKey: "app", secretKey: "secret", deviceName: "Replacement" })),
-    ).rejects.toMatchObject({ kind: "invalid" })
-    await expect(Effect.runPromise(setup.reuseLegacy({ deviceName: "Replacement" }))).rejects.toMatchObject({
-      kind: "invalid",
-    })
+    expect(switched.account?.id).toBe("account-b")
+    expect(switched.spaces).toHaveLength(1)
+    expect(switched.activeSpaceID).toBeUndefined()
   })
 
-  test("does not touch an unavailable secure store while merely reading disabled setup state", async () => {
-    const configDirectory = await temp()
-    let touched = 0
-    const unavailable: SyncSecureStore.Store = {
-      platform: "macos-keychain",
-      get: async () => {
-        touched++
-        throw new SyncSecureStore.SecureStoreUnavailableError("unavailable")
-      },
-      set: async () => {
-        touched++
-        throw new SyncSecureStore.SecureStoreUnavailableError("unavailable")
-      },
-      remove: async () => {
-        touched++
-        throw new SyncSecureStore.SecureStoreUnavailableError("unavailable")
+  test("logout removes OAuth and disables while preserving metadata, bindings, keys and ownership-facing state", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const setup = await authenticated(tmp.path, secure, memoryProvider(), () => key("secret"))
+    await run(setup.create({ name: "Secret", encryption: "aes-256-gcm" }))
+    await run(setup.activate("secret"))
+    const loggedOut = await run(setup.logout())
+    expect(loggedOut).toMatchObject({ enabled: false, account: { id: "account-a" }, activeSpaceID: "secret" })
+    expect(loggedOut.spaces).toHaveLength(1)
+    expect(secure.values.has(BaiduSyncProvider.credentialAccount("device"))).toBe(false)
+    expect(secure.values.has("space:secret:root")).toBe(true)
+    await expect(run(setup.discover())).rejects.toMatchObject({ kind: "unauthenticated" })
+  })
+
+  test("global delete is remote-first, clears the local binding and key, and returns its Session unassignment ID", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    const setup = await authenticated(tmp.path, secure, provider, () => key("secret"))
+    await run(setup.create({ name: "Secret", encryption: "aes-256-gcm" }))
+    await run(setup.activate("secret"))
+    expect(await run(setup.deleteSpace("secret"))).toBe("secret")
+    expect((await run(setup.state()))?.spaces).toEqual([])
+    expect(secure.values.has("space:secret:root")).toBe(false)
+    expect(await provider.stat("deleted-spaces/secret.json")).toBeDefined()
+  })
+
+  test("does not clear local state when the permanent remote delete marker cannot be published", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const base = memoryProvider()
+    const setup = await authenticated(tmp.path, secure, base, () => key("kept"))
+    await run(setup.create({ name: "Kept", encryption: "aes-256-gcm" }))
+    const failing: SyncProvider.Adapter = {
+      ...base,
+      uploadAtomic: async (path, bytes, condition, signal) => {
+        if (path.startsWith("deleted-spaces/")) throw new Error("offline")
+        return base.uploadAtomic(path, bytes, condition, signal)
       },
     }
-    const setup = SyncSetup.make({ configDirectory, store: unavailable, legacyStore: unavailable })
-    expect(await Effect.runPromise(setup.config())).toBeUndefined()
-    expect(touched).toBe(0)
+    const offline = SyncSetup.make({ configDirectory: tmp.path, store: secure, provider: failing })
+    await expect(run(offline.deleteSpace("kept"))).rejects.toMatchObject({ kind: "remote" })
+    expect((await run(offline.state()))?.spaces).toHaveLength(1)
+    expect(secure.values.has("space:kept:root")).toBe(true)
   })
 
-  test("deletes the complete old namespace before activating a reset space", async () => {
-    const configDirectory = await temp()
+  test("full device removal returns every bound ID and clears OAuth, config and keys without remote deletion", async () => {
+    await using tmp = await tmpdir()
     const secure = store()
-    const remote = baidu()
-    const setup = SyncSetup.make({ configDirectory, store: secure, legacyStore: store(), request: remote.request })
-    const pending = await Effect.runPromise(setup.begin({ appKey: "app", secretKey: "secret", deviceName: "Mac" }))
-    const first = await Effect.runPromise(setup.complete({ attemptID: pending.attemptID, code: "code" }))
-    const previousProtocol = `${first.config.remoteRoot}/protocol.json`
-    expect(remote.files.has(previousProtocol)).toBe(true)
-    const reset = await Effect.runPromise(setup.reset())
-    expect(reset.config.namespaceID).not.toBe(first.config.namespaceID)
-    expect(remote.files.has(previousProtocol)).toBe(false)
-    expect(remote.files.has(`${reset.config.remoteRoot}/protocol.json`)).toBe(true)
+    const provider = memoryProvider()
+    const keys = [key("one"), key("two")]
+    const setup = await authenticated(tmp.path, secure, provider, () => keys.shift()!)
+    await run(setup.create({ name: "One", encryption: "aes-256-gcm" }))
+    await run(setup.create({ name: "Two", encryption: "aes-256-gcm" }))
+    expect(await run(setup.removeFromDevice())).toEqual(["one", "two"])
+    expect(await run(setup.state())).toBeUndefined()
+    expect(secure.values.has("space:one:root")).toBe(false)
+    expect(secure.values.has("space:two:root")).toBe(false)
+    expect(await provider.stat("catalog/one.json")).toBeDefined()
+    expect(await provider.stat("deleted-spaces/one.json")).toBeUndefined()
   })
 })
+
+const manual = { redirectURI: "https://opencode.ai/oauth/baidu/manual", completion: "manual" as const }
+const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
+
+async function authenticated(
+  directory: string,
+  secure: ReturnType<typeof store>,
+  provider: SyncProvider.Adapter,
+  createSpace?: () => SyncCrypto.SpaceKey,
+) {
+  provision(secure)
+  const ids = ["device", "attempt", "state"]
+  const setup = SyncSetup.make({
+    configDirectory: directory,
+    store: secure,
+    provider,
+    createSpace,
+    randomUUID: () => ids.shift()!,
+    request: authRequest("account-a"),
+    now: () => 10,
+  })
+  await run(setup.initialize("Mac"))
+  const begun = await run(setup.begin(manual))
+  await run(setup.complete({ attemptID: begun.attemptID, response: { type: "manual", code: "code" } }))
+  return setup
+}
+
+function store() {
+  const values = new Map<string, string>()
+  return {
+    platform: "macos-keychain" as const,
+    values,
+    reads: 0,
+    async get(account: string) {
+      this.reads++
+      return values.get(account)
+    },
+    async set(account: string, value: string) {
+      values.set(account, value)
+    },
+    async remove(account: string) {
+      values.delete(account)
+    },
+  }
+}
+
+function provision(secure: ReturnType<typeof store>) {
+  secure.values.set(SyncSecureStore.BAIDU_APP_ACCOUNT, JSON.stringify({ appKey: "app", secretKey: "secret" }))
+}
+
+function authRequest(accountID: string): BaiduSyncProvider.Request {
+  return async (input) => {
+    const url = new URL(input instanceof Request ? input.url : input)
+    if (url.pathname.endsWith("/token"))
+      return Response.json({ access_token: `access-${accountID}`, refresh_token: "refresh", expires_in: 3600 })
+    if (url.searchParams.get("method") === "uinfo")
+      return Response.json({ errno: 0, uk: accountID, baidu_name: accountID })
+    throw new Error(`unexpected request: ${url}`)
+  }
+}
+
+function key(namespaceID: string): SyncCrypto.SpaceKey {
+  return { namespaceID, rootKey: new Uint8Array(32).fill(namespaceID.length) }
+}
+
+function memoryProvider(): SyncProvider.Adapter {
+  const objects = new Map<string, { version: string; bytes: Uint8Array }>()
+  let revision = 0
+  const conflict = (operation: "download" | "upload") =>
+    new SyncProvider.ProviderError("memory", operation, "conflict", false)
+  return {
+    id: "memory",
+    async list(prefix) {
+      return {
+        objects: [...objects.entries()]
+          .filter(([path]) => path === prefix || path.startsWith(`${prefix}/`))
+          .map(([path, value]) => ({ path, version: value.version, size: value.bytes.length })),
+      }
+    },
+    async stat(path) {
+      const value = objects.get(path)
+      return value ? { path, version: value.version, size: value.bytes.length } : undefined
+    },
+    async download(path, version) {
+      const value = objects.get(path)
+      if (!value) throw new SyncProvider.ProviderError("memory", "download", "not-found", false)
+      if (version && value.version !== version) throw conflict("download")
+      return { path, version: value.version, size: value.bytes.length, bytes: value.bytes.slice() }
+    },
+    async uploadAtomic(path, bytes, condition) {
+      const current = objects.get(path)
+      if (condition.type === "absent" && current) throw conflict("upload")
+      if (condition.type === "version" && current?.version !== condition.version) throw conflict("upload")
+      const value = { version: String(++revision), bytes: bytes.slice() }
+      objects.set(path, value)
+      return { path, version: value.version, size: value.bytes.length }
+    },
+    async deleteBatch(values) {
+      return values.map((value) => {
+        const current = objects.get(value.path)
+        if (!current) return { path: value.path, status: "missing" as const }
+        if (value.version && current.version !== value.version)
+          return { path: value.path, status: "conflict" as const, version: current.version }
+        objects.delete(value.path)
+        return { path: value.path, status: "deleted" as const }
+      })
+    },
+  }
+}

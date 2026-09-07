@@ -97,8 +97,7 @@ import { approvalModeCommand, type ApprovalModeCommandContext } from "../../comm
 import { useTargetManager } from "../../component/target-manager"
 import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
 import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
-import { DialogPrompt } from "../../ui/dialog-prompt"
-import { DialogSelect } from "../../ui/dialog-select"
+import { useSyncSettings } from "../../context/sync-settings"
 
 addDefaultParsers(parsers.parsers)
 
@@ -491,6 +490,7 @@ export function Session() {
   }
 
   const local = useLocal()
+  const syncSettings = useSyncSettings()
   const targetManager = useTargetManager()
   const coreCommandHost = createMemo(() =>
     createCommandHost<
@@ -521,68 +521,6 @@ export function Session() {
             enabled: result.data.data.enabled,
             generation: Number(result.data.data.generation),
             variables: result.data.data.variables,
-          }
-        }
-        const syncSetup = async (presetRecovery?: string) => {
-          try {
-            const state = await sdk.client.global.syncSetup({ throwOnError: true })
-            const resetExisting = state.data.config
-              ? await DialogConfirm.show(
-                  dialog,
-                  "Replace sync setup?",
-                  "This device already has a sync configuration. Continue only if you intend to replace it.",
-                )
-              : false
-            if (state.data.config && !resetExisting) return "cancelled" as const
-            const appKey = await DialogPrompt.show(dialog, "Baidu AppKey")
-            if (!appKey?.trim()) return "cancelled" as const
-            const secretKey = await DialogPrompt.show(dialog, "Baidu SecretKey", {
-              description: () => (
-                <text>This value stays in memory and is written only to the system secure store.</text>
-              ),
-            })
-            if (!secretKey?.trim()) return "cancelled" as const
-            const deviceName = await DialogPrompt.show(dialog, "Device name", {
-              value: process.platform === "darwin" ? "Mac" : "WSL",
-            })
-            if (!deviceName?.trim()) return "cancelled" as const
-            const recoveryString =
-              presetRecovery ??
-              (await DialogPrompt.show(dialog, "Recovery key (optional)", {
-                description: () => <text>Leave empty to create a new encrypted sync space.</text>,
-              }))
-            if (recoveryString === null) return "cancelled" as const
-            const pending = await sdk.client.global.syncAuthorize(
-              {
-                appKey: appKey.trim(),
-                secretKey: secretKey.trim(),
-                deviceName: deviceName.trim(),
-                ...(recoveryString.trim() ? { recoveryString: recoveryString.trim() } : {}),
-                resetExisting,
-              },
-              { throwOnError: true },
-            )
-            await clipboard.write?.(pending.data.authorizationURL)
-            await DialogAlert.show(
-              dialog,
-              "Authorize Baidu Netdisk",
-              `Authorization URL copied to clipboard:\n${pending.data.authorizationURL}`,
-            )
-            const code = await DialogPrompt.show(dialog, "Baidu authorization code")
-            if (!code?.trim()) return "cancelled" as const
-            const completed = await sdk.client.global.syncComplete(
-              { attemptID: pending.data.attemptID, code: code.trim() },
-              { throwOnError: true },
-            )
-            await clipboard.write?.(completed.data.recoveryString)
-            await DialogAlert.show(
-              dialog,
-              "Sensitive recovery key",
-              `${completed.data.recoveryString}\n\nCopied to clipboard. Store it safely; it cannot be recovered later.`,
-            )
-            return "completed" as const
-          } catch {
-            return "failed" as const
           }
         }
         return {
@@ -649,119 +587,7 @@ export function Session() {
               return "failed"
             }
           },
-          openSyncSetup: syncSetup,
-          sync: {
-            status: async () => {
-              const result = await sdk.client.global.syncStatus({ throwOnError: true })
-              return result.data
-            },
-            now: async () => {
-              await sdk.client.global.syncNow({ throwOnError: true })
-            },
-            enable: async (enabled) => {
-              await sdk.client.global.syncEnabled({ enabled }, { throwOnError: true })
-            },
-            exportKey: async () => {
-              const result = await sdk.client.global.syncRecoveryExport({ throwOnError: true })
-              return result.data.recoveryString
-            },
-            importKey: async (recovery) => {
-              if ((await syncSetup(recovery)) !== "completed") throw new Error("Recovery key import was not completed")
-            },
-          },
-          presentSyncStatus: async (status) => {
-            await DialogAlert.show(
-              dialog,
-              "Cloud sync status",
-              status.namespaceID
-                ? `${status.enabled ? "Enabled" : "Disabled"} · ${status.provider}\nDevice ${status.deviceID}\nOutbox ${status.outbox}`
-                : "Cloud sync is not configured",
-            )
-          },
-          presentSensitiveRecoveryKey: async (key) => {
-            await clipboard.write?.(key)
-            await DialogAlert.show(dialog, "Sensitive recovery key", `${key}\n\nCopied to clipboard.`)
-          },
-          promptSensitiveRecoveryKey: () =>
-            DialogPrompt.show(dialog, "Recovery key").then((value) => value ?? undefined),
-          confirmAndResetSync: async () => {
-            const confirmed = await DialogConfirm.show(
-              dialog,
-              "Reset sync space",
-              "Permanently delete the old encrypted namespace and create a new one? This cannot be undone.",
-            )
-            if (!confirmed) return "cancelled"
-            try {
-              const result = await sdk.client.global.syncReset({ throwOnError: true })
-              await clipboard.write?.(result.data.recoveryString)
-              await DialogAlert.show(
-                dialog,
-                "New sensitive recovery key",
-                `${result.data.recoveryString}\n\nCopied to clipboard. Other devices must import this new key.`,
-              )
-              return "completed"
-            } catch {
-              return "failed"
-            }
-          },
-          openDevices: async () => {
-            const result = await sdk.client.global.syncDevices({ throwOnError: true })
-            const choice = await new Promise<{ kind: "device"; id: string } | undefined>((resolve) =>
-              dialog.replace(
-                () => (
-                  <DialogSelect
-                    title="Sync devices"
-                    options={[
-                      ...result.data.devices.map((device) => ({
-                        title: `${device.name}${device.revoked ? " (revoked)" : ""}`,
-                        description: device.id,
-                        value: { kind: "device" as const, id: device.id },
-                      })),
-                      { title: "Bind portable target label", value: { kind: "device" as const, id: "" } },
-                    ]}
-                    onSelect={(option) => resolve(option.value)}
-                  />
-                ),
-                () => resolve(undefined),
-              ),
-            )
-            if (!choice) return "cancelled"
-            if (!choice.id) {
-              const label = await DialogPrompt.show(dialog, "Portable target label")
-              if (!label?.trim()) return "cancelled"
-              const targetID = await DialogPrompt.show(dialog, "Local target ID", {
-                description: () => <text>Leave empty to remove this device-local binding.</text>,
-              })
-              if (targetID === null) return "cancelled"
-              await sdk.client.global.syncBindingUpdate(
-                { label: label.trim(), ...(targetID.trim() ? { targetID: targetID.trim() } : {}) },
-                { throwOnError: true },
-              )
-              return "completed"
-            }
-            const device = result.data.devices.find((item) => item.id === choice.id)
-            if (!device || device.revoked) return "cancelled"
-            const action = await DialogPrompt.show(dialog, `Manage ${device.name}`, {
-              placeholder: "rename or revoke",
-              description: () => (
-                <text>Enter “rename” or “revoke”. Revocation stops the device blocking garbage collection.</text>
-              ),
-            })
-            if (action?.trim() === "rename") {
-              const name = await DialogPrompt.show(dialog, "Device name", { value: device.name })
-              if (!name?.trim()) return "cancelled"
-              await sdk.client.global.syncDeviceUpdate({ id: device.id, name: name.trim() }, { throwOnError: true })
-            } else if (action?.trim() === "revoke") {
-              const confirmed = await DialogConfirm.show(
-                dialog,
-                "Revoke device",
-                `Revoke “${device.name}”? This is monotonic and cannot reactivate the old device identity.`,
-              )
-              if (!confirmed) return "cancelled"
-              await sdk.client.global.syncDeviceUpdate({ id: device.id, revoke: true }, { throwOnError: true })
-            } else return "cancelled"
-            return "completed"
-          },
+          openSyncSettings: syncSettings.open,
         }
       },
       upstream: () => undefined,

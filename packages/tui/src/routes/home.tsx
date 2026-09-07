@@ -18,6 +18,9 @@ import { useBindings } from "../keymap"
 import { useDialog } from "../ui/dialog"
 import { DialogPermissionMode } from "../component/dialog-permission-mode"
 import { useToast } from "../ui/toast"
+import { syncCommands, type SyncCommandContext } from "../command-toolkit/sync"
+import { useSyncSettings } from "../context/sync-settings"
+import { useTheme } from "../context/theme"
 
 let once = false
 const placeholder = {
@@ -38,9 +41,21 @@ export function Home() {
   const tuiConfig = useTuiConfig()
   const dialog = useDialog()
   const toast = useToast()
+  const syncSettings = useSyncSettings()
+  const { theme } = useTheme()
+  const syncColor = createMemo(() => {
+    const state = syncSettings.model().state
+    if (state === "idle") return theme.success
+    if (state === "attention") return theme.error
+    if (state === "syncing" || state === "locked") return theme.warning
+    return theme.textMuted
+  })
   const commandHost = createMemo(() =>
-    createCommandHost<ApprovalModeCommandContext>({
-      register: (registry) => registry.register(approvalModeCommand),
+    createCommandHost<ApprovalModeCommandContext & SyncCommandContext>({
+      register: (registry) => {
+        registry.register(approvalModeCommand)
+        syncCommands.forEach((command) => registry.register(command))
+      },
       context: (source) => ({
         source,
         client: "tui",
@@ -58,6 +73,7 @@ export function Home() {
               />
             )),
         },
+        openSyncSettings: syncSettings.open,
       }),
       upstream: () => undefined,
       invalid: (message) => toast.show({ message, variant: "warning" }),
@@ -127,6 +143,9 @@ export function Home() {
               onBuiltinSlash={(input) => commandHost()(input)}
             />
           </pluginRuntime.Slot>
+        </box>
+        <box width="100%" maxWidth={promptMaxWidth()} justifyContent="flex-end" flexShrink={0}>
+          <text fg={syncColor()}>Sync {syncSettings.status()}</text>
         </box>
         <pluginRuntime.Slot name="home_bottom" />
         <box flexGrow={1} minHeight={0} />

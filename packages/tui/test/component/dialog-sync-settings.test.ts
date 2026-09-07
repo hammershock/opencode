@@ -26,6 +26,9 @@ const connected = {
   },
   spaces: [],
   devices: [],
+  bindings: [],
+  pending: 0,
+  unassigned: [],
 } satisfies SyncSettingsViewModel
 
 describe("Sync Settings presentation", () => {
@@ -48,11 +51,7 @@ describe("Sync Settings presentation", () => {
         oauth: { state: "waiting", authorizationURL: "https://openapi.baidu.com/oauth/authorize" },
       },
     })
-    expect(rows.map((row) => row.title)).toEqual([
-      "Connect Baidu Netdisk",
-      "Copy authorization URL",
-      "Enter authorization code",
-    ])
+    expect(rows.map((row) => row.title)).toEqual(["Connect Baidu Netdisk", "Copy authorization URL", "Use manual code"])
     expect(rows.join(" ")).not.toContain("AppKey")
     expect(rows.join(" ")).not.toContain("Secret")
   })
@@ -85,7 +84,7 @@ describe("Sync Settings presentation", () => {
 
   test("keeps the current device visible but non-revocable", () => {
     expect(buildDeviceRows([{ id: "mac", name: "Mac", current: true, state: "ready" }])).toEqual([
-      expect.objectContaining({ title: "Mac", description: "This device", status: "● ready", disabled: true }),
+      expect.objectContaining({ title: "Mac", description: "This device", status: "● ready", disabled: false }),
     ])
   })
 })

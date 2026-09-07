@@ -35,6 +35,7 @@ import { useEvent } from "./context/event"
 import { SDKProvider, useSDK } from "./context/sdk"
 import { StartupLoading } from "./component/startup-loading"
 import { SyncProvider, useSync } from "./context/sync"
+import { SyncSettingsProvider } from "./context/sync-settings"
 import { DataProvider } from "./context/data"
 import { LocationProvider } from "./context/location"
 import { LocalProvider, useLocal } from "./context/local"
@@ -314,20 +315,22 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                     <LocalProvider>
                                                       <PromptStashProvider>
                                                         <DialogProvider>
-                                                          <FrecencyProvider>
-                                                            <PromptHistoryProvider>
-                                                              <PromptRefProvider>
-                                                                <EditorContextProvider>
-                                                                  <LocationProvider>
-                                                                    <App
-                                                                      onSnapshot={input.onSnapshot}
-                                                                      pluginHost={input.pluginHost}
-                                                                    />
-                                                                  </LocationProvider>
-                                                                </EditorContextProvider>
-                                                              </PromptRefProvider>
-                                                            </PromptHistoryProvider>
-                                                          </FrecencyProvider>
+                                                          <SyncSettingsProvider>
+                                                            <FrecencyProvider>
+                                                              <PromptHistoryProvider>
+                                                                <PromptRefProvider>
+                                                                  <EditorContextProvider>
+                                                                    <LocationProvider>
+                                                                      <App
+                                                                        onSnapshot={input.onSnapshot}
+                                                                        pluginHost={input.pluginHost}
+                                                                      />
+                                                                    </LocationProvider>
+                                                                  </EditorContextProvider>
+                                                                </PromptRefProvider>
+                                                              </PromptHistoryProvider>
+                                                            </FrecencyProvider>
+                                                          </SyncSettingsProvider>
                                                         </DialogProvider>
                                                       </PromptStashProvider>
                                                     </LocalProvider>

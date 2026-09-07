@@ -14,27 +14,110 @@ describe("provider usage adapters", () => {
       })[0]?.remaining,
     ).toBe(12.5)
     expect(
-      ProviderUsageAdapters.decodeMoonshot({ data: { available_balance: 8, cash_balance: 8, voucher_balance: 0 } })[0]
-        ?.unit,
+      ProviderUsageAdapters.decodeMoonshot("CNY")({
+        code: 0,
+        status: true,
+        data: { available_balance: 8, cash_balance: 8, voucher_balance: 0 },
+      })[0]?.unit,
     ).toBe("CNY")
     expect(
       ProviderUsageAdapters.decodeMiniMax({
-        remains: [{ type: "five-hour", name: "5 hour", remains: 42, total: 100 }],
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_remaining_percent: 42,
+            end_time: 1_700_000_000,
+            current_weekly_remaining_percent: 73,
+            weekly_end_time: 1_800_000_000_000,
+          },
+        ],
       })[0]?.remaining,
     ).toBe(42)
+    expect(
+      ProviderUsageAdapters.decodeMiniMax({
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_remaining_percent: 42,
+            end_time: 1_700_000_000,
+            current_weekly_remaining_percent: 73,
+            weekly_end_time: 1_800_000_000_000,
+          },
+        ],
+      }).map((meter) => meter.resetsAt),
+    ).toEqual([1_700_000_000_000, 1_800_000_000_000])
     expect(() => ProviderUsageAdapters.decodeDeepSeek({ balance_infos: [] })).toThrow()
-    expect(() => ProviderUsageAdapters.decodeMoonshot({ data: { available_balance: null } })).toThrow()
+    expect(() =>
+      ProviderUsageAdapters.decodeMoonshot("USD")({
+        code: 0,
+        status: true,
+        data: { available_balance: null },
+      }),
+    ).toThrow()
     expect(() => ProviderUsageAdapters.decodeMiniMax({ remaining: 1 })).toThrow()
+  })
+
+  test("registers current OpenCode provider IDs with their regional official endpoints", async () => {
+    const urls = new Map<string, string>()
+    const registry = ProviderUsageAdapters.adapters(async (url) => {
+      const providerID = url.includes("moonshot") ? (url.includes(".cn/") ? "moonshotai-cn" : "moonshotai") : "minimax"
+      urls.set(providerID + urls.size, url)
+      if (url.includes("moonshot")) return Response.json({ code: 0, status: true, data: { available_balance: 8 } })
+      return Response.json({
+        model_remains: [
+          {
+            model_name: "general",
+            current_interval_remaining_percent: 42,
+            current_weekly_remaining_percent: 73,
+          },
+        ],
+      })
+    })
+
+    const expected = [
+      ["moonshotai", "api.moonshot.ai"],
+      ["moonshotai-cn", "api.moonshot.cn"],
+      ["minimax", "www.minimax.io"],
+      ["minimax-coding-plan", "www.minimax.io"],
+      ["minimax-cn", "www.minimaxi.com"],
+      ["minimax-cn-coding-plan", "www.minimaxi.com"],
+    ] as const
+    for (const [providerID, host] of expected) {
+      const adapter = registry.find((item) => item.providerID === providerID)
+      expect(adapter).toBeDefined()
+      await adapter!.fetch({ auth: api, signal: new AbortController().signal })
+      expect([...urls.values()].at(-1)).toContain(host)
+    }
   })
 
   test("strictly decodes Codex wham usage", () => {
     const meters = ProviderUsageAdapters.decodeWham({
       rate_limit: {
-        primary_window: { used_percent: 20, reset_at: 123 },
-        secondary_window: { used_percent: 40, reset_at: 456 },
+        primary_window: { used_percent: 20, limit_window_seconds: 604_800, reset_at: 456 },
+        secondary_window: { used_percent: 40, limit_window_seconds: 18_000, reset_at: 123 },
       },
+      credits: { balance: "2.50" },
     })
-    expect(meters.map((meter) => meter.remaining)).toEqual([80, 60])
+    expect(meters.map((meter) => [meter.id, meter.label, meter.remaining, meter.resetsAt])).toEqual([
+      ["secondary_window", "5 hour limit", 60, 123_000],
+      ["primary_window", "Weekly limit", 80, 456_000],
+      ["credits", "Credits", 2.5, undefined],
+    ])
+    expect(
+      ProviderUsageAdapters.decodeWham({
+        rate_limit: {
+          primary_window: { used_percent: 20, limit_window_seconds: 18_000, reset_at: 123 },
+          secondary_window: null,
+        },
+      }).map((meter) => meter.label),
+    ).toEqual(["5 hour limit"])
+    expect(
+      ProviderUsageAdapters.decodeWham({
+        rate_limit: {
+          secondary_window: { used_percent: 20, reset_at: 123 },
+        },
+      }).map((meter) => meter.label),
+    ).toEqual(["Secondary limit"])
     expect(() => ProviderUsageAdapters.decodeWham({ rate_limit: { primary_window: { used_percent: 101 } } })).toThrow()
   })
 

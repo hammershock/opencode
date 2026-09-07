@@ -1,5 +1,18 @@
 import { describe, expect, test } from "bun:test"
-import { activeRequest, load, meterDetails, orderedMeters, status, summary, truncateParts } from "../src/provider-usage"
+import {
+  activeRequest,
+  load,
+  meterDetails,
+  modelDialogWidth,
+  modelFavoriteDescription,
+  modelFooterWidth,
+  modelTitleWidth,
+  orderedMeters,
+  providerHeaderWidths,
+  status,
+  summary,
+  truncateParts,
+} from "../src/provider-usage"
 
 const snapshot = {
   providerID: "openai",
@@ -84,6 +97,29 @@ describe("provider usage presentation", () => {
   test("queries the selected provider and only revalidates its completed turn", () => {
     expect(activeRequest("deepseek", "openai")).toEqual({ providerID: "deepseek", refresh: false })
     expect(activeRequest("deepseek", "deepseek")).toEqual({ providerID: "deepseek", refresh: true })
+  })
+
+  test("budgets model rows and provider headers at supported viewport widths", () => {
+    for (const terminalWidth of [40, 80, 120, 180]) {
+      const dialogWidth = modelDialogWidth(terminalWidth)
+      expect(dialogWidth).toBeLessThanOrEqual(116)
+      expect(dialogWidth).toBeLessThanOrEqual(terminalWidth - 2)
+      const free = Bun.stringWidth("Free")
+      expect(modelTitleWidth(terminalWidth, { footerWidth: free }) + free + 13).toBeLessThanOrEqual(dialogWidth)
+
+      const category = modelFooterWidth(terminalWidth)
+      const favorite = modelFavoriteDescription(terminalWidth)
+      expect(
+        modelTitleWidth(terminalWidth, { footerWidth: category, description: favorite }) +
+          category +
+          (favorite ? Bun.stringWidth(favorite) + 1 : 0) +
+          13,
+      ).toBeLessThanOrEqual(dialogWidth)
+
+      const header = providerHeaderWidths(terminalWidth, "A provider with a long but bounded display name")
+      expect(header.title + header.usage + 11).toBeLessThanOrEqual(dialogWidth)
+      expect(Bun.stringWidth(status(result(), header.usage))).toBeLessThanOrEqual(header.usage)
+    }
   })
 
   test("supports refresh and treats endpoint failure as display-only", async () => {

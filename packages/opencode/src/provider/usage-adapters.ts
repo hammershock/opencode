@@ -15,8 +15,12 @@ export function registry(request: Request = fetch, now: () => number = Date.now)
   const rateLimits = openAIRateLimitStore(now)
   const values = [
     balance("deepseek", "https://api.deepseek.com/user/balance", decodeDeepSeek, request, now),
-    balance("moonshotai", "https://api.moonshot.cn/v1/users/me/balance", decodeMoonshot, request, now),
-    balance("minimax", "https://www.minimaxi.com/v1/token_plan/remains", decodeMiniMax, request, now),
+    balance("moonshotai", "https://api.moonshot.ai/v1/users/me/balance", decodeMoonshot("USD"), request, now),
+    balance("moonshotai-cn", "https://api.moonshot.cn/v1/users/me/balance", decodeMoonshot("CNY"), request, now),
+    balance("minimax", "https://www.minimax.io/v1/token_plan/remains", decodeMiniMax, request, now),
+    balance("minimax-coding-plan", "https://www.minimax.io/v1/token_plan/remains", decodeMiniMax, request, now),
+    balance("minimax-cn", "https://www.minimaxi.com/v1/token_plan/remains", decodeMiniMax, request, now),
+    balance("minimax-cn-coding-plan", "https://www.minimaxi.com/v1/token_plan/remains", decodeMiniMax, request, now),
     openAICodex(request, now, rateLimits.adapter),
   ]
   return { adapters: values, ingestOpenAI: rateLimits.ingest }
@@ -136,60 +140,122 @@ export function decodeDeepSeek(input: unknown) {
   })
 }
 
-export function decodeMoonshot(input: unknown) {
-  const data = record(record(input).data)
-  return [
-    new ProviderUsage.Meter({
-      id: "balance:cny",
-      label: "Available balance",
-      kind: "balance",
-      remaining: finite(data.available_balance),
-      unit: "CNY",
-      order: 0,
-    }),
-  ]
+export function decodeMoonshot(unit: "CNY" | "USD") {
+  return (input: unknown) => {
+    const body = record(input)
+    const data = record(body.data)
+    if (body.status !== true || finite(body.code) !== 0) throw new ProviderUsage.AdapterError({ kind: "schema" })
+    return [
+      new ProviderUsage.Meter({
+        id: `balance:${unit.toLowerCase()}`,
+        label: "Available balance",
+        kind: "balance",
+        remaining: finite(data.available_balance),
+        unit,
+        order: 0,
+      }),
+    ]
+  }
 }
 
 export function decodeMiniMax(input: unknown) {
   const body = record(input)
-  const remains = Array.isArray(body.remains) ? body.remains : Array.isArray(body.data) ? body.data : undefined
-  if (!remains) throw new ProviderUsage.AdapterError({ kind: "schema" })
-  return remains.map((entry, order) => {
-    const value = record(entry)
-    return new ProviderUsage.Meter({
-      id: typeof value.type === "string" ? value.type : `window:${order}`,
-      label: typeof value.name === "string" ? value.name : `Token plan ${order + 1}`,
-      kind: "quota",
-      remaining: finite(value.remains ?? value.remaining),
-      ...(value.total !== undefined ? { limit: finite(value.total) } : {}),
-      unit: "tokens",
-      ...(value.reset_at !== undefined ? { resetsAt: finite(value.reset_at) } : {}),
-      order,
-    })
+  if (!Array.isArray(body.model_remains)) throw new ProviderUsage.AdapterError({ kind: "schema" })
+  const general = body.model_remains.map(record).find((value) => value.model_name === "general")
+  if (!general) throw new ProviderUsage.AdapterError({ kind: "schema" })
+  return [
+    minimaxWindow(general, "five-hour", "5 hour limit", "current_interval_remaining_percent", "end_time", 0),
+    minimaxWindow(general, "weekly", "Weekly limit", "current_weekly_remaining_percent", "weekly_end_time", 1),
+  ]
+}
+
+function minimaxWindow(
+  value: Record<string, unknown>,
+  id: string,
+  label: string,
+  remaining: string,
+  resetsAt: string,
+  order: number,
+) {
+  const percentage = finite(value[remaining])
+  if (percentage < 0 || percentage > 100) throw new ProviderUsage.AdapterError({ kind: "schema" })
+  return new ProviderUsage.Meter({
+    id,
+    label,
+    kind: "quota",
+    remaining: percentage,
+    limit: 100,
+    unit: "percentage",
+    ...(value[resetsAt] !== undefined ? { resetsAt: timestamp(value[resetsAt]) } : {}),
+    order,
   })
 }
 
+function timestamp(input: unknown) {
+  const value = finite(input)
+  return value < 10_000_000_000 ? value * 1_000 : value
+}
+
 export function decodeWham(input: unknown) {
-  const limit = record(record(input).rate_limit)
-  return ["primary_window", "secondary_window"].flatMap((id, order) => {
-    if (limit[id] === undefined) return []
-    const value = record(limit[id])
-    const used = finite(value.used_percent)
-    if (used < 0 || used > 100) throw new ProviderUsage.AdapterError({ kind: "schema" })
-    return [
-      new ProviderUsage.Meter({
-        id,
-        label: order ? "Weekly limit" : "5 hour limit",
-        kind: "quota",
-        used,
-        remaining: 100 - used,
-        limit: 100,
-        unit: "percentage",
-        resetsAt: finite(value.reset_at),
-        order,
-      }),
-    ]
-  })
+  const body = record(input)
+  const limit = record(body.rate_limit)
+  const windows = ["primary_window", "secondary_window"]
+    .flatMap((id) => {
+      if (limit[id] === undefined || limit[id] === null) return []
+      const value = record(limit[id])
+      const used = finite(value.used_percent)
+      if (used < 0 || used > 100) throw new ProviderUsage.AdapterError({ kind: "schema" })
+      const seconds = value.limit_window_seconds === undefined ? undefined : finite(value.limit_window_seconds)
+      return [
+        {
+          seconds,
+          meter: new ProviderUsage.Meter({
+            id,
+            label: whamWindowLabel(seconds, id === "primary_window" ? "Primary limit" : "Secondary limit"),
+            kind: "quota",
+            used,
+            remaining: 100 - used,
+            limit: 100,
+            unit: "percentage",
+            ...(value.reset_at !== undefined && value.reset_at !== null ? { resetsAt: timestamp(value.reset_at) } : {}),
+            order: 0,
+          }),
+        },
+      ]
+    })
+    .toSorted((a, b) => (a.seconds ?? Number.POSITIVE_INFINITY) - (b.seconds ?? Number.POSITIVE_INFINITY))
+    .map(
+      (item, order) =>
+        new ProviderUsage.Meter({
+          ...item.meter,
+          order,
+        }),
+    )
+  const credits = body.credits === undefined || body.credits === null ? undefined : record(body.credits)
+  if (credits?.balance === undefined || credits.balance === null) return windows
+  return [
+    ...windows,
+    new ProviderUsage.Meter({
+      id: "credits",
+      label: "Credits",
+      kind: "credits",
+      remaining: finite(credits.balance),
+      unit: "USD",
+      order: windows.length,
+    }),
+  ]
+}
+
+function whamWindowLabel(seconds: number | undefined, fallback: string) {
+  if (seconds === undefined) return fallback
+  const windows = [
+    { seconds: 5 * 60 * 60, label: "5 hour limit" },
+    { seconds: 24 * 60 * 60, label: "Daily limit" },
+    { seconds: 7 * 24 * 60 * 60, label: "Weekly limit" },
+    { seconds: 30 * 24 * 60 * 60, label: "Monthly limit" },
+    { seconds: 365 * 24 * 60 * 60, label: "Yearly limit" },
+  ]
+  return windows.find((item) => seconds >= item.seconds * 0.95 && seconds <= item.seconds * 1.05)?.label ?? fallback
 }
 
 export type OpenAIRateLimitStore = ReturnType<typeof openAIRateLimitStore>

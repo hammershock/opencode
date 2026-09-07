@@ -64,6 +64,21 @@ test("opens from local state while a remote refresh is slow", async () => {
   const calls: Array<{ method: string; path: string }> = []
   let releaseStatus!: () => void
   let statusUnavailable = false
+  const remoteSpaces = Array.from({ length: 6 }, (_, index) => ({
+    status: "compatible",
+    descriptor: {
+      namespaceID: `space-remote-${index}`,
+      name: `Remote ${index}`,
+      protocol: { major: 1, minor: 0 },
+      encryption: "none",
+      createdAt: 1,
+      updatedAt: 2,
+      summary: { sessions: 0, devices: 0, updatedAt: 2 },
+      revision: 0,
+    },
+  }))
+  let discoveryCalls = 0
+  let delayNextDiscovery = false
   const statusGate = new Promise<void>((resolve) => {
     releaseStatus = resolve
   })
@@ -96,7 +111,15 @@ test("opens from local state while a remote refresh is slow", async () => {
         cursors: {},
       })
     }
-    if (url.pathname === "/global/sync/spaces") return json({ account: state.account, spaces: [] })
+    if (url.pathname === "/global/sync/spaces") {
+      discoveryCalls++
+      if (delayNextDiscovery) {
+        delayNextDiscovery = false
+        await new Promise<void>((resolve) => request.signal.addEventListener("abort", () => resolve(), { once: true }))
+        return new Response(null, { status: 503 })
+      }
+      return json({ account: state.account, spaces: remoteSpaces })
+    }
     if (url.pathname === "/global/sync/sessions") return json([])
     if (url.pathname === "/global/sync/devices")
       return json({ namespaceID: "space-local", devices: [], acknowledgements: {} })
@@ -184,14 +207,26 @@ test("opens from local state while a remote refresh is slow", async () => {
     releaseStatus()
     await refreshing
     await wait("ready model", () => settings.model().remote === "ready")
+    expect(settings.model().spaces).toHaveLength(7)
     await waitFrame("ready")
     expect(app.captureCharFrame()).toContain("Local space")
 
     statusUnavailable = true
     await settings.refresh(true)
     await wait("unavailable model", () => settings.model().remote === "unavailable")
+    expect(settings.model().spaces).toHaveLength(7)
     await waitFrame("unavailable")
     expect(app.captureCharFrame()).toContain("Local space")
+
+    statusUnavailable = false
+    delayNextDiscovery = true
+    const stale = settings.refresh(true)
+    await wait("stale discovery", () => discoveryCalls === 2)
+    const latest = settings.refresh(true)
+    await latest
+    await stale
+    expect(settings.model().remote).toBe("ready")
+    expect(settings.model().spaces).toHaveLength(7)
   } finally {
     app.renderer.destroy()
   }

@@ -18,7 +18,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncDatabase") {}
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 const layer = Layer.effect(
   Service,
@@ -49,6 +49,10 @@ const layer = Layer.effect(
           if ((current?.version ?? 1) < 4) {
             yield* Effect.forEach(schemaV4, (statement) => tx.run(statement), { discard: true })
             yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (4)`)
+          }
+          if ((current?.version ?? 1) < 5) {
+            yield* Effect.forEach(schemaV5, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (5)`)
           }
         }),
       { behavior: "immediate" },
@@ -117,4 +121,23 @@ const schemaV4 = [
     session_id TEXT PRIMARY KEY, payload TEXT NOT NULL, source_device TEXT NOT NULL,
     revision INTEGER NOT NULL, availability TEXT NOT NULL, updated_at INTEGER NOT NULL
   )`,
+]
+
+const schemaV5 = [
+  sql`ALTER TABLE sync_event_outbox ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_event_segment ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_event_head ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_event_cursor ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_remote_segment ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_remote_event ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_deletion_set ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_apply_journal ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`ALTER TABLE sync_session_metadata ADD COLUMN space_id TEXT NOT NULL DEFAULT 'legacy'`,
+  sql`CREATE TABLE sync_session_space (
+    session_id TEXT PRIMARY KEY, space_id TEXT NOT NULL, assigned_at INTEGER NOT NULL
+  )`,
+  sql`CREATE INDEX sync_event_outbox_space_idx ON sync_event_outbox(space_id, segment_id, created_at)`,
+  sql`CREATE INDEX sync_event_segment_space_idx ON sync_event_segment(space_id, device_id, generation)`,
+  sql`CREATE INDEX sync_event_cursor_space_idx ON sync_event_cursor(space_id, device_id)`,
+  sql`CREATE INDEX sync_session_space_space_idx ON sync_session_space(space_id, session_id)`,
 ]

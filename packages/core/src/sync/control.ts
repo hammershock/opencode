@@ -76,13 +76,14 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const setup = yield* SyncSetup.Service
-    const store = yield* SyncEventStore.Service
+    const eventStore = yield* SyncEventStore.Service
     const events = yield* EventV2.Service
-    const metadata = yield* SyncMetadata.Service
+    const metadataStore = yield* SyncMetadata.Service
     const syncDB = (yield* SyncDatabase.Service).db
     const sessionDB = (yield* Database.Service).db
     const global = yield* Global.Service
-    const devices = SyncDevice.make(path.join(global.config, "sync", "state.json"))
+    const devicesFor = (namespaceID: string) =>
+      SyncDevice.make(path.join(global.config, "sync", "spaces", namespaceID, "state.json"))
     let lastSuccessAt: number | undefined
     let lastError: string | undefined
     let engine: ReturnType<typeof SyncRuntime.make> | undefined
@@ -91,6 +92,9 @@ const layer = Layer.effect(
     const load = Effect.fn("SyncControl.load")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      const store = eventStore.scope(config.namespaceID)
+      const metadata = metadataStore.scope(config.namespaceID)
+      const devices = devicesFor(config.namespaceID)
       const identity = `${config.namespaceID}:${config.deviceID}:${config.enabled}`
       if (engine && engineIdentity === identity) return engine
       const secure = yield* Effect.tryPromise({
@@ -157,7 +161,11 @@ const layer = Layer.effect(
         metadataProjector: { apply: (values, deviceID) => metadata.apply(deviceID, values) },
         acknowledged: () =>
           syncDB
-            .all<{ device_id: string; cursor: number }>(sql`SELECT device_id, cursor FROM sync_event_cursor`)
+            .all<{ device_id: string; cursor: number }>(
+              sql`
+              SELECT device_id, cursor FROM sync_event_cursor WHERE space_id = ${config.namespaceID}
+            `,
+            )
             .pipe(Effect.map((rows) => Object.fromEntries(rows.map((row) => [row.device_id, row.cursor])))),
         revoked: () =>
           Effect.promise(() => devices.read()).pipe(
@@ -183,9 +191,11 @@ const layer = Layer.effect(
     const readStatus = Effect.fn("SyncControl.status")(function* () {
       const config = yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined)))
       const outbox =
-        (yield* syncDB.get<{ value: number }>(sql`SELECT COUNT(*) AS value FROM sync_event_outbox`))?.value ?? 0
+        (yield* syncDB.get<{ value: number }>(sql`
+          SELECT COUNT(*) AS value FROM sync_event_outbox WHERE space_id = ${config?.namespaceID ?? "legacy"}
+        `))?.value ?? 0
       const cursorRows = yield* syncDB.all<{ device_id: string; cursor: number }>(
-        sql`SELECT device_id, cursor FROM sync_event_cursor`,
+        sql`SELECT device_id, cursor FROM sync_event_cursor WHERE space_id = ${config?.namespaceID ?? "legacy"}`,
       )
       return Status.make({
         configured: Boolean(config),
@@ -230,10 +240,23 @@ const layer = Layer.effect(
       else scheduler.stop()
     })
     const deviceState = () =>
-      Effect.tryPromise({ try: () => devices.read(), catch: () => new ControlError({ kind: "storage" }) })
+      setup.config().pipe(
+        Effect.mapError(() => new ControlError({ kind: "storage" })),
+        Effect.flatMap((config) =>
+          config
+            ? Effect.tryPromise({
+                try: () => devicesFor(config.namespaceID).read(),
+                catch: () => new ControlError({ kind: "storage" }),
+              })
+            : Effect.fail(new ControlError({ kind: "unconfigured" })),
+        ),
+      )
     const updateDevice = Effect.fn("SyncControl.updateDevice")(function* (input: typeof DeviceUpdate.Type) {
       yield* Effect.tryPromise({
         try: async () => {
+          const config = await Effect.runPromise(setup.config())
+          if (!config) throw new Error("Sync is not configured")
+          const devices = devicesFor(config.namespaceID)
           if (input.name) await devices.rename(input.id, input.name)
           if (input.revoke) await devices.revoke(input.id)
         },
@@ -244,7 +267,12 @@ const layer = Layer.effect(
     })
     const updateBinding = Effect.fn("SyncControl.updateBinding")(function* (input: typeof BindingUpdate.Type) {
       yield* Effect.tryPromise({
-        try: () => (input.targetID ? devices.bind(input.label, input.targetID) : devices.unbind(input.label)),
+        try: async () => {
+          const config = await Effect.runPromise(setup.config())
+          if (!config) throw new Error("Sync is not configured")
+          const devices = devicesFor(config.namespaceID)
+          return input.targetID ? devices.bind(input.label, input.targetID) : devices.unbind(input.label)
+        },
         catch: () => new ControlError({ kind: "storage" }),
       })
       return yield* deviceState()
@@ -271,6 +299,10 @@ const layer = Layer.effect(
       }
     })
     const availabilityRaw = Effect.fn("SyncControl.sessionAvailability")(function* () {
+      const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      const metadata = metadataStore.scope(config.namespaceID)
+      const devices = devicesFor(config.namespaceID)
       const [indexed, local, deviceState] = yield* Effect.all([
         metadata.list(),
         sessionDB.select({ id: SessionTable.id }).from(SessionTable).all(),
@@ -307,6 +339,9 @@ const layer = Layer.effect(
       return yield* availability()
     })
     const hydrateRaw = Effect.fn("SyncControl.hydrate")(function* (input: typeof HydrateInput.Type) {
+      const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      const metadata = metadataStore.scope(config.namespaceID)
       const runtime = yield* load()
       // Keep the typed API self-contained: callers are not required to visit
       // the metadata browser endpoint before requesting a Session.

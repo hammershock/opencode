@@ -31,6 +31,7 @@ export const Item = Schema.Struct({
 export type Item = typeof Item.Type
 
 export interface Interface {
+  readonly scope: (spaceID: string) => Interface
   readonly apply: (deviceID: string, values: readonly SyncRuntime.Metadata[]) => Effect.Effect<void, unknown>
   readonly list: () => Effect.Effect<readonly Item[], unknown>
   readonly availability: (sessionID: string, value: Availability) => Effect.Effect<void, unknown>
@@ -43,46 +44,54 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const db = (yield* SyncDatabase.Service).db
-    const list = () =>
-      db
-        .all<{ payload: string; source_device: string; availability: Availability }>(
-          sql`
-        SELECT payload, source_device, availability FROM sync_session_metadata ORDER BY updated_at DESC, session_id
+    const scoped = (spaceID: string): Interface => {
+      const list = () =>
+        db
+          .all<{ payload: string; source_device: string; availability: Availability }>(
+            sql`
+        SELECT payload, source_device, availability FROM sync_session_metadata
+        WHERE space_id = ${spaceID} ORDER BY updated_at DESC, session_id
       `,
-        )
-        .pipe(
-          Effect.map((rows) =>
-            rows.map((row) => ({
-              ...Schema.decodeUnknownSync(SyncRuntime.Metadata)(JSON.parse(row.payload)),
-              sourceDeviceID: row.source_device,
-              availability: row.availability,
-            })),
-          ),
-        )
-    const apply = (deviceID: string, values: readonly SyncRuntime.Metadata[]) =>
-      db.transaction((tx) =>
-        Effect.forEach(
-          values,
-          (value) =>
-            tx.run(sql`
-        INSERT INTO sync_session_metadata (session_id, payload, source_device, revision, availability, updated_at)
-        VALUES (${value.sessionID}, ${JSON.stringify(value)}, ${deviceID}, ${value.revision}, 'metadata-only', ${value.updatedAt})
+          )
+          .pipe(
+            Effect.map((rows) =>
+              rows.map((row) => ({
+                ...Schema.decodeUnknownSync(SyncRuntime.Metadata)(JSON.parse(row.payload)),
+                sourceDeviceID: row.source_device,
+                availability: row.availability,
+              })),
+            ),
+          )
+      const apply = (deviceID: string, values: readonly SyncRuntime.Metadata[]) =>
+        db.transaction((tx) =>
+          Effect.forEach(
+            values,
+            (value) =>
+              tx.run(sql`
+        INSERT INTO sync_session_metadata (session_id, payload, source_device, revision, availability, updated_at, space_id)
+        VALUES (${value.sessionID}, ${JSON.stringify(value)}, ${deviceID}, ${value.revision}, 'metadata-only', ${value.updatedAt}, ${spaceID})
         ON CONFLICT(session_id) DO UPDATE SET
           payload = CASE WHEN excluded.revision > revision OR (excluded.revision = revision AND excluded.source_device < source_device) THEN excluded.payload ELSE payload END,
           source_device = CASE WHEN excluded.revision > revision OR (excluded.revision = revision AND excluded.source_device < source_device) THEN excluded.source_device ELSE source_device END,
           revision = MAX(revision, excluded.revision),
           updated_at = MAX(updated_at, excluded.updated_at)
       `),
-          { discard: true },
-        ),
-      )
-    const availability = (sessionID: string, value: Availability) =>
-      db
-        .run(sql`UPDATE sync_session_metadata SET availability = ${value} WHERE session_id = ${sessionID}`)
-        .pipe(Effect.asVoid)
-    const remove = (sessionID: string) =>
-      db.run(sql`DELETE FROM sync_session_metadata WHERE session_id = ${sessionID}`).pipe(Effect.asVoid)
-    return { apply, list, availability, remove }
+            { discard: true },
+          ),
+        )
+      const availability = (sessionID: string, value: Availability) =>
+        db
+          .run(
+            sql`UPDATE sync_session_metadata SET availability = ${value} WHERE session_id = ${sessionID} AND space_id = ${spaceID}`,
+          )
+          .pipe(Effect.asVoid)
+      const remove = (sessionID: string) =>
+        db
+          .run(sql`DELETE FROM sync_session_metadata WHERE session_id = ${sessionID} AND space_id = ${spaceID}`)
+          .pipe(Effect.asVoid)
+      return { scope: scoped, apply, list, availability, remove }
+    }
+    return scoped("legacy")
   }),
 )
 

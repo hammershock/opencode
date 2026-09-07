@@ -43,6 +43,13 @@ describe("SyncEventStore", () => {
     const raw = new BunDatabase(filename)
     raw.run("CREATE TABLE sync_schema (version INTEGER PRIMARY KEY)")
     raw.run("INSERT INTO sync_schema (version) VALUES (2)")
+    raw.run("CREATE TABLE sync_event_outbox (event_id TEXT PRIMARY KEY, segment_id TEXT, created_at INTEGER)")
+    raw.run("CREATE TABLE sync_event_segment (id TEXT PRIMARY KEY, device_id TEXT, generation INTEGER)")
+    raw.run("CREATE TABLE sync_event_head (device_id TEXT PRIMARY KEY)")
+    raw.run("CREATE TABLE sync_event_cursor (device_id TEXT PRIMARY KEY)")
+    raw.run("CREATE TABLE sync_remote_segment (device_id TEXT, generation INTEGER)")
+    raw.run("CREATE TABLE sync_remote_event (device_id TEXT, event_id TEXT)")
+    raw.run("CREATE TABLE sync_deletion_set (session_id TEXT PRIMARY KEY)")
     raw.close()
     const database = SyncDatabase.layerFromPath(filename)
     const version = await Effect.runPromise(
@@ -51,7 +58,7 @@ describe("SyncEventStore", () => {
         return yield* db.get<{ version: number }>(sql`SELECT MAX(version) AS version FROM sync_schema`)
       }).pipe(Effect.scoped, Effect.provide(database)),
     )
-    expect(version).toEqual({ version: 4 })
+    expect(version).toEqual({ version: 5 })
   })
 
   test("durably seals ordered outbox events into one immutable per-device generation", async () => {
@@ -81,6 +88,25 @@ describe("SyncEventStore", () => {
         expect(yield* store.head(device)).toBe(1)
         expect(yield* store.pending(10)).toEqual([])
         expect(yield* store.seal(device, 10)).toBeUndefined()
+      }),
+    )
+  })
+
+  test("partitions pending events, cursors, and leases by sync space", async () => {
+    await run(
+      Effect.gen(function* () {
+        const root = yield* SyncEventStore.Service
+        const first = root.scope("space-a")
+        const second = root.scope("space-b")
+        yield* first.enqueue(event("space-a-event", 0))
+        yield* second.enqueue({ ...event("space-b-event", 0), aggregateID: "session-b" })
+        expect((yield* first.pending(10)).map((item) => item.id)).toEqual(["space-a-event"])
+        expect((yield* second.pending(10)).map((item) => item.id)).toEqual(["space-b-event"])
+        expect(yield* first.acquire("upload", "first", 1_000, 0)).toBe(true)
+        expect(yield* second.acquire("upload", "second", 1_000, 0)).toBe(true)
+        const sealed = yield* first.seal(device, 10, 10)
+        expect(sealed?.operations).toHaveLength(1)
+        expect(yield* second.seal(SyncEvent.DeviceID.make("device-space-b"), 10, 10)).toBeDefined()
       }),
     )
   })

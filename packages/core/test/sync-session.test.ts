@@ -1,13 +1,113 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Exit, Layer, Stream } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
+import { EventSequenceTable, EventTable } from "@opencode-ai/core/event/sql"
+import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SyncEventStore } from "@opencode-ai/core/sync/event-store"
 import { SyncOwnership } from "@opencode-ai/core/sync/ownership"
 import { SessionSync } from "@opencode-ai/core/sync/session"
+import { Session } from "@opencode-ai/schema/session"
+import { SessionV1 } from "@opencode-ai/schema/session-v1"
+import path from "node:path"
+import { tmpdir } from "./fixture/tmpdir"
 
 describe("SessionSync", () => {
+  test("backfills assigned V1 Session history into its target space", async () => {
+    await using tmp = await tmpdir()
+    const layer = LayerNode.compile(LayerNode.group([Database.node, SyncEventStore.node, SyncOwnership.node]), [
+      [Database.node, Database.layerFromPath(path.join(tmp.path, "session.db"))],
+      [SyncDatabase.node, SyncDatabase.layerFromPath(path.join(tmp.path, "sync.db"))],
+    ])
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const store = yield* SyncEventStore.Service
+        const ownership = yield* SyncOwnership.Service
+        const sessionID = Session.ID.make("ses_legacy_backfill")
+        const messageID = SessionV1.MessageID.ascending("msg_legacy_backfill")
+        // Reproduce rows committed by the still-supported V1 Session endpoint;
+        // startup recovery reads this durable fact source without republishing it.
+        yield* database.insert(EventSequenceTable).values({ aggregate_id: sessionID, seq: 2 }).run()
+        yield* database
+          .insert(EventTable)
+          .values([
+            {
+              id: EventV2.ID.create(),
+              aggregate_id: sessionID,
+              seq: 0,
+              type: "session.created.1",
+              data: {
+                sessionID,
+                info: {
+                  id: sessionID,
+                  slug: "legacy",
+                  projectID: "global",
+                  directory: "/project",
+                  title: "Legacy Session",
+                  version: "test",
+                  time: { created: 0, updated: 0 },
+                },
+              },
+            },
+            {
+              id: EventV2.ID.create(),
+              aggregate_id: sessionID,
+              seq: 1,
+              type: "message.updated.1",
+              data: {
+                sessionID,
+                info: {
+                  id: messageID,
+                  sessionID,
+                  role: "user",
+                  time: { created: 1 },
+                  agent: "build",
+                  model: { providerID: "test", modelID: "test" },
+                },
+              },
+            },
+            {
+              id: EventV2.ID.create(),
+              aggregate_id: sessionID,
+              seq: 2,
+              type: "message.part.updated.1",
+              data: {
+                sessionID,
+                part: {
+                  id: SessionV1.PartID.ascending("prt_legacy_backfill"),
+                  sessionID,
+                  messageID,
+                  type: "text",
+                  text: "legacy history",
+                },
+                time: 2,
+              },
+            },
+          ])
+          .run()
+        yield* ownership.assign(sessionID, "target-space", 1)
+        yield* Effect.forEach(
+          yield* ownership.list(),
+          (item) => SessionSync.backfill(database, store, item.sessionID, item.spaceID),
+          { discard: true },
+        )
+
+        const pending = yield* store.scope("target-space").pending(10)
+        expect(pending.map((event) => event.type).toSorted()).toEqual([
+          "message.part.updated.1",
+          "message.updated.1",
+          "session.created.1",
+        ])
+        expect(new Set(pending.map((event) => event.aggregateID))).toEqual(new Set([sessionID]))
+        expect(yield* store.pending(10)).toEqual([])
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    )
+  })
+
   test("keeps the application available when startup recovery fails", async () => {
     const layer = SessionSync.captureLayer.pipe(
       Layer.provide([

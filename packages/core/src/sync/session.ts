@@ -14,7 +14,7 @@ import { SessionV2 } from "../session"
 import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
 import { eq } from "drizzle-orm"
-import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
+import { SessionSyncDurable } from "@opencode-ai/schema/durable-event-manifest"
 
 type DurablePayload = {
   readonly id: string
@@ -98,7 +98,7 @@ export function backfill(
         aggregateID: sessionID,
         after,
         limit: 256,
-        manifest: SessionDurable,
+        manifest: SessionSyncDurable,
       })
       yield* Effect.forEach(page.events, (event) => capture(store.scope(spaceID), event as DurablePayload), {
         discard: true,

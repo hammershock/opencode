@@ -304,20 +304,27 @@ export function windowsVault(runner: Runner, findInterop: () => Promise<string |
   const powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
   const invoke = async (operation: "get" | "set" | "remove", account: string, secret?: string) => {
     validateAccount(account)
-    const env: Record<string, string> = {}
-    if (!process.env.WSL_INTEROP) {
-      const interop = await findInterop()
-      if (interop) env.WSL_INTEROP = interop
-    }
     const input = JSON.stringify({ operation, resource: service, account, secret })
-    const result = await runner(
-      [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", script],
-      input,
-      env,
-    )
+    const inherited = process.env.WSL_INTEROP
+    const discovered = await findInterop()
+    const selected = discovered ?? inherited
+    const command = [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", script]
+    const result = await runner(command, input, selected && selected !== inherited ? { WSL_INTEROP: selected } : {})
     if (result.exitCode === 3) return undefined
-    ensure(result)
-    return operation === "get" ? trimOneNewline(result.stdout) : undefined
+    if (result.exitCode === 0) return operation === "get" ? trimOneNewline(result.stdout) : undefined
+
+    // A tmux process can outlive the WSL login session that supplied its
+    // inherited socket. Retry only when discovery proves that the transport
+    // changed; other PasswordVault failures have unknown side effects.
+    const recovered = await findInterop()
+    if (!recovered || recovered === selected) {
+      ensure(result)
+      return undefined
+    }
+    const retried = await runner(command, input, { WSL_INTEROP: recovered })
+    if (retried.exitCode === 3) return undefined
+    ensure(retried)
+    return operation === "get" ? trimOneNewline(retried.stdout) : undefined
   }
   return {
     platform: "windows-password-vault",

@@ -226,7 +226,10 @@ async function selectOverview(
     if (code?.trim()) await actions.submitOAuthCode(code.trim())
   }
   if (value === "account") return showAccount(dialog, actions, open)
-  if (value === "refresh") await actions.discoverSpaces()
+  // This dialog is reactive, so a completed background refresh must not
+  // replace it. Replacing here would resurrect a panel the user closed while
+  // the provider request was still in flight.
+  if (value === "refresh") return actions.discoverSpaces()
   if (value === "active") {
     await actions.discoverSpaces()
     return showSpaces(dialog, model, actions)

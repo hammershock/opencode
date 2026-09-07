@@ -1,6 +1,5 @@
 import * as InstanceState from "@/effect/instance-state"
 import { FileSystem } from "@opencode-ai/core/filesystem"
-import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Location } from "@opencode-ai/core/location"
 import { RelativePath } from "@opencode-ai/core/schema"
@@ -12,16 +11,9 @@ import { InstanceHttpApi } from "../api"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
   Effect.gen(function* () {
-    const locations = yield* LocationServiceMap.Service
-
-    const filesystem = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-      const active = yield* Location.Service
-      return yield* effect.pipe(Effect.provide(locations.get(Location.Ref.make(active))))
-    })
-
     const findText = Effect.fn("FileHttpApi.findText")(function* (ctx: { query: { pattern: string } }) {
-      return (yield* filesystem(
-        FileSystem.Service.use((fs) => fs.grep(new FileSystem.GrepInput({ pattern: ctx.query.pattern, limit: 10 }))),
+      return (yield* FileSystem.Service.use((fs) =>
+        fs.grep(new FileSystem.GrepInput({ pattern: ctx.query.pattern, limit: 10 })),
       )).map((match) => ({
         path: { text: match.entry.path },
         lines: { text: match.text },
@@ -42,7 +34,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       const limit = ctx.query.limit ?? 10
       const type = ctx.query.type ?? (ctx.query.dirs === "false" ? "file" : undefined)
       const started = performance.now()
-      const found = yield* filesystem(FileSystem.Service.use((fs) => fs.find({ query: ctx.query.query, limit, type })))
+      const found = yield* FileSystem.Service.use((fs) => fs.find({ query: ctx.query.query, limit, type }))
       yield* Effect.logInfo("find file", {
         query: ctx.query.query,
         type,
@@ -60,38 +52,36 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
 
     const list = Effect.fn("FileHttpApi.list")(function* (ctx: { query: { path: string } }) {
       const directory = (yield* InstanceState.context).directory
-      return yield* filesystem(
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.Service
-          const raw = yield* FSUtil.Service
-          const location = yield* Location.Service
-          const ignored = ignore()
-          const gitignore = yield* raw
-            .readFileString(path.join(location.project.directory, ".gitignore"))
-            .pipe(Effect.catch(() => Effect.succeed("")))
-          if (gitignore) ignored.add(gitignore)
-          const ignorefile = yield* raw
-            .readFileString(path.join(location.project.directory, ".ignore"))
-            .pipe(Effect.catch(() => Effect.succeed("")))
-          if (ignorefile) ignored.add(ignorefile)
-          return (yield* fs.list({ path: RelativePath.make(ctx.query.path) })).map((item) => ({
-            name: path.basename(item.path),
-            path: item.path,
-            absolute: path.resolve(location.directory, item.path),
-            type: item.type,
-            ignored: ignored.ignores(
-              path.relative(location.project.directory, path.resolve(location.directory, item.path)) +
-                (item.type === "directory" ? "/" : ""),
-            ),
-          }))
-        }),
-      )
+      return yield* Effect.gen(function* () {
+        const fs = yield* FileSystem.Service
+        const raw = yield* FSUtil.Service
+        const location = yield* Location.Service
+        const ignored = ignore()
+        const gitignore = yield* raw
+          .readFileString(path.join(location.project.directory, ".gitignore"))
+          .pipe(Effect.catch(() => Effect.succeed("")))
+        if (gitignore) ignored.add(gitignore)
+        const ignorefile = yield* raw
+          .readFileString(path.join(location.project.directory, ".ignore"))
+          .pipe(Effect.catch(() => Effect.succeed("")))
+        if (ignorefile) ignored.add(ignorefile)
+        return (yield* fs.list({ path: RelativePath.make(ctx.query.path) })).map((item) => ({
+          name: path.basename(item.path),
+          path: item.path,
+          absolute: path.resolve(location.directory, item.path),
+          type: item.type,
+          ignored: ignored.ignores(
+            path.relative(location.project.directory, path.resolve(location.directory, item.path)) +
+              (item.type === "directory" ? "/" : ""),
+          ),
+        }))
+      })
     })
 
     const content = Effect.fn("FileHttpApi.content")(function* (ctx: { query: { path: string } }) {
-      const item = yield* filesystem(
-        FileSystem.Service.use((fs) => fs.read({ path: RelativePath.make(ctx.query.path) })),
-      ).pipe(Effect.option)
+      const item = yield* FileSystem.Service.use((fs) => fs.read({ path: RelativePath.make(ctx.query.path) })).pipe(
+        Effect.option,
+      )
       if (Option.isNone(item)) return { type: "text" as const, content: "" }
       const text = item.value.content.includes(0)
         ? Option.none<string>()

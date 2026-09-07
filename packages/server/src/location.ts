@@ -29,10 +29,12 @@ export function response<A, E, R>(data: Effect.Effect<A, E, R>) {
 
 function ref(request: HttpServerRequest.HttpServerRequest): Location.Ref {
   const query = new URL(request.url, "http://localhost").searchParams
-  const workspaceID = query.get("location[workspace]") || request.headers["x-opencode-workspace"]
+  const workspaceID =
+    query.get("location[workspace]") || query.get("workspace") || request.headers["x-opencode-workspace"]
   const targetID = query.get("location[target]") || request.headers["x-opencode-target"]
   const directory =
     query.get("location[directory]") ||
+    query.get("directory") ||
     (request.headers["x-opencode-directory"] ? decode(request.headers["x-opencode-directory"]) : process.cwd())
   return Location.Ref.make({
     target: targetID ? { type: "rexd", targetID: Location.TargetID.make(targetID) } : { type: "local" },

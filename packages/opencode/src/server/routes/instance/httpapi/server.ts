@@ -285,6 +285,7 @@ const app = LayerNode.group([
   SessionLocationAccess.node,
   SessionLocationMutation.node,
   SessionActivity.node,
+  LocationServiceMap.node,
 ])
 
 export function createRoutes(
@@ -323,8 +324,6 @@ export function createRoutes(
         [SessionExecution.node, SessionExecutionLocal.node],
       ]),
     ),
-    Layer.provide(locationServiceMapV2),
-
     Layer.provide(
       AppNodeBuilderV1.build(app, [
         [TargetRegistry.node, rexdTargetRegistryNode],

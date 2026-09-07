@@ -63,17 +63,12 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
     )
     yield* Effect.addFinalizer(() => Effect.sync(unregister))
 
-    const pty = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-      const active = yield* Location.Service
-      return yield* effect.pipe(Effect.provide(locations.get(Location.Ref.make(active))))
-    })
-
     const shells = Effect.fn("PtyHttpApi.shells")(function* () {
       return yield* Effect.promise(() => Shell.list())
     })
 
     const list = Effect.fn("PtyHttpApi.list")(function* () {
-      const sessions = yield* pty(Pty.Service.use((service) => service.list()))
+      const sessions = yield* Pty.Service.use((service) => service.list())
       return sessions.filter((info) => info.status === "running")
     })
 
@@ -88,22 +83,20 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
         }
         const cwd = ctx.payload.cwd || (yield* InstanceState.context).directory
         const shell = yield* plugin.trigger("shell.env", { cwd }, { env: {} as Record<string, string> })
-        return yield* pty(
-          Pty.Service.use((service) =>
-            service.create({
-              ...ctx.payload,
-              args: ctx.payload.args ? [...ctx.payload.args] : undefined,
-              cwd,
-              env: { ...ctx.payload.env, ...shell.env },
-            }),
-          ),
+        return yield* Pty.Service.use((service) =>
+          service.create({
+            ...ctx.payload,
+            args: ctx.payload.args ? [...ctx.payload.args] : undefined,
+            cwd,
+            env: { ...ctx.payload.env, ...shell.env },
+          }),
         )
       })
       return yield* ctx.payload.sessionID ? activity.withActivity(ctx.payload.sessionID, "session_mutation", run) : run
     })
 
     const get = Effect.fn("PtyHttpApi.get")(function* (ctx: { params: { ptyID: PtyID } }) {
-      return yield* pty(Pty.Service.use((service) => service.get(ctx.params.ptyID))).pipe(
+      return yield* Pty.Service.use((service) => service.get(ctx.params.ptyID)).pipe(
         Effect.catchTag(
           "Pty.NotFoundError",
           (error) =>
@@ -128,13 +121,11 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
       payload: typeof Pty.UpdateInput.Type
     }) {
       yield* get(ctx)
-      return yield* pty(
-        Pty.Service.use((service) =>
-          service.update(ctx.params.ptyID, {
-            ...ctx.payload,
-            size: ctx.payload.size ? { ...ctx.payload.size } : undefined,
-          }),
-        ),
+      return yield* Pty.Service.use((service) =>
+        service.update(ctx.params.ptyID, {
+          ...ctx.payload,
+          size: ctx.payload.size ? { ...ctx.payload.size } : undefined,
+        }),
       ).pipe(
         Effect.catchTag(
           "Pty.NotFoundError",
@@ -161,7 +152,7 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
         }
         const current = yield* get(ctx)
         const shell = yield* plugin.trigger("shell.env", { cwd: current.cwd }, { env: {} as Record<string, string> })
-        return yield* pty(Pty.Service.use((service) => service.restart(ctx.params.ptyID, { env: shell.env }))).pipe(
+        return yield* Pty.Service.use((service) => service.restart(ctx.params.ptyID, { env: shell.env })).pipe(
           Effect.catchTags({
             "Pty.NotFoundError": (error) =>
               new ApiError.PtyNotFoundError({
@@ -181,7 +172,7 @@ export const ptyHandlers = HttpApiBuilder.group(InstanceHttpApi, "pty", (handler
 
     const remove = Effect.fn("PtyHttpApi.remove")(function* (ctx: { params: { ptyID: PtyID } }) {
       yield* get(ctx)
-      yield* pty(Pty.Service.use((service) => service.remove(ctx.params.ptyID))).pipe(
+      yield* Pty.Service.use((service) => service.remove(ctx.params.ptyID)).pipe(
         Effect.catchTag(
           "Pty.NotFoundError",
           (error) =>
@@ -218,24 +209,13 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
   Effect.gen(function* () {
     const tickets = yield* PtyTicket.Service
     const cors = yield* CorsConfig
-    const locations = yield* LocationServiceMap.Service
-    const unregister = registerDisposer((directory) =>
-      Effect.runPromise(locations.invalidate(Location.Ref.make({ directory: AbsolutePath.make(directory) }))),
-    )
-    yield* Effect.addFinalizer(() => Effect.sync(unregister))
-
-    const pty = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
-      const active = yield* Location.Service
-      return yield* effect.pipe(Effect.provide(locations.get(Location.Ref.make(active))))
-    })
-
     return handlers.handleRaw(
       "connect",
       Effect.fn("PtyHttpApi.connect")(function* (ctx: {
         params: { ptyID: PtyID }
         request: HttpServerRequest.HttpServerRequest
       }) {
-        const exists = yield* pty(Pty.Service.use((service) => service.get(ctx.params.ptyID))).pipe(
+        const exists = yield* Pty.Service.use((service) => service.get(ctx.params.ptyID)).pipe(
           Effect.map((info) => info.status === "running"),
           Effect.catchTag("Pty.NotFoundError", () => Effect.succeed(false)),
         )
@@ -274,14 +254,12 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
         // Outbound frames flow through one queue drained by a single writer so replay, live
         // output, and the close frame keep their order.
         const outbox = yield* Queue.unbounded<string | Uint8Array | Socket.CloseEvent>()
-        const attachment = yield* pty(
-          Pty.Service.use((service) =>
-            service.attach(ctx.params.ptyID, {
-              cursor,
-              onData: (chunk) => Queue.offerUnsafe(outbox, chunk),
-              onEnd: () => Queue.offerUnsafe(outbox, new Socket.CloseEvent(1000)),
-            }),
-          ),
+        const attachment = yield* Pty.Service.use((service) =>
+          service.attach(ctx.params.ptyID, {
+            cursor,
+            onData: (chunk) => Queue.offerUnsafe(outbox, chunk),
+            onEnd: () => Queue.offerUnsafe(outbox, new Socket.CloseEvent(1000)),
+          }),
         ).pipe(
           Effect.catchTags({
             "Pty.NotFoundError": () =>

@@ -54,6 +54,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     last_known_target_name: info.lastKnownTargetName ?? null,
     path: info.path,
     title: info.title,
+    approval_mode: info.approvalMode ?? "normal",
     agent: info.agent,
     model: info.model,
     version: info.version,

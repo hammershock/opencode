@@ -165,6 +165,11 @@ export function Prompt(props: PromptProps) {
   const route = useRoute()
   const project = useProject()
   const sync = useSync()
+  const approvalMode = createMemo(() =>
+    local.permission.effective(
+      props.sessionID ? (sync.session.get(props.sessionID)?.approvalMode ?? "normal") : local.permission.defaultMode,
+    ),
+  )
   const tuiConfig = useTuiConfig()
   const dialog = useDialog()
   const toast = useToast()
@@ -1129,6 +1134,7 @@ export function Prompt(props: PromptProps) {
 
       const res = await sdk.client.v2.session.create({
         location,
+        approvalMode: local.permission.defaultMode,
         agent: agent.name,
         model: {
           providerID: selectedModel.providerID,
@@ -1565,7 +1571,7 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : Locale.titlecase(agent().name)}
                       </text>
-                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
+                      <Show when={store.mode === "normal" && approvalMode() === "auto"}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
                       <Show when={store.mode === "normal"}>

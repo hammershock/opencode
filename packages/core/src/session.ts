@@ -41,6 +41,7 @@ import { Pty } from "./pty"
 import { PermissionV2 } from "./permission"
 import { QuestionV2 } from "./question"
 import { SessionActivity } from "./session/activity"
+import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -85,6 +86,7 @@ type CreateInput = {
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
+  approvalMode?: ApprovalMode.Mode
 }
 
 type CompactInput = {
@@ -260,6 +262,7 @@ const layer = Layer.effect(
           path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
           title: `New session - ${new Date(now).toISOString()}`,
+          approvalMode: input.approvalMode ?? "normal",
           agent: input.agent,
           model: input.model
             ? {

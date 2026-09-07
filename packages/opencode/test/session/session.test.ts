@@ -106,6 +106,29 @@ describe("session.created event", () => {
     }),
   )
 
+  it.instance("persists approval mode through the synchronized session payload", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const received = yield* Deferred.make<EventV2.SerializedEvent>()
+      const listener = (event: { payload: { type?: string; syncEvent?: EventV2.SerializedEvent } }) => {
+        if (event.payload.syncEvent?.type === EventV2.versionedType(SessionNs.Event.Updated.type, 1))
+          Deferred.doneUnsafe(received, Effect.succeed(event.payload.syncEvent))
+      }
+      GlobalBus.on("event", listener)
+      yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
+
+      const info = yield* session.create({ approvalMode: "normal" })
+      yield* session.setApprovalMode({ sessionID: info.id, approvalMode: "auto" })
+      expect((yield* session.get(info.id)).approvalMode).toBe("auto")
+      expect(yield* awaitDeferred(received, "timed out waiting for approval mode sync event")).toMatchObject({
+        aggregateID: info.id,
+        data: { info: { approvalMode: "auto" } },
+      })
+
+      yield* session.remove(info.id)
+    }),
+  )
+
   it.instance("emits legacy global sync payload", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

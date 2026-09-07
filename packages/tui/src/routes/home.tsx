@@ -12,6 +12,12 @@ import { useEditorContext } from "../context/editor"
 import { useTerminalDimensions } from "@opentui/solid"
 import { useTuiConfig } from "../config"
 import { HomeSessionDestinationProvider } from "./home/session-destination"
+import { createCommandHost } from "../command-toolkit/host"
+import { approvalModeCommand, type ApprovalModeCommandContext } from "../command-toolkit/approval-mode"
+import { useBindings } from "../keymap"
+import { useDialog } from "../ui/dialog"
+import { DialogPermissionMode } from "../component/dialog-permission-mode"
+import { useToast } from "../ui/toast"
 
 let once = false
 const placeholder = {
@@ -30,6 +36,40 @@ export function Home() {
   const editor = useEditorContext()
   const dimensions = useTerminalDimensions()
   const tuiConfig = useTuiConfig()
+  const dialog = useDialog()
+  const toast = useToast()
+  const commandHost = createMemo(() =>
+    createCommandHost<ApprovalModeCommandContext>({
+      register: (registry) => registry.register(approvalModeCommand),
+      context: (source) => ({
+        source,
+        client: "tui",
+        abortSignal: new AbortController().signal,
+        confirm: async () => false,
+        approvalMode: {
+          open: () =>
+            dialog.replace(() => (
+              <DialogPermissionMode
+                scope="Default"
+                mode={local.permission.defaultMode}
+                set={(mode) => {
+                  local.permission.setDefault(mode)
+                }}
+              />
+            )),
+        },
+      }),
+      upstream: () => undefined,
+      invalid: (message) => toast.show({ message, variant: "warning" }),
+      outcome: (message, status) =>
+        toast.show({
+          message,
+          variant: status === "failed" ? "error" : status === "cancelled" ? "warning" : "success",
+        }),
+    }),
+  )
+
+  useBindings(() => ({ commands: commandHost().commands() }))
   const promptMaxWidth = createMemo(() => {
     const configured = tuiConfig.prompt?.max_width
     if (configured === "auto") return Math.max(75, Math.floor(dimensions().width * 0.7))
@@ -80,7 +120,12 @@ export function Home() {
         <box height={1} minHeight={0} flexShrink={1} />
         <box width="100%" maxWidth={promptMaxWidth()} zIndex={1000} paddingTop={1} flexShrink={0}>
           <pluginRuntime.Slot name="home_prompt" mode="replace" ref={bind}>
-            <Prompt ref={bind} right={<pluginRuntime.Slot name="home_prompt_right" />} placeholders={placeholder} />
+            <Prompt
+              ref={bind}
+              right={<pluginRuntime.Slot name="home_prompt_right" />}
+              placeholders={placeholder}
+              onBuiltinSlash={(input) => commandHost()(input)}
+            />
           </pluginRuntime.Slot>
         </box>
         <pluginRuntime.Slot name="home_bottom" />

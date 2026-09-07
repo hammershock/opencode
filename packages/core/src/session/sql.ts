@@ -15,6 +15,7 @@ import type { SystemContext } from "../system-context/index"
 import { AgentV2 } from "../agent"
 import type { Revert } from "@opencode-ai/schema/revert"
 import type { Location } from "../location"
+import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -38,6 +39,7 @@ export const SessionTable = sqliteTable(
     location_revision: integer().notNull().default(0),
     path: DatabasePath.pathColumn(),
     title: text().notNull(),
+    approval_mode: text().$type<ApprovalMode.Mode>().notNull().default("normal"),
     version: text().notNull(),
     share_url: text(),
     summary_additions: integer(),

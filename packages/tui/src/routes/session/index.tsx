@@ -93,6 +93,7 @@ import { createCommandHost } from "../../command-toolkit/host"
 import { environmentCommands, type EnvironmentCommandContext } from "../../command-toolkit/environment"
 import { targetCommand, TARGET_MANAGER_SETTING, type TargetCommandContext } from "../../command-toolkit/target"
 import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
+import { approvalModeCommand, type ApprovalModeCommandContext } from "../../command-toolkit/approval-mode"
 import { useTargetManager } from "../../component/target-manager"
 import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
 import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
@@ -493,15 +494,20 @@ export function Session() {
   const targetManager = useTargetManager()
   const coreCommandHost = createMemo(() =>
     createCommandHost<
-      EnvironmentCommandContext & TargetCommandContext & SessionControlCommandContext & SyncCommandContext
+      EnvironmentCommandContext &
+        TargetCommandContext &
+        SessionControlCommandContext &
+        SyncCommandContext &
+        ApprovalModeCommandContext
     >({
       register: (registry) => {
         environmentCommands.forEach((command) => registry.register(command))
         registry.register(targetCommand)
         sessionControlCommands.forEach((command) => registry.register(command))
+        registry.register(approvalModeCommand)
         syncCommands.forEach((command) => registry.register(command))
       },
-      context: () => {
+      context: (source) => {
         const current = location()
         const queryLocation = current
           ? ({ directory: current.directory, workspace: current.workspaceID, target: current.target } as {
@@ -580,7 +586,7 @@ export function Session() {
           }
         }
         return {
-          source: "slash",
+          source,
           client: "tui",
           sessionID: route.sessionID,
           location: current,
@@ -588,7 +594,6 @@ export function Session() {
           targetManagerEnabled: kv.get(TARGET_MANAGER_SETTING, false),
           openTargetManager: targetManager.open,
           sessionControls: {
-            permissions: () => dialog.replace(() => <DialogPermissionMode />),
             outputExpansion: setOutputExpansion,
             delete: async () => {
               const current = session()
@@ -603,6 +608,21 @@ export function Session() {
               navigate({ type: "home" })
               return "deleted"
             },
+          },
+          approvalMode: {
+            open: () =>
+              dialog.replace(() => (
+                <DialogPermissionMode
+                  scope="Session"
+                  mode={session()?.approvalMode ?? "normal"}
+                  set={async (approvalMode) => {
+                    await sdk.client.session.update(
+                      { sessionID: route.sessionID, approvalMode },
+                      { throwOnError: true },
+                    )
+                  }}
+                />
+              )),
           },
           confirm: async (request) => Boolean(await DialogConfirm.show(dialog, request.title, request.message)),
           environment: {
@@ -1402,9 +1422,9 @@ export function Session() {
   ])
 
   const sessionCommands = createMemo(() =>
-    sessionCommandList().map((command) => ({
+    [...sessionCommandList(), ...coreCommandHost().commands()].map((command) => ({
       namespace: "palette",
-      name: command.value,
+      name: "value" in command ? command.value : command.name,
       desc: "description" in command ? command.description : undefined,
       slashName: "slash" in command ? command.slash?.name : undefined,
       slashAliases: "slash" in command ? command.slash?.aliases : undefined,

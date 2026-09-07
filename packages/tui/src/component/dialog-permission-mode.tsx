@@ -1,28 +1,31 @@
 import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
-import { useLocal } from "../context/local"
+import type { PermissionMode } from "../context/permission"
 
-export function DialogPermissionMode() {
+export function DialogPermissionMode(props: {
+  scope: "Default" | "Session"
+  mode: PermissionMode
+  set: (mode: PermissionMode) => Promise<void> | void
+}) {
   const dialog = useDialog()
-  const local = useLocal()
   return (
     <DialogSelect
-      title="Permission mode"
-      current={local.permission.mode}
+      title={`${props.scope} permission mode`}
+      current={props.mode}
       options={[
         {
-          title: "Ask according to configured rules",
+          title: "Disable auto-approve",
           description: "Prompt when a permission rule requires confirmation",
           value: "normal" as const,
         },
         {
-          title: "Auto-approve unless explicitly denied",
+          title: "Enable auto-approve",
           description: "Approve requests that are not rejected by an explicit rule",
           value: "auto" as const,
         },
       ]}
-      onSelect={(option) => {
-        local.permission.set(option.value)
+      onSelect={async (option) => {
+        await props.set(option.value)
         dialog.clear()
       }}
     />

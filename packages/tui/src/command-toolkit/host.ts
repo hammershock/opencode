@@ -2,7 +2,7 @@ import { CommandRegistry, createHostResolver, type InvocationContext } from "@op
 
 export function createCommandHost<Context extends InvocationContext>(input: {
   register: (registry: CommandRegistry<Context>) => void
-  context: () => Context
+  context: (source: InvocationContext["source"]) => Context
   upstream: (
     source: string,
   ) =>
@@ -14,7 +14,7 @@ export function createCommandHost<Context extends InvocationContext>(input: {
   const registry = new CommandRegistry<Context>()
   input.register(registry)
   const resolve = createHostResolver(registry.routes(), input.upstream)
-  return async (source: string) => {
+  const invoke = async (source: string, invocationSource: InvocationContext["source"] = "slash") => {
     const resolution = resolve(source)
     if (resolution.status !== "core") return false
     const prepared = resolution.resolution.command.prepare(resolution.resolution.arguments)
@@ -22,7 +22,7 @@ export function createCommandHost<Context extends InvocationContext>(input: {
       input.invalid(prepared.message)
       return true
     }
-    const context = input.context()
+    const context = input.context(invocationSource)
     if (resolution.resolution.command.available && !resolution.resolution.command.available(context)) return false
     let result
     try {
@@ -34,4 +34,18 @@ export function createCommandHost<Context extends InvocationContext>(input: {
     if (result.message) input.outcome(result.message, result.status)
     return true
   }
+  return Object.assign(invoke, {
+    commands: () =>
+      registry.list().map((command) => ({
+        namespace: "palette" as const,
+        name: command.id,
+        title: command.title,
+        desc: command.description,
+        category: command.category,
+        slashName: command.path.join(" "),
+        slashAliases: command.aliases?.map((path) => path.join(" ")),
+        enabled: command.available ? command.available(input.context("palette")) : true,
+        run: () => invoke(`/${command.path.join(" ")}`, "palette"),
+      })),
+  })
 }

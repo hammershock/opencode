@@ -294,65 +294,62 @@ async function siblingID(sessionID: string, deviceID: string, firstConflictSeq: 
 }
 
 /** Scoped bridge used by the application runtime after sync.db is available. */
-export const captureLayer = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const events = yield* EventV2.Service
-    const store = yield* SyncEventStore.Service
-    const ownership = yield* SyncOwnership.Service
-    const db = (yield* Database.Service).db
-    const persisted = (sessionID: string) =>
-      db
-        .select({ spaceID: SessionTable.sync_space_id })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, SessionV2.ID.make(sessionID)))
-        .get()
-        .pipe(
-          Effect.map(
-            (row): PersistedOwnership =>
-              row ? { exists: true, ...(row.spaceID ? { spaceID: row.spaceID } : {}) } : { exists: false },
-          ),
-        )
-    // Subscribe before taking the recovery snapshot. Any commit racing startup
-    // is either observed live or appears in the subsequent durable backfill.
-    yield* events.all().pipe(
-      Stream.runForEach((event) =>
-        captureOwned(ownership, store, event as DurablePayload, Date.now(), persisted).pipe(
-          Effect.catchCause((cause) => Effect.logWarning("Session sync live capture failed", { cause })),
+const captureEffect = Effect.gen(function* () {
+  const events = yield* EventV2.Service
+  const store = yield* SyncEventStore.Service
+  const ownership = yield* SyncOwnership.Service
+  const db = (yield* Database.Service).db
+  const persisted = (sessionID: string) =>
+    db
+      .select({ spaceID: SessionTable.sync_space_id })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, SessionV2.ID.make(sessionID)))
+      .get()
+      .pipe(
+        Effect.map(
+          (row): PersistedOwnership =>
+            row ? { exists: true, ...(row.spaceID ? { spaceID: row.spaceID } : {}) } : { exists: false },
         ),
-      ),
-      Effect.catchCause((cause) => Effect.logWarning("Session sync capture stream failed", { cause })),
-      Effect.forkScoped,
-    )
-    yield* Effect.gen(function* () {
-      const existing = yield* db
-        .select({
-          sessionID: SessionTable.id,
-          spaceID: SessionTable.sync_space_id,
-          assignedAt: SessionTable.time_created,
-        })
-        .from(SessionTable)
-        .all()
-      yield* reconcileOwnership(
-        ownership,
-        existing.map((item) => ({
-          sessionID: item.sessionID,
-          ...(item.spaceID ? { spaceID: item.spaceID } : {}),
-          assignedAt: item.assignedAt,
-        })),
       )
-      // Session and sync outbox use separate SQLite databases. Replaying the
-      // owned durable history after the live subscriber starts closes the crash
-      // window between a committed Session event and its asynchronous capture.
-      // Enqueue is idempotent by event ID, so overlap with the live stream is safe.
-      yield* Effect.forEach(yield* ownership.list(), (item) => backfill(db, store, item.sessionID, item.spaceID), {
-        discard: true,
+  // Subscribe before taking the recovery snapshot. Any commit racing startup
+  // is either observed live or appears in the subsequent durable backfill.
+  const unsubscribe = yield* events.listen((event) =>
+    captureOwned(ownership, store, event as DurablePayload, Date.now(), persisted).pipe(
+      Effect.catchCause((cause) => Effect.logWarning("Session sync live capture failed", { cause })),
+    ),
+  )
+  yield* Effect.addFinalizer(() => unsubscribe)
+  yield* Effect.gen(function* () {
+    const existing = yield* db
+      .select({
+        sessionID: SessionTable.id,
+        spaceID: SessionTable.sync_space_id,
+        assignedAt: SessionTable.time_created,
       })
-    }).pipe(Effect.catchCause((cause) => Effect.logWarning("Session sync recovery failed", { cause })))
-  }),
-)
+      .from(SessionTable)
+      .all()
+    yield* reconcileOwnership(
+      ownership,
+      existing.map((item) => ({
+        sessionID: item.sessionID,
+        ...(item.spaceID ? { spaceID: item.spaceID } : {}),
+        assignedAt: item.assignedAt,
+      })),
+    )
+    // Session and sync outbox use separate SQLite databases. Replaying the
+    // owned durable history after the live subscriber starts closes the crash
+    // window between a committed Session event and its asynchronous capture.
+    // Enqueue is idempotent by event ID, so overlap with the live stream is safe.
+    yield* Effect.forEach(yield* ownership.list(), (item) => backfill(db, store, item.sessionID, item.spaceID), {
+      discard: true,
+    })
+  }).pipe(Effect.catchCause((cause) => Effect.logWarning("Session sync recovery failed", { cause })))
+})
+
+export const captureLayer = Layer.effectDiscard(captureEffect)
 
 export class Capture extends Context.Service<Capture, true>()("@opencode/SessionSyncCapture") {}
-const captureServiceLayer = Layer.provideMerge(Layer.succeed(Capture, true), captureLayer)
+const captureServiceLayer = Layer.effect(Capture, captureEffect.pipe(Effect.as(true)))
 export const node = makeGlobalNode({
   service: Capture,
   layer: captureServiceLayer,

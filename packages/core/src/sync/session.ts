@@ -15,6 +15,7 @@ import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
 import { eq } from "drizzle-orm"
 import { SessionSyncDurable } from "@opencode-ai/schema/durable-event-manifest"
+import { SessionV1 } from "@opencode-ai/schema/session-v1"
 
 type DurablePayload = {
   readonly id: string
@@ -272,7 +273,7 @@ function replaceSessionID(value: unknown, source: string, target: string): any {
 }
 
 function isCreatedEnvelope(event: SyncEvent.Envelope) {
-  return event.type === "session.created" || event.type.startsWith("session.created@")
+  return SessionSyncDurable.definitions.get(event.type) === SessionV1.Event.Created
 }
 
 function bindCreatedSpace(event: SyncEvent.Envelope, spaceID: string) {

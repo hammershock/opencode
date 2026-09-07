@@ -4,6 +4,8 @@ import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventSequenceTable, EventTable } from "@opencode-ai/core/event/sql"
+import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SyncEventStore } from "@opencode-ai/core/sync/event-store"
@@ -11,6 +13,7 @@ import { SyncOwnership } from "@opencode-ai/core/sync/ownership"
 import { SessionSync } from "@opencode-ai/core/sync/session"
 import { Session } from "@opencode-ai/schema/session"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
+import { eq } from "drizzle-orm"
 import path from "node:path"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -297,6 +300,111 @@ describe("SessionSync", () => {
       { publish: true },
     ])
     expect(calls[1]).toEqual(["remove", "s1"])
+  })
+
+  test("persists real versioned Created ownership across restart reconciliation", async () => {
+    await using tmp = await tmpdir()
+    const sessionPath = path.join(tmp.path, "session.db")
+    const syncPath = path.join(tmp.path, "sync.db")
+    const layer = () =>
+      LayerNode.compile(LayerNode.group([Database.node, EventV2.node, SessionProjector.node, SyncOwnership.node]), [
+        [Database.node, Database.layerFromPath(sessionPath)],
+        [SyncDatabase.node, SyncDatabase.layerFromPath(syncPath)],
+      ])
+    const sessionID = Session.ID.make("ses_remote_owned")
+    const spaceID = "remote-space-exact"
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const events = yield* EventV2.Service
+        const ownership = yield* SyncOwnership.Service
+        const projector = SessionSync.projector(
+          events,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          spaceID,
+          (id, ownedSpaceID) => ownership.assign(id, ownedSpaceID),
+        )
+        yield* projector.project({
+          id: EventV2.ID.create(),
+          aggregateID: sessionID,
+          seq: 0,
+          type: "session.created.1",
+          data: {
+            sessionID,
+            info: {
+              id: sessionID,
+              slug: "remote-owned",
+              projectID: "global",
+              directory: "/remote/project",
+              title: "Remote owned Session",
+              version: "test",
+              time: { created: 1, updated: 1 },
+            },
+          },
+        })
+
+        expect(
+          yield* database
+            .select({ spaceID: SessionTable.sync_space_id })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get(),
+        ).toEqual({ spaceID })
+        expect(yield* ownership.get(sessionID)).toMatchObject({ sessionID, spaceID })
+      }).pipe(Effect.scoped, Effect.provide(layer())),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const ownership = yield* SyncOwnership.Service
+        const row = yield* database
+          .select({ sessionID: SessionTable.id, spaceID: SessionTable.sync_space_id })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID))
+          .get()
+        expect(row).toEqual({ sessionID, spaceID })
+        yield* SessionSync.reconcileOwnership(ownership, [{ sessionID, spaceID: row!.spaceID!, assignedAt: 1 }])
+        expect(yield* ownership.get(sessionID)).toMatchObject({ sessionID, spaceID })
+      }).pipe(Effect.scoped, Effect.provide(layer())),
+    )
+  })
+
+  test("does not bind unsupported or non-Created durable wire events", async () => {
+    const replayed: SyncEvent.Envelope[] = []
+    const owned: string[] = []
+    const projector = SessionSync.projector(
+      {
+        replay: (event: SyncEvent.Envelope) => Effect.sync(() => void replayed.push(event)),
+        remove: () => Effect.void,
+      } as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "remote-space",
+      (sessionID) => Effect.sync(() => void owned.push(sessionID)),
+    )
+    const event = (type: string) => ({
+      id: EventV2.ID.create(),
+      aggregateID: `ses_${type}`,
+      seq: 0,
+      type,
+      data: { info: { syncSpaceID: "sender-value" } },
+    })
+
+    await Effect.runPromise(projector.project(event("session.updated.1")))
+    await Effect.runPromise(projector.project(event("session.created.999")))
+
+    expect(replayed.map((item) => item.data)).toEqual([
+      { info: { syncSpaceID: "sender-value" } },
+      { info: { syncSpaceID: "sender-value" } },
+    ])
+    expect(owned).toEqual([])
   })
 
   test("marks projection and deletion as sync replay activity", async () => {

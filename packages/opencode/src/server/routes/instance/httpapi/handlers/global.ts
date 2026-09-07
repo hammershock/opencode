@@ -99,22 +99,32 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const badSetup = <A>(effect: Effect.Effect<A, SyncSetup.SetupError>) =>
       effect.pipe(
-        Effect.mapError((error) => {
-          if (error.kind === "missing-app")
-            return new SyncSetupApiError({
+        Effect.mapError(
+          (error) =>
+            new SyncSetupApiError({
               name: "SyncSetupError",
-              data: { kind: "missing-app", message: SyncMissingAppMessage },
-            })
-          if (error.kind === "incompatible-local-state")
-            return new SyncSetupApiError({
-              name: "SyncSetupError",
-              data: { kind: "incompatible-local-state", message: SyncIncompatibleLocalStateMessage },
-            })
-          return new SyncSetupApiError({
-            name: "SyncSetupError",
-            data: { kind: "bad-request", message: "Sync setup request failed" },
-          })
-        }),
+              data: {
+                kind: error.kind,
+                message:
+                  error.kind === "missing-app"
+                    ? SyncMissingAppMessage
+                    : error.kind === "incompatible-local-state"
+                      ? SyncIncompatibleLocalStateMessage
+                      : `Sync setup failed (${error.kind})`,
+                diagnostic: error.diagnostic,
+              },
+            }),
+        ),
+      )
+    const controlApi = <A>(effect: Effect.Effect<A, SyncControl.ControlError>) =>
+      effect.pipe(
+        Effect.mapError(
+          (error) =>
+            new SyncControlApiError({
+              name: "SyncControlError",
+              data: { kind: error.kind, diagnostic: error.diagnostic },
+            }),
+        ),
       )
     const badControl = <A>(effect: Effect.Effect<A, SyncControl.ControlError>) =>
       effect.pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
@@ -169,26 +179,14 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncOAuthComplete", (ctx) => badSetup(syncSetup.complete(ctx.payload)))
       .handle("syncOAuthSwitchAccount", (ctx) => badControl(syncControl.switchAccount(ctx.payload)))
       .handle("syncLogout", () => stateAfter(syncControl.logout()))
-      .handle("syncDiscover", () =>
-        syncSetup.discover().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
+      .handle("syncDiscover", () => badSetup(syncSetup.discover()))
       .handle("syncCreate", (ctx) => badSetup(syncSetup.create(ctx.payload)))
       .handle("syncJoin", (ctx) => badSetup(syncControl.join(ctx.payload)))
-      .handle("syncActivate", (ctx) => badControl(syncControl.switchSpace(ctx.payload)))
+      .handle("syncActivate", (ctx) => controlApi(syncControl.switchSpace(ctx.payload)))
       .handle("syncLeave", (ctx) => badControl(syncControl.leaveSpace(ctx.payload.namespaceID)))
       .handle("syncEnabled", (ctx) => stateAfter(syncControl.enable(ctx.payload.enabled)))
       .handle("syncInterval", (ctx) => stateAfter(syncControl.setInterval(ctx.payload.intervalSeconds)))
-      .handle("syncDelete", (ctx) =>
-        syncControl.deleteSpace(ctx.params.namespaceID).pipe(
-          Effect.mapError(
-            (error) =>
-              new SyncControlApiError({
-                name: "SyncControlError",
-                data: { kind: error.kind, diagnostic: error.diagnostic },
-              }),
-          ),
-        ),
-      )
+      .handle("syncDelete", (ctx) => controlApi(syncControl.deleteSpace(ctx.params.namespaceID)))
       .handle("syncRemove", () => badControl(syncControl.removeFromDevice()))
       .handle("syncUnassigned", () =>
         syncControl.unassigned().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
@@ -197,30 +195,11 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncStatus", () =>
         syncControl.status().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
       )
-      .handle("syncNow", () =>
-        syncControl.now().pipe(
-          Effect.as(true),
-          Effect.mapError(
-            (error) =>
-              new SyncControlApiError({
-                name: "SyncControlError",
-                data: { kind: error.kind, diagnostic: error.diagnostic },
-              }),
-          ),
-        ),
-      )
-      .handle("syncSessions", () =>
-        syncControl.sessions().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncHydrate", (ctx) =>
-        syncControl.hydrate(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncDevices", () =>
-        syncControl.devices().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncDeviceUpdate", (ctx) =>
-        syncControl.updateDevice(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
-      )
+      .handle("syncNow", () => controlApi(syncControl.now()).pipe(Effect.as(true)))
+      .handle("syncSessions", () => controlApi(syncControl.sessions()))
+      .handle("syncHydrate", (ctx) => controlApi(syncControl.hydrate(ctx.payload)))
+      .handle("syncDevices", () => controlApi(syncControl.devices()))
+      .handle("syncDeviceUpdate", (ctx) => controlApi(syncControl.updateDevice(ctx.payload)))
       .handle("syncRecoveryExport", () =>
         syncControl.exportKey().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
       )

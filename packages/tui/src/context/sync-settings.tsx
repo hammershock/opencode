@@ -83,7 +83,16 @@ export function syncOperationFailure(error: unknown) {
   return "Sync operation failed"
 }
 
-const SYNC_FAILURE_STAGES = new Set(["attachment", "segment", "head", "pull", "hydrate", "collect", "delete"])
+const SYNC_FAILURE_STAGES = new Set([
+  "attachment",
+  "segment",
+  "head",
+  "pull",
+  "hydrate",
+  "collect",
+  "catalog",
+  "delete",
+])
 
 function syncFailureStage(value: unknown, depth: number): string | undefined {
   if (depth > 4 || !value || typeof value !== "object") return

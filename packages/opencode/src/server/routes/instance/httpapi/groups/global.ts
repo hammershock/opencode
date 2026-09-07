@@ -102,20 +102,22 @@ export const SyncIncompatibleLocalStateMessage = SyncSetup.INCOMPATIBLE_LOCAL_ST
 export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("SyncSetupApiError")(
   {
     name: Schema.Literal("SyncSetupError"),
-    data: Schema.Union([
-      Schema.Struct({
-        kind: Schema.Literal("missing-app"),
-        message: Schema.Literal(SyncMissingAppMessage),
-      }),
-      Schema.Struct({
-        kind: Schema.Literal("incompatible-local-state"),
-        message: Schema.Literal(SyncIncompatibleLocalStateMessage),
-      }),
-      Schema.Struct({
-        kind: Schema.Literal("bad-request"),
-        message: Schema.Literal("Sync setup request failed"),
-      }),
-    ]),
+    data: Schema.Struct({
+      kind: Schema.Literals([
+        "uninitialized",
+        "unauthenticated",
+        "account-mismatch",
+        "invalid",
+        "oauth",
+        "missing-app",
+        "incompatible-local-state",
+        "remote",
+        "storage",
+        "locked",
+      ]),
+      message: Schema.String,
+      diagnostic: Schema.optional(SyncRuntime.Diagnostic),
+    }),
   },
   { httpApiStatus: 400 },
 ) {}
@@ -220,7 +222,7 @@ export const GlobalApi = HttpApi.make("global").add(
       }),
       HttpApiEndpoint.get("syncDiscover", GlobalPaths.syncSpaces, {
         success: SyncDiscovery,
-        error: HttpApiError.ServiceUnavailable,
+        error: SyncSetupApiError,
       }),
       HttpApiEndpoint.post("syncCreate", GlobalPaths.syncSpaces, {
         payload: SyncSetup.CreateInput,
@@ -235,7 +237,7 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.post("syncActivate", GlobalPaths.syncSpaceActivate, {
         payload: SyncControl.SwitchInput,
         success: SyncControl.SwitchResult,
-        error: HttpApiError.BadRequest,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.post("syncLeave", GlobalPaths.syncSpaceLeave, {
         payload: SyncNamespaceInput,
@@ -280,21 +282,21 @@ export const GlobalApi = HttpApi.make("global").add(
       }),
       HttpApiEndpoint.get("syncSessions", GlobalPaths.syncSessions, {
         success: Schema.Array(SyncMetadata.Item),
-        error: HttpApiError.ServiceUnavailable,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.post("syncHydrate", GlobalPaths.syncHydrate, {
         payload: SyncControl.HydrateInput,
         success: SyncControl.HydrateResult,
-        error: HttpApiError.ServiceUnavailable,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.get("syncDevices", GlobalPaths.syncDevices, {
         success: SyncDevice.State,
-        error: HttpApiError.ServiceUnavailable,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.patch("syncDeviceUpdate", GlobalPaths.syncDevices, {
         payload: SyncControl.DeviceUpdate,
         success: SyncDevice.State,
-        error: HttpApiError.BadRequest,
+        error: SyncControlApiError,
       }),
       HttpApiEndpoint.get("syncRecoveryExport", GlobalPaths.syncRecovery, {
         success: SyncControl.Recovery,

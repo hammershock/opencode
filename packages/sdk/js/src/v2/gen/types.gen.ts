@@ -2087,31 +2087,21 @@ export type Config = {
 
 export type SyncSetupApiError = {
   name: "SyncSetupError"
-  data:
-    | {
-        kind: "missing-app"
-        message: "Baidu Netdisk is not enabled in this build. Reinstall an official opencode-rexd build or contact its distributor."
-      }
-    | {
-        kind: "incompatible-local-state"
-        message: "Local sync state is incompatible. Archive the local sync folder and restart opencode-rexd."
-      }
-    | {
-        kind: "bad-request"
-        message: "Sync setup request failed"
-      }
-}
-
-export type EffectHttpApiErrorServiceUnavailable = {
-  _tag: "ServiceUnavailable"
-}
-
-export type SyncControlApiError = {
-  name: "SyncControlError"
   data: {
-    kind: "unconfigured" | "locked" | "provider" | "storage" | "invalid" | "pending" | "deleted"
+    kind:
+      | "uninitialized"
+      | "unauthenticated"
+      | "account-mismatch"
+      | "invalid"
+      | "oauth"
+      | "missing-app"
+      | "incompatible-local-state"
+      | "remote"
+      | "storage"
+      | "locked"
+    message: string
     diagnostic?: {
-      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "delete"
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "catalog" | "delete"
       operation?: "list" | "stat" | "download" | "upload" | "delete"
       kind?:
         | "unauthenticated"
@@ -2129,6 +2119,35 @@ export type SyncControlApiError = {
       message: string
     }
   }
+}
+
+export type SyncControlApiError = {
+  name: "SyncControlError"
+  data: {
+    kind: "unconfigured" | "locked" | "provider" | "storage" | "invalid" | "pending" | "deleted"
+    diagnostic?: {
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "catalog" | "delete"
+      operation?: "list" | "stat" | "download" | "upload" | "delete"
+      kind?:
+        | "unauthenticated"
+        | "permission"
+        | "not-found"
+        | "conflict"
+        | "rate-limit"
+        | "network"
+        | "provider"
+        | "cancelled"
+        | "invalid-response"
+      retryable: boolean
+      outcome?: "failed" | "unknown"
+      retryAfter?: number
+      message: string
+    }
+  }
+}
+
+export type EffectHttpApiErrorServiceUnavailable = {
+  _tag: "ServiceUnavailable"
 }
 
 export type Model = {
@@ -8190,13 +8209,9 @@ export type GlobalSyncDiscoverData = {
 
 export type GlobalSyncDiscoverErrors = {
   /**
-   * Bad request
+   * SyncSetupApiError | InvalidRequestError
    */
-  400: BadRequestError
-  /**
-   * ServiceUnavailable
-   */
-  503: EffectHttpApiErrorServiceUnavailable
+  400: SyncSetupApiError | InvalidRequestError
 }
 
 export type GlobalSyncDiscoverError = GlobalSyncDiscoverErrors[keyof GlobalSyncDiscoverErrors]
@@ -8416,9 +8431,13 @@ export type GlobalSyncActivateData = {
 
 export type GlobalSyncActivateErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * Bad request
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
 }
 
 export type GlobalSyncActivateError = GlobalSyncActivateErrors[keyof GlobalSyncActivateErrors]
@@ -8756,7 +8775,7 @@ export type GlobalSyncStatusResponses = {
     lastSuccessAt?: number
     error?: string
     diagnostic?: {
-      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "delete"
+      stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "catalog" | "delete"
       operation?: "list" | "stat" | "download" | "upload" | "delete"
       kind?:
         | "unauthenticated"
@@ -8820,9 +8839,9 @@ export type GlobalSyncSessionsErrors = {
    */
   400: BadRequestError
   /**
-   * ServiceUnavailable
+   * SyncControlApiError
    */
-  503: EffectHttpApiErrorServiceUnavailable
+  503: SyncControlApiError
 }
 
 export type GlobalSyncSessionsError = GlobalSyncSessionsErrors[keyof GlobalSyncSessionsErrors]
@@ -8862,9 +8881,9 @@ export type GlobalSyncHydrateErrors = {
    */
   400: BadRequestError
   /**
-   * ServiceUnavailable
+   * SyncControlApiError
    */
-  503: EffectHttpApiErrorServiceUnavailable
+  503: SyncControlApiError
 }
 
 export type GlobalSyncHydrateError = GlobalSyncHydrateErrors[keyof GlobalSyncHydrateErrors]
@@ -8894,9 +8913,9 @@ export type GlobalSyncDevicesErrors = {
    */
   400: BadRequestError
   /**
-   * ServiceUnavailable
+   * SyncControlApiError
    */
-  503: EffectHttpApiErrorServiceUnavailable
+  503: SyncControlApiError
 }
 
 export type GlobalSyncDevicesError = GlobalSyncDevicesErrors[keyof GlobalSyncDevicesErrors]
@@ -8932,9 +8951,13 @@ export type GlobalSyncDeviceUpdateData = {
 
 export type GlobalSyncDeviceUpdateErrors = {
   /**
-   * BadRequest | InvalidRequestError
+   * Bad request
    */
-  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
 }
 
 export type GlobalSyncDeviceUpdateError = GlobalSyncDeviceUpdateErrors[keyof GlobalSyncDeviceUpdateErrors]

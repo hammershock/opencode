@@ -233,6 +233,7 @@ function syncOperation(pathname: string, method: string) {
   if (/^\/global\/sync\/spaces\/[^/]+$/.test(pathname) && method === "DELETE")
     return { operation: "delete space", phase: "publish deletion marker" }
   if (pathname === "/global/sync/now") return { operation: "synchronize", phase: "exchange changes" }
+  if (pathname === "/global/sync/sessions") return { operation: "refresh sessions", phase: "index remote heads" }
   if (pathname === "/global/sync/hydrate") return { operation: "download session", phase: "hydrate" }
   if (pathname === "/global/sync/devices")
     return { operation: method === "GET" ? "refresh devices" : "update device", phase: "device heads" }

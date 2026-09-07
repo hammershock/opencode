@@ -416,7 +416,7 @@ const make = (input: LayerOptions) =>
             ? new ControlError({ kind: "invalid" })
             : new ControlError({
                 kind: error.kind === "storage" ? "storage" : "provider",
-                diagnostic: SyncRuntime.diagnostic("delete", error),
+                diagnostic: error.diagnostic ?? SyncRuntime.diagnostic("delete", error),
               }),
         ),
       )

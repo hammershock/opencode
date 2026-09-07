@@ -1,5 +1,19 @@
 import path from "node:path"
 import { format } from "prettier"
+import {
+  ScriptKind,
+  ScriptTarget,
+  createSourceFile,
+  forEachChild,
+  isComputedPropertyName,
+  isIdentifier,
+  isObjectLiteralExpression,
+  isPropertyAssignment,
+  isStringLiteralLike,
+  type Node,
+  type ObjectLiteralExpression,
+  type PropertyAssignment,
+} from "typescript"
 
 type Contract = {
   identity: string
@@ -27,6 +41,57 @@ const required = ["appExit", "sessionRename"] as const
 const directory = path.resolve(import.meta.dir, "..")
 const catalogFile = path.join(directory, "src/command-toolkit/upstream-catalog.json")
 const outputFile = path.join(directory, "src/command-toolkit/upstream-current.gen.ts")
+
+export function validateSlashCommandDescriptions(files: readonly { readonly name: string; readonly source: string }[]) {
+  const missing = files.flatMap((file) => {
+    const source = createSourceFile(
+      file.name,
+      file.source,
+      ScriptTarget.Latest,
+      true,
+      file.name.endsWith(".tsx") ? ScriptKind.TSX : ScriptKind.TS,
+    )
+    const errors: string[] = []
+    const visit = (node: Node) => {
+      if (isObjectLiteralExpression(node) && isCanonicalSlashRegistration(node) && !hasReviewedDescription(node)) {
+        const position = source.getLineAndCharacterOfPosition(node.getStart(source))
+        errors.push(`${file.name}:${position.line + 1}`)
+      }
+      forEachChild(node, visit)
+    }
+    visit(source)
+    return errors
+  })
+  if (missing.length) throw new Error(`Slash commands require reviewed descriptions: ${missing.join(", ")}`)
+}
+
+function property(node: ObjectLiteralExpression, name: string) {
+  return node.properties.find(
+    (item): item is PropertyAssignment => isPropertyAssignment(item) && propertyName(item) === name,
+  )
+}
+
+function propertyName(node: PropertyAssignment) {
+  if (isIdentifier(node.name) || isStringLiteralLike(node.name)) return node.name.text
+  if (isComputedPropertyName(node.name) && isStringLiteralLike(node.name.expression)) return node.name.expression.text
+}
+
+function isCanonicalSlashRegistration(node: ObjectLiteralExpression) {
+  const slashName = property(node, "slashName")
+  if (slashName && slashName.initializer.getText() !== "undefined") return true
+  const slash = property(node, "slash")
+  if (slash && isObjectLiteralExpression(slash.initializer) && property(slash.initializer, "name")) return true
+  const provenance = property(node, "provenance")
+  if (!provenance || !isObjectLiteralExpression(provenance.initializer)) return false
+  const type = property(provenance.initializer, "type")
+  return type !== undefined && isStringLiteralLike(type.initializer) && type.initializer.text === "builtin"
+}
+
+function hasReviewedDescription(node: ObjectLiteralExpression) {
+  const description = property(node, "description") ?? property(node, "desc")
+  if (!description || description.initializer.getText() === "undefined") return false
+  return !isStringLiteralLike(description.initializer) || description.initializer.text.trim().length > 0
+}
 
 export function validateUpstreamCommandCatalog(input: unknown): asserts input is Catalog {
   if (!input || typeof input !== "object") throw new Error("Upstream command catalog must be an object")
@@ -92,6 +157,13 @@ function validateContract(name: string, input: unknown): asserts input is Contra
 if (import.meta.main) {
   const catalog: unknown = await Bun.file(catalogFile).json()
   validateUpstreamCommandCatalog(catalog)
+  const sources = await Array.fromAsync(
+    new Bun.Glob("src/**/*.{ts,tsx}").scan({ cwd: directory, absolute: true }),
+    async (name) => ({ name: path.relative(directory, name), source: await Bun.file(name).text() }),
+  )
+  const builtin = path.resolve(directory, "../opencode/src/command/index.ts")
+  sources.push({ name: path.relative(directory, builtin), source: await Bun.file(builtin).text() })
+  validateSlashCommandDescriptions(sources)
   const generated = await renderUpstreamCommandManifest(catalog)
   if (!process.argv.includes("--check")) await Bun.write(outputFile, generated)
   else if ((await Bun.file(outputFile).text()) !== generated) {

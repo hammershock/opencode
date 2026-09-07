@@ -542,6 +542,7 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Open editor",
+        desc: "Edit the prompt in an external editor",
         category: "Session",
         name: "prompt.editor",
         slashName: "editor",
@@ -634,6 +635,7 @@ export function Prompt(props: PromptProps) {
       },
       {
         title: "Skills",
+        desc: "Browse available skills",
         name: "prompt.skills",
         category: "Prompt",
         slashName: "skills",

@@ -679,6 +679,7 @@ export function Session() {
   const sessionCommandList = createMemo(() => [
     {
       title: session()?.share?.url ? "Copy share link" : "Share session",
+      description: "Share the current session or copy its link",
       value: "session.share",
       suggested: route.type === "session",
       category: "Session",
@@ -723,6 +724,7 @@ export function Session() {
     },
     {
       title: "Jump to message",
+      description: "Open the session timeline",
       value: "session.timeline",
       category: "Session",
       slash: {
@@ -745,6 +747,7 @@ export function Session() {
     },
     {
       title: "Fork session",
+      description: "Create a session from an earlier message",
       value: "session.fork",
       category: "Session",
       slash: {
@@ -767,6 +770,7 @@ export function Session() {
     },
     {
       title: "Compact session",
+      description: "Summarize older context in this session",
       value: "session.compact",
       category: "Session",
       slash: {
@@ -793,6 +797,7 @@ export function Session() {
     },
     {
       title: "Unshare session",
+      description: "Disable the current session share link",
       value: "session.unshare",
       category: "Session",
       enabled: !!session()?.share?.url,
@@ -816,6 +821,7 @@ export function Session() {
     },
     {
       title: "Undo previous message",
+      description: "Revert the most recent user message",
       value: "session.undo",
       category: "Session",
       slash: {
@@ -852,6 +858,7 @@ export function Session() {
     },
     {
       title: "Redo",
+      description: "Restore the next reverted message",
       value: "session.redo",
       category: "Session",
       enabled: !!session()?.revert?.messageID,
@@ -900,6 +907,7 @@ export function Session() {
     },
     {
       title: showTimestamps() ? "Hide timestamps" : "Show timestamps",
+      description: "Toggle message timestamps",
       value: "session.toggle.timestamps",
       category: "Session",
       slash: {
@@ -917,6 +925,7 @@ export function Session() {
         if (next === "hide") return "Collapse thinking"
         return "Expand thinking"
       })(),
+      description: "Toggle expanded thinking content",
       value: "session.toggle.thinking",
       category: "Session",
       slash: {
@@ -1122,6 +1131,7 @@ export function Session() {
     },
     {
       title: "Copy session transcript",
+      description: "Copy the current session as text",
       value: "session.copy",
       category: "Session",
       slash: {
@@ -1152,6 +1162,7 @@ export function Session() {
     },
     {
       title: "Export session transcript",
+      description: "Export the current session to a file",
       value: "session.export",
       category: "Session",
       slash: {

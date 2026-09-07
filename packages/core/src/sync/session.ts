@@ -11,6 +11,7 @@ import { SyncOwnership } from "./ownership"
 import { Database } from "../database/database"
 import { SessionTable } from "../session/sql"
 import { isNotNull } from "drizzle-orm"
+import { SessionDurable } from "@opencode-ai/schema/durable-event-manifest"
 
 type DurablePayload = {
   readonly id: string
@@ -241,6 +242,32 @@ export const captureLayer = Layer.effectDiscard(
     yield* events.all().pipe(
       Stream.runForEach((event) => captureOwned(ownership, store, event as DurablePayload)),
       Effect.forkScoped,
+    )
+    // Session and sync outbox use separate SQLite databases. Replaying the
+    // owned durable history after the live subscriber starts closes the crash
+    // window between a committed Session event and its asynchronous capture.
+    // Enqueue is idempotent by event ID, so overlap with the live stream is safe.
+    yield* Effect.forEach(
+      yield* ownership.list(),
+      (item) =>
+        Effect.gen(function* () {
+          let after = -1
+          while (true) {
+            const page = yield* EventV2.readAggregate(db, {
+              aggregateID: item.sessionID,
+              after,
+              limit: 256,
+              manifest: SessionDurable,
+            })
+            yield* Effect.forEach(page.events, (event) => capture(store.scope(item.spaceID), event as DurablePayload), {
+              discard: true,
+            })
+            const last = page.events.at(-1)
+            if (!page.hasMore || !last?.durable) break
+            after = last.durable.seq
+          }
+        }),
+      { discard: true },
     )
   }),
 )

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  SESSION_FILTER_FOOTER_HINT,
   createDialogSessionListQuery,
   dialogSessionListScopeSelection,
   dialogSessionListLocationFilter,
@@ -11,6 +12,10 @@ import {
 } from "../../src/component/dialog-session-list"
 
 describe("dialog session list", () => {
+  test("advertises Tab as the filter-row navigation key", () => {
+    expect(SESSION_FILTER_FOOTER_HINT).toEqual({ title: "tab", label: "filters" })
+  })
+
   test("requests root sessions for the default browse list", () => {
     expect(createDialogSessionListQuery({ filter: { path: "packages/tui" } })).toEqual({
       roots: true,

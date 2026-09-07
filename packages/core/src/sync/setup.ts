@@ -43,6 +43,7 @@ export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetup
     "account-mismatch",
     "invalid",
     "oauth",
+    "missing-app",
     "remote",
     "storage",
     "locked",
@@ -342,10 +343,15 @@ function effect<A>(kind: SetupError["kind"], run: () => Promise<A>) {
 function authEffect<A>(run: () => Promise<A>) {
   return Effect.tryPromise({
     try: run,
-    catch: (cause) =>
-      new SetupError({
-        kind: cause instanceof BaiduAuth.AuthError && cause.kind === "account-mismatch" ? "account-mismatch" : "oauth",
-      }),
+    catch: (cause) => {
+      const kind =
+        cause instanceof BaiduAuth.AuthError && cause.kind === "account-mismatch"
+          ? "account-mismatch"
+          : cause instanceof BaiduAuth.AuthError && cause.kind === "missing-app"
+            ? "missing-app"
+            : "oauth"
+      return new SetupError({ kind })
+    },
   })
 }
 

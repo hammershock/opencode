@@ -83,6 +83,10 @@ Session domain 持久化可选的 `syncSpaceID`。缺少该字段表示未归属
 
 百度 v1 使用 OpenCode 产品注册的 OAuth client。TUI setup 只提供清晰的 `Connect Baidu Netdisk` 流程：打开或展示授权地址、接收授权结果、校验账户，然后将 refresh/access credential 写入系统安全存储。普通用户不填写 AppKey、SecretKey，不粘贴 token，也不选择外部应用登录态。
 
+产品 OAuth client 由发布流程在候选构建验证后从标准输入静默写入系统安全存储的固定 `opencode-rexd-sync` / `baidu:app` 记录。输入不经过参数、环境变量、配置、manifest、日志或临时文件；写入后必须回读验证，失败时恢复旧记录且不替换已安装版本。该入口不出现在普通 CLI help 或 TUI 中。运行时缺少产品记录时只提示重新安装官方构建或联系分发者，不引导用户输入应用凭据。
+
+HTTP/SDK 边界只公开稳定的 `missing-app` 原因码和上述固定提示；其他 setup 失败统一为不携带内部原因的 `bad-request`。
+
 授权优先使用本机 loopback callback。无法自动回调时可以展示并复制授权 URL，再由用户粘贴授权码；该 installed-app fallback 只允许百度协议要求的精确 literal `oob` redirect。除明确的 loopback 与 `oob` 两种情况外，redirect 必须是 HTTPS，不能接受任意 HTTP URL、自定义 scheme 或调用方提供的其他非 HTTPS redirect。
 
 - macOS 使用 Keychain；

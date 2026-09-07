@@ -14,6 +14,7 @@ import { SyncDevice } from "@opencode-ai/core/sync/device"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
 import { SyncState } from "@opencode-ai/core/sync/state"
 import { SyncSpace } from "@opencode-ai/core/sync/space"
+import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -94,6 +95,25 @@ const SyncNamespaceInput = Schema.Struct({ namespaceID: Schema.NonEmptyString })
 const SyncEnabledInput = Schema.Struct({ enabled: Schema.Boolean })
 const SyncIntervalInput = Schema.Struct({ intervalSeconds: SyncState.IntervalSeconds })
 
+export const SyncMissingAppMessage = BaiduAuth.MISSING_APP_MESSAGE
+
+export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("SyncSetupApiError")(
+  {
+    name: Schema.Literal("SyncSetupError"),
+    data: Schema.Union([
+      Schema.Struct({
+        kind: Schema.Literal("missing-app"),
+        message: Schema.Literal(SyncMissingAppMessage),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("bad-request"),
+        message: Schema.Literal("Sync setup request failed"),
+      }),
+    ]),
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
@@ -160,17 +180,17 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.post("syncInitialize", GlobalPaths.syncInitialize, {
         payload: SyncInitializeInput,
         success: SyncState.State,
-        error: HttpApiError.BadRequest,
+        error: SyncSetupApiError,
       }),
       HttpApiEndpoint.post("syncOAuthBegin", GlobalPaths.syncOAuthBegin, {
         payload: SyncSetup.BeginInput,
         success: SyncOAuthBeginResult,
-        error: HttpApiError.BadRequest,
+        error: SyncSetupApiError,
       }),
       HttpApiEndpoint.post("syncOAuthComplete", GlobalPaths.syncOAuthComplete, {
         payload: SyncSetup.CompleteInput,
         success: SyncState.State,
-        error: HttpApiError.BadRequest,
+        error: SyncSetupApiError,
       }),
       HttpApiEndpoint.post("syncOAuthSwitchAccount", GlobalPaths.syncOAuthSwitchAccount, {
         payload: SyncSetup.CompleteInput,
@@ -188,12 +208,12 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.post("syncCreate", GlobalPaths.syncSpaces, {
         payload: SyncSetup.CreateInput,
         success: SyncCreateResult,
-        error: HttpApiError.BadRequest,
+        error: SyncSetupApiError,
       }),
       HttpApiEndpoint.post("syncJoin", GlobalPaths.syncSpaceJoin, {
         payload: SyncSetup.JoinInput,
         success: SyncState.State,
-        error: HttpApiError.BadRequest,
+        error: SyncSetupApiError,
       }),
       HttpApiEndpoint.post("syncActivate", GlobalPaths.syncSpaceActivate, {
         payload: SyncControl.SwitchInput,

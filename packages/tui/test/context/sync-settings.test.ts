@@ -1,5 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { createLoopbackCallback, unassignedFingerprint } from "../../src/context/sync-settings"
+import { createLoopbackCallback, syncOperationFailure, unassignedFingerprint } from "../../src/context/sync-settings"
+
+describe("sync settings deployment errors", () => {
+  test("maps a missing product app to an actionable message without credential terminology", () => {
+    const message = syncOperationFailure(
+      new Error("request failed", {
+        cause: { status: 400, body: { name: "SyncSetupError", data: { kind: "missing-app" } } },
+      }),
+    )
+    expect(message).toContain("Reinstall an official opencode-rexd build")
+    expect(message).not.toContain("AppKey")
+    expect(message).not.toContain("SecretKey")
+    expect(syncOperationFailure({ message: "provider failed with token secret" })).toBe("Sync operation failed")
+  })
+})
 
 describe("sync settings OAuth loopback", () => {
   test("accepts only the callback path and responds after completion", async () => {

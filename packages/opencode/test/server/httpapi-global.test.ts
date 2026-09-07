@@ -9,7 +9,7 @@ import { Installation } from "../../src/installation"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { ServerAuth } from "../../src/server/auth"
 import { RootHttpApi } from "../../src/server/routes/instance/httpapi/api"
-import { GlobalPaths } from "../../src/server/routes/instance/httpapi/groups/global"
+import { GlobalPaths, SyncMissingAppMessage } from "../../src/server/routes/instance/httpapi/groups/global"
 import { controlHandlers } from "../../src/server/routes/instance/httpapi/handlers/control"
 import { controlPlaneHandlers } from "../../src/server/routes/instance/httpapi/handlers/control-plane"
 import { globalHandlers } from "../../src/server/routes/instance/httpapi/handlers/global"
@@ -21,6 +21,7 @@ import { SyncControl } from "@opencode-ai/core/sync/control"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
 import { SyncState } from "@opencode-ai/core/sync/state"
 import { SyncSpace } from "@opencode-ai/core/sync/space"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2"
 
 const descriptor = SyncSpace.Descriptor.make({
   namespaceID: "space-a",
@@ -76,7 +77,15 @@ const apiLayer = HttpRouter.serve(
       state: () => Effect.succeed(syncState),
       initialize: () => Effect.succeed(syncState),
       begin: (input) =>
-        Effect.succeed({ attemptID: "attempt-a", authorizationURL: input.redirectURI, completion: input.completion }),
+        input.redirectURI.endsWith("/missing-app")
+          ? Effect.fail(new SyncSetup.SetupError({ kind: "missing-app" }))
+          : input.redirectURI.endsWith("/internal-storage-failure")
+            ? Effect.fail(new SyncSetup.SetupError({ kind: "storage" }))
+            : Effect.succeed({
+                attemptID: "attempt-a",
+                authorizationURL: input.redirectURI,
+                completion: input.completion,
+              }),
       complete: () => Effect.succeed(syncState),
       switchAccount: () => Effect.succeed(syncState),
       logout: () => Effect.succeed(syncState),
@@ -136,6 +145,67 @@ const apiLayer = HttpRouter.serve(
 const it = testEffect(apiLayer)
 
 describe("global HttpApi", () => {
+  it.live("preserves the redacted missing-app code through the generated SDK boundary", () =>
+    Effect.gen(function* () {
+      const raw = yield* HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
+        HttpClientRequest.bodyJsonUnsafe({
+          redirectURI: "http://127.0.0.1/missing-app",
+          completion: "loopback",
+        }),
+        HttpClient.execute,
+      )
+      expect(raw.status).toBe(400)
+      const body = yield* raw.json
+      expect(body).toEqual({
+        name: "SyncSetupError",
+        data: { kind: "missing-app", message: SyncMissingAppMessage },
+      })
+      const sdk = createOpencodeClient({
+        baseUrl: "http://localhost",
+        // Feed the exact body emitted by the in-process handler through the
+        // generated client's real decoding and error interceptor.
+        fetch: (async () =>
+          new Response(JSON.stringify(body), {
+            status: raw.status,
+            headers: { "content-type": "application/json" },
+          })) as unknown as typeof fetch,
+      })
+      const caught = yield* Effect.promise(async () => {
+        try {
+          await sdk.global.syncOAuthBegin(
+            { redirectURI: "http://127.0.0.1/missing-app", completion: "loopback" },
+            { throwOnError: true },
+          )
+        } catch (error) {
+          return error
+        }
+      })
+      expect(caught).toBeInstanceOf(Error)
+      const error = caught as Error
+      const cause = error.cause as { status?: number; body?: unknown }
+      expect(error.message).toBe(SyncMissingAppMessage)
+      expect(cause.status).toBe(400)
+      expect(cause.body).toEqual({
+        name: "SyncSetupError",
+        data: { kind: "missing-app", message: SyncMissingAppMessage },
+      })
+      expect(JSON.stringify(cause.body)).not.toContain("secret")
+
+      const generic = yield* HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
+        HttpClientRequest.bodyJsonUnsafe({
+          redirectURI: "http://127.0.0.1/internal-storage-failure",
+          completion: "loopback",
+        }),
+        HttpClient.execute,
+      )
+      expect(generic.status).toBe(400)
+      expect(yield* generic.json).toEqual({
+        name: "SyncSetupError",
+        data: { kind: "bad-request", message: "Sync setup request failed" },
+      })
+    }),
+  )
+
   it.live("exposes the account and multi-space setup lifecycle", () =>
     Effect.gen(function* () {
       const state = yield* HttpClientRequest.get(GlobalPaths.syncState).pipe(HttpClient.execute)

@@ -38,6 +38,61 @@ export class SecureStoreOperationError extends Error {
   override readonly name = "SyncSecureStore.OperationError"
 }
 
+const MAX_APP_CREDENTIAL_BYTES = 4 * 1024
+const MAX_APP_CREDENTIAL_FIELD = 512
+
+/**
+ * Parse the release-only credential envelope. Keeping this parser here makes
+ * the deployment entrypoint use the same contract as the runtime reader.
+ */
+export function parseBaiduAppProvisioning(input: string): BaiduAppCredential {
+  if (Buffer.byteLength(input, "utf8") > MAX_APP_CREDENTIAL_BYTES)
+    throw new SecureStoreOperationError("Invalid Baidu app provisioning input")
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(input)
+  } catch {
+    throw new SecureStoreOperationError("Invalid Baidu app provisioning input")
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new SecureStoreOperationError("Invalid Baidu app provisioning input")
+  const value = parsed as Record<string, unknown>
+  if (
+    Object.keys(value).sort().join(",") !== "appKey,secretKey" ||
+    typeof value.appKey !== "string" ||
+    typeof value.secretKey !== "string" ||
+    !validCredentialField(value.appKey) ||
+    !validCredentialField(value.secretKey)
+  )
+    throw new SecureStoreOperationError("Invalid Baidu app provisioning input")
+  return { appKey: value.appKey, secretKey: value.secretKey }
+}
+
+/** Atomically replace the product OAuth credential, restoring the old value on failure. */
+export async function provisionBaiduApp(store: Store, input: string) {
+  const credential = parseBaiduAppProvisioning(input)
+  const previous = await store.get(BAIDU_APP_ACCOUNT)
+  const encoded = JSON.stringify(credential)
+  try {
+    await store.set(BAIDU_APP_ACCOUNT, encoded)
+    const verified = await store.get(BAIDU_APP_ACCOUNT)
+    if (verified !== encoded) throw new SecureStoreOperationError("Baidu app provisioning verification failed")
+  } catch {
+    try {
+      if (previous === undefined) {
+        await store.remove(BAIDU_APP_ACCOUNT)
+        if ((await store.get(BAIDU_APP_ACCOUNT)) !== undefined) throw new Error("rollback verification")
+      } else {
+        await store.set(BAIDU_APP_ACCOUNT, previous)
+        if ((await store.get(BAIDU_APP_ACCOUNT)) !== previous) throw new Error("rollback verification")
+      }
+    } catch {
+      throw new SecureStoreOperationError("Baidu app provisioning failed and rollback could not be verified")
+    }
+    throw new SecureStoreOperationError("Baidu app provisioning failed; previous credential was restored")
+  }
+}
+
 export async function detect(
   options: {
     readonly platform?: NodeJS.Platform
@@ -56,6 +111,10 @@ export async function readProvisionedBaiduApp(store: Store) {
   if (!parsed?.appKey || !parsed.secretKey || /[\r\n\0]/.test(parsed.appKey) || /[\r\n\0]/.test(parsed.secretKey))
     throw new SecureStoreOperationError("Invalid provisioned Baidu app credential")
   return parsed
+}
+
+function validCredentialField(value: string) {
+  return value.length > 0 && value.length <= MAX_APP_CREDENTIAL_FIELD && !/[\r\n\0]/.test(value)
 }
 
 async function detectService(
@@ -89,10 +148,15 @@ export function macos(runner: Runner, service = SERVICE): Store {
     },
     async set(account, secret) {
       validateAccount(account)
-      // macOS security(1) has no non-interactive stdin secret option. The
-      // argument is passed directly to spawn (never through a shell) and is
-      // never logged or retained by this service.
-      ensure(await runner([security, "add-generic-password", "-U", "-a", account, "-s", service, "-w", secret]))
+      // With -w as the final option and no value, security(1) reads the value
+      // from its prompt. Feeding that prompt over stdin keeps it out of argv.
+      // Keychain asks for the value and a confirmation, even for an update.
+      ensure(
+        await runner(
+          [security, "add-generic-password", "-U", "-a", account, "-s", service, "-w"],
+          `${secret}\n${secret}\n`,
+        ),
+      )
     },
     async remove(account) {
       validateAccount(account)

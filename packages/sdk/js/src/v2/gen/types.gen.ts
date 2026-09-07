@@ -22,6 +22,7 @@ export type Event =
   | EventSessionNextLocationRebound
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
+  | EventSessionNextTurnSettled
   | EventSessionNextContextUpdated
   | EventSessionNextSynthetic
   | EventSessionNextShellStarted
@@ -892,6 +893,16 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.turn.settled"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
+          outcome: "completed" | "failed" | "cancelled"
+        }
+      }
+    | {
+        id: string
         type: "session.next.context.updated"
         properties: {
           timestamp: number
@@ -1634,6 +1645,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextLocationRebound
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
+    | SyncEventSessionNextTurnSettled
     | SyncEventSessionNextContextUpdated
     | SyncEventSessionNextSynthetic
     | SyncEventSessionNextShellStarted
@@ -2838,6 +2850,7 @@ export type SessionDurableEvent =
   | SessionNextLocationRebound
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextTurnSettled
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -2966,6 +2979,7 @@ export type V2Event =
   | SessionNextLocationRebound
   | SessionNextPrompted
   | SessionNextPromptAdmitted
+  | SessionNextTurnSettled
   | SessionNextContextUpdated
   | SessionNextSynthetic
   | SessionNextShellStarted
@@ -3515,6 +3529,23 @@ export type SyncEventSessionNextPromptAdmitted = {
       messageID: string
       prompt: Prompt
       delivery: "steer" | "queue"
+    }
+  }
+}
+
+export type SyncEventSessionNextTurnSettled = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.turn.settled.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
+      outcome: "completed" | "failed" | "cancelled"
     }
   }
 }
@@ -4422,6 +4453,26 @@ export type SessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+  }
+}
+
+export type SessionNextTurnSettled = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.turn.settled"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    outcome: "completed" | "failed" | "cancelled"
   }
 }
 
@@ -6648,6 +6699,17 @@ export type EventSessionNextPromptAdmitted = {
     messageID: string
     prompt: Prompt
     delivery: "steer" | "queue"
+  }
+}
+
+export type EventSessionNextTurnSettled = {
+  id: string
+  type: "session.next.turn.settled"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    outcome: "completed" | "failed" | "cancelled"
   }
 }
 
@@ -16667,15 +16729,11 @@ export type V2EnvironmentRevealResponse = V2EnvironmentRevealResponses[keyof V2E
 
 export type V2EnvironmentInitData = {
   body?: never
-  path?: never
-  query?: {
-    location?: {
-      directory?: string
-      workspace?: string
-      target?: string
-    }
+  path: {
+    sessionID: string
   }
-  url: "/api/environment/init"
+  query?: never
+  url: "/api/session/{sessionID}/environment/init"
 }
 
 export type V2EnvironmentInitErrors = {
@@ -16687,6 +16745,10 @@ export type V2EnvironmentInitErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
 }
 
 export type V2EnvironmentInitError = V2EnvironmentInitErrors[keyof V2EnvironmentInitErrors]
@@ -16697,9 +16759,16 @@ export type V2EnvironmentInitResponses = {
    */
   200: {
     location: LocationInfo
-    data: {
-      status: "created" | "existing"
-    }
+    data:
+      | {
+          status: "completed"
+          template: "created" | "existing"
+          generation: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      | {
+          status: "cancelled" | "failed"
+          template: "created" | "existing"
+        }
   }
 }
 

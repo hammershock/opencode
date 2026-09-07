@@ -29,4 +29,14 @@ export const Values = Schema.Struct({
   values: Schema.Record(Schema.String, Schema.String),
 })
 
-export const InitResult = Schema.Struct({ status: Schema.Literals(["created", "existing"]) })
+export const InitResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("completed"),
+    template: Schema.Literals(["created", "existing"]),
+    generation: Schema.Number,
+  }),
+  Schema.Struct({
+    status: Schema.Literals(["cancelled", "failed"]),
+    template: Schema.Literals(["created", "existing"]),
+  }),
+])

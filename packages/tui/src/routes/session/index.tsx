@@ -592,24 +592,20 @@ export function Session() {
               )
               return { generation: Number(result.data.data.generation), values: result.data.data.values }
             },
-            ensureTemplate: async () => {
-              const result = await sdk.client.v2.environment.init({ location: queryLocation }, { throwOnError: true })
-              return result.data.data.status
+            init: async () => {
+              const result = await sdk.client.v2.environment.init(
+                { sessionID: route.sessionID },
+                { throwOnError: true },
+              )
+              if (result.data.data.status !== "completed") return result.data.data
+              return {
+                status: result.data.data.status,
+                template: result.data.data.template,
+                generation: Number(result.data.data.generation),
+              }
             },
           },
           presentEnvironment: (snapshot, reveal) => showEnvironment(dialog, snapshot, reveal, toast.error),
-          invokeAgent: async (prompt) => {
-            try {
-              const result = await sdk.client.session.prompt(
-                { sessionID: route.sessionID, noReply: false, parts: [{ type: "text", text: prompt }] },
-                { throwOnError: true },
-              )
-              if (result.data.info.error) return "failed"
-              return "completed"
-            } catch {
-              return "failed"
-            }
-          },
           openSyncSettings: syncSettings.open,
         }
       },

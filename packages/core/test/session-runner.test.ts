@@ -48,6 +48,7 @@ import {
   SessionTable,
 } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionTurn } from "@opencode-ai/core/session/turn"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
@@ -252,6 +253,7 @@ const execution = Layer.effect(
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,
+      wakeAndWait: coordinator.wakeAndWait,
       interrupt: coordinator.interrupt,
     })
   }),
@@ -1480,7 +1482,11 @@ describe("SessionRunnerLLM", () => {
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Echo this" }), resume: false })
+      const admitted = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Echo this" }),
+        resume: false,
+      })
 
       requests.length = 0
       authorizations.length = 0
@@ -1531,6 +1537,9 @@ describe("SessionRunnerLLM", () => {
         },
         { type: "assistant", finish: "stop", content: [{ type: "text", id: "text-final", text: "Done" }] },
       ])
+      expect(yield* SessionTurn.find((yield* Database.Service).db, { sessionID, messageID: admitted.id })).toBe(
+        "completed",
+      )
     }),
   )
 
@@ -3021,7 +3030,11 @@ describe("SessionRunnerLLM", () => {
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Interrupt provider" }), resume: false })
+      const admitted = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Interrupt provider" }),
+        resume: false,
+      })
       requests.length = 0
       response = []
       streamGate = yield* Deferred.make<void>()
@@ -3036,6 +3049,9 @@ describe("SessionRunnerLLM", () => {
 
       expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
       expect(requests).toHaveLength(1)
+      expect(yield* SessionTurn.find((yield* Database.Service).db, { sessionID, messageID: admitted.id })).toBe(
+        "cancelled",
+      )
       yield* session.interrupt(sessionID)
     }),
   )
@@ -3181,7 +3197,11 @@ describe("SessionRunnerLLM", () => {
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Fail durably" }), resume: false })
+      const admitted = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Fail durably" }),
+        resume: false,
+      })
 
       requests.length = 0
       responses = undefined
@@ -3196,6 +3216,9 @@ describe("SessionRunnerLLM", () => {
         { type: "user", text: "Fail durably" },
         { type: "assistant", finish: "error", error: { type: "unknown", message: "Provider unavailable" } },
       ])
+      expect(yield* SessionTurn.find((yield* Database.Service).db, { sessionID, messageID: admitted.id })).toBe(
+        "failed",
+      )
     }),
   )
 

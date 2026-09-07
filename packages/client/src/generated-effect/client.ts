@@ -912,9 +912,9 @@ const Endpoint19_2 = (raw: RawClient["server.environment"]) => (input: Endpoint1
   }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint19_3Request = Parameters<RawClient["server.environment"]["environment.init"]>[0]
-type Endpoint19_3Input = { readonly location?: Endpoint19_3Request["query"]["location"] }
-const Endpoint19_3 = (raw: RawClient["server.environment"]) => (input?: Endpoint19_3Input) =>
-  raw["environment.init"]({ query: { location: input?.["location"] } }).pipe(Effect.mapError(mapClientError))
+type Endpoint19_3Input = { readonly sessionID: Endpoint19_3Request["params"]["sessionID"] }
+const Endpoint19_3 = (raw: RawClient["server.environment"]) => (input: Endpoint19_3Input) =>
+  raw["environment.init"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
 
 const adaptGroup19 = (raw: RawClient["server.environment"]) => ({
   list: Endpoint19_0(raw),

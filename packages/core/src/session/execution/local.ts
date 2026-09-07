@@ -36,6 +36,7 @@ const layer = Layer.effect(
       interrupt: coordinator.interrupt,
       resume: coordinator.run,
       wake: coordinator.wake,
+      wakeAndWait: coordinator.wakeAndWait,
     })
   }),
 )

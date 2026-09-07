@@ -930,6 +930,24 @@ export type SessionsHistoryOutput = {
     | {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.turn.settled"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly messageID: string
+          readonly outcome: "completed" | "failed" | "cancelled"
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
         readonly type: "session.next.context.updated"
         readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
         readonly location?: {
@@ -1557,6 +1575,24 @@ export type SessionsEventsOutput =
           }>
         }
         readonly delivery: "steer" | "queue"
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.turn.settled"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly messageID: string
+        readonly outcome: "completed" | "failed" | "cancelled"
       }
     }
   | {
@@ -4418,17 +4454,7 @@ export type EnvironmentRevealOutput = {
   }
 }
 
-export type EnvironmentInitInput = {
-  readonly location?: {
-    readonly location?:
-      | {
-          readonly directory?: string | undefined
-          readonly workspace?: string | undefined
-          readonly target?: string | undefined
-        }
-      | undefined
-  }["location"]
-}
+export type EnvironmentInitInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type EnvironmentInitOutput = {
   readonly location: {
@@ -4438,5 +4464,11 @@ export type EnvironmentInitOutput = {
     readonly lastKnownTargetName?: string
     readonly project: { readonly id: string; readonly directory: string }
   }
-  readonly data: { readonly status: "created" | "existing" }
+  readonly data:
+    | {
+        readonly status: "completed"
+        readonly template: "created" | "existing"
+        readonly generation: number | "Infinity" | "-Infinity" | "NaN"
+      }
+    | { readonly status: "cancelled" | "failed"; readonly template: "created" | "existing" }
 }

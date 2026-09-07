@@ -7,16 +7,18 @@ export type EnvironmentMetadata = {
 }
 
 export type EnvironmentValues = { generation: number; values: Record<string, string> }
+export type EnvironmentInitResult =
+  | { status: "completed"; template: "created" | "existing"; generation: number }
+  | { status: "cancelled" | "failed"; template: "created" | "existing" }
 
 export type EnvironmentCommandContext = InvocationContext & {
   environment: {
     list: () => Promise<EnvironmentMetadata>
     reload: () => Promise<EnvironmentMetadata>
     reveal: () => Promise<EnvironmentValues>
-    ensureTemplate: () => Promise<"created" | "existing">
+    init: () => Promise<EnvironmentInitResult>
   }
   presentEnvironment: (snapshot: EnvironmentMetadata, reveal: () => Promise<EnvironmentValues>) => Promise<void>
-  invokeAgent: (prompt: string) => Promise<"completed" | "cancelled" | "failed">
 }
 
 const empty = (raw: RawArguments) =>
@@ -72,18 +74,19 @@ export const environmentCommands = [
     capabilities: ["workspace.write", "agent.invoke", "environment.reload"],
     parse: empty,
     execute: async (ctx) => {
-      const template = await ctx.environment.ensureTemplate()
-      const result = await ctx.invokeAgent(
-        "Review the project .env file, add only the environment variables required by this workspace, and do not expose secret values in chat.",
-      )
-      if (result === "cancelled") return { status: "cancelled", message: "Environment was not reloaded" }
-      if (result === "failed") {
-        return { status: "failed", code: "agent_failed", message: "Environment was not reloaded", retryable: true }
+      const result = await ctx.environment.init()
+      if (result.status !== "completed") {
+        if (result.status === "cancelled") return { status: "cancelled", message: "Environment was not reloaded" }
+        return {
+          status: "failed",
+          code: "agent_failed",
+          message: "Environment was not reloaded",
+          retryable: true,
+        }
       }
-      const snapshot = await ctx.environment.reload()
       return {
         status: "completed",
-        message: `${template === "created" ? "Created" : "Kept"} .env and loaded generation ${snapshot.generation}`,
+        message: `${result.template === "created" ? "Created" : "Kept"} .env and loaded generation ${result.generation}`,
       }
     },
   }),

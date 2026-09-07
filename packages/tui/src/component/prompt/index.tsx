@@ -64,6 +64,7 @@ import { validateDestination } from "../../routes/home/target-workflow"
 import type { LocationRef } from "@opencode-ai/sdk/v2"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
+import { canAdjustVariant } from "../../model-variant"
 
 registerOpencodeSpinner()
 
@@ -921,7 +922,14 @@ export function Prompt(props: PromptProps) {
   useBindings(() => {
     return {
       target: inputTarget,
-      enabled: inputTarget() !== undefined && !props.disabled && store.mode === "normal" && !auto()?.visible,
+      enabled:
+        inputTarget() !== undefined &&
+        canAdjustVariant({
+          disabled: !!props.disabled,
+          mode: store.mode,
+          autocompleteVisible: !!auto()?.visible,
+          dialogOpen: dialog.stack.length > 0,
+        }),
       priority: 1,
       commands: [
         {
@@ -1432,7 +1440,7 @@ export function Prompt(props: PromptProps) {
   const showVariant = createMemo(() => {
     const variants = local.model.variant.list()
     if (variants.length === 0) return false
-    const current = local.model.variant.current()
+    const current = local.model.variant.effective()
     return !!current
   })
 
@@ -1602,7 +1610,7 @@ export function Prompt(props: PromptProps) {
                             <text fg={fadeColor(theme.textMuted, variantMetaAlpha())}>·</text>
                             <text>
                               <span style={{ fg: fadeColor(theme.warning, variantMetaAlpha()), bold: true }}>
-                                {local.model.variant.current()}
+                                {local.model.variant.effective()}
                               </span>
                             </text>
                           </Show>

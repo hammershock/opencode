@@ -10,6 +10,19 @@ export type CandidateLocation = {
   lastKnownTargetName?: string
 }
 
+export const executionTargetActions = [
+  { title: "Add target…", value: "add" as const, category: "Actions" },
+  { title: "Manage targets…", value: "manage" as const, category: "Actions" },
+]
+
+export function remoteInitialDirectory(target: { defaultDirectory?: string }, home: string) {
+  return target.defaultDirectory ?? home
+}
+
+export function openExecutionTargetAction(action: "add" | "manage", open: (mode?: "manage" | "add") => void) {
+  open(action)
+}
+
 export async function validateDestination(input: {
   target: HomeSessionTarget
   directory: string
@@ -21,10 +34,7 @@ export async function validateDestination(input: {
     if (result.status !== "ready") throw new Error(`${result.stage}: ${result.message}`)
   }
   const location: CandidateLocation = {
-    target:
-      input.target.type === "local"
-        ? { type: "local" }
-        : { type: "rexd", targetID: input.target.targetID },
+    target: input.target.type === "local" ? { type: "local" } : { type: "rexd", targetID: input.target.targetID },
     directory: input.directory,
     ...(input.target.type === "rexd" ? { lastKnownTargetName: input.target.name } : {}),
   }

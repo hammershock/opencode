@@ -18,6 +18,11 @@ import {
   preflightDirectory as preflightLocationDirectory,
   targetInput,
 } from "../../component/location-directory-workflow"
+import {
+  executionTargetActions,
+  openExecutionTargetAction,
+  remoteInitialDirectory,
+} from "../../routes/home/target-workflow"
 
 const id = "internal:home-footer"
 
@@ -126,7 +131,7 @@ function Directory(props: { api: TuiPluginApi }) {
         if (result.data.status !== "ready") throw new Error(`${result.data.stage}: ${result.data.message}`)
         const input = targetInput(target)
         const inspected = await sdk.client.v2.target.wizard.inspect({ input }, { throwOnError: true })
-        const starting = inspected.data.home
+        const starting = remoteInitialDirectory(target, inspected.data.home)
         const directory = await DialogPrompt.show(dialog, `${target.name} working directory`, {
           value: starting,
           placeholder: starting,
@@ -167,13 +172,14 @@ function Directory(props: { api: TuiPluginApi }) {
             description: target.defaultDirectory ?? target.workspaceRoots[0],
             footer: <TargetHealth state={targetManager.state(target.id)} />,
             details: [targetManager.detail(target.id)].filter((item): item is string => Boolean(item)),
-            value: target as TargetDefinition | "local" | "manage",
+            value: target as TargetDefinition | "local" | "add" | "manage",
             category: "Targets",
           })),
-          { title: "Manage targets…", value: "manage" as const, category: "Actions" },
+          ...executionTargetActions,
         ]}
         onSelect={(option) => {
-          if (option.value === "manage") return targetManager.open()
+          if (option.value === "add" || option.value === "manage")
+            return openExecutionTargetAction(option.value, targetManager.open)
           if (option.value === "local") return chooseLocal()
           choose(option.value)
         }}

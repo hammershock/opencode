@@ -4,6 +4,17 @@ import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogSelect } from "../ui/dialog-select"
 import { revealEnvironment, type EnvironmentMetadata, type EnvironmentValues } from "../command-toolkit/environment"
 
+export function environmentVariableOption(variable: EnvironmentMetadata["variables"][number]) {
+  return {
+    title: variable.name,
+    description: variable.source,
+    footer: variable.overrides.length
+      ? `${variable.origin} · overrides ${variable.overrides.join(", ")}`
+      : variable.origin,
+    value: variable.name,
+  }
+}
+
 export function showEnvironment(
   dialog: DialogContext,
   snapshot: EnvironmentMetadata,
@@ -15,12 +26,7 @@ export function showEnvironment(
       () => (
         <DialogSelect
           title={`Environment · generation ${snapshot.generation}`}
-          options={snapshot.variables.map((variable) => ({
-            title: variable.name,
-            description: variable.source,
-            footer: variable.origin,
-            value: variable.name,
-          }))}
+          options={snapshot.variables.map(environmentVariableOption)}
           actions={[
             {
               command: "dialog.environment.reveal",

@@ -5,7 +5,7 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-07
 implemented-by: []
 depends-on:
   - 0001
@@ -58,7 +58,7 @@ UserShellRuntimeState {
 - OpenCode 重启、实验功能关闭、Session 删除或 Location identity 改变时立即丢弃状态；
 - 没有有效 runtime state 时无条件回到 Session Location directory。
 
-实验开关是设备本地、用户级配置，并在 experimental panel 显示；默认关闭。开关可以持久化，但它控制的是功能偏好，不代表 cwd 状态可以持久化。
+CWD Continuity 的实验开关是设备本地、用户级配置，并在 experimental panel 显示；默认关闭。开关可以持久化，但它控制的是功能偏好，不代表 cwd 状态可以持久化。Shell completion 不是该实验开关的一部分：完整补全默认启用，关闭 CWD Continuity 时仍以 Session Location directory 为 cwd 提供补全。
 
 ## 一次性执行协议
 
@@ -102,13 +102,22 @@ Location process contract 应返回独立的 `finalCwd` control result；该值�
 
 ## Completion
 
-完整补全仍是必需功能，但只针对每次请求重新构造的 Shell 环境。补全 helper 为发现 alias、function 和原生 completion 可以在隔离进程中加载目标用户的 completion/startup 配置；该进程仅生成候选，其环境修改不得进入 EnvironmentSnapshot 或后续命令。至少覆盖：
+完整补全是 User Shell 的默认能力，不放入 experimental panel，也不依赖 CWD Continuity 是否开启。补全只针对每次请求重新构造的 Shell 环境。补全 helper 为发现 alias、function 和原生 completion 可以在隔离进程中加载目标用户的 completion/startup 配置；该进程仅生成候选，其环境修改不得进入 EnvironmentSnapshot 或后续命令。至少覆盖：
 
 - 当前 User Shell runtime cwd 下的文件和目录；
 - 当前基础环境 `PATH` 中的可执行命令；
 - Shell startup 配置提供的 aliases、functions 和原生 completion；
 - 带空格、引号、转义及光标位于行中间时的正确替换；
 - 结构化候选、展示文本、replacement range 和候选类型。
+
+交互遵循一套可复用的 TUI candidate panel：
+
+- 唯一候选可以直接填入，但不能提交或执行命令；
+- 多个候选显示在输入框附近的滚动列表中，默认最多显示八行；
+- `Tab` 打开补全、应用当前候选或继续完成，方向键移动选择，`Enter` 只接受候选；接受候选绝不能等价于执行 User Shell；
+- 输入变化、光标变化、cwd generation 变化、超时或取消会废弃旧请求，迟到结果不得覆盖新输入；
+- native completion 不可用、超时或失败时退化为同一 Location 上的文件、目录和 `PATH` 命令补全，并以简短非阻塞状态说明降级；
+- target wizard 与 Location path prompt 应复用同一 candidate-panel 交互和 replacement contract，但它们只能请求对应 Location 的路径候选，不能借用控制设备文件系统。
 
 前一条一次性命令动态创建的 alias、function 或 completion 不在承诺范围内。completion helper 可以为每次请求启动短生命周期 Shell，但不能成为隐藏的持久 User Shell；不能向用户命令 PTY 发送 Tab 后解析 ANSI 屏幕文本。
 
@@ -158,5 +167,5 @@ UserShellRuntime
 6. 环境变量、alias、function、virtual environment、umask 和 job 不跨 User Shell 命令继承。
 7. local 与 Rexd providers 通过同一套 execute/finalCwd/completion contract tests。
 8. timeout、interrupt、launch failure、断线、非法 finalCwd 和缺失 control result 均保留此前 cwd，并清理进程树。
-9. completion 使用当前 runtime cwd，返回结构化替换范围，并覆盖 quoting、cursor-in-middle 与 stale generation。
+9. completion 默认开启，使用当前 runtime cwd，返回结构化替换范围，并覆盖 quoting、cursor-in-middle、八行滚动候选、接受但不执行、native fallback 与 stale generation。
 10. 交互命令不会让 prompt 永久等待；UI 明确引导用户改用 Terminal panel。

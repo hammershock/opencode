@@ -15,12 +15,12 @@ This document defines how this fork turns accepted RFCs into maintainable work w
 
 Use these artifacts for distinct purposes:
 
-| Artifact | Owns | Does not own |
-| --- | --- | --- |
-| RFC in `docs/rfcs` | Accepted behavior, boundaries, risks, compatibility and acceptance criteria | Daily progress or implementation ownership |
-| GitHub issue | One task contract, owner, dependencies, status and handoff notes | Long-lived architecture decisions |
-| Branch and worktree | Isolated implementation for exactly one issue | Planning for unrelated work |
-| Pull request | Review, verification evidence and integration into `dev` | Unapproved product decisions |
+| Artifact            | Owns                                                                        | Does not own                               |
+| ------------------- | --------------------------------------------------------------------------- | ------------------------------------------ |
+| RFC in `docs/rfcs`  | Accepted behavior, boundaries, risks, compatibility and acceptance criteria | Daily progress or implementation ownership |
+| GitHub issue        | One task contract, owner, dependencies, status and handoff notes            | Long-lived architecture decisions          |
+| Branch and worktree | Isolated implementation for exactly one issue                               | Planning for unrelated work                |
+| Pull request        | Review, verification evidence and integration into `dev`                    | Unapproved product decisions               |
 
 Do not create a second task tracker in repository Markdown. GitHub issues are the live task queue; RFCs and merged PRs are the durable record. A PR must close exactly one primary issue. It may reference related issues without closing them.
 
@@ -238,3 +238,4 @@ Upstream integration is its own task and worktree. It must not carry feature imp
 7. Can each task merge without enabling an incomplete feature, using an experimental setting where the RFC requires one?
 
 The detailed test ladder, evidence requirements, device matrix, and release gate are defined in [`testing-workflow.md`](testing-workflow.md).
+Fork-owned TUI surfaces additionally follow the normative interaction and presentation rules in [`ui-design-guidelines.md`](ui-design-guidelines.md).

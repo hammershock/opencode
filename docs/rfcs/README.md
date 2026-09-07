@@ -13,7 +13,7 @@ RFC（Request for Comments）用于记录本 fork 中影响多个模块或核心
 | [0007](0007-provider-usage.md)              | Provider Usage Surfaces      | Accepted |
 | [0008](0008-tui-input-interactions.md)      | TUI Input Interactions       | Accepted |
 | [0009](0009-session-location-rebinding.md)  | Session Target Recovery      | Accepted |
-| [0010](0010-encrypted-session-sync.md)      | Encrypted Session Sync       | Accepted |
+| [0010](0010-encrypted-session-sync.md)      | Multi-device Session Sync    | Accepted |
 
 ## 状态
 

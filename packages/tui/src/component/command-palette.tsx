@@ -9,6 +9,10 @@ import {
   useOpencodeKeymap,
 } from "../keymap"
 import { useTuiConfig } from "../config"
+import { isCoreCommandMetadata, provenanceLabel, resolveUpstreamCandidates } from "../command-toolkit/host"
+import type { CommandProvenance } from "@opencode-ai/command-kit"
+import { adaptKeymapCommands, adaptServerCommands } from "../command-toolkit/upstream"
+import { useSync } from "../context/sync"
 
 type PaletteCommandEntry = ReturnType<OpenTuiKeymap["getCommandEntries"]>[number]
 
@@ -26,6 +30,7 @@ function isSuggestedPaletteCommand(entry: PaletteCommandEntry) {
 export function CommandPaletteDialog() {
   const config = useTuiConfig()
   const keymap = useOpencodeKeymap()
+  const sync = useSync()
   const entries = useKeymapSelector((keymap: OpenTuiKeymap) => {
     const query = {
       namespace: "palette",
@@ -45,20 +50,37 @@ export function CommandPaletteDialog() {
       bindings: registeredBindings.get(entry.command.name) ?? entry.bindings,
     }))
   })
-  const options = createMemo(() =>
-    entries().map((entry) => ({
-      title: typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
-      description: typeof entry.command.desc === "string" ? entry.command.desc : undefined,
-      category: typeof entry.command.category === "string" ? entry.command.category : undefined,
-      footer: formatKeyBindings(entry.bindings, config),
-      value: entry.command.name,
-      suggested: isSuggestedPaletteCommand(entry),
-      onSelect: (dialog: DialogContext) => {
-        dialog.clear()
-        keymap.dispatchCommand(entry.command.name)
-      },
-    })),
-  )
+  const options = createMemo(() => {
+    const current = entries()
+    const upstream = [...adaptServerCommands(sync.data.command), ...adaptKeymapCommands(current, () => undefined)]
+    return current.flatMap((entry) => {
+      const metadata = entry.command as typeof entry.command & {
+        commandKitProvenance?: CommandProvenance
+        commandKitPath?: readonly string[]
+      }
+      if (isCoreCommandMetadata(metadata)) {
+        const source = `/${metadata.commandKitPath.join(" ")}`
+        if (resolveUpstreamCandidates(source, upstream).length > 0) return []
+      }
+      const provenance = metadata.commandKitProvenance
+      const label = provenance ? provenanceLabel(provenance) : "upstream"
+      const description = typeof entry.command.desc === "string" ? entry.command.desc : undefined
+      return [
+        {
+          title: typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
+          description: provenance ? description : description ? `${description} · ${label}` : label,
+          category: typeof entry.command.category === "string" ? entry.command.category : undefined,
+          footer: formatKeyBindings(entry.bindings, config),
+          value: entry.command.name,
+          suggested: isSuggestedPaletteCommand(entry),
+          onSelect: (dialog: DialogContext) => {
+            dialog.clear()
+            keymap.dispatchCommand(entry.command.name)
+          },
+        },
+      ]
+    })
+  })
 
   let ref: DialogSelectRef<string>
   const list = () => {

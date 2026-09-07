@@ -58,7 +58,14 @@ import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
-import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useLeaderActive, useOpencodeKeymap } from "../../keymap"
+import {
+  OPENCODE_BASE_MODE,
+  useBindings,
+  useCommandShortcut,
+  useKeymapSelector,
+  useLeaderActive,
+  useOpencodeKeymap,
+} from "../../keymap"
 import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
@@ -67,6 +74,8 @@ import type { LocationRef } from "@opencode-ai/sdk/v2"
 import { readLocalAttachment } from "./local-attachment"
 import { useLocation } from "../../context/location"
 import { canAdjustVariant } from "../../model-variant"
+import { createCommandHost, type TuiCommandDispatch, type TuiSlashCommand } from "../../command-toolkit/host"
+import { adaptKeymapCommands, adaptServerCommands } from "../../command-toolkit/upstream"
 
 registerOpencodeSpinner()
 
@@ -75,7 +84,10 @@ export type PromptProps = {
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
-  onBuiltinSlash?: (input: string) => Promise<boolean>
+  commandHost?: {
+    (input: string, source?: "slash" | "palette" | "keybind"): Promise<TuiCommandDispatch>
+    slashes: () => readonly TuiSlashCommand[]
+  }
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
   right?: JSX.Element
@@ -180,6 +192,34 @@ export function Prompt(props: PromptProps) {
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = useOpencodeKeymap()
+  const upstreamCommandEntries = useKeymapSelector((value) =>
+    value.getCommandEntries({ visibility: "reachable", namespace: "palette" }),
+  )
+  const fallbackCommandHost = createMemo(() =>
+    createCommandHost({
+      register: () => undefined,
+      context: (source) => ({
+        source,
+        client: "tui" as const,
+        sessionID: props.sessionID,
+        location: location(),
+        abortSignal: new AbortController().signal,
+        confirm: async () => false,
+      }),
+      upstream: () => [
+        ...adaptServerCommands(sync.data.command),
+        ...adaptKeymapCommands(upstreamCommandEntries(), (identity) => keymap.dispatchCommand(identity)),
+      ],
+      invalid: (message) => toast.show({ message, variant: "warning" }),
+      outcome: (message, result) =>
+        toast.show({
+          message,
+          variant: result === "failed" ? "error" : result === "cancelled" ? "warning" : "success",
+        }),
+      diagnostic: (diagnostic) => console.warn("[command-kit] shadowed command", diagnostic),
+    }),
+  )
+  const activeCommandHost = () => props.commandHost ?? fallbackCommandHost()
   const agentShortcut = useCommandShortcut("agent.cycle")
   const paletteShortcut = useCommandShortcut("command.palette.show")
   const shellExitShortcut = useCommandShortcut("prompt.shell.exit")
@@ -1089,12 +1129,11 @@ export function Prompt(props: PromptProps) {
         return [{ start: extmark.start, end: extmark.end, text: part.text }]
       }),
     )
-    const upstreamCommand =
-      inputText.startsWith("/") &&
-      sync.data.command.some((item) => item.name === inputText.split("\n")[0].split(" ")[0].slice(1))
-    // External server commands keep the upstream winner. Client-only verified
-    // overrides run before model resolution because they do not invoke an Agent.
-    if (store.mode !== "shell" && !upstreamCommand && props.onBuiltinSlash && (await props.onBuiltinSlash(inputText))) {
+    const slashDispatch =
+      store.mode !== "shell"
+        ? await activeCommandHost()(inputText, "slash")
+        : ({ status: "passthrough", input: inputText, diagnostics: [] } as const)
+    if (slashDispatch.status === "handled") {
       history.append({ ...store.prompt, mode: store.mode })
       input.extmarks.clear()
       setStore("prompt", { input: "", parts: [] })
@@ -1233,19 +1272,12 @@ export function Prompt(props: PromptProps) {
         command: inputText,
       })
       setStore("mode", "normal")
-    } else if (upstreamCommand) {
+    } else if (slashDispatch.status === "session") {
       move.startSubmit()
-      // Parse command from first line, preserve multi-line content in arguments
-      const firstLineEnd = inputText.indexOf("\n")
-      const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
-      const [command, ...firstLineArgs] = firstLine.split(" ")
-      const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
-      const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
-
       void sdk.client.session.command({
         sessionID,
-        command: command.slice(1),
-        arguments: args,
+        command: slashDispatch.command,
+        arguments: slashDispatch.arguments,
         agent: agent.name,
         model: `${selectedModel.providerID}/${selectedModel.modelID}`,
         variant,
@@ -1875,6 +1907,7 @@ export function Prompt(props: PromptProps) {
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
         shellMutation={cursorVersion()}
+        commandSlashes={activeCommandHost().slashes}
       />
     </>
   )

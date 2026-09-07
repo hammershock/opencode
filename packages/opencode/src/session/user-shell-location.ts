@@ -99,9 +99,11 @@ export function makeProvider(
           maxOutputBytes: 512 * 1024,
           signal: input.signal,
         })
-      const fallback = yield* run(UserShellLocal.commandFallbackScript(token), "/bin/sh", Duration.millis(750)).pipe(
-        Effect.catch(() => Effect.void),
-      )
+      const fallback = UserShellLocal.isCommandPosition(input.input, range.start)
+        ? yield* run(UserShellLocal.commandFallbackScript(token), "/bin/sh", Duration.millis(750)).pipe(
+            Effect.catch(() => Effect.void),
+          )
+        : undefined
       const commands = fallback ? UserShellLocal.parseCommandFallback(fallback.stdout.toString("utf8"), range) : []
       const supported = Shell.name(shell) === "bash" || Shell.name(shell) === "zsh"
       const native = supported
@@ -126,7 +128,9 @@ export function makeProvider(
             : "native_failed"
       const candidates = [
         ...new Map([...paths, ...commands, ...names].map((candidate) => [candidate.value, candidate])).values(),
-      ].toSorted((a, b) => a.display.localeCompare(b.display)).slice(0, 8)
+      ]
+        .toSorted((a, b) => a.display.localeCompare(b.display))
+        .slice(0, 8)
       return { candidates, ...(degraded ? { degraded: { reason: degraded } } : {}) }
     })
   return { execute, validateDirectory, complete } satisfies Provider

@@ -23,7 +23,100 @@ describe("SyncSecureStore", () => {
     expect(await store.get("space:key")).toBe("secret")
     await store.remove("space:key")
     expect(calls.every((call) => call.service === SyncSecureStore.SERVICE)).toBe(true)
-    expect(calls.map((call) => call.operation)).toEqual(["set", "get", "remove"])
+    expect(calls.map((call) => call.operation)).toEqual(["set", "remove"])
+  })
+
+  test("caches successful and missing macOS reads across store instances", async () => {
+    const values = new Map([["present", "secret"]])
+    const reads = new Map<string, number>()
+    const backend: SyncSecureStore.MacosBackend = {
+      get: async (_service, account) => {
+        reads.set(account, (reads.get(account) ?? 0) + 1)
+        return values.get(account)
+      },
+      set: async (_service, account, secret) => void values.set(account, secret),
+      remove: async (_service, account) => void values.delete(account),
+    }
+    const first = SyncSecureStore.macos("cache-read-test", backend)
+    const second = SyncSecureStore.macos("cache-read-test", backend)
+
+    expect(await first.get("present")).toBe("secret")
+    expect(await second.get("present")).toBe("secret")
+    expect(await first.get("missing")).toBeUndefined()
+    expect(await second.get("missing")).toBeUndefined()
+    expect(reads).toEqual(
+      new Map([
+        ["present", 1],
+        ["missing", 1],
+      ]),
+    )
+  })
+
+  test("isolates cached reads by Keychain service and account", async () => {
+    const calls: string[] = []
+    const backend: SyncSecureStore.MacosBackend = {
+      get: async (service, account) => {
+        calls.push(`${service}:${account}`)
+        return `${service}:${account}:value`
+      },
+      set: async () => undefined,
+      remove: async () => undefined,
+    }
+    const first = SyncSecureStore.macos("first-service", backend)
+    const second = SyncSecureStore.macos("second-service", backend)
+
+    expect(await first.get("account-a")).toBe("first-service:account-a:value")
+    expect(await first.get("account-b")).toBe("first-service:account-b:value")
+    expect(await second.get("account-a")).toBe("second-service:account-a:value")
+    expect(await first.get("account-a")).toBe("first-service:account-a:value")
+    expect(calls).toEqual(["first-service:account-a", "first-service:account-b", "second-service:account-a"])
+  })
+
+  test("coalesces concurrent macOS reads and does not cache failures", async () => {
+    let release = (_value: string | undefined) => {}
+    let calls = 0
+    let fail = false
+    const backend: SyncSecureStore.MacosBackend = {
+      get: async () => {
+        calls++
+        if (fail) throw new SyncSecureStore.SecureStoreOperationError("fake failure")
+        return new Promise<string | undefined>((resolve) => void (release = resolve))
+      },
+      set: async () => undefined,
+      remove: async () => undefined,
+    }
+    const store = SyncSecureStore.macos("cache-coalesce-test", backend)
+    const first = store.get("account")
+    const second = store.get("account")
+    await Bun.sleep(0)
+    expect(calls).toBe(1)
+    release("secret")
+    expect(await Promise.all([first, second])).toEqual(["secret", "secret"])
+
+    fail = true
+    await expect(store.get("failure")).rejects.toThrow("fake failure")
+    await expect(store.get("failure")).rejects.toThrow("fake failure")
+    expect(calls).toBe(3)
+  })
+
+  test("keeps cached macOS reads coherent after product set and remove", async () => {
+    const values = new Map([["account", "old"]])
+    let reads = 0
+    const backend: SyncSecureStore.MacosBackend = {
+      get: async (_service, account) => {
+        reads++
+        return values.get(account)
+      },
+      set: async (_service, account, secret) => void values.set(account, secret),
+      remove: async (_service, account) => void values.delete(account),
+    }
+    const store = SyncSecureStore.macos("cache-mutation-test", backend)
+    expect(await store.get("account")).toBe("old")
+    await store.set("account", "new")
+    expect(await store.get("account")).toBe("new")
+    await store.remove("account")
+    expect(await store.get("account")).toBeUndefined()
+    expect(reads).toBe(1)
   })
 
   test("passes long UTF-8 macOS secrets only to the native backend", async () => {

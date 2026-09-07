@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal } from "solid-js"
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount } from "solid-js"
 import { useLocal } from "../context/local"
 import { map, pipe, flatMap, entries, filter, sortBy, take } from "remeda"
 import { DialogSelect } from "../ui/dialog-select"
@@ -8,8 +8,21 @@ import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
 import { useSync } from "../context/sync"
-import { load, summary, type Meter, type Result } from "../provider-usage"
+import {
+  formatTime,
+  load,
+  meterDetails,
+  orderedMeters,
+  status as usageStatus,
+  type Meter,
+  type Result,
+} from "../provider-usage"
 import { useSDK } from "../context/sdk"
+
+function providerID(value: unknown) {
+  if (!value || typeof value !== "object" || !("providerID" in value)) return
+  return typeof value.providerID === "string" ? value.providerID : undefined
+}
 
 export function DialogModel(props: { providerID?: string }) {
   const local = useLocal()
@@ -18,13 +31,36 @@ export function DialogModel(props: { providerID?: string }) {
   const sdk = useSDK()
   const [query, setQuery] = createSignal("")
   const [usage, setUsage] = createSignal<Record<string, Result>>({})
+  const requests = new Map<string, AbortController>()
 
-  createEffect(() => {
-    for (const provider of sync.data.provider) {
-      if (usage()[provider.id]) continue
-      void load(sdk, provider.id).then((result) => setUsage((current) => ({ ...current, [provider.id]: result })))
-    }
-  })
+  function queryUsage(providerID: string, refresh = false) {
+    requests.get(providerID)?.abort()
+    const controller = new AbortController()
+    requests.set(providerID, controller)
+    void load(sdk, providerID, refresh, controller.signal)
+      .then((result) => {
+        if (requests.get(providerID) !== controller) return
+        setUsage((current) => ({ ...current, [providerID]: result }))
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (requests.get(providerID) === controller) requests.delete(providerID)
+      })
+  }
+
+  createEffect(
+    on(
+      () => sync.data.provider.map((provider) => provider.id).join("\0"),
+      () => {
+        for (const provider of sync.data.provider) {
+          if (usage()[provider.id] || requests.has(provider.id)) continue
+          queryUsage(provider.id)
+        }
+      },
+      { defer: false },
+    ),
+  )
+  onCleanup(() => requests.forEach((controller) => controller.abort()))
 
   const connected = useConnected()
   const providers = createDialogProviderOptions()
@@ -52,7 +88,11 @@ export function DialogModel(props: { providerID?: string }) {
             description: provider.name,
             category,
             disabled: provider.id === "opencode" && model.id.includes("-nano"),
-            footer: model.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined,
+            footer: connected()
+              ? usageStatus(usage()[provider.id])
+              : model.cost?.input === 0 && provider.id === "opencode"
+                ? "Free"
+                : undefined,
             onSelect: () => {
               onSelect(provider.id, model.id)
             },
@@ -94,14 +134,11 @@ export function DialogModel(props: { providerID?: string }) {
               : undefined,
             category: connected() ? provider.name : undefined,
             disabled: provider.id === "opencode" && model.includes("-nano"),
-            footer:
-              summary(
-                usage()[provider.id],
-                local.model.usage.selected(
-                  provider.id,
-                  usage()[provider.id]?.snapshot?.meters.map((meter) => meter.id) ?? [],
-                ),
-              ) ?? (info.cost?.input === 0 && provider.id === "opencode" ? "Free" : undefined),
+            footer: connected()
+              ? usageStatus(usage()[provider.id])
+              : info.cost?.input === 0 && provider.id === "opencode"
+                ? "Free"
+                : undefined,
             onSelect() {
               onSelect(provider.id, model)
             },
@@ -181,14 +218,32 @@ export function DialogModel(props: { providerID?: string }) {
       options={options()}
       actions={[
         {
+          command: "model.dialog.usage.view",
+          title: "View provider usage",
+          hidden: !connected(),
+          onTrigger: (option) => {
+            const id = providerID(option.value)
+            if (!id) return
+            const provider = sync.data.provider.find((item) => item.id === id)
+            dialog.replace(() => (
+              <DialogProviderUsageDetails providerID={id} providerName={provider?.name ?? id} initial={usage()[id]} />
+            ))
+          },
+        },
+        {
           command: "model.dialog.usage.configure",
           title: "Configure footer usage",
           hidden: !connected(),
+          disabled: (option) => {
+            const id = providerID(option?.value)
+            return !id || !usage()[id]?.snapshot?.meters.length
+          },
           onTrigger: (option) => {
-            const providerID = (option.value as { providerID: string }).providerID
-            const meters = usage()[providerID]?.snapshot?.meters
+            const id = providerID(option.value)
+            if (!id) return
+            const meters = usage()[id]?.snapshot?.meters
             if (!meters?.length) return
-            dialog.replace(() => <DialogProviderUsage providerID={providerID} meters={meters} />)
+            dialog.replace(() => <DialogProviderUsage providerID={id} meters={meters} />)
           },
         },
         {
@@ -196,10 +251,8 @@ export function DialogModel(props: { providerID?: string }) {
           title: "Refresh provider usage",
           hidden: !connected(),
           onTrigger: (option) => {
-            const providerID = (option.value as { providerID: string }).providerID
-            void load(sdk, providerID, true).then((result) =>
-              setUsage((current) => ({ ...current, [providerID]: result })),
-            )
+            const id = providerID(option.value)
+            if (id) queryUsage(id, true)
           },
         },
         {
@@ -227,9 +280,81 @@ export function DialogModel(props: { providerID?: string }) {
   )
 }
 
+function DialogProviderUsageDetails(props: { providerID: string; providerName: string; initial?: Result }) {
+  const sdk = useSDK()
+  const dialog = useDialog()
+  const [result, setResult] = createSignal(props.initial)
+  const [refreshing, setRefreshing] = createSignal(false)
+  let controller: AbortController | undefined
+
+  function refresh() {
+    controller?.abort()
+    controller = new AbortController()
+    setRefreshing(true)
+    void load(sdk, props.providerID, true, controller.signal)
+      .then(setResult)
+      .catch(() => {})
+      .finally(() => setRefreshing(false))
+  }
+
+  onMount(() => {
+    if (!props.initial) refresh()
+  })
+  onCleanup(() => controller?.abort())
+
+  const meters = createMemo(() => orderedMeters(result()?.snapshot?.meters ?? []))
+  const options = createMemo(() => {
+    if (!meters().length) {
+      return [
+        {
+          title: usageStatus(result()),
+          value: "__status__",
+          description: result()?.error,
+        },
+      ]
+    }
+    return meters().map((meter) => ({
+      title: meter.label,
+      value: meter.id,
+      details: [meterDetails(meter)],
+    }))
+  })
+  const footer = createMemo(() => {
+    if (refreshing()) return "◐ refreshing"
+    const snapshot = result()?.snapshot
+    if (!snapshot) return usageStatus(result())
+    const scope = snapshot.scopeID ? `scope ${snapshot.scopeID}` : undefined
+    return [usageStatus(result()), scope, `fetched ${formatTime(snapshot.fetchedAt)}`].filter(Boolean).join(" · ")
+  })
+
+  return (
+    <DialogSelect
+      title={`${props.providerName} usage`}
+      options={options()}
+      renderFilter={false}
+      footer={<text>{footer()}</text>}
+      actions={[
+        {
+          command: "model.dialog.usage.configure",
+          title: "Configure footer",
+          disabled: meters().length === 0,
+          onTrigger: () =>
+            dialog.replace(() => <DialogProviderUsage providerID={props.providerID} meters={meters()} />),
+        },
+        {
+          command: "model.dialog.usage.refresh",
+          title: "Refresh usage",
+          disabled: refreshing(),
+          onTrigger: refresh,
+        },
+      ]}
+    />
+  )
+}
+
 function DialogProviderUsage(props: { providerID: string; meters: Meter[] }) {
   const local = useLocal()
-  const available = () => props.meters.map((meter) => meter.id)
+  const available = () => orderedMeters(props.meters).map((meter) => meter.id)
   const selected = () => local.model.usage.selected(props.providerID, available())
   const order = () => local.model.usage.saved(props.providerID) ?? available()
   const options = () =>

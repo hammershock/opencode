@@ -43,8 +43,10 @@ import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
 import {
+  activeRequest as activeProviderUsageRequest,
   load as loadProviderUsage,
   summary as providerUsageSummary,
+  truncateParts,
   type Result as ProviderUsageResult,
 } from "../../provider-usage"
 import { useDialog } from "../../ui/dialog"
@@ -298,36 +300,52 @@ export function Prompt(props: PromptProps) {
   const [providerUsage, setProviderUsage] = createSignal<ProviderUsageResult>()
   const providerUsageText = createMemo(() => {
     const result = providerUsage()
-    const providerID = props.sessionID
-      ? sync.data.message[props.sessionID]?.findLast(
-          (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
-        )?.providerID
-      : undefined
-    if (!result?.snapshot || !providerID) return
-    return providerUsageSummary(
+    const model = local.model.current()
+    if (!result?.snapshot || !model || result.providerID !== model.providerID) return
+    const provider = sync.data.provider.find((item) => item.id === model.providerID)
+    const label = provider?.name ?? model.providerID
+    const value = providerUsageSummary(
       result,
       local.model.usage.selected(
-        providerID,
+        model.providerID,
         result.snapshot.meters.map((meter) => meter.id),
       ),
+      Math.max(12, Math.floor(dimensions().width * 0.35) - label.length - 3),
     )
+    if (!value) return
+    return `${label} · ${value}`
   })
   createEffect(
     on(
       () => {
-        if (!props.sessionID) return
+        const model = local.model.current()
+        if (!props.sessionID || !model) return
         const message = sync.data.message[props.sessionID]?.findLast(
           (item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0,
         )
-        return message ? `${message.id}\0${message.providerID}` : undefined
+        return `${model.providerID}\0${message?.id ?? ""}\0${message?.providerID ?? ""}`
       },
       (key) => {
         setProviderUsage(undefined)
         if (!key) return
-        void loadProviderUsage(sdk, key.split("\0")[1]!, true).then(setProviderUsage)
+        const [providerID, _, completedProviderID] = key.split("\0")
+        const request = activeProviderUsageRequest(providerID, completedProviderID)
+        const controller = new AbortController()
+        void loadProviderUsage(sdk, request.providerID, request.refresh, controller.signal)
+          .then(setProviderUsage)
+          .catch(() => {})
+        onCleanup(() => controller.abort())
       },
     ),
   )
+
+  const footerUsageText = createMemo(() => {
+    const item = usage()
+    return truncateParts(
+      [item?.context, item?.cost, providerUsageText()].filter((value): value is string => Boolean(value)),
+      Math.max(12, Math.floor(dimensions().width / 2) - 16),
+    )
+  })
 
   const [store, setStore] = createStore<{
     prompt: PromptInfo
@@ -1798,10 +1816,10 @@ export function Prompt(props: PromptProps) {
               <Switch>
                 <Match when={store.mode === "normal"}>
                   <Switch>
-                    <Match when={usage()}>
-                      {(item) => (
+                    <Match when={footerUsageText()}>
+                      {(text) => (
                         <text fg={theme.textMuted} wrapMode="none">
-                          {[item().context, item().cost, providerUsageText()].filter(Boolean).join(" · ")}
+                          {text()}
                         </text>
                       )}
                     </Match>

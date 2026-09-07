@@ -2,8 +2,10 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Auth } from "@/auth"
+import { Config } from "@/config/config"
 import { Context, Effect, Layer, Schema } from "effect"
 import { ProviderUsageAdapters } from "./usage-adapters"
+import type { ConfigProviderV1 } from "@opencode-ai/core/v1/config/provider"
 
 export const Source = Schema.Literals(["official_api", "response_headers", "experimental_private"])
 export type Source = typeof Source.Type
@@ -61,9 +63,10 @@ export type Probe =
 export interface Adapter {
   readonly providerID: string
   readonly ttlMs?: number
-  readonly probe: (input: { readonly auth: Auth.Info }) => Probe
+  readonly probe: (input: { readonly auth: Auth.Info; readonly providerConfig?: ConfigProviderV1.Info }) => Probe
   readonly fetch: (input: {
     readonly auth: Auth.Info
+    readonly providerConfig?: ConfigProviderV1.Info
     readonly accountID?: string
     readonly scopeID?: string
     readonly signal: AbortSignal
@@ -110,9 +113,11 @@ export function layer(
     Service,
     Effect.gen(function* () {
       const auth = yield* Auth.Service
+      const config = yield* Config.Service
       const registry = new Map(adapters.map((adapter) => [adapter.providerID, adapter]))
       const cache = new Map<string, Cache>()
       const inflight = new Map<string, Inflight>()
+      const identities = new Map<string, string>()
       const concurrency = Math.max(1, Math.floor(options?.concurrency ?? 4))
       const now = options?.now ?? Date.now
       const queue: Array<() => void> = []
@@ -176,11 +181,17 @@ export function layer(
         const credential = yield* auth.get(input.providerID)
         if (!credential) {
           clearProvider(input.providerID, cache, inflight)
+          identities.delete(input.providerID)
           return new Result({ providerID: input.providerID, status: "unauthenticated" })
         }
 
-        const authID = Hash.fast(JSON.stringify(credential))
-        const probe = adapter.probe({ auth: credential })
+        const providerConfig = (yield* config.get()).provider?.[input.providerID]
+        const authID = Hash.fast(JSON.stringify([credential, providerConfig ?? null]))
+        if (identities.get(input.providerID) !== authID) {
+          clearProvider(input.providerID, cache, inflight)
+          identities.set(input.providerID, authID)
+        }
+        const probe = adapter.probe({ auth: credential, providerConfig })
         if (probe.status === "unsupported") return new Result({ providerID: input.providerID, status: "unsupported" })
 
         const key = JSON.stringify([input.providerID, probe.accountID ?? "", probe.scopeID ?? ""])
@@ -207,6 +218,7 @@ export function layer(
         const promise = schedule(() =>
           adapter.fetch({
             auth: credential,
+            providerConfig,
             accountID: probe.accountID,
             scopeID: probe.scopeID,
             signal: controller.signal,
@@ -252,10 +264,15 @@ export function layer(
 
       const invalidate = Effect.fn("ProviderUsage.invalidate")((providerID?: string) =>
         Effect.sync(() => {
-          if (providerID) return clearProvider(providerID, cache, inflight)
+          if (providerID) {
+            clearProvider(providerID, cache, inflight)
+            identities.delete(providerID)
+            return
+          }
           for (const item of inflight.values()) item.controller.abort()
           inflight.clear()
           cache.clear()
+          identities.clear()
         }),
       )
 
@@ -282,6 +299,6 @@ function clearProvider(providerID: string, cache: Map<string, Cache>, inflight: 
 }
 
 export const defaultLayer = Layer.unwrap(Effect.sync(() => layer(ProviderUsageAdapters.defaults.adapters)))
-export const node = LayerNode.make({ service: Service, layer: defaultLayer, deps: [Auth.node] })
+export const node = LayerNode.make({ service: Service, layer: defaultLayer, deps: [Auth.node, Config.node] })
 
 export * as ProviderUsage from "./usage"

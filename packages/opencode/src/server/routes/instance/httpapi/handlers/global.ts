@@ -178,7 +178,17 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncLeave", (ctx) => badControl(syncControl.leaveSpace(ctx.payload.namespaceID)))
       .handle("syncEnabled", (ctx) => stateAfter(syncControl.enable(ctx.payload.enabled)))
       .handle("syncInterval", (ctx) => stateAfter(syncControl.setInterval(ctx.payload.intervalSeconds)))
-      .handle("syncDelete", (ctx) => badControl(syncControl.deleteSpace(ctx.params.namespaceID)))
+      .handle("syncDelete", (ctx) =>
+        syncControl.deleteSpace(ctx.params.namespaceID).pipe(
+          Effect.mapError(
+            (error) =>
+              new SyncControlApiError({
+                name: "SyncControlError",
+                data: { kind: error.kind, diagnostic: error.diagnostic },
+              }),
+          ),
+        ),
+      )
       .handle("syncRemove", () => badControl(syncControl.removeFromDevice()))
       .handle("syncUnassigned", () =>
         syncControl.unassigned().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
@@ -190,11 +200,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncNow", () =>
         syncControl.now().pipe(
           Effect.as(true),
-          Effect.mapError((error) =>
-            new SyncControlApiError({
-              name: "SyncControlError",
-              data: { kind: error.kind, diagnostic: error.diagnostic },
-            }),
+          Effect.mapError(
+            (error) =>
+              new SyncControlApiError({
+                name: "SyncControlError",
+                data: { kind: error.kind, diagnostic: error.diagnostic },
+              }),
           ),
         ),
       )

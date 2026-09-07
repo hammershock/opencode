@@ -32,6 +32,9 @@ describe("sync settings deployment errors", () => {
     expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "pull" } } })).toBe(
       "Sync failed during pull",
     )
+    expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "delete" } } })).toBe(
+      "Sync failed during delete",
+    )
     expect(syncOperationFailure({ data: { diagnostic: { stage: "token secret" } } })).toBe("Sync operation failed")
     expect(syncOperationFailure({ message: "provider failed with token secret" })).toBe("Sync operation failed")
   })

@@ -250,19 +250,20 @@ export function make(input: {
   const setInterval = Effect.fn("SyncSetup.setInterval")((intervalSeconds: SyncState.IntervalSeconds) =>
     update(states, (current) => ({ ...current, intervalSeconds })),
   )
-  const deleteSpace = Effect.fn("SyncSetup.deleteSpace")((namespaceID: string) =>
-    effect("remote", async () => {
-      const context = await remote()
-      const binding = context.current.spaces.find(
-        (item) => item.descriptor.namespaceID === namespaceID && item.accountID === context.current.account?.id,
-      )
-      if (!binding) throw new SetupError({ kind: "invalid" })
-      await context.catalog.remove(namespaceID)
-      if (binding.descriptor.encryption === "aes-256-gcm") await input.store.remove(rootAccount(namespaceID))
-      await states.write(SyncState.remove(context.current, namespaceID), context.current.revision)
-      return namespaceID
-    }),
-  )
+  const deleteSpace = Effect.fn("SyncSetup.deleteSpace")(function* (namespaceID: string) {
+    const context = yield* effect("remote", remote)
+    const binding = context.current.spaces.find(
+      (item) => item.descriptor.namespaceID === namespaceID && item.accountID === context.current.account?.id,
+    )
+    if (!binding) return yield* new SetupError({ kind: "invalid" })
+    yield* effect("remote", () => context.catalog.remove(namespaceID))
+    yield* effect("storage", () =>
+      states.write(SyncState.remove(context.current, namespaceID), context.current.revision),
+    )
+    if (binding.descriptor.encryption === "aes-256-gcm")
+      yield* Effect.tryPromise(() => input.store.remove(rootAccount(namespaceID))).pipe(Effect.ignore)
+    return namespaceID
+  })
   const applyRemoteDeletion = Effect.fn("SyncSetup.applyRemoteDeletion")((namespaceID: string) =>
     effect("remote", async () => {
       const context = await remote()

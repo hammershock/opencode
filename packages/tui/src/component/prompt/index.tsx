@@ -90,6 +90,8 @@ export type PromptProps = {
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
+  onPromptSubmit?: () => void
+  shellCompletionGeneration?: number
   commandHost?: {
     (input: string, source?: "slash" | "palette" | "keybind"): Promise<TuiCommandDispatch>
     commands: () => readonly TuiCommandWinner[]
@@ -1335,6 +1337,7 @@ export function Prompt(props: PromptProps) {
     })
     setStore("extmarkToPartIndex", new Map())
     props.onSubmit?.()
+    props.onPromptSubmit?.()
 
     // temporary hack to make sure the message is sent
     if (!props.sessionID) {
@@ -1917,7 +1920,7 @@ export function Prompt(props: PromptProps) {
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
-        shellMutation={cursorVersion()}
+        shellMutation={cursorVersion() + (props.shellCompletionGeneration ?? 0)}
         commandSlashes={activeCommandHost().slashes}
       />
     </>

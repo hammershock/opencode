@@ -4,6 +4,7 @@ import * as TestClock from "effect/testing/TestClock"
 import { UserShellRuntime, type Provider } from "@/session/user-shell-runtime"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
+import { SessionLocationRuntime } from "@opencode-ai/core/session/location-runtime"
 
 const location = { target: "local", directory: "/workspace" }
 
@@ -15,13 +16,15 @@ function provider(input?: { finalCwd?: string; valid?: boolean }): Provider {
   }
 }
 
-function runtime<A, E>(effect: Effect.Effect<A, E, UserShellRuntime.Service>) {
-  return Effect.runPromise(
-    effect.pipe(
-      Effect.provide(UserShellRuntime.layer.pipe(Layer.provide(SessionActivity.layer))),
-      Effect.provide(TestClock.layer()),
-    ),
-  )
+const runtimeLayer = UserShellRuntime.layer.pipe(
+  Layer.provideMerge(SessionActivity.layer),
+  Layer.provideMerge(SessionLocationRuntime.layer),
+)
+
+function runtime<A, E>(
+  effect: Effect.Effect<A, E, UserShellRuntime.Service | SessionActivity.Service | SessionLocationRuntime.Service>,
+) {
+  return Effect.runPromise(effect.pipe(Effect.provide(runtimeLayer), Effect.scoped, Effect.provide(TestClock.layer())))
 }
 
 describe("UserShellRuntime", () => {
@@ -87,6 +90,43 @@ describe("UserShellRuntime", () => {
             enabled: true,
           }),
         ).toBe("/other")
+      }),
+    ))
+
+  test("Location rebind resets cwd and invalidates completion generation", () =>
+    runtime(
+      Effect.gen(function* () {
+        const service = yield* UserShellRuntime.Service
+        const locationRuntime = yield* SessionLocationRuntime.Service
+        yield* service.execute({
+          sessionID: "ses_one",
+          location,
+          command: "cd child",
+          environment: {},
+          enabled: true,
+          provider: provider({ finalCwd: "/workspace/child" }),
+        })
+        const before = yield* service.complete({
+          sessionID: "ses_one",
+          location,
+          input: "x",
+          cursor: 1,
+          environment: {},
+          enabled: true,
+          provider: provider(),
+        })
+        yield* locationRuntime.rebound(SessionSchema.ID.make("ses_one"))
+        expect(yield* service.current({ sessionID: "ses_one", location, enabled: true })).toBe("/workspace")
+        const after = yield* service.complete({
+          sessionID: "ses_one",
+          location,
+          input: "x",
+          cursor: 1,
+          environment: {},
+          enabled: true,
+          provider: provider(),
+        })
+        expect(after.generation).toBeGreaterThan(before.generation)
       }),
     ))
 
@@ -156,7 +196,7 @@ describe("UserShellRuntime", () => {
         yield* Deferred.succeed(gate, undefined)
         yield* Fiber.join(execution)
         expect(yield* activity.blockers(SessionSchema.ID.make("ses_one"))).toEqual([])
-      }).pipe(Effect.provide(UserShellRuntime.layer.pipe(Layer.provideMerge(SessionActivity.layer))), Effect.scoped),
+      }).pipe(Effect.provide(runtimeLayer), Effect.scoped),
     )
   })
 

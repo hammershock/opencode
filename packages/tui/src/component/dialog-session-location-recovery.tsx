@@ -19,6 +19,34 @@ type Destination =
   | { target: { type: "local" }; name: "local"; definition?: undefined }
   | { target: { type: "rexd"; targetID: string }; name: string; definition: TargetDefinition }
 
+export type AffectedSession = { readonly id: string; readonly title: string }
+type RecoveryScopeChoice = { readonly type: "session"; readonly id: string } | { readonly type: "continue" }
+
+export async function affectedSessionDetails(sdk: SDK, sessionIDs: readonly string[]) {
+  return Promise.all(
+    sessionIDs.map(async (sessionID) => {
+      const result = await sdk.client.v2.session.get({ sessionID }, { throwOnError: true })
+      return { id: sessionID, title: result.data.data.title.replaceAll(/[\r\n]+/g, " ").trim() || "Untitled Session" }
+    }),
+  )
+}
+
+export function recoveryScopeOptions(sessions: readonly AffectedSession[]): DialogSelectOption<RecoveryScopeChoice>[] {
+  return [
+    ...sessions.map((session) => ({
+      title: session.title,
+      description: session.id,
+      value: { type: "session" as const, id: session.id },
+      category: "Affected Sessions",
+    })),
+    { title: "Continue", value: { type: "continue" as const }, category: "Action" },
+  ]
+}
+
+export function allowsRecoveryRebind(resolution: TargetResolution, enabled: boolean) {
+  return enabled && resolution.status !== "resolved"
+}
+
 export function portableBindingRequest(
   resolution: Extract<TargetResolution, { status: "unbound_portable_target" }>,
   targetID: string,
@@ -41,6 +69,24 @@ function select<T>(dialog: DialogContext, title: string, options: DialogSelectOp
     dialog.replace(
       () => <DialogSelect title={title} options={options} onSelect={(option) => resolve(option.value)} />,
       () => resolve(undefined),
+    ),
+  )
+}
+
+function reviewRecoveryScope(dialog: DialogContext, title: string, sessions: readonly AffectedSession[]) {
+  return new Promise<boolean>((resolve) =>
+    dialog.replace(
+      () => (
+        <DialogSelect<RecoveryScopeChoice>
+          title={title}
+          options={recoveryScopeOptions(sessions)}
+          onSelect={(option) => {
+            if (option.value.type !== "continue") return
+            resolve(true)
+          }}
+        />
+      ),
+      () => resolve(false),
     ),
   )
 }
@@ -174,6 +220,14 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
 
   const restoreMissing = async () => {
     if (resolution.status !== "missing_local_target") return
+    if (
+      !(await reviewRecoveryScope(
+        dialog,
+        `Restore target for ${resolution.referencedSessionIDs.length} Sessions`,
+        await affectedSessionDetails(sdk, resolution.referencedSessionIDs),
+      ))
+    )
+      return
     const registry = await sdk.client.v2.target.list({ throwOnError: true })
     const draft: TargetDefinition = {
       id: resolution.missingTargetID,
@@ -214,6 +268,14 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
     // binding that appeared after it was opened; the user must review the new
     // resolution or use the separately gated force-rebind workflow.
     if (!portableTargetIsUnbound(bindings.data.bindings, resolution.portableTargetLabel)) return reopen()
+    if (
+      !(await reviewRecoveryScope(
+        dialog,
+        `Bind target for ${resolution.referencedSessionIDs.length} Sessions`,
+        await affectedSessionDetails(sdk, resolution.referencedSessionIDs),
+      ))
+    )
+      return
     const choice = await select<string>(dialog, `Bind ${resolution.portableTargetLabel}`, [
       ...targets.data.targets.map((target) => ({
         title: target.name,
@@ -280,7 +342,7 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
             description: `Restore its identity for ${resolution.referencedSessionIDs.length} Sessions`,
             value: "restore" as const,
           },
-          ...(kv.get(SESSION_FORCE_REBIND_SETTING, false)
+          ...(allowsRecoveryRebind(resolution, kv.get(SESSION_FORCE_REBIND_SETTING, false))
             ? [
                 {
                   title: "Rebind this Session…",
@@ -298,7 +360,7 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
             description: `${resolution.referencedSessionIDs.length} Sessions will be validated before binding`,
             value: "bind" as const,
           },
-          ...(kv.get(SESSION_FORCE_REBIND_SETTING, false)
+          ...(allowsRecoveryRebind(resolution, kv.get(SESSION_FORCE_REBIND_SETTING, false))
             ? [
                 {
                   title: "Rebind this Session…",
@@ -317,10 +379,30 @@ export function DialogSessionLocationRecovery(props: { sessionID: string; resolu
             description: `Repair ${resolution.target.name} without creating a duplicate`,
             value: "edit" as const,
           },
+          ...(allowsRecoveryRebind(resolution, kv.get(SESSION_FORCE_REBIND_SETTING, false))
+            ? [
+                {
+                  title: "Rebind this Session…",
+                  description: "Experimental · not recommended · changes only this Session",
+                  value: "rebind" as const,
+                },
+              ]
+            : []),
         ]
       : []),
     ...(resolution.status === "resolution_failed"
-      ? [{ title: "Retry validation", description: resolution.message, value: "retry" as const }]
+      ? [
+          { title: "Retry validation", description: resolution.message, value: "retry" as const },
+          ...(allowsRecoveryRebind(resolution, kv.get(SESSION_FORCE_REBIND_SETTING, false))
+            ? [
+                {
+                  title: "Rebind this Session…",
+                  description: "Experimental · not recommended · changes only this Session",
+                  value: "rebind" as const,
+                },
+              ]
+            : []),
+        ]
       : []),
   ]
 

@@ -45,6 +45,8 @@ import { SessionLocationAccess } from "./session/location-access"
 import { SessionLocationMutation } from "./session/location-mutation"
 import { SyncSetup } from "./sync/setup"
 import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
+import { FileSystem } from "./filesystem"
+import { SessionLocationRuntime } from "./session/location-runtime"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -221,6 +223,7 @@ const layer = Layer.effect(
     const locations = yield* LocationServiceMap.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const locationMutation = yield* SessionLocationMutation.Service
+    const locationRuntime = yield* SessionLocationRuntime.Service
     const activity = yield* SessionActivity.Service
     const locationAccess = yield* SessionLocationAccess.Service
     const requireLocation = Effect.fn("V2Session.requireLocation")(function* (sessionID: SessionSchema.ID) {
@@ -371,9 +374,26 @@ const layer = Layer.effect(
               if (blockers.length)
                 return yield* new LocationRebindError({ message: `Session is not idle: ${blockers.join(", ")}` })
 
-              // Materializing every Location-scoped service validates the candidate without
-              // mutating Session state. The scoped lease is released if validation fails.
-              yield* Effect.scoped(locations.contextEffect(input.destination))
+              // Materialize the candidate and prove its root can actually be used before
+              // committing. Service construction alone does not reject a missing local path.
+              yield* Effect.scoped(
+                Effect.gen(function* () {
+                  const context = yield* locations.contextEffect(input.destination)
+                  const filesystem = Context.get(context, FileSystem.Service)
+                  const status = yield* filesystem.directoryStatus(RelativePath.make("."))
+                  if (status.status === "missing")
+                    return yield* new LocationRebindError({ message: "Destination directory does not exist" })
+                  if (status.status === "not-directory")
+                    return yield* new LocationRebindError({ message: "Destination path is not a directory" })
+                  // Listing is the least invasive cross-provider access check and catches
+                  // unreadable local directories as well as Rexd filesystem denial.
+                  yield* filesystem.list({ path: RelativePath.make(".") })
+                }),
+              ).pipe(
+                Effect.catchDefect(
+                  () => new LocationRebindError({ message: "Destination directory is not accessible" }),
+                ),
+              )
               const current = yield* store.get(input.sessionID)
               if (!current) return yield* new NotFoundError({ sessionID: input.sessionID })
               if (current.locationRevision !== input.expectedRevision)
@@ -396,6 +416,13 @@ const layer = Layer.effect(
                 Effect.catch((cause) =>
                   Effect.sync(() => {
                     warnings.push(`Old Location cleanup failed: ${String(cause)}`)
+                  }),
+                ),
+              )
+              yield* locationRuntime.rebound(input.sessionID).pipe(
+                Effect.catch((cause) =>
+                  Effect.sync(() => {
+                    warnings.push(`Location runtime reset failed: ${String(cause)}`)
                   }),
                 ),
               )
@@ -677,6 +704,7 @@ export const node = makeGlobalNode({
     SessionActivity.node,
     SessionLocationAccess.node,
     SessionLocationMutation.node,
+    SessionLocationRuntime.node,
     SyncSetup.node,
   ],
 })

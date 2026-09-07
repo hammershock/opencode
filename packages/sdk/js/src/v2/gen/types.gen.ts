@@ -19,6 +19,7 @@ export type Event =
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
   | EventSessionNextMoved
+  | EventSessionNextLocationRebound
   | EventSessionNextPrompted
   | EventSessionNextPromptAdmitted
   | EventSessionNextContextUpdated
@@ -858,6 +859,17 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.location.rebound"
+        properties: {
+          timestamp: number
+          sessionID: string
+          previous: LocationRef
+          location: LocationRef
+          revision: number
+        }
+      }
+    | {
+        id: string
         type: "session.next.prompted"
         properties: {
           timestamp: number
@@ -1619,6 +1631,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
     | SyncEventSessionNextMoved
+    | SyncEventSessionNextLocationRebound
     | SyncEventSessionNextPrompted
     | SyncEventSessionNextPromptAdmitted
     | SyncEventSessionNextContextUpdated
@@ -2822,6 +2835,7 @@ export type SessionDurableEvent =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextLocationRebound
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -2949,6 +2963,7 @@ export type V2Event =
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
+  | SessionNextLocationRebound
   | SessionNextPrompted
   | SessionNextPromptAdmitted
   | SessionNextContextUpdated
@@ -3446,6 +3461,24 @@ export type SyncEventSessionNextMoved = {
       sessionID: string
       location: LocationRef
       subdirectory?: string
+    }
+  }
+}
+
+export type SyncEventSessionNextLocationRebound = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.location.rebound.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      previous: LocationRef
+      location: LocationRef
+      revision: number
     }
   }
 }
@@ -4326,6 +4359,27 @@ export type SessionNextMoved = {
     sessionID: string
     location: LocationRef
     subdirectory?: string
+  }
+}
+
+export type SessionNextLocationRebound = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.location.rebound"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    previous: LocationRef
+    location: LocationRef
+    revision: number
   }
 }
 
@@ -6558,6 +6612,18 @@ export type EventSessionNextMoved = {
     sessionID: string
     location: LocationRef
     subdirectory?: string
+  }
+}
+
+export type EventSessionNextLocationRebound = {
+  id: string
+  type: "session.next.location.rebound"
+  properties: {
+    timestamp: number
+    sessionID: string
+    previous: LocationRef
+    location: LocationRef
+    revision: number
   }
 }
 

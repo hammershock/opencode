@@ -837,6 +837,35 @@ export type SessionsHistoryOutput = {
     | {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.location.rebound"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly previous: {
+            readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+            readonly directory: string
+            readonly workspaceID?: string
+            readonly lastKnownTargetName?: string
+          }
+          readonly location: {
+            readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+            readonly directory: string
+            readonly workspaceID?: string
+            readonly lastKnownTargetName?: string
+          }
+          readonly revision: number
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
         readonly type: "session.next.prompted"
         readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
         readonly location?: {
@@ -1435,6 +1464,35 @@ export type SessionsEventsOutput =
           readonly lastKnownTargetName?: string
         }
         readonly subdirectory?: string
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.location.rebound"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly previous: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly location: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly revision: number
       }
     }
   | {

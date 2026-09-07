@@ -101,6 +101,11 @@ import { DialogSessionLocationRecovery } from "../../component/dialog-session-lo
 import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
 import { useSyncSettings } from "../../context/sync-settings"
 import { adaptKeymapCommands, adaptServerCommands } from "../../command-toolkit/upstream"
+import {
+  sessionLocationNoticeKey,
+  sessionLocationNoticeText,
+  type SessionLocationNotice,
+} from "../../util/session-location-notice"
 
 addDefaultParsers(parsers.parsers)
 
@@ -215,6 +220,9 @@ export function Session() {
   const { theme } = useTheme()
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID))
+  const locationNoticeKey = sessionLocationNoticeKey(route.sessionID)
+  const locationNotice = createMemo(() => kv.get(locationNoticeKey) as SessionLocationNotice | null | undefined)
+  const dismissLocationNotice = () => kv.set(locationNoticeKey, null)
   const location = createMemo(() => {
     const current = session()
     return current
@@ -393,6 +401,7 @@ export function Session() {
   let seeded = false
   let scroll: ScrollBoxRenderable
   let prompt: PromptRef | undefined
+  const [shellCompletionGeneration, setShellCompletionGeneration] = createSignal(0)
   const bind = (r: PromptRef | undefined) => {
     prompt = r
     promptRef.set(r)
@@ -400,6 +409,10 @@ export function Session() {
     seeded = true
     r.set(route.prompt)
   }
+  event.on("session.next.location.rebound", (evt) => {
+    if (evt.properties.sessionID !== route.sessionID) return
+    setShellCompletionGeneration((value) => value + 1)
+  })
   const keymap = useOpencodeKeymap()
   const upstreamCommandEntries = useKeymapSelector((value) =>
     value.getCommandEntries({ visibility: "reachable", namespace: "palette" }),
@@ -1508,6 +1521,25 @@ export function Session() {
                     </text>
                   </box>
                 </Show>
+                <Show when={locationNotice()}>
+                  {(notice) => (
+                    <box
+                      flexDirection="row"
+                      justifyContent="space-between"
+                      paddingLeft={2}
+                      paddingRight={2}
+                      paddingTop={1}
+                      paddingBottom={1}
+                      border={["top"]}
+                      borderColor={theme.warning}
+                    >
+                      <text fg={theme.warning}>{sessionLocationNoticeText(notice())}</text>
+                      <text fg={theme.textMuted} onMouseUp={dismissLocationNotice}>
+                        dismiss
+                      </text>
+                    </box>
+                  )}
+                </Show>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt
                     request={permissions()[0]}
@@ -1538,9 +1570,11 @@ export function Session() {
                       ref={bind}
                       disabled={disabled()}
                       commandHost={coreCommandHost()}
+                      shellCompletionGeneration={shellCompletionGeneration()}
                       onSubmit={() => {
                         toBottom()
                       }}
+                      onPromptSubmit={dismissLocationNotice}
                       sessionID={route.sessionID}
                       right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
                     />

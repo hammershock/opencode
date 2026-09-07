@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import path from "path"
+import { chmod, mkdir } from "node:fs/promises"
 import { Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { asc, eq } from "drizzle-orm"
@@ -21,6 +22,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionEvent } from "@opencode-ai/core/session/event"
+import { SessionLocationRuntime } from "@opencode-ai/core/session/location-runtime"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { SessionMessage } from "@opencode-ai/core/session/message"
@@ -38,7 +40,14 @@ const projects = Layer.succeed(
 )
 const it = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([Database.node, EventV2.node, SessionProjector.node, SessionStore.node, SessionV2.node]),
+    LayerNode.group([
+      Database.node,
+      EventV2.node,
+      SessionProjector.node,
+      SessionStore.node,
+      SessionLocationRuntime.node,
+      SessionV2.node,
+    ]),
     [
       [ProjectV2.node, projects],
       [SessionExecution.node, SessionExecution.noopLayer],
@@ -90,6 +99,9 @@ describe("SessionV2.create", () => {
   it.effect("rebinds an unresolved Session without materializing its old Location", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
+      const locationRuntime = yield* SessionLocationRuntime.Service
+      const reset: string[] = []
+      yield* locationRuntime.register((sessionID) => Effect.sync(() => reset.push(sessionID)))
       const created = yield* session.create({
         location: Location.Ref.make({
           target: { type: "rexd", targetID: Location.TargetID.make("22222222-2222-4222-8222-222222222222") },
@@ -106,6 +118,69 @@ describe("SessionV2.create", () => {
         }),
       ).toMatchObject({ status: "rebound", revision: created.locationRevision + 1 })
       expect((yield* session.get(created.id)).location).toEqual(destination)
+      expect(reset).toEqual([created.id])
+    }),
+  )
+
+  it.effect("rejects missing and non-directory local rebind destinations before commit", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const session = yield* SessionV2.Service
+      const created = yield* session.create({
+        location: Location.Ref.make({
+          target: { type: "rexd", targetID: Location.TargetID.make("33333333-3333-4333-8333-333333333333") },
+          directory: AbsolutePath.make("/historical/worktree"),
+        }),
+      })
+      const destinations = [path.join(tmp.path, "missing"), path.join(tmp.path, "file")]
+      yield* Effect.promise(() => Bun.write(destinations[1], "not a directory"))
+
+      for (const destination of destinations) {
+        const error = yield* session
+          .rebindLocation({
+            sessionID: created.id,
+            expectedRevision: created.locationRevision,
+            destination: Location.Ref.make({ directory: AbsolutePath.make(destination) }),
+          })
+          .pipe(Effect.flip)
+        expect(error).toBeInstanceOf(SessionV2.LocationRebindError)
+        expect((yield* session.get(created.id)).locationRevision).toBe(created.locationRevision)
+      }
+    }),
+  )
+
+  it.effect("rejects an inaccessible local rebind destination before commit", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const locked = path.join(tmp.path, "locked")
+      yield* Effect.promise(() => mkdir(locked))
+      yield* Effect.acquireRelease(
+        Effect.promise(() => chmod(locked, 0)),
+        () => Effect.promise(() => chmod(locked, 0o700)),
+      )
+      const session = yield* SessionV2.Service
+      const created = yield* session.create({
+        location: Location.Ref.make({
+          target: { type: "rexd", targetID: Location.TargetID.make("44444444-4444-4444-8444-444444444444") },
+          directory: AbsolutePath.make("/historical/worktree"),
+        }),
+      })
+      const error = yield* session
+        .rebindLocation({
+          sessionID: created.id,
+          expectedRevision: created.locationRevision,
+          destination: Location.Ref.make({ directory: AbsolutePath.make(locked) }),
+        })
+        .pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(SessionV2.LocationRebindError)
+      expect((yield* session.get(created.id)).locationRevision).toBe(created.locationRevision)
     }),
   )
 

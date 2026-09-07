@@ -2,6 +2,7 @@ import { Cause, Context, Duration, Effect, Layer } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
 import type { SessionSchema } from "@opencode-ai/core/session/schema"
+import { SessionLocationRuntime } from "@opencode-ai/core/session/location-runtime"
 
 export * as UserShellRuntime from "./user-shell-runtime"
 
@@ -212,7 +213,8 @@ export const layer = Layer.effect(
     )
 
     const reset = Effect.fn("UserShellRuntime.reset")(function* (sessionID: string) {
-      if (states.delete(sessionID)) generation++
+      states.delete(sessionID)
+      generation++
     })
 
     const disable = Effect.sync(() => {
@@ -221,8 +223,16 @@ export const layer = Layer.effect(
       generation++
     })
 
-    return Service.of({ current, execute, complete, reset, disable })
+    const service = Service.of({ current, execute, complete, reset, disable })
+    const locationRuntime = yield* SessionLocationRuntime.Service
+    yield* locationRuntime.register((sessionID) => reset(sessionID))
+
+    return service
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer, deps: [SessionActivity.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer,
+  deps: [SessionActivity.node, SessionLocationRuntime.node],
+})

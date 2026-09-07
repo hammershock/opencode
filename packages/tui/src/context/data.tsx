@@ -164,6 +164,18 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         }
         case "session.next.prompt.admitted":
           break
+        case "session.next.location.rebound":
+          setStore("session", "info", event.data.sessionID, (session) =>
+            session
+              ? {
+                  ...session,
+                  location: event.data.location,
+                  locationRevision: event.data.revision,
+                  time: { ...session.time, updated: event.data.timestamp },
+                }
+              : session,
+          )
+          break
         case "session.next.context.updated":
           message.update(event.data.sessionID, (draft) => {
             message.prepend(draft, {

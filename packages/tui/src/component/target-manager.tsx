@@ -10,21 +10,30 @@ import { useTheme } from "../context/theme"
 
 export type TargetHealthState = "checking" | "ready" | "unavailable" | "invalid"
 
+export function targetHealthLabel(state: TargetHealthState) {
+  return {
+    checking: "◐ checking",
+    ready: "● ready",
+    unavailable: "! unavailable",
+    invalid: "! invalid",
+  }[state]
+}
+
 export function TargetHealth(props: { state: TargetHealthState }) {
   const { theme } = useTheme()
   return (
     <Switch>
       <Match when={props.state === "checking"}>
-        <span style={{ fg: theme.warning }}>◐ checking</span>
+        <span style={{ fg: theme.warning }}>{targetHealthLabel(props.state)}</span>
       </Match>
       <Match when={props.state === "ready"}>
-        <span style={{ fg: theme.success }}>● ready</span>
+        <span style={{ fg: theme.success }}>{targetHealthLabel(props.state)}</span>
       </Match>
       <Match when={props.state === "unavailable"}>
-        <span style={{ fg: theme.error }}>● unavailable</span>
+        <span style={{ fg: theme.error }}>{targetHealthLabel(props.state)}</span>
       </Match>
       <Match when={props.state === "invalid"}>
-        <span style={{ fg: theme.error }}>● invalid</span>
+        <span style={{ fg: theme.error }}>{targetHealthLabel(props.state)}</span>
       </Match>
     </Switch>
   )
@@ -133,7 +142,7 @@ export function useTargetManager() {
             const confirmed = await DialogConfirm.show(
               dialog,
               "Remove target",
-              `Remove ${target.name} globally? Referencing Sessions are preserved as unresolved.`,
+              `Remove ${target.name} from this device? Referencing Sessions are preserved as unresolved.`,
             )
             if (!confirmed || !targets()) return
             await sdk.client.v2.target.remove(

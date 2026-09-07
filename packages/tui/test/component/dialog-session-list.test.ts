@@ -53,11 +53,12 @@ describe("dialog session list", () => {
   })
 
   test("labels every metadata-first availability state", () => {
-    expect(syncAvailabilityLabel("metadata-only")).toContain("not downloaded")
-    expect(syncAvailabilityLabel("hydrating")).toContain("downloading")
-    expect(syncAvailabilityLabel("partial")).toContain("retry")
-    expect(syncAvailabilityLabel("conflict")).toContain("conflict")
-    expect(syncAvailabilityLabel("unresolved")).toContain("binding")
+    expect(syncAvailabilityLabel("metadata-only")).toBe("◐ metadata-only")
+    expect(syncAvailabilityLabel("hydrating")).toBe("◐ hydrating")
+    expect(syncAvailabilityLabel("ready")).toBe("● ready")
+    expect(syncAvailabilityLabel("partial")).toBe("! partial")
+    expect(syncAvailabilityLabel("conflict")).toBe("! conflict")
+    expect(syncAvailabilityLabel("unresolved")).toBe("! unresolved")
   })
 
   test("tabs between fixed filter rows and arrows change only the focused value", () => {

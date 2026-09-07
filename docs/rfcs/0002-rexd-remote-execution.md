@@ -423,7 +423,7 @@ v1 managed install 支持 Linux `x86_64`、Linux `arm64`，以及能够通过 SS
 以下条件全部满足后，本 RFC 才能标记为 `implemented`：
 
 1. QuickStart 可以选择 local 或已配置 target，并完成远端目录补全、验证和原子 Session 创建；整个流程不依赖 `/target`，失败时保留尚未提交的 prompt。
-2. QuickStart 可以通过 Core/Server API 新增、编辑、测试、重命名和移除 target；TUI 不直接读写配置或执行 SSH，保存未验证配置需要明确确认。
+2. QuickStart 可以通过 Core/Server API 新增、编辑、测试、重命名和移除 target；TUI 不直接读写配置或执行 SSH。保存不需要预先确认，验证失败时保留配置并展示实际错误；未验证 target 不能创建 Session。
 3. Session 持久数据只包含设备本地不可变 target ID 和规范化 directory，显示名称、连接配置与运行时 Rexd session 不进入 Session 或同步数据。
 4. managed daemon 的支持平台安装、已安装复用、并发准备、checksum 失败和 unsupported platform 均有测试。
 5. 握手强制检查 protocol、server version、`exec`、`fs`、`events`、`pty`、limits 和 workspace roots。

@@ -55,6 +55,10 @@ export class ConflictError extends Error {
   override readonly name = "SyncState.ConflictError"
 }
 
+export class IncompatibleLocalStateError extends Error {
+  override readonly name = "SyncState.IncompatibleLocalStateError"
+}
+
 export function empty(deviceName: string, deviceID: string = crypto.randomUUID()): State {
   if (!deviceName.trim()) throw new Error("Device name is required")
   return {
@@ -127,7 +131,16 @@ export function make(configDirectory: string) {
       if (cause.code === "ENOENT") return undefined
       throw cause
     })
-    return value ? Schema.decodeUnknownSync(State)(JSON.parse(value)) : undefined
+    if (!value) return undefined
+    const decoded: unknown = JSON.parse(value)
+    if (
+      decoded !== null &&
+      typeof decoded === "object" &&
+      Object.hasOwn(decoded, "version") &&
+      (decoded as { version?: unknown }).version !== 2
+    )
+      throw new IncompatibleLocalStateError("Unsupported local sync state version")
+    return Schema.decodeUnknownSync(State)(decoded)
   }
   const write = async (next: State, expectedRevision?: number) => {
     const current = await read()

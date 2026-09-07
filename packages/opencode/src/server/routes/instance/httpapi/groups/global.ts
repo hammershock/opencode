@@ -96,6 +96,7 @@ const SyncEnabledInput = Schema.Struct({ enabled: Schema.Boolean })
 const SyncIntervalInput = Schema.Struct({ intervalSeconds: SyncState.IntervalSeconds })
 
 export const SyncMissingAppMessage = BaiduAuth.MISSING_APP_MESSAGE
+export const SyncIncompatibleLocalStateMessage = SyncSetup.INCOMPATIBLE_LOCAL_STATE_MESSAGE
 
 export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("SyncSetupApiError")(
   {
@@ -104,6 +105,10 @@ export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("Syn
       Schema.Struct({
         kind: Schema.Literal("missing-app"),
         message: Schema.Literal(SyncMissingAppMessage),
+      }),
+      Schema.Struct({
+        kind: Schema.Literal("incompatible-local-state"),
+        message: Schema.Literal(SyncIncompatibleLocalStateMessage),
       }),
       Schema.Struct({
         kind: Schema.Literal("bad-request"),
@@ -175,7 +180,7 @@ export const GlobalApi = HttpApi.make("global").add(
       ),
       HttpApiEndpoint.get("syncState", GlobalPaths.syncState, {
         success: Schema.NullOr(SyncState.State),
-        error: HttpApiError.ServiceUnavailable,
+        error: SyncSetupApiError,
       }),
       HttpApiEndpoint.post("syncInitialize", GlobalPaths.syncInitialize, {
         payload: SyncInitializeInput,

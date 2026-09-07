@@ -36,6 +36,9 @@ export const JoinInput = Schema.Struct({
 })
 export type JoinInput = typeof JoinInput.Type
 
+export const INCOMPATIBLE_LOCAL_STATE_MESSAGE =
+  "Local sync state is incompatible. Archive the local sync folder and restart opencode-rexd."
+
 export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetupError", {
   kind: Schema.Literals([
     "uninitialized",
@@ -44,6 +47,7 @@ export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetup
     "invalid",
     "oauth",
     "missing-app",
+    "incompatible-local-state",
     "remote",
     "storage",
     "locked",
@@ -337,7 +341,12 @@ function update(store: ReturnType<typeof SyncState.make>, change: (current: Sync
 function effect<A>(kind: SetupError["kind"], run: () => Promise<A>) {
   return Effect.tryPromise({
     try: run,
-    catch: (cause) => (cause instanceof SetupError ? cause : new SetupError({ kind })),
+    catch: (cause) =>
+      cause instanceof SetupError
+        ? cause
+        : cause instanceof SyncState.IncompatibleLocalStateError
+          ? new SetupError({ kind: "incompatible-local-state" })
+          : new SetupError({ kind }),
   })
 }
 function authEffect<A>(run: () => Promise<A>) {

@@ -2,6 +2,7 @@ import { createSignal, onCleanup, onMount } from "solid-js"
 import type { GlobalSyncDiscoverResponse } from "@opencode-ai/sdk/v2"
 import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
+import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { hostname } from "node:os"
 import openBrowser from "open"
 import { createSimpleContext } from "./helper"
@@ -41,9 +42,19 @@ export function unassignedFingerprint(spaceID: string, sessionIDs: readonly stri
 }
 
 const MISSING_APP_MESSAGE = BaiduAuth.MISSING_APP_MESSAGE
+const INCOMPATIBLE_LOCAL_STATE_MESSAGE = SyncSetup.INCOMPATIBLE_LOCAL_STATE_MESSAGE
 
 export function syncOperationFailure(error: unknown) {
-  return hasMissingApp(error, 0) ? MISSING_APP_MESSAGE : "Sync operation failed"
+  if (hasMissingApp(error, 0)) return MISSING_APP_MESSAGE
+  if (hasSetupKind(error, "incompatible-local-state", 0)) return INCOMPATIBLE_LOCAL_STATE_MESSAGE
+  return "Sync operation failed"
+}
+
+function hasSetupKind(value: unknown, kind: string, depth: number): boolean {
+  if (depth > 4 || !value || typeof value !== "object") return false
+  const record = value as Record<string, unknown>
+  if (record.kind === kind || record.code === kind) return true
+  return [record.data, record.error, record.cause, record.body].some((item) => hasSetupKind(item, kind, depth + 1))
 }
 
 function hasMissingApp(value: unknown, depth: number): boolean {
@@ -127,17 +138,25 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     onCleanup(() => loopback?.close())
 
     const refresh = async (discover = false, notify = false) => {
-      const state = await sdk.client.global.syncState({ throwOnError: true }).then(
-        (result) => result.data,
-        () => undefined,
+      const stateResult = await sdk.client.global.syncState({ throwOnError: true }).then(
+        (result) => ({ state: result.data, error: undefined }),
+        (error) => ({ state: undefined, error }),
       )
+      const state = stateResult.state
       const status = await sdk.client.global.syncStatus({ throwOnError: true }).then(
         (result) => result.data,
         () => undefined,
       )
       if (!state) {
-        setModel((current) => ({ ...initial, account: current.account, state: status ? "attention" : "off" }))
-        if (!status && notify) toast.show({ message: "Sync status is unavailable", variant: "warning" })
+        const detail = stateResult.error ? syncOperationFailure(stateResult.error) : undefined
+        setModel((current) => ({
+          ...initial,
+          account: current.account,
+          state: detail || status ? "attention" : "off",
+          detail,
+        }))
+        if (notify && (detail || !status))
+          toast.show({ message: detail ?? "Sync status is unavailable", variant: "warning" })
         return
       }
       const authenticated = Boolean(status?.authenticated)

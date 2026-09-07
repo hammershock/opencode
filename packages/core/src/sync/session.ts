@@ -46,6 +46,23 @@ export function capture(store: SyncEventStore.Interface, payload: DurablePayload
   )
 }
 
+/** Resolves durable Session ownership before selecting a space-scoped outbox. */
+export function captureOwned(
+  ownership: Pick<SyncOwnership.Interface, "assign" | "get">,
+  store: SyncEventStore.Interface,
+  payload: DurablePayload,
+  createdAt = Date.now(),
+) {
+  return Effect.gen(function* () {
+    if (!payload.durable) return
+    const createdSpaceID = sessionCreatedSpace(payload)
+    if (createdSpaceID) yield* ownership.assign(payload.durable.aggregateID, createdSpaceID, createdAt)
+    const owned = createdSpaceID ? { spaceID: createdSpaceID } : yield* ownership.get(payload.durable.aggregateID)
+    if (!owned) return
+    yield* capture(store.scope(owned.spaceID), payload, createdAt)
+  })
+}
+
 /** Converts an event to the compact attachment-aware wire representation. */
 export async function externalize(
   event: SyncEvent.Envelope,
@@ -222,17 +239,7 @@ export const captureLayer = Layer.effectDiscard(
       discard: true,
     })
     yield* events.all().pipe(
-      Stream.runForEach((event) =>
-        Effect.gen(function* () {
-          const payload = event as DurablePayload
-          if (!payload.durable) return
-          const createdSpaceID = sessionCreatedSpace(payload)
-          if (createdSpaceID) yield* ownership.assign(payload.durable.aggregateID, createdSpaceID, Date.now())
-          const owned = createdSpaceID ? { spaceID: createdSpaceID } : yield* ownership.get(payload.durable.aggregateID)
-          if (!owned) return
-          yield* capture(store.scope(owned.spaceID), payload)
-        }),
-      ),
+      Stream.runForEach((event) => captureOwned(ownership, store, event as DurablePayload)),
       Effect.forkScoped,
     )
   }),

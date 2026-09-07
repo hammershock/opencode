@@ -5,6 +5,40 @@ import { SyncEvent } from "@opencode-ai/core/sync/event"
 import { SessionSync } from "@opencode-ai/core/sync/session"
 
 describe("SessionSync", () => {
+  test("routes only owned Session events to their original space", async () => {
+    const spaces: string[] = []
+    const enqueued: string[] = []
+    const ownership = new Map<string, string>()
+    const store = {
+      scope: (spaceID: string) => {
+        spaces.push(spaceID)
+        return store
+      },
+      enqueue: (event: SyncEvent.Envelope) => Effect.sync(() => void enqueued.push(event.aggregateID)),
+      delete: () => Effect.void,
+    } as any
+    const owner = {
+      assign: (sessionID: string, spaceID: string) => Effect.sync(() => void ownership.set(sessionID, spaceID)),
+      get: (sessionID: string) =>
+        Effect.succeed(ownership.get(sessionID) ? { spaceID: ownership.get(sessionID)! } : undefined),
+    }
+    const event = (sessionID: string, type: string, data: Record<string, unknown>) => ({
+      id: `${sessionID}-${type}`,
+      type,
+      durable: { aggregateID: sessionID, seq: type === "session.created" ? 0 : 1, version: 1 },
+      data,
+    })
+
+    await Effect.runPromise(
+      SessionSync.captureOwned(owner as any, store, event("owned", "session.created", { info: { syncSpaceID: "a" } })),
+    )
+    await Effect.runPromise(SessionSync.captureOwned(owner as any, store, event("owned", "session.updated", {})))
+    await Effect.runPromise(SessionSync.captureOwned(owner as any, store, event("local", "session.updated", {})))
+
+    expect(spaces).toEqual(["a", "a"])
+    expect(enqueued).toEqual(["owned", "owned"])
+  })
+
   test("captures ordinary durable events and maps deletion to a permanent tombstone", async () => {
     const calls: unknown[] = []
     const store = {

@@ -11,6 +11,7 @@ const version = `${pkg.version}-rexd.${commit.slice(0, 12)}${dirty ? ".dirty" : 
 
 process.env.OPENCODE_VERSION = version
 process.env.OPENCODE_CHANNEL = "rexd"
+process.env.OPENCODE_PLUGIN_VERSION = pkg.version
 
 await import("./build.ts")
 
@@ -31,6 +32,7 @@ await Promise.all(
         {
           entrypoint: "opencode-rexd",
           version,
+          pluginVersion: pkg.version,
           commit,
           dirty,
           builtAt: new Date().toISOString(),

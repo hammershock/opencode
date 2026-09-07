@@ -185,13 +185,17 @@ describe("global HttpApi", () => {
     }),
   )
 
-  it.live("does not expose the obsolete reuse-legacy or reset routes", () =>
+  it.live("does not expose obsolete setup or duplicate target-binding routes", () =>
     Effect.gen(function* () {
       const responses = yield* Effect.all([
         HttpClientRequest.post("/global/sync/setup/reuse-legacy").pipe(HttpClient.execute),
         HttpClientRequest.post("/global/sync/reset").pipe(HttpClient.execute),
+        HttpClientRequest.patch("/global/sync/bindings").pipe(
+          HttpClientRequest.bodyJsonUnsafe({ label: "lab", targetID: "device-local-target" }),
+          HttpClient.execute,
+        ),
       ])
-      expect(responses.map((response) => response.status)).toEqual([404, 404])
+      expect(responses.map((response) => response.status)).toEqual([404, 404, 404])
     }),
   )
 

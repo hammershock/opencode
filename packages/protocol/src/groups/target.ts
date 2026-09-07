@@ -47,6 +47,22 @@ export const TargetGroup = HttpApiGroup.make("server.target")
     ),
   )
   .add(
+    HttpApiEndpoint.delete("target.unbindPortable", "/api/target-binding/:portableTargetLabel", {
+      params: { portableTargetLabel: Schema.String },
+      payload: Schema.Struct({
+        expectedRevision: Schema.String,
+        expectedSessionIDs: Schema.Array(SessionID),
+      }),
+      success: SessionLocationRebinding.PortableBindingSnapshot,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({
+        identifier: "v2.targetBinding.unbind",
+        summary: "Explicitly unbind a portable target label",
+      }),
+    ),
+  )
+  .add(
     HttpApiEndpoint.post("target.rebindSession", "/api/session/:sessionID/location/rebind", {
       params: { sessionID: SessionID },
       payload: SessionLocationRebinding.RebindInput,

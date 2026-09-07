@@ -1873,6 +1873,7 @@ export function Prompt(props: PromptProps) {
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
+        shellMutation={cursorVersion()}
       />
     </>
   )

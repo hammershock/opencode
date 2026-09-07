@@ -352,11 +352,25 @@ function DialogProviderUsageDetails(props: { providerID: string; providerName: s
   )
 }
 
-function DialogProviderUsage(props: { providerID: string; meters: Meter[] }) {
+export type ProviderUsagePreferenceStore = {
+  selected(providerID: string, available: string[]): string[]
+  saved(providerID: string): string[] | undefined
+  set(providerID: string, ids: string[]): void
+}
+
+export function DialogProviderUsage(props: { providerID: string; meters: Meter[] }) {
   const local = useLocal()
+  return <DialogProviderUsagePreferences {...props} usage={local.model.usage} />
+}
+
+export function DialogProviderUsagePreferences(props: {
+  providerID: string
+  meters: Meter[]
+  usage: ProviderUsagePreferenceStore
+}) {
   const available = () => orderedMeters(props.meters).map((meter) => meter.id)
-  const selected = () => local.model.usage.selected(props.providerID, available())
-  const order = () => local.model.usage.saved(props.providerID) ?? available()
+  const selected = () => props.usage.selected(props.providerID, available())
+  const order = () => props.usage.saved(props.providerID) ?? available()
   const options = () =>
     props.meters
       .toSorted((a, b) => {
@@ -375,18 +389,18 @@ function DialogProviderUsage(props: { providerID: string; meters: Meter[] }) {
       }))
 
   function toggle(id: string) {
-    const saved = local.model.usage.saved(props.providerID) ?? available()
-    local.model.usage.set(props.providerID, saved.includes(id) ? saved.filter((item) => item !== id) : [...saved, id])
+    const saved = props.usage.saved(props.providerID) ?? available()
+    props.usage.set(props.providerID, saved.includes(id) ? saved.filter((item) => item !== id) : [...saved, id])
   }
 
   function move(id: string, direction: -1 | 1) {
-    const saved = [...(local.model.usage.saved(props.providerID) ?? available())]
+    const saved = [...(props.usage.saved(props.providerID) ?? available())]
     const index = saved.indexOf(id)
     if (index === -1) return
     const next = Math.max(0, Math.min(saved.length - 1, index + direction))
     saved.splice(index, 1)
     saved.splice(next, 0, id)
-    local.model.usage.set(props.providerID, saved)
+    props.usage.set(props.providerID, saved)
   }
 
   return (

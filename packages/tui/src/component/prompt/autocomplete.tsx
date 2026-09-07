@@ -84,6 +84,30 @@ export type AutocompleteOption = {
   path?: string
 }
 
+export function createShellCompletionGeneration() {
+  let value = 0
+  return {
+    begin() {
+      return ++value
+    },
+    invalidate() {
+      value++
+    },
+    accepts(generation: number) {
+      return generation === value
+    },
+  }
+}
+
+export function invalidateShellCompletion(
+  generation: ReturnType<typeof createShellCompletionGeneration>,
+  visible: AutocompleteRef["visible"],
+  hide: () => void,
+) {
+  generation.invalidate()
+  if (visible === "shell") hide()
+}
+
 export function Autocomplete(props: {
   value: string
   shell: () => boolean
@@ -96,6 +120,7 @@ export function Autocomplete(props: {
   fileStyleId: number
   agentStyleId: number
   promptPartTypeId: () => number
+  shellMutation: number
 }) {
   const editor = useEditorContext()
   const sdk = useSDK()
@@ -117,7 +142,13 @@ export function Autocomplete(props: {
     input: "keyboard" as "keyboard" | "mouse",
   })
   const [shellOptions, setShellOptions] = createSignal<AutocompleteOption[]>([])
-  let shellGeneration = 0
+  const shellGeneration = createShellCompletionGeneration()
+
+  createEffect(() => {
+    props.shellMutation
+    if (!props.shell()) return
+    invalidateShellCompletion(shellGeneration, store.visible, hide)
+  })
 
   const [positionTick, setPositionTick] = createSignal(0)
 
@@ -693,7 +724,7 @@ export function Autocomplete(props: {
       async completeShell() {
         if (!props.sessionID) return
         const input = props.input()
-        const generation = ++shellGeneration
+        const generation = shellGeneration.begin()
         const current = location()
         const result = await sdk.client.session
           .shellCompletion(
@@ -708,7 +739,7 @@ export function Autocomplete(props: {
           )
           .then((response) => response.data)
           .catch(() => undefined)
-        if (!result || generation !== shellGeneration || result.stale) return
+        if (!result || !shellGeneration.accepts(generation) || result.stale) return
         const apply = (candidate: (typeof result.candidates)[number]) => {
           const before = input.plainText.slice(0, Number(candidate.replacement.start))
           input.setText(before + candidate.value + input.plainText.slice(Number(candidate.replacement.end)))
@@ -734,6 +765,7 @@ export function Autocomplete(props: {
       },
       onInput(value) {
         if (props.shell()) {
+          invalidateShellCompletion(shellGeneration, store.visible, hide)
           if (store.visible && store.visible !== "shell") hide()
           return
         }

@@ -94,12 +94,12 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     const badSetup = <A>(effect: Effect.Effect<A, SyncSetup.SetupError>) =>
       effect.pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
 
-    const getSyncSetup = Effect.fn("GlobalHttpApi.syncSetup")(function* () {
-      const [current, legacy] = yield* Effect.all([syncSetup.config(), syncSetup.inspectLegacy()]).pipe(
+    const getSyncState = Effect.fn("GlobalHttpApi.syncState")(() =>
+      syncSetup.state().pipe(
+        Effect.map((state) => state ?? null),
         Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
-      )
-      return { config: current, legacy }
-    })
+      ),
+    )
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
       const method = yield* installation.method()
@@ -130,51 +130,61 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return HttpServerResponse.jsonUnsafe(result)
     })
 
-    return handlers
-      .handle("health", health)
-      .handleRaw("event", event)
-      .handle("configGet", configGet)
-      .handle("configUpdate", configUpdate)
-      .handle("syncSetup", getSyncSetup)
-      .handle("syncAuthorize", (ctx) => badSetup(syncSetup.begin(ctx.payload)))
-      .handle("syncComplete", (ctx) => badSetup(syncSetup.complete(ctx.payload)))
-      .handle("syncReuseLegacy", (ctx) => badSetup(syncSetup.reuseLegacy(ctx.payload)))
-      .handle("syncEnabled", (ctx) =>
-        syncControl.enable(ctx.payload.enabled).pipe(
-          Effect.andThen(syncSetup.config()),
-          Effect.flatMap((config) => (config ? Effect.succeed(config) : Effect.fail(new HttpApiError.BadRequest({})))),
-          Effect.mapError(() => new HttpApiError.BadRequest({})),
-        ),
-      )
-      .handle("syncStatus", () =>
-        syncControl.status().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncNow", () =>
-        syncControl.now().pipe(
-          Effect.as(true),
-          Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
-        ),
-      )
-      .handle("syncSessions", () =>
-        syncControl.sessions().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncHydrate", (ctx) =>
-        syncControl.hydrate(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncDevices", () =>
-        syncControl.devices().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncDeviceUpdate", (ctx) =>
-        syncControl.updateDevice(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
-      )
-      .handle("syncBindingUpdate", (ctx) =>
-        syncControl.updateBinding(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
-      )
-      .handle("syncRecoveryExport", () =>
-        syncControl.exportKey().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
-      .handle("syncReset", () => badSetup(syncSetup.reset()))
-      .handle("dispose", dispose)
-      .handle("upgrade", upgrade)
+    return (
+      handlers
+        .handle("health", health)
+        .handleRaw("event", event)
+        .handle("configGet", configGet)
+        .handle("configUpdate", configUpdate)
+        .handle("syncState", getSyncState)
+        .handle("syncInitialize", (ctx) => badSetup(syncSetup.initialize(ctx.payload.deviceName)))
+        .handle("syncOAuthBegin", (ctx) => badSetup(syncSetup.begin(ctx.payload)))
+        .handle("syncOAuthComplete", (ctx) => badSetup(syncSetup.complete(ctx.payload)))
+        .handle("syncOAuthSwitchAccount", (ctx) => badSetup(syncSetup.switchAccount(ctx.payload)))
+        .handle("syncLogout", () => badSetup(syncSetup.logout()))
+        .handle("syncDiscover", () =>
+          syncSetup.discover().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+        )
+        .handle("syncCreate", (ctx) => badSetup(syncSetup.create(ctx.payload)))
+        .handle("syncJoin", (ctx) => badSetup(syncSetup.join(ctx.payload)))
+        .handle("syncActivate", (ctx) => badSetup(syncSetup.activate(ctx.payload.namespaceID)))
+        // SyncSetup currently leaves the active space. The HTTP payload already
+        // carries the intended space so SyncControl can enforce/unassign it when
+        // its lifecycle wrapper lands.
+        .handle("syncLeave", () => badSetup(syncSetup.leave()))
+        .handle("syncEnabled", (ctx) => badSetup(syncSetup.setEnabled(ctx.payload.enabled)))
+        .handle("syncInterval", (ctx) => badSetup(syncSetup.setInterval(ctx.payload.intervalSeconds)))
+        .handle("syncDelete", (ctx) => badSetup(syncSetup.deleteSpace(ctx.params.namespaceID)))
+        .handle("syncRemove", () => badSetup(syncSetup.removeFromDevice()))
+        .handle("syncStatus", () =>
+          syncControl.status().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+        )
+        .handle("syncNow", () =>
+          syncControl.now().pipe(
+            Effect.as(true),
+            Effect.mapError(() => new HttpApiError.ServiceUnavailable({})),
+          ),
+        )
+        .handle("syncSessions", () =>
+          syncControl.sessions().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+        )
+        .handle("syncHydrate", (ctx) =>
+          syncControl.hydrate(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+        )
+        .handle("syncDevices", () =>
+          syncControl.devices().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+        )
+        .handle("syncDeviceUpdate", (ctx) =>
+          syncControl.updateDevice(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
+        )
+        .handle("syncBindingUpdate", (ctx) =>
+          syncControl.updateBinding(ctx.payload).pipe(Effect.mapError(() => new HttpApiError.BadRequest({}))),
+        )
+        .handle("syncRecoveryExport", () =>
+          syncControl.exportKey().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
+        )
+        .handle("dispose", dispose)
+        .handle("upgrade", upgrade)
+    )
   }),
 )

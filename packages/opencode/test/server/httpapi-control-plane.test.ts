@@ -42,8 +42,7 @@ const apiLayer = HttpRouter.serve(
   Layer.provide(Layer.mock(Config.Service)({})),
   Layer.provide(
     Layer.mock(SyncSetup.Service)({
-      config: () => Effect.succeed(undefined),
-      inspectLegacy: () => Effect.succeed({ available: false }),
+      state: () => Effect.succeed(undefined),
     }),
   ),
   Layer.provide(

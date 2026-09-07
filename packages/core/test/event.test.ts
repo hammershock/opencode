@@ -1122,4 +1122,20 @@ describe("EventV2", () => {
       expect(received[0]?.data).toEqual(durableData(aggregateID, "replayed"))
     }),
   )
+
+  it.effect("pruneBefore retains the latest durable marker and aggregate identity", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const aggregateID = Session.ID.create()
+      yield* events.publish(DurableMessage, durableData(aggregateID, "content"))
+      const marker = yield* events.publish(DurableMessage, durableData(aggregateID, "deleted"))
+      yield* events.pruneBefore(aggregateID, marker.durable!.seq)
+
+      const history = yield* events.durable({ aggregateID }).pipe(Stream.take(1), Stream.runCollect)
+      expect(Array.from(history).map((event) => (event.data as { messageID: string }).messageID)).toEqual([
+        SessionV1.MessageID.ascending("msg_deleted"),
+      ])
+      expect(yield* EventV2.latestSequence((yield* Database.Service).db, aggregateID)).toBe(marker.durable!.seq)
+    }),
+  )
 })

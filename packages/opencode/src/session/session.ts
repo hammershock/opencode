@@ -640,8 +640,10 @@ const layer: Layer.Layer<
           yield* remove(child.id)
         }
 
-        yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session })
-        yield* events.remove(sessionID)
+        const deleted = yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session })
+        // Retain the minimal durable deletion marker until sync capture can
+        // recover it after a process crash. Older content events are removed.
+        if (deleted.durable) yield* events.pruneBefore(sessionID, deleted.durable.seq)
       } catch (error) {
         yield* Effect.logError("failed to remove session", { sessionID, error })
       }

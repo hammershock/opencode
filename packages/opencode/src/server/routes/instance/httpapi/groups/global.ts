@@ -111,6 +111,7 @@ export const GlobalPaths = {
   syncSpaceActivate: "/global/sync/spaces/activate",
   syncSpaceLeave: "/global/sync/spaces/leave",
   syncSpaceDelete: "/global/sync/spaces/:namespaceID",
+  syncUnassigned: "/global/sync/unassigned",
   syncEnabled: "/global/sync/enabled",
   syncInterval: "/global/sync/interval",
   syncRemove: "/global/sync/device",
@@ -196,13 +197,13 @@ export const GlobalApi = HttpApi.make("global").add(
         error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.post("syncActivate", GlobalPaths.syncSpaceActivate, {
-        payload: SyncNamespaceInput,
-        success: SyncState.State,
+        payload: SyncControl.SwitchInput,
+        success: SyncControl.SwitchResult,
         error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.post("syncLeave", GlobalPaths.syncSpaceLeave, {
         payload: SyncNamespaceInput,
-        success: SyncState.State,
+        success: Schema.Array(Schema.NonEmptyString),
         error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.patch("syncEnabled", GlobalPaths.syncEnabled, {
@@ -217,10 +218,19 @@ export const GlobalApi = HttpApi.make("global").add(
       }),
       HttpApiEndpoint.delete("syncDelete", GlobalPaths.syncSpaceDelete, {
         params: SyncNamespaceInput,
-        success: Schema.NonEmptyString,
+        success: Schema.Array(Schema.NonEmptyString),
         error: HttpApiError.BadRequest,
       }),
       HttpApiEndpoint.delete("syncRemove", GlobalPaths.syncRemove, {
+        success: Schema.Array(Schema.NonEmptyString),
+        error: HttpApiError.BadRequest,
+      }),
+      HttpApiEndpoint.get("syncUnassigned", GlobalPaths.syncUnassigned, {
+        success: Schema.Array(Schema.NonEmptyString),
+        error: HttpApiError.ServiceUnavailable,
+      }),
+      HttpApiEndpoint.post("syncAssignUnassigned", GlobalPaths.syncUnassigned, {
+        payload: SyncControl.AssignInput,
         success: Schema.Array(Schema.NonEmptyString),
         error: HttpApiError.BadRequest,
       }),

@@ -95,10 +95,33 @@ const apiLayer = HttpRouter.serve(
     Layer.mock(SyncControl.Service)({
       status: () =>
         Effect.succeed(
-          SyncControl.Status.make({ configured: false, enabled: false, locked: false, outbox: 0, cursors: {} }),
+          SyncControl.Status.make({
+            configured: false,
+            initialized: false,
+            authenticated: false,
+            enabled: false,
+            locked: false,
+            outbox: 0,
+            cursors: {},
+          }),
         ),
       sessions: () => Effect.succeed([remoteSession]),
       hydrate: (input) => Effect.succeed(SyncControl.HydrateResult.make({ ...input, availability: "ready" })),
+      switchAccount: () => Effect.succeed(syncState),
+      logout: () => Effect.void,
+      switchSpace: (input) =>
+        Effect.succeed(
+          input.namespaceID === "blocked"
+            ? SyncControl.SwitchResult.make({ status: "blocked", reason: "pending-outbox", outbox: 2 })
+            : SyncControl.SwitchResult.make({ status: "switched", namespaceID: input.namespaceID }),
+        ),
+      leaveSpace: () => Effect.succeed(["session-a"]),
+      enable: () => Effect.void,
+      setInterval: () => Effect.void,
+      deleteSpace: () => Effect.succeed(["session-a"]),
+      removeFromDevice: () => Effect.succeed(["session-a"]),
+      unassigned: () => Effect.succeed(["session-unassigned"]),
+      assignUnassigned: (input) => Effect.succeed(input.sessionIDs),
     }),
   ),
   Layer.provide(
@@ -152,6 +175,10 @@ describe("global HttpApi", () => {
         ),
         HttpClientRequest.delete(GlobalPaths.syncSpaceDelete.replace(":namespaceID", descriptor.namespaceID)),
         HttpClientRequest.delete(GlobalPaths.syncRemove),
+        HttpClientRequest.get(GlobalPaths.syncUnassigned),
+        HttpClientRequest.post(GlobalPaths.syncUnassigned).pipe(
+          HttpClientRequest.bodyJsonUnsafe({ sessionIDs: ["session-unassigned"] }),
+        ),
       ]
       const responses = yield* Effect.all(requests.map((request) => request.pipe(HttpClient.execute)))
       expect(responses.map((response) => response.status)).toEqual(Array.from({ length: requests.length }, () => 200))
@@ -168,12 +195,36 @@ describe("global HttpApi", () => {
     }),
   )
 
+  it.live("returns a typed pending-outbox switch result and an explicit unassigned snapshot", () =>
+    Effect.gen(function* () {
+      const blocked = yield* HttpClientRequest.post(GlobalPaths.syncSpaceActivate).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ namespaceID: "blocked" }),
+        HttpClient.execute,
+      )
+      expect(blocked.status).toBe(200)
+      expect(yield* blocked.json).toEqual({ status: "blocked", reason: "pending-outbox", outbox: 2 })
+
+      const snapshot = yield* HttpClientRequest.get(GlobalPaths.syncUnassigned).pipe(HttpClient.execute)
+      expect(snapshot.status).toBe(200)
+      expect(yield* snapshot.json).toEqual(["session-unassigned"])
+
+      const assigned = yield* HttpClientRequest.post(GlobalPaths.syncUnassigned).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ sessionIDs: ["session-unassigned"] }),
+        HttpClient.execute,
+      )
+      expect(assigned.status).toBe(200)
+      expect(yield* assigned.json).toEqual(["session-unassigned"])
+    }),
+  )
+
   it.live("reports redacted sync control status", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.get(GlobalPaths.syncStatus).pipe(HttpClient.execute)
       expect(response.status).toBe(200)
       expect(yield* response.json).toEqual({
         configured: false,
+        initialized: false,
+        authenticated: false,
         enabled: false,
         locked: false,
         outbox: 0,

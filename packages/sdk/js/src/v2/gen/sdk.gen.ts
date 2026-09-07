@@ -89,6 +89,8 @@ import type {
   GlobalHealthResponses,
   GlobalSyncActivateErrors,
   GlobalSyncActivateResponses,
+  GlobalSyncAssignUnassignedErrors,
+  GlobalSyncAssignUnassignedResponses,
   GlobalSyncBindingUpdateErrors,
   GlobalSyncBindingUpdateResponses,
   GlobalSyncCreateErrors,
@@ -133,6 +135,8 @@ import type {
   GlobalSyncStateResponses,
   GlobalSyncStatusErrors,
   GlobalSyncStatusResponses,
+  GlobalSyncUnassignedErrors,
+  GlobalSyncUnassignedResponses,
   GlobalUpgradeErrors,
   GlobalUpgradeResponses,
   InstanceDisposeErrors,
@@ -1659,10 +1663,21 @@ export class Global extends HeyApiClient {
   public syncActivate<ThrowOnError extends boolean = false>(
     parameters?: {
       namespaceID?: string
+      force?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ) {
-    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "namespaceID" }] }])
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "namespaceID" },
+            { in: "body", key: "force" },
+          ],
+        },
+      ],
+    )
     return (options?.client ?? this.client).post<GlobalSyncActivateResponses, GlobalSyncActivateErrors, ThrowOnError>({
       url: "/global/sync/spaces/activate",
       ...options,
@@ -1750,6 +1765,37 @@ export class Global extends HeyApiClient {
     return (options?.client ?? this.client).delete<GlobalSyncRemoveResponses, GlobalSyncRemoveErrors, ThrowOnError>({
       url: "/global/sync/device",
       ...options,
+    })
+  }
+
+  public syncUnassigned<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalSyncUnassignedResponses,
+      GlobalSyncUnassignedErrors,
+      ThrowOnError
+    >({ url: "/global/sync/unassigned", ...options })
+  }
+
+  public syncAssignUnassigned<ThrowOnError extends boolean = false>(
+    parameters?: {
+      sessionIDs?: Array<string>
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "body", key: "sessionIDs" }] }])
+    return (options?.client ?? this.client).post<
+      GlobalSyncAssignUnassignedResponses,
+      GlobalSyncAssignUnassignedErrors,
+      ThrowOnError
+    >({
+      url: "/global/sync/unassigned",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

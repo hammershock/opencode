@@ -83,6 +83,23 @@ export const PtyGroup = HttpApiGroup.make("server.pty")
       ),
   )
   .add(
+    HttpApiEndpoint.post("pty.restart", "/api/pty/:ptyID/restart", {
+      params: { ptyID: Pty.ID },
+      query: LocationQuery,
+      payload: Pty.RestartInput,
+      success: Location.response(Pty.Info),
+      error: [PtyNotFoundError, InvalidRequestError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.pty.restart",
+          summary: "Restart PTY session",
+          description: "Replace a running PTY session using the current Location environment generation.",
+        }),
+      ),
+  )
+  .add(
     HttpApiEndpoint.delete("pty.remove", "/api/pty/:ptyID", {
       params: { ptyID: Pty.ID },
       query: LocationQuery,

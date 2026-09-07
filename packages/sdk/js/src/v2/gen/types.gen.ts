@@ -11007,6 +11007,42 @@ export type PtyUpdateResponses = {
 
 export type PtyUpdateResponse = PtyUpdateResponses[keyof PtyUpdateResponses]
 
+export type PtyRestartData = {
+  body?: {
+    sessionID?: string
+  }
+  path: {
+    ptyID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/pty/{ptyID}/restart"
+}
+
+export type PtyRestartErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * PtyNotFoundError
+   */
+  404: PtyNotFoundError
+}
+
+export type PtyRestartError = PtyRestartErrors[keyof PtyRestartErrors]
+
+export type PtyRestartResponses = {
+  /**
+   * Restarted session
+   */
+  200: Pty
+}
+
+export type PtyRestartResponse = PtyRestartResponses[keyof PtyRestartResponses]
+
 export type PtyConnectTokenData = {
   body?: never
   path: {
@@ -15314,6 +15350,52 @@ export type V2PtyUpdateResponses = {
 }
 
 export type V2PtyUpdateResponse = V2PtyUpdateResponses[keyof V2PtyUpdateResponses]
+
+export type V2PtyRestartData = {
+  body: {
+    sessionID?: string
+  }
+  path: {
+    ptyID: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+  }
+  url: "/api/pty/{ptyID}/restart"
+}
+
+export type V2PtyRestartErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * PtyNotFoundError
+   */
+  404: PtyNotFoundError
+}
+
+export type V2PtyRestartError = V2PtyRestartErrors[keyof V2PtyRestartErrors]
+
+export type V2PtyRestartResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: Pty
+  }
+}
+
+export type V2PtyRestartResponse = V2PtyRestartResponses[keyof V2PtyRestartResponses]
 
 export type V2PtyConnectTokenData = {
   body?: never

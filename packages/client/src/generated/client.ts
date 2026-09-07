@@ -98,6 +98,8 @@ import type {
   PtysGetOutput,
   PtysUpdateInput,
   PtysUpdateOutput,
+  PtysRestartInput,
+  PtysRestartOutput,
   PtysRemoveInput,
   PtysRemoveOutput,
   QuestionsListRequestsInput,
@@ -937,6 +939,19 @@ export function make(options: ClientOptions) {
             body: { title: input["title"], size: input["size"] },
             successStatus: 200,
             declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      restart: (input: PtysRestartInput, requestOptions?: RequestOptions) =>
+        request<PtysRestartOutput>(
+          {
+            method: "POST",
+            path: `/api/pty/${encodeURIComponent(input.ptyID)}/restart`,
+            query: { location: input["location"] },
+            body: { sessionID: input["sessionID"] },
+            successStatus: 200,
+            declaredStatuses: [404, 400, 401],
             empty: false,
           },
           requestOptions,

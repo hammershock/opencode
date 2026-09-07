@@ -7,10 +7,12 @@ import { Tabs } from "@opencode-ai/ui/tabs"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Icon } from "@opencode-ai/ui/icon"
 import { MenuV2 } from "@opencode-ai/ui/v2/menu-v2"
+import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { isDefaultTitle as isDefaultTerminalTitle } from "@/context/terminal-title"
 import { useTerminal, type LocalPTY } from "@/context/terminal"
 import { useLanguage } from "@/context/language"
 import { focusTerminalById } from "@/pages/session/helpers"
+import { showToast } from "@/utils/toast"
 
 export function SortableTerminalTabV2(props: {
   terminal: LocalPTY
@@ -62,6 +64,19 @@ export function SortableTerminalTabV2(props: {
       props.onClose?.()
     }
   }
+
+  const restart = (event?: Event) => {
+    event?.stopPropagation()
+    event?.preventDefault()
+    void terminal.restart(props.terminal.id).catch(() =>
+      showToast({
+        title: language.t("terminal.restart.failed"),
+        variant: "error",
+      }),
+    )
+  }
+
+  const stale = () => props.terminal.environmentStale === true
 
   const focus = () => {
     if (store.editing) return
@@ -163,8 +178,11 @@ export function SortableTerminalTabV2(props: {
                 />
               }
             >
-              <span onDblClick={edit} classList={{ invisible: store.editing }}>
-                {label()}
+              <span class="flex items-center gap-1" onDblClick={edit} classList={{ invisible: store.editing }}>
+                <span>{label()}</span>
+                <Show when={stale()}>
+                  <Icon name="warning" size="small" aria-label={language.t("terminal.restart.stale")} />
+                </Show>
               </span>
             </Tabs.Trigger>
             <Show when={store.editing}>
@@ -200,6 +218,12 @@ export function SortableTerminalTabV2(props: {
                     <Icon name="edit" class="w-4 h-4 mr-2" />
                     {language.t("common.rename")}
                   </DropdownMenu.Item>
+                  <Show when={stale()}>
+                    <DropdownMenu.Item onSelect={() => restart()} disabled={terminal.restarting(props.terminal.id)}>
+                      <Icon name="warning" class="w-4 h-4 mr-2" />
+                      {language.t("terminal.restart")}
+                    </DropdownMenu.Item>
+                  </Show>
                   <DropdownMenu.Item onSelect={close}>
                     <Icon name="close" class="w-4 h-4 mr-2" />
                     {language.t("common.close")}
@@ -241,12 +265,22 @@ export function SortableTerminalTabV2(props: {
               onMiddleClick={close}
             >
               <span
-                class="truncate"
+                class="truncate flex items-center gap-1"
                 data-slot="terminal-tab-title"
                 onDblClick={edit}
                 classList={{ invisible: store.editing }}
               >
-                {label()}
+                <span class="truncate">{label()}</span>
+                <Show when={stale()}>
+                  <TooltipV2 value={language.t("terminal.restart.stale")} placement="bottom">
+                    <Icon
+                      name="warning"
+                      size="small"
+                      class="shrink-0 text-icon-warning-base"
+                      aria-label={language.t("terminal.restart.stale")}
+                    />
+                  </TooltipV2>
+                </Show>
               </span>
             </Tabs.Trigger>
             <Show when={store.editing}>
@@ -274,6 +308,11 @@ export function SortableTerminalTabV2(props: {
               }}
             >
               <MenuV2.Item onSelect={() => (editRequested = true)}>{language.t("common.rename")}</MenuV2.Item>
+              <Show when={stale()}>
+                <MenuV2.Item onSelect={() => restart()} disabled={terminal.restarting(props.terminal.id)}>
+                  {language.t("terminal.restart")}
+                </MenuV2.Item>
+              </Show>
               <MenuV2.Item onSelect={close}>{language.t("common.close")}</MenuV2.Item>
             </MenuV2.Context.Content>
           </MenuV2.Context.Portal>

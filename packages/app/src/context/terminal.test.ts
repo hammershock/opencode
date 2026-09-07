@@ -5,6 +5,7 @@ let getWorkspaceTerminalCacheKey: typeof import("./terminal").getWorkspaceTermin
 let getLegacyTerminalStorageKeys: (dir: string, legacySessionID?: string) => string[]
 let migrateTerminalState: (value: unknown) => unknown
 let terminalAdmission: typeof import("./terminal").terminalAdmission
+let restartedTerminal: typeof import("./terminal").restartedTerminal
 
 beforeAll(async () => {
   mock.module("@solidjs/router", () => ({
@@ -24,6 +25,7 @@ beforeAll(async () => {
   getLegacyTerminalStorageKeys = mod.getLegacyTerminalStorageKeys
   migrateTerminalState = mod.migrateTerminalState
   terminalAdmission = mod.terminalAdmission
+  restartedTerminal = mod.restartedTerminal
 })
 
 describe("terminalAdmission", () => {
@@ -98,6 +100,71 @@ describe("migrateTerminalState", () => {
         { id: "one", title: "Terminal 1", titleNumber: 1 },
         { id: "two", title: "shell", titleNumber: 7 },
       ],
+    })
+  })
+
+  test("preserves environment metadata while migrating persisted terminals", () => {
+    expect(
+      migrateTerminalState({
+        active: "one",
+        all: [
+          {
+            id: "one",
+            title: "shell",
+            environmentGeneration: 4,
+            environmentStale: true,
+          },
+        ],
+      }),
+    ).toEqual({
+      active: "one",
+      all: [
+        {
+          id: "one",
+          title: "shell",
+          titleNumber: 0,
+          environmentGeneration: 4,
+          environmentStale: true,
+        },
+      ],
+    })
+  })
+})
+
+describe("restartedTerminal", () => {
+  test("preserves tab presentation and replaces stale process state", () => {
+    expect(
+      restartedTerminal(
+        {
+          id: "old",
+          title: "server",
+          titleNumber: 3,
+          rows: 24,
+          cols: 80,
+          buffer: "old output",
+          cursor: 10,
+          scrollY: 2,
+          environmentGeneration: 1,
+          environmentStale: true,
+        },
+        {
+          id: "new",
+          title: "server",
+          environmentGeneration: 2,
+          environmentStale: false,
+        },
+      ),
+    ).toEqual({
+      id: "new",
+      title: "server",
+      titleNumber: 3,
+      rows: 24,
+      cols: 80,
+      buffer: undefined,
+      cursor: undefined,
+      scrollY: undefined,
+      environmentGeneration: 2,
+      environmentStale: false,
     })
   })
 })

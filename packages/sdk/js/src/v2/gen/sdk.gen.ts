@@ -214,6 +214,8 @@ import type {
   PtyListResponses,
   PtyRemoveErrors,
   PtyRemoveResponses,
+  PtyRestartErrors,
+  PtyRestartResponses,
   PtyShellsErrors,
   PtyShellsResponses,
   PtyUpdateErrors,
@@ -393,6 +395,8 @@ import type {
   V2PtyListResponses,
   V2PtyRemoveErrors,
   V2PtyRemoveResponses,
+  V2PtyRestartErrors,
+  V2PtyRestartResponses,
   V2PtyUpdateErrors,
   V2PtyUpdateResponses,
   V2QuestionRequestListErrors,
@@ -3452,6 +3456,45 @@ export class Pty extends HeyApiClient {
     )
     return (options?.client ?? this.client).put<PtyUpdateResponses, PtyUpdateErrors, ThrowOnError>({
       url: "/pty/{ptyID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Restart PTY session
+   *
+   * Replace a running pseudo-terminal (PTY) session using the current Location environment generation.
+   */
+  public restart<ThrowOnError extends boolean = false>(
+    parameters: {
+      ptyID: string
+      directory?: string
+      workspace?: string
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "ptyID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<PtyRestartResponses, PtyRestartErrors, ThrowOnError>({
+      url: "/pty/{ptyID}/restart",
       ...options,
       ...params,
       headers: {
@@ -7472,6 +7515,47 @@ export class Pty2 extends HeyApiClient {
     )
     return (options?.client ?? this.client).put<V2PtyUpdateResponses, V2PtyUpdateErrors, ThrowOnError>({
       url: "/api/pty/{ptyID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Restart PTY session
+   *
+   * Replace a running PTY session using the current Location environment generation.
+   */
+  public restart<ThrowOnError extends boolean = false>(
+    parameters: {
+      ptyID: string
+      location?: {
+        directory?: string
+        workspace?: string
+        target?: string
+      }
+      sessionID?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "ptyID" },
+            { in: "query", key: "location" },
+            { in: "body", key: "sessionID" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<V2PtyRestartResponses, V2PtyRestartErrors, ThrowOnError>({
+      url: "/api/pty/{ptyID}/restart",
       ...options,
       ...params,
       headers: {

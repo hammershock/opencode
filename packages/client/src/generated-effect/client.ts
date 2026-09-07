@@ -602,12 +602,25 @@ const Endpoint14_3 = (raw: RawClient["server.pty"]) => (input: Endpoint14_3Input
     payload: { title: input["title"], size: input["size"] },
   }).pipe(Effect.mapError(mapClientError))
 
-type Endpoint14_4Request = Parameters<RawClient["server.pty"]["pty.remove"]>[0]
+type Endpoint14_4Request = Parameters<RawClient["server.pty"]["pty.restart"]>[0]
 type Endpoint14_4Input = {
   readonly ptyID: Endpoint14_4Request["params"]["ptyID"]
   readonly location?: Endpoint14_4Request["query"]["location"]
+  readonly sessionID?: Endpoint14_4Request["payload"]["sessionID"]
 }
 const Endpoint14_4 = (raw: RawClient["server.pty"]) => (input: Endpoint14_4Input) =>
+  raw["pty.restart"]({
+    params: { ptyID: input["ptyID"] },
+    query: { location: input["location"] },
+    payload: { sessionID: input["sessionID"] },
+  }).pipe(Effect.mapError(mapClientError))
+
+type Endpoint14_5Request = Parameters<RawClient["server.pty"]["pty.remove"]>[0]
+type Endpoint14_5Input = {
+  readonly ptyID: Endpoint14_5Request["params"]["ptyID"]
+  readonly location?: Endpoint14_5Request["query"]["location"]
+}
+const Endpoint14_5 = (raw: RawClient["server.pty"]) => (input: Endpoint14_5Input) =>
   raw["pty.remove"]({ params: { ptyID: input["ptyID"] }, query: { location: input["location"] } }).pipe(
     Effect.mapError(mapClientError),
   )
@@ -617,7 +630,8 @@ const adaptGroup14 = (raw: RawClient["server.pty"]) => ({
   create: Endpoint14_1(raw),
   get: Endpoint14_2(raw),
   update: Endpoint14_3(raw),
-  remove: Endpoint14_4(raw),
+  restart: Endpoint14_4(raw),
+  remove: Endpoint14_5(raw),
 })
 
 type Endpoint15_0Request = Parameters<RawClient["server.question"]["question.request.list"]>[0]

@@ -19,6 +19,8 @@ export type LocalPTY = {
   buffer?: string
   scrollY?: number
   cursor?: number
+  environmentGeneration?: number
+  environmentStale?: boolean
 }
 
 const WORKSPACE_KEY = "__workspace__"
@@ -36,11 +38,15 @@ function num(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
+function bool(value: unknown) {
+  return typeof value === "boolean" ? value : undefined
+}
+
 function numberFromTitle(title: string) {
   return titleNumber(title, MAX_TERMINAL_SESSIONS)
 }
 
-function pty(value: unknown): LocalPTY | undefined {
+function parseLocalPty(value: unknown): LocalPTY | undefined {
   if (!record(value)) return
 
   const id = text(value.id)
@@ -53,6 +59,8 @@ function pty(value: unknown): LocalPTY | undefined {
   const buffer = text(value.buffer)
   const scrollY = num(value.scrollY)
   const cursor = num(value.cursor)
+  const environmentGeneration = num(value.environmentGeneration)
+  const environmentStale = bool(value.environmentStale)
 
   return {
     id,
@@ -63,6 +71,8 @@ function pty(value: unknown): LocalPTY | undefined {
     ...(buffer !== undefined ? { buffer } : {}),
     ...(scrollY !== undefined ? { scrollY } : {}),
     ...(cursor !== undefined ? { cursor } : {}),
+    ...(environmentGeneration !== undefined ? { environmentGeneration } : {}),
+    ...(environmentStale !== undefined ? { environmentStale } : {}),
   }
 }
 
@@ -71,7 +81,7 @@ export function migrateTerminalState(value: unknown) {
 
   const seen = new Set<string>()
   const all = (Array.isArray(value.all) ? value.all : []).flatMap((item) => {
-    const next = pty(item)
+    const next = parseLocalPty(item)
     if (!next || seen.has(next.id)) return []
     seen.add(next.id)
     return [next]
@@ -82,6 +92,27 @@ export function migrateTerminalState(value: unknown) {
   return {
     active: active && seen.has(active) ? active : all[0]?.id,
     all,
+  }
+}
+
+export function restartedTerminal(
+  previous: LocalPTY,
+  next: {
+    id: string
+    title?: string
+    environmentGeneration?: number
+    environmentStale?: boolean
+  },
+): LocalPTY {
+  return {
+    ...previous,
+    id: next.id,
+    title: next.title ?? previous.title,
+    environmentGeneration: next.environmentGeneration,
+    environmentStale: next.environmentStale,
+    buffer: undefined,
+    cursor: undefined,
+    scrollY: undefined,
   }
 }
 
@@ -172,6 +203,7 @@ function createWorkspaceTerminalSession(
   )
   const [ui, setUi] = createStore({
     focus: undefined as { request: number; id?: string; pending: boolean } | undefined,
+    restarting: {} as Record<string, boolean>,
   })
   const focus = { request: 0 }
 
@@ -247,6 +279,39 @@ function createWorkspaceTerminalSession(
   })
   onCleanup(unsub)
 
+  const applyEnvironmentMetadata = (info: {
+    id: string
+    environmentGeneration?: number
+    environmentStale?: boolean
+  }) => {
+    const index = store.all.findIndex((item) => item.id === info.id)
+    if (index === -1) return
+    setStore("all", index, {
+      environmentGeneration: info.environmentGeneration,
+      environmentStale: info.environmentStale,
+    })
+  }
+
+  const unsubUpdated = sdk.event.on(
+    "pty.updated",
+    (event: {
+      properties: {
+        info: { id: string; environmentGeneration?: number; environmentStale?: boolean }
+      }
+    }) => applyEnvironmentMetadata(event.properties.info),
+  )
+  onCleanup(unsubUpdated)
+
+  const refreshEnvironmentMetadata = async () => {
+    if (ready.promise) await ready.promise
+    const result = (await sdk.protocol) === "v1" ? await sdk.client.pty.list() : await sdk.api.pty.list({ location })
+    if (!Array.isArray(result.data)) return
+    for (const info of result.data) applyEnvironmentMetadata(info)
+  }
+  void refreshEnvironmentMetadata().catch((error: unknown) =>
+    console.error("Failed to refresh terminal metadata", error),
+  )
+
   const update = (pty: Partial<LocalPTY> & { id: string }) => {
     const index = store.all.findIndex((x) => x.id === pty.id)
     const previous = index >= 0 ? store.all[index] : undefined
@@ -302,6 +367,7 @@ function createWorkspaceTerminalSession(
       return undefined
     })
     if (!data?.id) return
+    const metadata = parseLocalPty(data)
 
     const active = store.active === pty.id
 
@@ -315,11 +381,49 @@ function createWorkspaceTerminalSession(
         scrollY: undefined,
         rows: undefined,
         cols: undefined,
+        environmentGeneration: metadata?.environmentGeneration,
+        environmentStale: metadata?.environmentStale,
       })
       if (active) {
         setStore("active", data.id)
       }
     })
+  }
+
+  const restart = async (id: string) => {
+    if (ui.restarting[id]) return
+    const index = store.all.findIndex((item) => item.id === id)
+    const previous = store.all[index]
+    if (!previous) return
+    setUi("restarting", id, true)
+    try {
+      const data = await (async () => {
+        if ((await sdk.protocol) === "v1") {
+          return (
+            await sdk.client.pty.restart({
+              ...terminalAdmission(getSessionID),
+              ptyID: id,
+            } as Parameters<typeof sdk.client.pty.restart>[0])
+          ).data
+        }
+        return (
+          await sdk.client.v2.pty.restart({
+            ...terminalAdmission(getSessionID),
+            ptyID: id,
+            location,
+          })
+        ).data?.data
+      })()
+      if (!data?.id) throw new Error("Restart did not return a replacement terminal")
+      const current = store.all.findIndex((item) => item.id === id)
+      if (current === -1) return
+      batch(() => {
+        setStore("all", current, restartedTerminal(previous, data))
+        if (store.active === id) setStore("active", data.id)
+      })
+    } finally {
+      setUi("restarting", id, false)
+    }
   }
 
   return {
@@ -391,6 +495,12 @@ function createWorkspaceTerminalSession(
     },
     async clone(id: string) {
       await clone(id)
+    },
+    async restart(id: string) {
+      await restart(id)
+    },
+    restarting(id: string) {
+      return ui.restarting[id] === true
     },
     bind() {
       return {
@@ -549,6 +659,8 @@ export const { use: useTerminal, provider: TerminalProvider } = createSimpleCont
       trim: (id: string) => workspace().trim(id),
       trimAll: () => workspace().trimAll(),
       clone: (id: string) => workspace().clone(id),
+      restart: (id: string) => workspace().restart(id),
+      restarting: (id: string) => workspace().restarting(id),
       bind: () => workspace(),
       open: (id: string) => workspace().open(id),
       requestFocus: (id?: string) => workspace().requestFocus(id),

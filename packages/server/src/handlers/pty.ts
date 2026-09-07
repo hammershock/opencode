@@ -126,6 +126,63 @@ export const PtyHandler = HttpApiBuilder.group(Api, "server.pty", (handlers) =>
         }),
       )
       .handle(
+        "pty.restart",
+        Effect.fn(function* (ctx) {
+          const restart = Effect.gen(function* () {
+            const pty = yield* Pty.Service
+            const location = yield* Location.Service
+            if (ctx.payload.sessionID) {
+              const resolution = yield* access
+                .require(ctx.payload.sessionID)
+                .pipe(
+                  Effect.mapError(
+                    () =>
+                      new InvalidRequestError({ message: "Session Location is unavailable", kind: "session_location" }),
+                  ),
+                )
+              if (!sameLocation(resolution, Location.Ref.make(location)))
+                return yield* new InvalidRequestError({
+                  message: "Session Location changed before terminal restart",
+                  kind: "session_location_changed",
+                })
+            }
+            const current = yield* pty.get(ctx.params.ptyID).pipe(
+              Effect.catchTag(
+                "Pty.NotFoundError",
+                () =>
+                  new PtyNotFoundError({
+                    ptyID: ctx.params.ptyID,
+                    message: `PTY session not found: ${ctx.params.ptyID}`,
+                  }),
+              ),
+            )
+            return yield* response(
+              pty
+                .restart(ctx.params.ptyID, {
+                  env: yield* environment.get({ directory: location.directory, cwd: current.cwd }),
+                })
+                .pipe(
+                  Effect.catchTags({
+                    "Pty.NotFoundError": () =>
+                      new PtyNotFoundError({
+                        ptyID: ctx.params.ptyID,
+                        message: `PTY session not found: ${ctx.params.ptyID}`,
+                      }),
+                    "Pty.ExitedError": () =>
+                      new PtyNotFoundError({
+                        ptyID: ctx.params.ptyID,
+                        message: `PTY session not found: ${ctx.params.ptyID}`,
+                      }),
+                  }),
+                ),
+            )
+          })
+          return yield* ctx.payload.sessionID
+            ? activity.withActivity(ctx.payload.sessionID, "session_mutation", restart)
+            : restart
+        }),
+      )
+      .handle(
         "pty.remove",
         Effect.fn(function* (ctx) {
           const pty = yield* Pty.Service

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect"
+import { Cause, Context, Duration, Effect, Layer } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
 import type { SessionSchema } from "@opencode-ai/core/session/schema"
@@ -15,7 +15,11 @@ export type Environment = Readonly<Record<string, string>>
 export type ExecuteResult = {
   readonly exitCode: number
   readonly finalCwd?: string
+  readonly timedOut?: true
 }
+
+export const EXECUTION_TIMEOUT = Duration.minutes(10)
+export const TIMEOUT_GUIDANCE = "Command timed out. Use Terminal panel for interactive commands."
 
 export type CompletionKind = "command" | "file" | "directory" | "alias" | "function" | "option" | "argument"
 
@@ -134,13 +138,22 @@ export const layer = Layer.effect(
           "user_shell",
           Effect.gen(function* () {
             const before = state(input)
-            const result = yield* input.provider.execute({
-              cwd: before.cwd,
-              command: input.command,
-              environment: input.environment,
-              signal: input.signal,
-              onOutput: input.onOutput,
-            })
+            const result = yield* input.provider
+              .execute({
+                cwd: before.cwd,
+                command: input.command,
+                environment: input.environment,
+                signal: input.signal,
+                onOutput: input.onOutput,
+              })
+              .pipe(
+                Effect.timeout(EXECUTION_TIMEOUT),
+                Effect.catch((error) =>
+                  Cause.isTimeoutError(error)
+                    ? Effect.succeed<ExecuteResult>({ exitCode: 124, timedOut: true })
+                    : Effect.fail(error),
+                ),
+              )
             if (!input.enabled || !result.finalCwd) return result
             const canonical = yield* input.provider.validateDirectory(result.finalCwd)
             const latest = states.get(input.sessionID)

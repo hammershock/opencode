@@ -6,7 +6,7 @@ import { RelativePath } from "@opencode-ai/core/schema"
 import { Duration, Effect } from "effect"
 import { Shell } from "@opencode-ai/core/shell"
 import { UserShellLocal } from "./user-shell-local"
-import type { CompletionCandidate, Provider } from "./user-shell-runtime"
+import { EXECUTION_TIMEOUT, type CompletionCandidate, type Provider } from "./user-shell-runtime"
 
 export const provider = Effect.gen(function* () {
   const process = yield* LocationProcess.Service
@@ -46,7 +46,7 @@ export function makeProvider(
         cwd: input.cwd,
         shell: "/bin/sh",
         env: input.environment,
-        timeout: Duration.minutes(10),
+        timeout: EXECUTION_TIMEOUT,
         maxOutputBytes: 8 * 1024 * 1024,
         signal: input.signal,
       })

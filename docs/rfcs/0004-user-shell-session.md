@@ -126,7 +126,9 @@ Location process contract 应返回独立的 `finalCwd` control result；该值�
 ## 中断、交互与清理
 
 - 每次命令都有独立 cancellation 与 timeout；触发后终止该命令的进程树并保留执行前 cwd。
+- v1 local 与 Rexd User Shell 共用十分钟的一次性执行上限；这是 User Shell runtime 的同一个 contract，不是 Agent tool 的通用 timeout。超时返回可识别结果、中断 provider，并不更新 cwd。
 - v1 User Shell stdin 在提交命令后不提供持续交互通道。需要密码、REPL、全屏 UI 或持续 stdin 的命令应在 Terminal panel 运行。
+- Shell mode 的状态区始终以简短文案标明交互命令应使用 Terminal panel；命令超时时，Session 结果也附加同样的引导。不通过命令名或 stderr 文本猜测某个程序是否需要 TTY。
 - 不支持 detached/background job 的生命周期承诺；一次性命令完成、取消或超时后，provider 必须尽力清理仍附着的子进程。
 - Shell launch 失败、Rexd 断线或 control result 缺失时，命令返回明确错误或不确定状态，绝不切换到 local Location。
 - 下一条命令可以重新创建一次性 Shell，不需要 reset 或重建持久进程。

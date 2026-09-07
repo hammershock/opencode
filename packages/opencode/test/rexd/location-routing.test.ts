@@ -3,7 +3,7 @@ import { FileSystem } from "@opencode-ai/core/filesystem"
 import { Location } from "@opencode-ai/core/location"
 import type { LocationProcess } from "@opencode-ai/core/location-process"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import { Context, Layer } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -19,6 +19,7 @@ import {
   readExecutionControl,
   wrapExecution,
 } from "../../src/session/user-shell-location"
+import { EXECUTION_TIMEOUT } from "../../src/session/user-shell-runtime"
 
 type Notify = (method: string, params: unknown) => void
 
@@ -235,10 +236,12 @@ describe("Rexd Location routing contract", () => {
 
   test("user shell delegates execution and completion to location services", async () => {
     const executed: string[] = []
+    let executionTimeout = 0
     const process = {
-      runShell: (command: string) =>
+      runShell: (command: string, options: { timeout: Duration.Duration }) =>
         Effect.sync(() => {
           executed.push(command)
+          executionTimeout = Duration.toMillis(options.timeout)
           const nonce = command.match(/opencode-cwd-([a-f0-9]+)/)?.[1]
           const output = nonce
             ? Buffer.from(`remote-shell\0opencode-cwd-${nonce}\0/workspace/child\0`)
@@ -290,6 +293,7 @@ describe("Rexd Location routing contract", () => {
     expect(executed).toHaveLength(1)
     expect(executed[0]).toContain("{ pwd")
     expect(executed[0]).toContain("pwd -P")
+    expect(executionTimeout).toBe(Duration.toMillis(EXECUTION_TIMEOUT))
     expect(output).toEqual(["remote-shell"])
     const completion = await Effect.runPromise(
       shell.complete({ input: "rem", cursor: 3, cwd: "/workspace", environment: {} }),

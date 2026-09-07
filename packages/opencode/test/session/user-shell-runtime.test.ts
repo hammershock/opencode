@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Deferred, Effect, Fiber, Layer } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 import { UserShellRuntime, type Provider } from "@/session/user-shell-runtime"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
@@ -16,7 +17,10 @@ function provider(input?: { finalCwd?: string; valid?: boolean }): Provider {
 
 function runtime<A, E>(effect: Effect.Effect<A, E, UserShellRuntime.Service>) {
   return Effect.runPromise(
-    effect.pipe(Effect.provide(UserShellRuntime.layer.pipe(Layer.provide(SessionActivity.layer)))),
+    effect.pipe(
+      Effect.provide(UserShellRuntime.layer.pipe(Layer.provide(SessionActivity.layer))),
+      Effect.provide(TestClock.layer()),
+    ),
   )
 }
 
@@ -153,4 +157,30 @@ describe("UserShellRuntime", () => {
       }).pipe(Effect.provide(UserShellRuntime.layer.pipe(Layer.provideMerge(SessionActivity.layer))), Effect.scoped),
     )
   })
+
+  test("bounds one-shot execution, interrupts the provider, and preserves cwd", () =>
+    runtime(
+      Effect.gen(function* () {
+        const service = yield* UserShellRuntime.Service
+        let interrupted = false
+        const blocking: Provider = {
+          ...provider(),
+          execute: () => Effect.never.pipe(Effect.onInterrupt(() => Effect.sync(() => (interrupted = true)))),
+        }
+        const execution = yield* service
+          .execute({
+            sessionID: "one",
+            location,
+            command: "interactive-command",
+            environment: {},
+            enabled: true,
+            provider: blocking,
+          })
+          .pipe(Effect.forkChild)
+        yield* TestClock.adjust(UserShellRuntime.EXECUTION_TIMEOUT)
+        expect(yield* Fiber.join(execution)).toEqual({ exitCode: 124, timedOut: true })
+        expect(interrupted).toBe(true)
+        expect(yield* service.current({ sessionID: "one", location, enabled: true })).toBe("/workspace")
+      }),
+    ))
 })

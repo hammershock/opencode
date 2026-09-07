@@ -477,7 +477,7 @@ export function RunFooterView(props: RunFooterViewProps) {
       return stateStatus()
     }
 
-    return shell() ? "Shell mode" : ""
+    return shell() ? "One-shot shell · interactive: Terminal" : ""
   })
   const activityMeta = createMemo(() => {
     if (!responsive().statusline.showActivityMeta || usage().length === 0) {

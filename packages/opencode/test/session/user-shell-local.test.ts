@@ -142,6 +142,29 @@ describe("UserShellLocal", () => {
   )
 
   it(
+    "keeps candidates beyond the eight-row TUI viewport",
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fs.makeTempDirectoryScoped()
+      yield* Effect.all(
+        Array.from({ length: 12 }, (_, index) =>
+          fs.writeFileString(path.join(root, `candidate-${String(index).padStart(2, "0")}`), ""),
+        ),
+      )
+      const result = yield* UserShellLocal.provider("/bin/sh", fs, spawner).complete({
+        cwd: root,
+        input: "cat candidate-",
+        cursor: 14,
+        environment: {},
+      })
+      expect(result.candidates).toHaveLength(12)
+      expect(result.candidates.at(8)?.value).toBe("candidate-08")
+      expect(result.candidates.at(11)?.value).toBe("candidate-11")
+    }),
+  )
+
+  it(
     "recognizes assignments and shell control operators before a command",
     Effect.sync(() => {
       expect(UserShellLocal.isCommandPosition("", 0)).toBe(true)

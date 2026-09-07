@@ -17,6 +17,7 @@ import { probeTarget } from "../../src/rexd/target-registry"
 import {
   makeProvider as makeUserShellProvider,
   readExecutionControl,
+  targetShell,
   wrapExecution,
 } from "../../src/session/user-shell-location"
 import { EXECUTION_TIMEOUT } from "../../src/session/user-shell-runtime"
@@ -238,11 +239,13 @@ describe("Rexd Location routing contract", () => {
   test("user shell delegates execution and completion to location services", async () => {
     const executed: string[] = []
     let executionTimeout = 0
+    let executionEnvironment: Readonly<Record<string, string>> | undefined
     const process = {
-      runShell: (command: string, options: { timeout: Duration.Duration }) =>
+      runShell: (command: string, options: { timeout: Duration.Duration; env?: Readonly<Record<string, string>> }) =>
         Effect.sync(() => {
           executed.push(command)
           executionTimeout = Duration.toMillis(options.timeout)
+          executionEnvironment = options.env
           const nonce = command.match(/opencode-cwd-([a-f0-9]+)/)?.[1]
           const output = nonce
             ? Buffer.from(`remote-shell\0opencode-cwd-${nonce}\0/workspace/child\0`)
@@ -284,7 +287,7 @@ describe("Rexd Location routing contract", () => {
       shell.execute({
         command: "pwd",
         cwd: "/workspace",
-        environment: {},
+        environment: { SHELL: "/bin/zsh", BASH_ENV: "/target/.bash_env", ENV: "/target/.sh_env" },
         signal: new AbortController().signal,
         onOutput: (value) => Effect.sync(() => void output.push(value)),
       }),
@@ -292,7 +295,9 @@ describe("Rexd Location routing contract", () => {
     expect(result.exitCode).toBe(0)
     expect(result.finalCwd).toBe("/workspace/child")
     expect(executed).toHaveLength(1)
+    expect(executed[0]).toStartWith("'/bin/zsh' '-f' '-c'")
     expect(executed[0]).toContain("{ pwd")
+    expect(executionEnvironment).toMatchObject({ SHELL: "/bin/zsh", BASH_ENV: "", ENV: "" })
     expect(executed[0]).toContain("pwd -P")
     expect(executionTimeout).toBe(Duration.toMillis(EXECUTION_TIMEOUT))
     expect(output).toEqual(["remote-shell"])
@@ -456,6 +461,52 @@ describe("Rexd Location routing contract", () => {
     )
     expect(executed).toEqual([])
     expect(result.candidates.map((candidate) => candidate.value)).toEqual(["hammer-path"])
+  })
+
+  test("remote user shell keeps candidates beyond the eight-row TUI viewport", async () => {
+    const process = {
+      runShell: () => Effect.die("path argument completion must not spawn a shell"),
+    } as LocationProcess.Interface
+    const filesystem = FileSystem.Service.of({
+      list: () =>
+        Effect.succeed(
+          Array.from({ length: 12 }, (_, index) =>
+            FileSystem.Entry.make({
+              path: RelativePath.make(`candidate-${String(index).padStart(2, "0")}`),
+              type: "file",
+            }),
+          ),
+        ),
+      find: () => Effect.succeed([]),
+      glob: () => Effect.succeed([]),
+      grep: () => Effect.succeed([]),
+      read: () => Effect.die("not used"),
+      directoryStatus: () => Effect.die("not used"),
+      ensureDirectory: () => Effect.die("not used"),
+    })
+    const location = Location.Service.of({
+      target: { type: "rexd", targetID },
+      directory: AbsolutePath.make("/workspace"),
+      workspaceID: "workspace" as never,
+      project: { id: "project" as never, directory: AbsolutePath.make("/workspace") },
+    })
+    const result = await Effect.runPromise(
+      makeUserShellProvider(process, filesystem, location).complete({
+        input: "cat ./candidate-",
+        cursor: 16,
+        cwd: "/workspace",
+        environment: { SHELL: "/bin/bash" },
+      }),
+    )
+    expect(result.candidates).toHaveLength(12)
+    expect(result.candidates.at(8)?.value).toBe("candidate-08")
+    expect(result.candidates.at(11)?.value).toBe("candidate-11")
+  })
+
+  test("remote user shell falls back from an unsupported target shell", () => {
+    expect(targetShell({})).toBe("/bin/sh")
+    expect(targetShell({ SHELL: "/usr/bin/fish" })).toBe("/bin/sh")
+    expect(targetShell({ SHELL: "/bin/bash" })).toBe("/bin/bash")
   })
 
   test("target probe reports protocol stage without leaking a thrown failure", async () => {

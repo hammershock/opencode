@@ -47,10 +47,11 @@ export function makeProvider(
   const execute: Provider["execute"] = (input) =>
     Effect.gen(function* () {
       const nonce = crypto.randomUUID().replaceAll("-", "")
-      const result = yield* process.runShell(wrapExecution(input.command, nonce), {
+      const shell = targetShell(input.environment)
+      const result = yield* process.runShell(UserShellLocal.bareCommand(shell, wrapExecution(input.command, nonce)), {
         cwd: input.cwd,
         shell: "/bin/sh",
-        env: input.environment,
+        env: { ...input.environment, BASH_ENV: "", ENV: "" },
         timeout: EXECUTION_TIMEOUT,
         maxOutputBytes: 8 * 1024 * 1024,
         signal: input.signal,
@@ -89,7 +90,7 @@ export function makeProvider(
           }),
         )
       if (token.includes("/")) return { candidates: paths }
-      const shell = input.environment.SHELL ?? "/bin/sh"
+      const shell = targetShell(input.environment)
       const run = (command: string, selectedShell: string, timeout: Duration.Input) =>
         process.runShell(command, {
           cwd: input.cwd,
@@ -128,12 +129,15 @@ export function makeProvider(
             : "native_failed"
       const candidates = [
         ...new Map([...paths, ...commands, ...names].map((candidate) => [candidate.value, candidate])).values(),
-      ]
-        .toSorted((a, b) => a.display.localeCompare(b.display))
-        .slice(0, 8)
+      ].toSorted((a, b) => a.display.localeCompare(b.display))
       return { candidates, ...(degraded ? { degraded: { reason: degraded } } : {}) }
     })
   return { execute, validateDirectory, complete } satisfies Provider
+}
+
+export function targetShell(environment: Readonly<Record<string, string>>) {
+  const shell = environment.SHELL
+  return shell && Shell.posix(shell) ? shell : "/bin/sh"
 }
 
 export * as UserShellLocation from "./user-shell-location"

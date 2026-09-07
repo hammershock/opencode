@@ -66,6 +66,7 @@ import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { ToolRegistry as LocationToolRegistry } from "@opencode-ai/core/tool/registry"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { Reference } from "@opencode-ai/core/reference"
+import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -155,6 +156,7 @@ const layer = Layer.effect(
     const database = yield* Database.Service
     const locations = yield* LocationServiceMap.Service
     const targetRegistry = yield* TargetRegistry.Service
+    const locationAccess = yield* SessionLocationAccess.Service
     const { db } = database
     const sessionLocation = Effect.fn("SessionPrompt.sessionLocation")(function* (sessionID: SessionID) {
       const row = yield* db
@@ -474,6 +476,7 @@ const layer = Layer.effect(
     })
 
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
+      yield* locationAccess.require(input.sessionID).pipe(Effect.catch(Effect.die))
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const markReady = ready ? ready.open.pipe(Effect.asVoid) : Effect.void
@@ -1092,6 +1095,7 @@ const layer = Layer.effect(
     const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
+      yield* locationAccess.require(input.sessionID).pipe(Effect.catch(Effect.die))
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
@@ -1120,6 +1124,7 @@ const layer = Layer.effect(
 
     const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
       function* (sessionID: SessionID) {
+        yield* locationAccess.require(sessionID).pipe(Effect.catch(Effect.die))
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
@@ -1421,6 +1426,7 @@ const layer = Layer.effect(
     })
 
     const completeShell = Effect.fn("SessionPrompt.completeShell")(function* (input: ShellCompletionInput) {
+      yield* locationAccess.require(input.sessionID).pipe(Effect.catch(Effect.die))
       yield* sessions.get(input.sessionID)
       const cfg = yield* config.get()
       const sh = Shell.preferred(cfg.shell)
@@ -1451,6 +1457,7 @@ const layer = Layer.effect(
     })
 
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
+      yield* locationAccess.require(input.sessionID).pipe(Effect.catch(Effect.die))
       yield* Effect.logInfo("command", {
         "session.id": input.sessionID,
         command: input.command,
@@ -1748,6 +1755,7 @@ export const node = LayerNode.make({
     UserShellRuntime.node,
     LocationServiceMap.node,
     TargetRegistry.node,
+    SessionLocationAccess.node,
   ],
 })
 

@@ -6,6 +6,7 @@ import { SessionsCursor } from "@opencode-ai/protocol/groups/session"
 import {
   ConflictError,
   InvalidCursorError,
+  InvalidRequestError,
   MessageNotFoundError,
   ServiceUnavailableError,
   SessionNotFoundError,
@@ -164,6 +165,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                     new ConflictError({
                       message: `Prompt message ID conflicts with an existing durable record: ${error.messageID}`,
                       resource: error.messageID,
+                    }),
+                  ),
+                ),
+                Effect.catchTag("Session.OperationUnavailableError", (error) =>
+                  Effect.fail(
+                    new InvalidRequestError({
+                      message: `Session ${error.operation} is not available`,
+                      kind: `session_${error.operation}`,
                     }),
                   ),
                 ),

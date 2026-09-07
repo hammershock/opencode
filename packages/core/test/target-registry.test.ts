@@ -183,8 +183,8 @@ describe("TargetRegistry", () => {
           calls.push(`test:${target.name}`)
           return { status: "ready", stages: ["ssh", "handshake"] }
         },
-        prepare: async (target) => {
-          calls.push(`prepare:${target.name}`)
+        prepare: async (target, directory) => {
+          calls.push(`prepare:${target.name}:${directory}`)
           return { status: "ready", stages: ["ssh", "environment", "prepare", "handshake"] }
         },
         inspect: async (target) => {
@@ -199,14 +199,14 @@ describe("TargetRegistry", () => {
     })
     const created = await registry.create(manual("gpu"), (await registry.load()).revision)
     expect(await registry.testConnection(created.target.id)).toMatchObject({ status: "ready" })
-    expect(await registry.prepare(created.target.id)).toMatchObject({ status: "ready" })
+    expect(await registry.prepare(created.target.id, "/historical/worktree")).toMatchObject({ status: "ready" })
     expect(await registry.inspect(manual("draft"))).toEqual({ home: "/home/remote" })
     expect(await registry.complete(manual("draft"), { value: "/ho", cursor: 3, cwd: "/" })).toEqual({
       value: "/home/remote/",
       cursor: 13,
       candidates: ["/home/remote/"],
     })
-    expect(calls).toEqual(["test:gpu", "prepare:gpu", "inspect:draft", "complete:draft:/ho"])
+    expect(calls).toEqual(["test:gpu", "prepare:gpu:/historical/worktree", "inspect:draft", "complete:draft:/ho"])
   })
 
   test("previews and explicitly imports legacy config without changing the source", async () => {

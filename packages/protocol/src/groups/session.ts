@@ -160,15 +160,13 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         params: { sessionID: Session.ID },
         success: Schema.Struct({ data: Session.Info }),
         error: SessionNotFoundError,
-      })
-        .middleware(sessionLocationMiddleware)
-        .annotateMerge(
-          OpenApi.annotations({
-            identifier: "v2.session.get",
-            summary: "Get session",
-            description: "Retrieve a session by ID.",
-          }),
-        ),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.get",
+          summary: "Get session",
+          description: "Retrieve a session by ID.",
+        }),
+      ),
     )
     .add(
       HttpApiEndpoint.post("session.switchAgent", "/api/session/:sessionID/agent", {
@@ -294,15 +292,13 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         params: { sessionID: Session.ID },
         success: Schema.Struct({ data: Schema.Array(SessionMessage.Message) }),
         error: [SessionNotFoundError, UnknownError],
-      })
-        .middleware(sessionLocationMiddleware)
-        .annotateMerge(
-          OpenApi.annotations({
-            identifier: "v2.session.context",
-            summary: "Get session context",
-            description: "Retrieve the active context messages for a session (all messages after the last compaction).",
-          }),
-        ),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.context",
+          summary: "Get session context",
+          description: "Retrieve the active context messages for a session (all messages after the last compaction).",
+        }),
+      ),
     )
     .add(
       HttpApiEndpoint.get("session.history", "/api/session/:sessionID/history", {
@@ -313,16 +309,14 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           hasMore: Schema.Boolean,
         }).annotate({ identifier: "SessionHistory" }),
         error: SessionNotFoundError,
-      })
-        .middleware(sessionLocationMiddleware)
-        .annotateMerge(
-          OpenApi.annotations({
-            identifier: "v2.session.history",
-            summary: "Get session history",
-            description:
-              "Read one finite page of public durable Session events after an exclusive aggregate sequence. Newly committed events may appear on later pages.",
-          }),
-        ),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.history",
+          summary: "Get session history",
+          description:
+            "Read one finite page of public durable Session events after an exclusive aggregate sequence. Newly committed events may appear on later pages.",
+        }),
+      ),
     )
     .add(
       HttpApiEndpoint.get("session.events", "/api/session/:sessionID/event", {
@@ -332,15 +326,13 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         },
         success: HttpApiSchema.StreamSse({ data: SessionEvent.Durable }),
         error: SessionNotFoundError,
-      })
-        .middleware(sessionLocationMiddleware)
-        .annotateMerge(
-          OpenApi.annotations({
-            identifier: "v2.session.events",
-            summary: "Subscribe to session events",
-            description: "Replay durable events after an aggregate sequence, then continue with new durable events.",
-          }),
-        ),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.events",
+          summary: "Subscribe to session events",
+          description: "Replay durable events after an aggregate sequence, then continue with new durable events.",
+        }),
+      ),
     )
     .add(
       HttpApiEndpoint.post("session.interrupt", "/api/session/:sessionID/interrupt", {
@@ -362,15 +354,13 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         params: { sessionID: Session.ID, messageID: SessionMessage.ID },
         success: Schema.Struct({ data: SessionMessage.Message }),
         error: [SessionNotFoundError, MessageNotFoundError],
-      })
-        .middleware(sessionLocationMiddleware)
-        .annotateMerge(
-          OpenApi.annotations({
-            identifier: "v2.session.message",
-            summary: "Get session message",
-            description: "Retrieve one projected message owned by the Session.",
-          }),
-        ),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.message",
+          summary: "Get session message",
+          description: "Retrieve one projected message owned by the Session.",
+        }),
+      ),
     )
     .annotateMerge(
       OpenApi.annotations({

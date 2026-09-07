@@ -284,6 +284,7 @@ export type SessionsListOutput = {
     }
     readonly locationRevision?: number
     readonly portableTargetLabel?: string
+    readonly syncSpaceID?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -390,6 +391,7 @@ export type SessionsCreateOutput = {
     }
     readonly locationRevision?: number
     readonly portableTargetLabel?: string
+    readonly syncSpaceID?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -436,6 +438,7 @@ export type SessionsGetOutput = {
     }
     readonly locationRevision?: number
     readonly portableTargetLabel?: string
+    readonly syncSpaceID?: string
     readonly subpath?: string
     readonly revert?: {
       readonly messageID: string
@@ -3597,6 +3600,25 @@ export type TargetsBindPortableInput = {
 export type TargetsBindPortableOutput = {
   readonly revision: string
   readonly bindings: { readonly [x: string]: string }
+  readonly resolvedSessionIDs: ReadonlyArray<string>
+  readonly failedSessionIDs: ReadonlyArray<string>
+}
+
+export type TargetsUnbindPortableInput = {
+  readonly portableTargetLabel: { readonly portableTargetLabel: string }["portableTargetLabel"]
+  readonly expectedRevision: {
+    readonly expectedRevision: string
+    readonly expectedSessionIDs: ReadonlyArray<string>
+  }["expectedRevision"]
+  readonly expectedSessionIDs: {
+    readonly expectedRevision: string
+    readonly expectedSessionIDs: ReadonlyArray<string>
+  }["expectedSessionIDs"]
+}
+
+export type TargetsUnbindPortableOutput = {
+  readonly revision: string
+  readonly bindings: { readonly [x: string]: string }
 }
 
 export type TargetsRebindSessionInput = {
@@ -4073,6 +4095,8 @@ export type TargetsRestoreOutput = {
     }>
     readonly valid: boolean
   }
+  readonly resolvedSessionIDs: ReadonlyArray<string>
+  readonly failedSessionIDs: ReadonlyArray<string>
 }
 
 export type TargetsTestConnectionInput = { readonly targetID: { readonly targetID: string }["targetID"] }

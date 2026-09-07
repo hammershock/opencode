@@ -378,5 +378,17 @@ describe("Rexd Location routing contract", () => {
     const ready = await probeTarget(target, async () => ({ handshake: {}, prepared: undefined }) as never)
     expect(ready.status).toBe("ready")
     if (ready.status === "ready") expect(ready.stages).toContain("capabilities")
+
+    let probedDirectory: string | undefined
+    await probeTarget(
+      target,
+      async (_target, options) => {
+        probedDirectory = options.directory
+        return { handshake: {}, prepared: undefined } as never
+      },
+      true,
+      "/workspace/historical",
+    )
+    expect(probedDirectory).toBe("/workspace/historical")
   })
 })

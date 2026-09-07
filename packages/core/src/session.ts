@@ -41,6 +41,7 @@ import { Pty } from "./pty"
 import { PermissionV2 } from "./permission"
 import { QuestionV2 } from "./question"
 import { SessionActivity } from "./session/activity"
+import { SessionLocationAccess } from "./session/location-access"
 import { SyncSetup } from "./sync/setup"
 import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
 
@@ -102,7 +103,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ses
 export class OperationUnavailableError extends Schema.TaggedErrorClass<OperationUnavailableError>()(
   "Session.OperationUnavailableError",
   {
-    operation: Schema.Literals(["move", "shell", "skill", "switchAgent", "compact", "wait"]),
+    operation: Schema.Literals(["move", "shell", "skill", "switchAgent", "compact", "wait", "location"]),
   },
 ) {}
 
@@ -160,7 +161,7 @@ export interface Interface {
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
-  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError>
+  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | OperationUnavailableError>
   readonly shell: (input: {
     id?: EventV2.ID
     sessionID: SessionSchema.ID
@@ -176,7 +177,9 @@ export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
-  readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
+  readonly resume: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<void, NotFoundError | OperationUnavailableError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
   readonly rebindLocation: (input: {
     readonly sessionID: SessionSchema.ID
@@ -212,6 +215,16 @@ const layer = Layer.effect(
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const locationMutation = yield* Semaphore.make(1)
     const activity = yield* SessionActivity.Service
+    const locationAccess = yield* SessionLocationAccess.Service
+    const requireLocation = Effect.fn("V2Session.requireLocation")(function* (sessionID: SessionSchema.ID) {
+      return yield* locationAccess.require(sessionID).pipe(
+        Effect.catchTag("SessionLocationAccess.NotFoundError", () => new NotFoundError({ sessionID })),
+        Effect.catchTag(
+          "SessionLocationAccess.UnresolvedError",
+          () => new OperationUnavailableError({ operation: "location" }),
+        ),
+      )
+    })
     const syncSetup = yield* SyncSetup.Service
     const locationBlockers = (sessionID: SessionSchema.ID, ref: Location.Ref) =>
       Effect.scoped(
@@ -224,6 +237,11 @@ const layer = Layer.effect(
           if ((yield* pty.list()).some((item) => item.status === "running")) blockers.push("terminal_pty")
           if ((yield* permissions.forSession(sessionID)).length) blockers.push("permission")
           if ((yield* questions.list()).some((item) => item.sessionID === sessionID)) blockers.push("question")
+          if (
+            (yield* SessionInput.hasPending(db, sessionID, "steer")) ||
+            (yield* SessionInput.hasPending(db, sessionID, "queue"))
+          )
+            blockers.push("queued_turn")
           blockers.push(...(yield* activity.blockers(sessionID)))
           return blockers
         }),
@@ -457,30 +475,35 @@ const layer = Layer.effect(
         })
       }),
       prompt: Effect.fn("V2Session.prompt")((input) =>
-        Effect.uninterruptible(
-          Effect.gen(function* () {
-            yield* result.get(input.sessionID)
-            const prompt = resolvePrompt(input.prompt)
-            const messageID = input.id ?? SessionMessage.ID.create()
-            const delivery = input.delivery ?? "steer"
-            const expected = { sessionID: input.sessionID, messageID, prompt, delivery }
-            const admitted = yield* SessionInput.admit(db, events, {
-              id: messageID,
-              sessionID: input.sessionID,
-              prompt,
-              delivery,
-            }).pipe(
-              Effect.catchDefect((defect) =>
-                defect instanceof SessionInput.LifecycleConflict
-                  ? new PromptConflictError({ sessionID: input.sessionID, messageID })
-                  : Effect.die(defect),
-              ),
-            )
-            if (!SessionInput.equivalent(admitted, expected))
-              return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-            if (input.resume !== false) yield* execution.wake(admitted.sessionID)
-            return admitted
-          }),
+        activity.withActivity(
+          input.sessionID,
+          "session_mutation",
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              yield* requireLocation(input.sessionID)
+              yield* result.get(input.sessionID)
+              const prompt = resolvePrompt(input.prompt)
+              const messageID = input.id ?? SessionMessage.ID.create()
+              const delivery = input.delivery ?? "steer"
+              const expected = { sessionID: input.sessionID, messageID, prompt, delivery }
+              const admitted = yield* SessionInput.admit(db, events, {
+                id: messageID,
+                sessionID: input.sessionID,
+                prompt,
+                delivery,
+              }).pipe(
+                Effect.catchDefect((defect) =>
+                  defect instanceof SessionInput.LifecycleConflict
+                    ? new PromptConflictError({ sessionID: input.sessionID, messageID })
+                    : Effect.die(defect),
+                ),
+              )
+              if (!SessionInput.equivalent(admitted, expected))
+                return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+              if (input.resume !== false) yield* execution.wake(admitted.sessionID)
+              return admitted
+            }),
+          ),
         ),
       ),
       shell: Effect.fn("V2Session.shell")(function* () {
@@ -523,6 +546,7 @@ const layer = Layer.effect(
       }),
       active: execution.active,
       resume: Effect.fn("V2Session.resume")(function* (sessionID) {
+        yield* requireLocation(sessionID)
         yield* result.get(sessionID)
         yield* execution.resume(sessionID)
       }),
@@ -532,22 +556,34 @@ const layer = Layer.effect(
       revert: {
         stage: Effect.fn("V2Session.revert.stage")(function* (input) {
           const session = yield* result.get(input.sessionID)
-          return yield* SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
-            Effect.provideService(Database.Service, database),
-            Effect.provideService(EventV2.Service, events),
-            Effect.provide(locations.get(session.location)),
+          return yield* activity.withActivity(
+            input.sessionID,
+            "session_mutation",
+            SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
+              Effect.provideService(Database.Service, database),
+              Effect.provideService(EventV2.Service, events),
+              Effect.provide(locations.get(session.location)),
+            ),
           )
         }),
         clear: Effect.fn("V2Session.revert.clear")(function* (sessionID) {
           const session = yield* result.get(sessionID)
-          yield* SessionRevert.clear(session).pipe(
-            Effect.provideService(EventV2.Service, events),
-            Effect.provide(locations.get(session.location)),
+          yield* activity.withActivity(
+            sessionID,
+            "session_mutation",
+            SessionRevert.clear(session).pipe(
+              Effect.provideService(EventV2.Service, events),
+              Effect.provide(locations.get(session.location)),
+            ),
           )
         }),
         commit: Effect.fn("V2Session.revert.commit")(function* (sessionID) {
           const session = yield* result.get(sessionID)
-          yield* SessionRevert.commit(session).pipe(Effect.provideService(EventV2.Service, events))
+          yield* activity.withActivity(
+            sessionID,
+            "session_mutation",
+            SessionRevert.commit(session).pipe(Effect.provideService(EventV2.Service, events)),
+          )
         }),
       },
     })
@@ -582,6 +618,7 @@ export const node = makeGlobalNode({
     LocationServiceMap.node,
     SessionProjector.node,
     SessionActivity.node,
+    SessionLocationAccess.node,
     SyncSetup.node,
   ],
 })

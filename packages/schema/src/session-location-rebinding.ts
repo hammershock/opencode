@@ -58,6 +58,16 @@ export const RecoveryResult = Schema.Struct({
   failedSessionIDs: batch,
 }).annotate({ identifier: "SessionLocationRebinding.RecoveryResult" })
 
+export const RestoreResult = Schema.Struct({
+  ...Target.MutationResult.fields,
+  ...RecoveryResult.fields,
+}).annotate({ identifier: "SessionLocationRebinding.RestoreResult" })
+
+export const PortableBindingRecoveryResult = Schema.Struct({
+  ...PortableBindingSnapshot.fields,
+  ...RecoveryResult.fields,
+}).annotate({ identifier: "SessionLocationRebinding.PortableBindingRecoveryResult" })
+
 export const RebindInput = Schema.Struct({
   expectedRevision: Schema.Number,
   destination: Location.Ref,

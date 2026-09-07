@@ -10,6 +10,8 @@ import { connectRexd } from "./connection"
 import { detectRemotePlatform } from "./prepare"
 import { RexdFiles } from "./location-files"
 import { REXD_BASELINE_VERSION } from "./manifest"
+import { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 
 export const rexdTargetRegistryNode = makeGlobalNode({
   service: TargetRegistry.Service,
@@ -17,9 +19,10 @@ export const rexdTargetRegistryNode = makeGlobalNode({
     TargetRegistry.Service,
     Effect.gen(function* () {
       const global = yield* Global.Service
+      const db = (yield* Database.Service).db
       const probe: TargetRegistry.ConnectionProbe = {
         test: (target) => probeTarget(target, testInstalledRexdConnection, false),
-        prepare: (target) => probeTarget(target),
+        prepare: (target, directory) => probeTarget(target, testRexdConnection, true, directory),
         inspect: async (target) => ({ home: (await detectRemotePlatform({ ...target, id: "target-wizard" })).home }),
         complete: (target, input) => completeRemotePath(target, input),
       }
@@ -28,11 +31,28 @@ export const rexdTargetRegistryNode = makeGlobalNode({
           directory: global.config,
           legacyFile: path.join(global.home, ".config", "rexd", "targets.json"),
           probe,
+          restoreAuthorizer: {
+            authorize: async (targetID, referencedSessionIDs) => {
+              const rows = await Effect.runPromise(
+                db.select({ id: SessionTable.id, target: SessionTable.target }).from(SessionTable),
+              )
+              const actual = rows
+                .filter((row) => row.target?.type === "rexd" && row.target.targetID === targetID)
+                .map((row) => row.id)
+                .sort()
+              const expected = [...new Set(referencedSessionIDs)].sort()
+              return (
+                actual.length > 0 &&
+                actual.length === expected.length &&
+                actual.every((id, index) => id === expected[index])
+              )
+            },
+          },
         }),
       )
     }),
   ),
-  deps: [Global.node],
+  deps: [Global.node, Database.node],
 })
 
 export async function probeTarget(
@@ -42,9 +62,10 @@ export async function probeTarget(
     options: { directory?: string; clientVersion: string; signal?: AbortSignal },
   ) => Promise<unknown> = testRexdConnection,
   prepared = true,
+  directory = target.defaultDirectory,
 ): Promise<TargetRegistry.ProbeResult> {
   return test(target, {
-    directory: target.defaultDirectory,
+    directory,
     clientVersion: InstallationVersion,
   })
     .then(

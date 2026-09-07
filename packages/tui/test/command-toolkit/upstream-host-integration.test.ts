@@ -134,6 +134,32 @@ describe("Home and Session command host integration", () => {
     expect(dispatched).toEqual(["plugin.deploy"])
   })
 
+  test("shows reviewed upstream purpose and provenance in slash and palette surfaces", () => {
+    const host = createCommandHost({
+      register: () => undefined,
+      context: (source) => ({ ...context, source }),
+      upstream: () =>
+        adaptKeymapCommands(
+          [
+            {
+              command: {
+                name: "session.list",
+                title: "Switch session",
+                desc: "Search and open a session",
+                slashName: "sessions",
+              },
+            },
+          ],
+          () => undefined,
+        ),
+      invalid: () => undefined,
+      outcome: () => undefined,
+    })
+
+    expect(host.slashes()[0]?.description).toBe("Search and open a session · upstream")
+    expect(commandPaletteWinners(host.commands())[0]?.description).toBe("Search and open a session · upstream")
+  })
+
   test("normalizes persisted user restrictions without granting capabilities", () => {
     expect(
       normalizeCommandRestrictions({

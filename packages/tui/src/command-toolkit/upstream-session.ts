@@ -11,6 +11,7 @@ export const verifiedSessionRename = verifyUpstreamCommand(
 
 export const sessionRenameMetadata = {
   title: verifiedSessionRename.contract.title,
+  description: "Rename the current session",
   value: verifiedSessionRename.contract.identity,
   category: verifiedSessionRename.contract.category,
   slash: {

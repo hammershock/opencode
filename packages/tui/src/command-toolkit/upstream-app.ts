@@ -9,6 +9,7 @@ export const verifiedAppExit = verifyUpstreamCommand(reviewedUpstreamCommands.ap
 export const appExitMetadata = {
   name: verifiedAppExit.contract.identity,
   title: verifiedAppExit.contract.title,
+  description: "Exit OpenCode",
   category: verifiedAppExit.contract.category,
   slash: {
     name: verifiedAppExit.contract.path[0],

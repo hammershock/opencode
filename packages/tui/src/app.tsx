@@ -589,6 +589,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "session.list",
         title: "Switch session",
+        desc: "Search and open a session",
         category: "Session",
         suggested: sync.data.session.length > 0,
         slashName: "sessions",
@@ -600,6 +601,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "session.new",
         title: "New session",
+        desc: "Return to QuickStart for a new session",
         suggested: route.data.type === "session",
         category: "Session",
         slashName: "new",
@@ -629,6 +631,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "workspace.list",
         title: "Manage workspaces",
+        desc: "Manage connected workspaces",
         category: "Workspace",
         hidden: !Flag.OPENCODE_EXPERIMENTAL_WORKSPACES,
         slashName: "workspaces",
@@ -648,6 +651,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "model.list",
         title: "Switch model",
+        desc: "Choose the model for this session",
         suggested: true,
         category: "Agent",
         slashName: "models",
@@ -696,6 +700,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "agent.list",
         title: "Switch agent",
+        desc: "Choose the active agent",
         category: "Agent",
         slashName: "agents",
         run: () => {
@@ -705,6 +710,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "mcp.list",
         title: "Toggle MCPs",
+        desc: "Enable or disable MCP servers",
         category: "Agent",
         slashName: "mcps",
         run: () => {
@@ -731,6 +737,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "variant.list",
         title: "Switch model variant",
+        desc: "Choose the current model variant",
         category: "Agent",
         hidden: local.model.variant.list().length === 0,
         slashName: "variants",
@@ -757,6 +764,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "provider.connect",
         title: "Connect provider",
+        desc: "Connect a model provider",
         suggested: !connected(),
         slashName: "connect",
         run: () => {
@@ -769,6 +777,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             {
               name: "console.org.switch",
               title: "Switch org",
+              desc: "Switch the active provider organization",
               suggested: Boolean(sync.data.console_state.activeOrgName),
               slashName: "org",
               slashAliases: ["orgs", "switch-org"],
@@ -782,6 +791,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "opencode.status",
         title: "View status",
+        desc: "Inspect providers, MCP servers, and system state",
         slashName: "status",
         run: () => {
           dialog.replace(() => <DialogStatus />)
@@ -791,6 +801,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "opencode.debug",
         title: "View debug info",
+        desc: "Inspect diagnostic paths and runtime details",
         slashName: "debug",
         run: () => {
           dialog.replace(() => <DialogDebug />)
@@ -808,6 +819,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "theme.switch",
         title: "Switch theme",
+        desc: "Choose the TUI color theme",
         slashName: "themes",
         run: () => {
           dialog.replace(() => <DialogThemeList />)
@@ -836,6 +848,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: "help.show",
         title: "Help",
+        desc: "View shortcuts and help",
         slashName: "help",
         run: () => {
           dialog.replace(() => <DialogHelp />)
@@ -854,6 +867,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       {
         name: appExitMetadata.name,
         title: appExitMetadata.title,
+        desc: appExitMetadata.description,
         slashName: appExitMetadata.slash.aliases[0],
         slashAliases: appExitMetadata.slash.aliases.slice(1),
         run: () => exit(),
@@ -865,6 +879,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
           kv.get(SESSION_EXIT_TO_HOME_SETTING, false) && route.data.type === "session"
             ? "Return to QuickStart"
             : appExitMetadata.title,
+        desc: "Return to QuickStart or exit OpenCode",
         slashName: appExitMetadata.slash.name,
         run: () => {
           const current = route.data.type === "session" ? "session" : route.data.type === "home" ? "home" : "other"

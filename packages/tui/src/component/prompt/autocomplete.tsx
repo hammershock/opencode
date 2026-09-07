@@ -86,6 +86,21 @@ export type AutocompleteOption = {
   path?: string
 }
 
+export function slashAutocompleteOptions(
+  slashes: readonly Pick<TuiSlashCommand, "display" | "description" | "aliases" | "onSelect">[],
+): AutocompleteOption[] {
+  const results = slashes.map((command) => ({
+    display: command.display,
+    description: command.description,
+    aliases: command.aliases,
+    onSelect: command.onSelect,
+  }))
+  results.sort((a, b) => a.display.localeCompare(b.display))
+  const max = firstBy(results, [(item) => item.display.length, "desc"])?.display.length
+  if (!max) return results
+  return results.map((item) => ({ ...item, display: item.display.padEnd(max + 2) }))
+}
+
 export function createShellCompletionGeneration() {
   let value = 0
   return {
@@ -502,30 +517,21 @@ export function Autocomplete(props: {
   )
 
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = slashes().map((command) => ({
-      display: command.display,
-      description: command.description,
-      aliases: command.aliases,
-      onSelect:
-        "insertText" in command && command.insertText
-          ? () => {
-              const newText = command.insertText!
-              const cursor = props.input().logicalCursor
-              props.input().deleteRange(0, 0, cursor.row, cursor.col)
-              props.input().insertText(newText)
-              props.input().cursorOffset = Bun.stringWidth(newText)
-            }
-          : command.onSelect,
-    }))
-
-    results.sort((a, b) => a.display.localeCompare(b.display))
-
-    const max = firstBy(results, [(x) => x.display.length, "desc"])?.display.length
-    if (!max) return results
-    return results.map((item) => ({
-      ...item,
-      display: item.display.padEnd(max + 2),
-    }))
+    return slashAutocompleteOptions(
+      slashes().map((command) => ({
+        ...command,
+        onSelect:
+          "insertText" in command && command.insertText
+            ? () => {
+                const newText = command.insertText!
+                const cursor = props.input().logicalCursor
+                props.input().deleteRange(0, 0, cursor.row, cursor.col)
+                props.input().insertText(newText)
+                props.input().cursorOffset = Bun.stringWidth(newText)
+              }
+            : command.onSelect,
+      })),
+    )
   })
 
   const options = createMemo((prev: AutocompleteOption[] | undefined) => {

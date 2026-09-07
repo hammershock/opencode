@@ -1058,6 +1058,7 @@ const tui: TuiPlugin = async (api) => {
       {
         name: "diff.open",
         title: "Open diff viewer",
+        desc: "Review workspace or Session changes",
         slashName: "diff",
         category: "VCS",
         namespace: "palette",

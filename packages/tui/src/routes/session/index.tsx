@@ -106,6 +106,7 @@ import {
   sessionLocationNoticeText,
   type SessionLocationNotice,
 } from "../../util/session-location-notice"
+import { locationQuery } from "../../util/location-query"
 
 addDefaultParsers(parsers.parsers)
 
@@ -528,12 +529,7 @@ export function Session() {
       },
       context: (source) => {
         const current = location()
-        const queryLocation = current
-          ? ({ directory: current.directory, workspace: current.workspaceID, target: current.target } as {
-              directory: string
-              workspace?: string
-            })
-          : undefined
+        const queryLocation = locationQuery(current)
         const metadata = async (kind: "list" | "reload") => {
           const result = await sdk.client.v2.environment[kind]({ location: queryLocation }, { throwOnError: true })
           return {

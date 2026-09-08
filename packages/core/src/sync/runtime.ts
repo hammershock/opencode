@@ -133,8 +133,12 @@ export function make(input: {
     status = { ...status, running: "upload" }
     let stage: Diagnostic["stage"] = "segment"
     try {
-      const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
-      if (segment) {
+      while (true) {
+        signal?.throwIfAborted()
+        const renewed = await Effect.runPromise(input.store.renew("upload", owner, 60_000, now()))
+        if (!renewed) throw new Error("Sync upload lease expired while draining queued segments")
+        const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
+        if (!segment) break
         stage = "attachment"
         const wire = input.attachment ? await externalizeSegment(segment, input.attachment) : segment
         stage = "segment"

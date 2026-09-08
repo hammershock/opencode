@@ -119,9 +119,7 @@ export function reconcileOwnership(
   return Effect.forEach(
     rows,
     (row) =>
-      row.spaceID
-        ? ownership.assign(row.sessionID, row.spaceID, row.assignedAt)
-        : ownership.unassign(row.sessionID),
+      row.spaceID ? ownership.assign(row.sessionID, row.spaceID, row.assignedAt) : ownership.unassign(row.sessionID),
     { discard: true },
   )
 }
@@ -211,7 +209,7 @@ export function projector(
               type: item.type,
               data: replaceSessionID(item.data as Record<string, unknown>, hydrated.aggregateID, sibling),
             },
-            { publish: true, ownerID: sourceDeviceID, strictOwner: true },
+            { publish: true, ownerID: sourceDeviceID, strictOwner: true, allowEquivalent: true },
           )
         }
         yield* replayAs(events, hydrated, sibling, sourceDeviceID)
@@ -257,7 +255,7 @@ function replayAs(
       aggregateID: sessionID,
       data: replaceSessionID(event.data, event.aggregateID, sessionID),
     },
-    { publish: true, ...(ownerID ? { ownerID, strictOwner: true } : {}) },
+    { publish: true, allowEquivalent: true, ...(ownerID ? { ownerID, strictOwner: true } : {}) },
   )
 }
 

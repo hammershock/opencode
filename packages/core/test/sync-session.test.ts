@@ -491,7 +491,8 @@ describe("SessionSync", () => {
     expect(sibling).toMatch(/^s1-conflict-/)
     expect(calls[1][0].data).toMatchObject({ id: sibling, sessionID: sibling })
     expect(calls[2][0]).toMatchObject({ aggregateID: sibling, seq: 1, data: { sessionID: sibling } })
-    expect(calls[2][1]).toMatchObject({ ownerID: "remote", strictOwner: true })
+    expect(calls[1][1]).toMatchObject({ ownerID: "remote", strictOwner: true, allowEquivalent: true })
+    expect(calls[2][1]).toMatchObject({ ownerID: "remote", strictOwner: true, allowEquivalent: true })
   })
 
   test("replays attachment-backed Session parts only after restoring their data URL", async () => {

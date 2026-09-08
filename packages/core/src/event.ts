@@ -123,6 +123,14 @@ export interface PublishOptions {
   readonly commit?: (seq: number) => Effect.Effect<void>
 }
 
+export interface ReplayOptions {
+  readonly publish?: boolean
+  readonly ownerID?: string
+  readonly strictOwner?: boolean
+  /** Treat the same type and payload at the same sequence as an already committed replay. */
+  readonly allowEquivalent?: boolean
+}
+
 export interface Interface {
   readonly publish: <D extends Definition>(
     definition: D,
@@ -135,14 +143,8 @@ export interface Interface {
   /** @deprecated Use `all()` and consume the returned stream. */
   readonly listen: (listener: Subscriber) => Effect.Effect<Unsubscribe>
   readonly project: <D extends Definition>(definition: D, projector: Subscriber<D>) => Effect.Effect<void>
-  readonly replay: (
-    event: SerializedEvent,
-    options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
-  ) => Effect.Effect<void>
-  readonly replayAll: (
-    events: SerializedEvent[],
-    options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
-  ) => Effect.Effect<string | undefined>
+  readonly replay: (event: SerializedEvent, options?: ReplayOptions) => Effect.Effect<void>
+  readonly replayAll: (events: SerializedEvent[], options?: ReplayOptions) => Effect.Effect<string | undefined>
   readonly remove: (aggregateID: string) => Effect.Effect<void>
   /** Deletes older payload rows while retaining aggregate identity and its latest durable marker. */
   readonly pruneBefore: (aggregateID: string, sequence: number) => Effect.Effect<void>
@@ -212,6 +214,7 @@ export const layerWith = (options?: LayerOptions) =>
           readonly aggregateID: string
           readonly ownerID?: string
           readonly strictOwner?: boolean
+          readonly allowEquivalent?: boolean
         },
         commit?: (seq: number) => Effect.Effect<void>,
       ) {
@@ -269,7 +272,8 @@ export const layerWith = (options?: LayerOptions) =>
                               .get()
                               .pipe(Effect.orDie)
                             if (
-                              stored?.id === event.id &&
+                              stored &&
+                              (stored.id === event.id || input.allowEquivalent) &&
                               stored.type === versionedType(definition.type, durable.version) &&
                               isDeepStrictEqual(stored.data, encoded)
                             ) {
@@ -445,10 +449,7 @@ export const layerWith = (options?: LayerOptions) =>
         })
       }
 
-      function replay(
-        event: SerializedEvent,
-        options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
-      ) {
+      function replay(event: SerializedEvent, options?: ReplayOptions) {
         return Effect.gen(function* () {
           const definition = Durable.get(event.type)
           if (!definition?.durable) {
@@ -466,6 +467,7 @@ export const layerWith = (options?: LayerOptions) =>
               aggregateID: event.aggregateID,
               ownerID: options?.ownerID,
               strictOwner: options?.strictOwner,
+              allowEquivalent: options?.allowEquivalent,
             })
             if (committed && options?.publish) {
               yield* notify(
@@ -484,10 +486,7 @@ export const layerWith = (options?: LayerOptions) =>
         })
       }
 
-      function replayAll(
-        events: SerializedEvent[],
-        options?: { readonly publish?: boolean; readonly ownerID?: string; readonly strictOwner?: boolean },
-      ) {
+      function replayAll(events: SerializedEvent[], options?: ReplayOptions) {
         return Effect.gen(function* () {
           const source = events[0]?.aggregateID
           if (!source) return undefined

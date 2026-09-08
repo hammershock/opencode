@@ -822,6 +822,34 @@ describe("EventV2", () => {
     }),
   )
 
+  it.effect("allows an equivalent owned replay with a different event ID for crash recovery", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const aggregateID = Session.ID.create()
+      const replayed = {
+        id: EventV2.ID.create(),
+        type: EventV2.versionedType(DurableMessage.type, 1),
+        seq: 0,
+        aggregateID,
+        data: durableData(aggregateID, "owned"),
+      }
+      yield* events.replay(replayed, { ownerID: "owner-a", strictOwner: true })
+      yield* events.replay(
+        { ...replayed, id: EventV2.ID.create() },
+        { ownerID: "owner-a", strictOwner: true, allowEquivalent: true },
+      )
+
+      const rows = yield* db
+        .select()
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, aggregateID))
+        .all()
+        .pipe(Effect.orDie)
+      expect(rows).toHaveLength(1)
+    }),
+  )
+
   it.effect("exact replay claims an unowned aggregate", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service

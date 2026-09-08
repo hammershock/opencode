@@ -53,7 +53,9 @@ function provider() {
 
 function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operations?: readonly SyncEvent.Operation[]) {
   let local = event
+  let pendingOperations = operations
   let sealed: SyncEvent.Segment | undefined
+  let acknowledgedHead = 0
   const cursors = new Map<string, number>()
   const applied: SyncEvent.Envelope[] = []
   const deletions = (operations ?? [])
@@ -66,18 +68,24 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
     seal: (_deviceID: SyncEvent.DeviceID) =>
       Effect.sync(() => {
         if (sealed) return sealed
-        if (!local && !operations) return undefined
+        if (!local && !pendingOperations) return undefined
         return (sealed = SyncEvent.Segment.make({
           version: 1,
           id: SyncEvent.SegmentID.make(`${deviceID}:1`),
           deviceID,
           generation: 1,
           createdAt: 1,
-          operations: operations ?? [{ kind: "event", event: local! }],
+          operations: pendingOperations ?? [{ kind: "event", event: local! }],
         }))
       }),
-    acknowledge: () => Effect.sync(() => void (local = undefined)),
-    head: () => Effect.succeed(sealed ? 1 : 0),
+    acknowledge: () =>
+      Effect.sync(() => {
+        acknowledgedHead = sealed?.generation ?? acknowledgedHead
+        local = undefined
+        pendingOperations = undefined
+        sealed = undefined
+      }),
+    head: () => Effect.succeed(sealed?.generation ?? acknowledgedHead),
     cursor: (remote: SyncEvent.DeviceID) => Effect.succeed(cursors.get(remote) ?? 0),
     apply: (segment: SyncEvent.Segment) =>
       Effect.sync(() => {
@@ -111,6 +119,43 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
 }
 
 describe("SyncRuntime", () => {
+  test("drains every queued segment in one upload run", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("drain")
+    const local = store(id)
+    let remaining = 3
+    let generation = 0
+    local.service.seal = () =>
+      Effect.sync(() => {
+        if (remaining === 0) return undefined
+        const next = ++generation
+        return SyncEvent.Segment.make({
+          version: 1,
+          id: SyncEvent.SegmentID.make(`${id}:${next}`),
+          deviceID: id,
+          generation: next,
+          createdAt: next,
+          operations: [],
+        })
+      })
+    local.service.acknowledge = () => Effect.sync(() => void remaining--)
+    local.service.head = () => Effect.sync(() => generation)
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: local.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+
+    await Effect.runPromise(runtime.upload())
+
+    expect([...remote.files.keys()].filter((item) => item.startsWith(`segments/${id}/`))).toHaveLength(3)
+    expect(remaining).toBe(0)
+  })
+
   test("includes safe provider identifiers in diagnostics", () => {
     expect(
       SyncRuntime.diagnostic(

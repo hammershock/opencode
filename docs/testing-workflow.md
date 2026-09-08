@@ -36,7 +36,7 @@ Record the actual hostname, OS/architecture, Git commit, executable path, `--ver
 
 ## Isolation and data safety
 
-- Use a unique temporary test workspace, target label, Session title prefix and sync space for each run.
+- Use a unique temporary test workspace, target label and Session title prefix for each run.
 - Never run destructive cases against personal workspaces, production Session IDs or an unscoped cloud directory.
 - Tests that remove a target definition must first preserve the exact test fixture and restore it after the scenario. They must not alter unrelated Rexd targets.
 - Tests must never print or persist SSH keys, OAuth tokens, recovery keys, `.env` secret values, provider credentials or decrypted sync payloads in logs or screenshots.
@@ -139,15 +139,16 @@ At minimum run Mac to a configured Linux Rexd target and exercise `mywindows` as
 Run bidirectionally between Mac and `mywindows`:
 
 - the TUI completes the product-owned Baidu OAuth flow without requesting AppKey, SecretKey or an external login state;
-- account discovery lists compatible spaces, permits only one active space and renders unsupported protocols as read-only summaries;
-- new Sessions inherit the active space once at creation; unassigned Sessions never upload, including after enable, restart or active-space changes;
-- switching spaces stops the previous scheduler and never crosses outbox, cursor, cache, lease, Session projection or object paths;
-- `Scope: Current Sync Space` excludes unassigned Sessions; `Scope: All` uses only locally held data and does not fetch non-active cloud-only metadata;
-- initial metadata appears before lazy content hydration for the active space;
+- OAuth completion leaves automatic sync disabled and offers `Enable and sync now`, `Enable` and `Keep disabled`;
+- the fixed account-wide manifest is the only initialization fact; missing or incompatible manifests never accept uploads;
+- explicit initialization backfills every existing Session, and every future Session participates without assignment or a user-visible space;
+- disabling automatic sync stops queue consumption while durable outbox events continue to accumulate and later resume from checkpoints;
+- `Scope: All` remains the default Session browser scope; the optional `Synced` filter never changes by itself after delayed discovery;
+- initial metadata appears before lazy content hydration;
 - each device can create and append while the other is offline, then converge deterministically;
 - attachments and large tool payloads hydrate, verify and retry independently;
 - target ID, SSH configuration, credentials, `.env` values, OpenCode configuration and UI/runtime state never upload;
-- plaintext is the default space codec and is visibly identified as `Encryption: Off`; a separate encrypted-space run validates recovery and tamper rejection;
+- v1 payloads use the specified plaintext codec and the UI does not expose encryption or recovery-key concepts;
 - an unbound portable target remains unresolved until the device-local wizard binds it;
 - sibling conflict results are identical under reversed pull order;
 - production setup does not discover or migrate the archived prototype login. A separate explicit test fixture may reuse its exact secure-store identity to test compatibility without exposing the credential.
@@ -158,14 +159,15 @@ Run the scenario in both directions, once with Mac deleting and once with `mywin
 
 1. Device A deletes a synced Session.
 2. Device B remains offline with old heads, materialized content and a pending old mutation/outbox.
-3. Device A uploads the deletion marker.
-4. Device B reconnects, uploads/replays stale state, restarts and hydrates again.
-5. Trigger compaction eligibility and repeat projection rebuild.
-6. Verify neither device recreates the deleted Session and the Session ID remains permanently rejected.
+3. Device A uploads the deletion marker and freezes the required device-ID set.
+4. Device B reconnects and pulls the deletion. Interrupt it before its replacement head is uploaded; verify no acknowledgement exists and cloud payload is retained.
+5. Resume B: it deletes local state, publishes a head without the Session, then publishes its idempotent acknowledgement.
+6. Trigger garbage-collection eligibility, restart and repeat projection rebuild.
+7. Verify neither device nor a newly connected device recreates the Session; after every required device has acknowledged or been revoked, its payload, attachment, marker and acknowledgements are gone.
 
-This is a release-blocking regression. Payload garbage collection may occur after acknowledgements, but the codec-appropriate deletion marker must remain (encrypted inside an encrypted space, canonical and integrity-checked inside a plaintext space). Any resurrection is a correctness and data-loss-class failure; do not ship or merge around it.
+This is a release-blocking regression. Payload garbage collection may occur only after acknowledgements whose corresponding replacement heads are already durable. Any resurrection is a correctness and data-loss-class failure; do not ship or merge around it.
 
-Repeat the same stale-device sequence for global sync-space deletion. Verify a stale catalog, cached head, pending outbox, restart and provider relist cannot recreate the deleted space. Run Session deletion in both plaintext and encrypted spaces; the logical deletion marker is permanent in either codec.
+For account-wide cloud reset, verify the manifest is invalidated before object cleanup. An interrupted cleanup may leave orphan objects, but another device must treat the root as uninitialized, pause automatic sync and request an explicit decision. Reinitialization clears those orphans before publishing a new manifest; cancellation disables automatic sync.
 
 ### I. TUI interaction
 

@@ -128,6 +128,40 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
 }
 
 describe("SyncRuntime", () => {
+  test("waits for a cross-process upload lease and then drains pending work", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("lease-wait")
+    const local = store(id, {
+      id: "evt_lease_wait" as any,
+      aggregateID: "session-lease-wait",
+      seq: 0,
+      type: "session.created",
+      data: { title: "queued while another process uploads" },
+    })
+    let uploadAttempts = 0
+    const leasedStore = {
+      ...local.service,
+      acquire: ((kind: string, ...args: unknown[]) => {
+        if (kind === "upload" && uploadAttempts++ === 0) return Effect.succeed(false)
+        return local.service.acquire(kind, ...args)
+      }) as typeof local.service.acquire,
+    }
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: leasedStore,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+
+    await Effect.runPromise(runtime.now())
+
+    expect(uploadAttempts).toBe(2)
+    expect([...remote.files.keys()].some((path) => path.includes("segments/lease-wait/1-1"))).toBeTrue()
+  })
+
   test("drains every queued segment in one upload run", async () => {
     const remote = provider()
     const id = SyncEvent.DeviceID.make("drain")

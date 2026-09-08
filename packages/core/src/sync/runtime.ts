@@ -120,6 +120,24 @@ export function make(input: {
   let localHead: Head | undefined
   let attachmentCollectionPending = false
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
+  const acquireLease = async (kind: "upload" | "pull" | "hydrate", signal?: AbortSignal) => {
+    const deadline = Date.now() + 65_000
+    while (!(await Effect.runPromise(input.store.acquire(kind, owner, 60_000, now())))) {
+      signal?.throwIfAborted()
+      if (Date.now() >= deadline) throw new Error(`Timed out waiting for the ${kind} sync lease`)
+      await new Promise<void>((resolve, reject) => {
+        const aborted = () => {
+          clearTimeout(timer)
+          reject(signal?.reason)
+        }
+        const timer = setTimeout(() => {
+          signal?.removeEventListener("abort", aborted)
+          resolve()
+        }, 50)
+        signal?.addEventListener("abort", aborted, { once: true })
+      })
+    }
+  }
   const projector = (deviceID: SyncEvent.DeviceID) => {
     if (typeof input.projector !== "function") return input.projector
     const found = projectors.get(deviceID)
@@ -131,8 +149,7 @@ export function make(input: {
 
   const uploadOnce = async (signal?: AbortSignal) => {
     if (!status.enabled) return
-    const acquired = await Effect.runPromise(input.store.acquire("upload", owner, 60_000, now()))
-    if (!acquired) return
+    await acquireLease("upload", signal)
     status = { ...status, running: "upload" }
     let stage: Diagnostic["stage"] = "segment"
     try {
@@ -221,8 +238,7 @@ export function make(input: {
 
   const pullOnce = async (signal?: AbortSignal) => {
     if (!status.enabled) return
-    const acquired = await Effect.runPromise(input.store.acquire("pull", owner, 60_000, now()))
-    if (!acquired) return
+    await acquireLease("pull", signal)
     status = { ...status, running: "pull" }
     try {
       const [objects, segments] = await Promise.all([
@@ -292,8 +308,7 @@ export function make(input: {
     // Metadata indexing is intentionally a separate committed phase. Opening a
     // metadata-only Session calls hydrate(); idle background work may do so too.
     if (!indexedHeads.length) await coalesce("pull", signal)
-    const acquired = await Effect.runPromise(input.store.acquire("hydrate", owner, 60_000, now()))
-    if (!acquired) return
+    await acquireLease("hydrate", signal)
     try {
       for (const head of indexedHeads) {
         let cursor = await Effect.runPromise(input.store.cursor(head.deviceID))

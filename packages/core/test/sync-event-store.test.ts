@@ -367,6 +367,36 @@ describe("SyncEventStore", () => {
     )
   })
 
+  test("treats a replayed tombstone timestamp as equivalent", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const deleted: string[] = []
+        const projector: SyncEvent.DurableProjector = {
+          project: () => Effect.void,
+          delete: (item) => Effect.sync(() => void deleted.push(item.sessionID)),
+        }
+        const first = SyncEvent.Tombstone.make({ id: "delete-a", sessionID: "session-a", deletedAt: 20 })
+        const replay = SyncEvent.Tombstone.make({ ...first, deletedAt: 30 })
+        const deletion = (generation: number, tombstone: SyncEvent.Tombstone) =>
+          SyncEvent.Segment.make({
+            version: 1,
+            id: SyncEvent.SegmentID.make(`${remote}:${generation}`),
+            deviceID: remote,
+            generation,
+            createdAt: tombstone.deletedAt,
+            operations: [{ kind: "tombstone", tombstone }],
+          })
+
+        yield* store.applyDurable(deletion(1, first), projector)
+        yield* store.applyDurable(deletion(2, replay), projector)
+
+        expect(yield* store.cursor(remote)).toBe(2)
+        expect(deleted).toEqual(["session-a", "session-a"])
+      }),
+    )
+  })
+
   test("absorbs advertised deletions before stale local events can be sealed", async () => {
     await run(
       Effect.gen(function* () {

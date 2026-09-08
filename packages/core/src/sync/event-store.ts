@@ -271,7 +271,7 @@ export const layer = Layer.effect(
                 SELECT fingerprint FROM sync_remote_event
                 WHERE device_id = ${segment.deviceID} AND event_id = ${id} AND space_id = ${spaceID}
               `)
-                if (stored?.fingerprint === fingerprint) continue
+                if (stored && operationMatchesFingerprint(operation, stored.fingerprint)) continue
                 if (stored) return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
                 if (operation.kind === "tombstone") {
                   const marker = canonical(operation.tombstone)
@@ -405,7 +405,7 @@ export const layer = Layer.effect(
                 SELECT fingerprint FROM sync_remote_event
                 WHERE device_id = ${segment.deviceID} AND event_id = ${id} AND space_id = ${spaceID}
               `)
-                if (stored && stored.fingerprint !== fingerprint)
+                if (stored && !operationMatchesFingerprint(operation, stored.fingerprint))
                   return yield* new DivergentEventError({ deviceID: segment.deviceID, eventID: id })
                 if (operation.kind === "tombstone") {
                   const marker = canonical(operation.tombstone)
@@ -572,7 +572,30 @@ function operationID(operation: SyncEvent.Operation) {
 }
 
 function operationFingerprint(operation: SyncEvent.Operation) {
-  return operation.kind === "event" ? encodeEvent(operation.event) : canonical(operation)
+  return operation.kind === "event"
+    ? encodeEvent(operation.event)
+    : canonical({ kind: operation.kind, id: operation.tombstone.id, sessionID: operation.tombstone.sessionID })
+}
+
+function operationMatchesFingerprint(operation: SyncEvent.Operation, fingerprint: string) {
+  if (fingerprint === operationFingerprint(operation)) return true
+  if (operation.kind !== "tombstone") return false
+  try {
+    const stored = JSON.parse(fingerprint) as {
+      kind?: unknown
+      id?: unknown
+      sessionID?: unknown
+      tombstone?: { id?: unknown; sessionID?: unknown }
+    }
+    const tombstone = stored.tombstone ?? stored
+    return (
+      stored.kind === "tombstone" &&
+      tombstone.id === operation.tombstone.id &&
+      tombstone.sessionID === operation.tombstone.sessionID
+    )
+  } catch {
+    return false
+  }
 }
 
 function encodeSegment(segment: SyncEvent.Segment) {

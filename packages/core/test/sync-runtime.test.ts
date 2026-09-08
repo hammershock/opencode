@@ -567,7 +567,7 @@ describe("SyncRuntime", () => {
     ).toEqual(events.map((event) => event.data))
   })
 
-  test("commits attachment references before segments and gates collection on device acknowledgements", async () => {
+  test("commits attachment references without rescanning unchanged history", async () => {
     const remote = provider()
     const space = SyncCrypto.createSpace()
     const macID = SyncEvent.DeviceID.make("mac")
@@ -602,7 +602,7 @@ describe("SyncRuntime", () => {
       attachment,
     })
     await Effect.runPromise(uploader.upload())
-    expect(collected[0]).toMatchObject({ liveObjectIDs: new Set(["image"]), allActiveDevicesAcknowledged: true })
+    expect(collected).toEqual([])
 
     const windows = store(winID)
     const gated: any[] = []
@@ -618,7 +618,7 @@ describe("SyncRuntime", () => {
       attachment: { ...attachment, collect: async (input: unknown) => void gated.push(input) },
     })
     await Effect.runPromise(downloader.now())
-    expect(gated[0]).toMatchObject({ liveObjectIDs: new Set(["image"]), allActiveDevicesAcknowledged: false })
+    expect(gated).toEqual([])
   })
 
   test("does not retain attachment references belonging to globally deleted sessions", async () => {

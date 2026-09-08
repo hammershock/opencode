@@ -135,7 +135,6 @@ export function make(input: {
     if (!acquired) return
     status = { ...status, running: "upload" }
     let stage: Diagnostic["stage"] = "segment"
-    let segmentsChanged = false
     try {
       while (true) {
         signal?.throwIfAborted()
@@ -143,7 +142,6 @@ export function make(input: {
         if (!renewed) throw new Error("Sync upload lease expired while draining queued segments")
         const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
         if (!segment) break
-        segmentsChanged = true
         stage = "attachment"
         const wire = input.attachment ? await externalizeSegment(segment, input.attachment) : segment
         stage = "segment"
@@ -208,7 +206,7 @@ export function make(input: {
       }
       await collectDeletions(signal)
       stage = "collect"
-      if (segmentsChanged || attachmentCollectionPending || pendingDeletions.length) {
+      if (attachmentCollectionPending || pendingDeletions.length) {
         await collectAttachments(signal)
         attachmentCollectionPending = false
       }
@@ -252,14 +250,6 @@ export function make(input: {
       indexedHeads = heads
         .filter((head) => !revoked.has(head.deviceID))
         .sort((a, b) => String(a.deviceID).localeCompare(String(b.deviceID)))
-      if (input.attachment) {
-        for (const head of indexedHeads) {
-          if ((await Effect.runPromise(input.store.cursor(head.deviceID))) < head.generation) {
-            attachmentCollectionPending = true
-            break
-          }
-        }
-      }
       for (const head of indexedHeads) {
         if (revoked.has(head.deviceID)) continue
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))

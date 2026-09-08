@@ -59,11 +59,8 @@ export function rexdFilesystemNodes(
           ),
         directoryStatus: (input) =>
           Effect.promise(async () => {
-            const result = await files.stat(input, directory)
-            return {
-              status: result.exists ? (result.type === "dir" ? "directory" : "not-directory") : "missing",
-              path: files.resolve(input, directory),
-            } as const
+            const result = await files.directoryStatus(input, directory)
+            return { status: result.status, path: result.path }
           }),
         ensureDirectory: (input) =>
           Effect.promise(async () => {
@@ -177,8 +174,8 @@ export function rexdFilesystemNodes(
               Effect.orElseSucceed(() => false),
             ),
           isDir: (value) =>
-            Effect.promise(() => files.stat(value, directory)).pipe(
-              Effect.map((x) => x.type === "dir"),
+            Effect.promise(() => files.directoryStatus(value, directory)).pipe(
+              Effect.map((x) => x.status === "directory"),
               Effect.orElseSucceed(() => false),
             ),
           isFile: (value) =>

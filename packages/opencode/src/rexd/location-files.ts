@@ -7,6 +7,7 @@ const Stat = Schema.Struct({
   exists: Schema.Boolean,
   type: Schema.optional(Schema.Literals(["file", "dir", "symlink", "other"])),
   mtime: Schema.optional(Schema.NullOr(Schema.Number)),
+  symlink_target: Schema.optional(Schema.String),
 })
 const Read = Schema.Struct({
   path: Schema.String,
@@ -26,6 +27,13 @@ const List = Schema.Struct({
   ),
 })
 const Glob = Schema.Struct({ matches: Schema.Array(Schema.String) })
+
+export type RexdDirectoryStatus = {
+  readonly status: "directory" | "missing" | "not-directory"
+  readonly path: string
+  readonly resolvedPath?: string
+  readonly reason?: "broken-symlink" | "symlink-loop" | "outside-roots"
+}
 
 export class RexdFiles {
   readonly roots: readonly string[]
@@ -52,6 +60,11 @@ export class RexdFiles {
         { signal },
       ),
     )
+  }
+
+  async directoryStatus(value: string, cwd: string, signal?: AbortSignal): Promise<RexdDirectoryStatus> {
+    const requested = this.resolve(value, cwd)
+    return this.followDirectory(requested, requested, new Set(), signal)
   }
 
   async read(value: string, cwd: string, signal?: AbortSignal) {
@@ -109,6 +122,27 @@ export class RexdFiles {
       },
       { sideEffect: true },
     )
+  }
+
+  private async followDirectory(
+    requested: string,
+    current: string,
+    visited: ReadonlySet<string>,
+    signal?: AbortSignal,
+  ): Promise<RexdDirectoryStatus> {
+    if (visited.has(current) || visited.size >= 40)
+      return { status: "not-directory", path: requested, reason: "symlink-loop" }
+    if (!this.roots.some((root) => contains(root, current)))
+      return { status: "not-directory", path: requested, reason: "outside-roots" }
+    const item = await this.stat(current, "/", signal)
+    if (!item.exists)
+      return current === requested
+        ? { status: "missing", path: requested }
+        : { status: "not-directory", path: requested, reason: "broken-symlink" }
+    if (item.type === "dir") return { status: "directory", path: requested, resolvedPath: current }
+    if (item.type !== "symlink" || !item.symlink_target) return { status: "not-directory", path: requested }
+    const target = path.posix.resolve(path.posix.dirname(current), item.symlink_target)
+    return this.followDirectory(requested, target, new Set([...visited, current]), signal)
   }
 }
 

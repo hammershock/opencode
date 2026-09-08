@@ -32,7 +32,7 @@ describe("Rexd connection test", () => {
   })
 
   test("validates the remote directory then gracefully closes the protocol and transport", async () => {
-    const transport = new ScriptedTransport({ stat: { exists: true, type: "dir" } })
+    const transport = new ScriptedTransport({ stat: { path: "/work/project", exists: true, type: "dir" } })
     const result = await testRexdConnection(
       target,
       { directory: "/work/project", clientVersion: "test" },
@@ -43,8 +43,35 @@ describe("Rexd connection test", () => {
     expect(transport.closed).toBe(true)
   })
 
+  test("validates a directory reached through a relative symbolic link", async () => {
+    const transport = new ScriptedTransport({
+      stats: {
+        "/work/link": { path: "/work/link", exists: true, type: "symlink", symlink_target: "project" },
+        "/work/project": { path: "/work/project", exists: true, type: "dir" },
+      },
+    })
+    await testRexdConnection(target, { directory: "/work/link", clientVersion: "test" }, { connect: () => transport })
+
+    expect(transport.methods).toEqual(["session.open", "fs.stat", "fs.stat", "session.close"])
+    expect(transport.closed).toBe(true)
+  })
+
+  test("rejects a symbolic link whose final target leaves the negotiated roots", async () => {
+    const transport = new ScriptedTransport({
+      stats: {
+        "/work/link": { path: "/work/link", exists: true, type: "symlink", symlink_target: "/outside" },
+      },
+    })
+    await expect(
+      testRexdConnection(target, { directory: "/work/link", clientVersion: "test" }, { connect: () => transport }),
+    ).rejects.toMatchObject({ phase: "directory" })
+
+    expect(transport.methods).toEqual(["session.open", "fs.stat", "session.close"])
+    expect(transport.closed).toBe(true)
+  })
+
   test("rejects a directory outside negotiated roots without local fallback", async () => {
-    const transport = new ScriptedTransport({ stat: { exists: true, type: "dir" } })
+    const transport = new ScriptedTransport({ stat: { path: "/control-device/path", exists: true, type: "dir" } })
     await expect(
       testRexdConnection(
         target,
@@ -71,7 +98,7 @@ class ScriptedTransport implements Transport {
   closeListeners = new Set<(error: RexdError) => void>()
   closed = false
 
-  constructor(readonly options: { protocol?: string; stat?: unknown }) {}
+  constructor(readonly options: { protocol?: string; stat?: unknown; stats?: Readonly<Record<string, unknown>> }) {}
 
   async write(payload: string) {
     const request = JSON.parse(payload)
@@ -94,7 +121,7 @@ class ScriptedTransport implements Transport {
             workspace_roots: ["/work"],
           }
         : request.method === "fs.stat"
-          ? this.options.stat
+          ? (this.options.stats?.[request.params.path] ?? this.options.stat)
           : { ok: true }
     queueMicrotask(() =>
       this.dataListeners.forEach((listener) =>

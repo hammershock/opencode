@@ -70,6 +70,32 @@ describe("target wizard Rexd connection", () => {
     expect(closes).toBe(2)
   })
 
+  test("offers only symbolic links that resolve to remote directories", async () => {
+    const wizard = makeWizardConnectionProbe({
+      connect: async () =>
+        lease(async (method, params) => {
+          if (method === "fs.list")
+            return {
+              entries: [
+                { name: "directory-link", path: "/home/hammer/directory-link", type: "symlink" },
+                { name: "file-link", path: "/home/hammer/file-link", type: "symlink" },
+              ],
+            }
+          if (params?.path === "/home/hammer/directory-link")
+            return { path: params.path, exists: true, type: "symlink", symlink_target: "/project" }
+          if (params?.path === "/home/hammer/file-link")
+            return { path: params.path, exists: true, type: "symlink", symlink_target: "/notes.txt" }
+          if (params?.path === "/project") return { path: params.path, exists: true, type: "dir" }
+          return { path: params?.path, exists: true, type: "file" }
+        }),
+    })
+
+    expect((await wizard.complete(target, { value: "/home/hammer/", cursor: 13, cwd: "/" })).candidates).toEqual([
+      "/home/hammer/directory-link/",
+    ])
+    await wizard.close()
+  })
+
   test("expires an idle lease", async () => {
     let connects = 0
     let closes = 0
@@ -93,9 +119,14 @@ describe("target wizard Rexd connection", () => {
   })
 })
 
-function lease(request: (method: string) => Promise<unknown>, close: () => void): RexdLease {
+function lease(
+  request: (method: string, params?: Readonly<Record<string, unknown>>) => Promise<unknown>,
+  close: () => void = () => undefined,
+): RexdLease {
   return {
-    client: { request } as unknown as RexdLease["client"],
+    client: {
+      request: (method: string, params?: Readonly<Record<string, unknown>>) => request(method, params),
+    } as unknown as RexdLease["client"],
     handshake: {
       sessionID: "wizard",
       protocol: "rexd/1",

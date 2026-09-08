@@ -201,10 +201,22 @@ async function completeRemotePath(
   const absolute = path.posix.isAbsolute(expanded) ? expanded : path.posix.join(input.cwd, expanded)
   const directory = absolute.endsWith("/") ? absolute : path.posix.dirname(absolute)
   const fragment = absolute.endsWith("/") ? "" : path.posix.basename(absolute)
-  const entries = await new RexdFiles("target-wizard", connection.lease).list(directory, input.cwd)
-  const candidates = entries
-    .filter((entry) => entry.type === "dir" && entry.name.startsWith(fragment))
-    .map((entry) => path.posix.join(directory, entry.name) + "/")
+  const files = new RexdFiles("target-wizard", connection.lease)
+  const entries = await files.list(directory, input.cwd)
+  const candidates = (
+    await Promise.all(
+      entries
+        .filter((entry) => entry.name.startsWith(fragment) && (entry.type === "dir" || entry.type === "symlink"))
+        .map(async (entry) => {
+          const candidate = path.posix.join(directory, entry.name)
+          if (entry.type === "dir") return candidate + "/"
+          return (await files.directoryStatus(candidate, input.cwd)).status === "directory"
+            ? candidate + "/"
+            : undefined
+        }),
+    )
+  )
+    .filter((candidate) => candidate !== undefined)
     .sort()
   const completion = candidates.slice(1).reduce((prefix, value) => {
     let index = 0

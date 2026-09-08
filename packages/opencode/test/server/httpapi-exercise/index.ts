@@ -761,6 +761,22 @@ const scenarios: Scenario[] = [
     .seeded((ctx) => ctx.file("hello.txt", "hello\n"))
     .at((ctx) => ({ path: "/api/fs/find?query=hello&type=file", headers: ctx.headers() }))
     .json(200, locationData(array)),
+  http.protected
+    .post("/api/shell/completion", "v2.shell.complete")
+    .seeded((ctx) => ctx.file("shell-completion-marker", ""))
+    .at((ctx) => ({
+      path: "/api/shell/completion",
+      headers: ctx.headers(),
+      body: { input: "shell-comp", cursor: 10 },
+    }))
+    .json(200, (body) => {
+      object(body)
+      array(body.candidates)
+      check(
+        body.candidates.some((candidate) => isRecord(candidate) && candidate.value === "shell-completion-marker"),
+        "Location shell completion should return the project marker",
+      )
+    }),
   http.protected.get("/api/pty", "v2.pty.list").json(200, locationData(array)),
   http.protected
     .post("/api/pty", "v2.pty.create")

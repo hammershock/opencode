@@ -116,6 +116,9 @@ export interface Interface {
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly completeShell: (input: ShellCompletionInput) => Effect.Effect<ShellCompletionResult, unknown>
+  readonly completeShellAtLocation: (
+    input: ShellLocationCompletionInput,
+  ) => Effect.Effect<ShellCompletionResult, unknown>
   readonly resetShell: (sessionID: SessionID) => Effect.Effect<void>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
@@ -1428,35 +1431,62 @@ const layer = Layer.effect(
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
+    const shellCompletionContext = Effect.fnUntraced(function* (input: {
+      location: Location.Ref
+      sessionID?: SessionID
+    }) {
+      const cfg = yield* config.get()
+      const sh = Shell.preferred(cfg.shell)
+      const location = {
+        target: input.location.target.type === "rexd" ? input.location.target.targetID : "local",
+        directory: input.location.directory,
+      }
+      const enabled = cfg.experimental?.user_shell_cwd === true
+      const cwd = input.sessionID
+        ? yield* userShell.current({ sessionID: input.sessionID, location, enabled })
+        : input.location.directory
+      const shellEnv = yield* plugin.trigger(
+        "shell.env",
+        { cwd, ...(input.sessionID ? { sessionID: input.sessionID } : {}) },
+        { env: {} },
+      )
+      const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
+        service.environment(shellEnv.env),
+      ).pipe(Effect.provide(locations.get(input.location)))
+      const selected =
+        input.location.target.type === "local"
+          ? UserShellLocal.provider(sh, fsys, spawner)
+          : yield* UserShellLocation.provider.pipe(Effect.provide(locations.get(input.location)))
+      return { location, cwd, environment, provider: selected, enabled }
+    })
+
     const completeShell = Effect.fn("SessionPrompt.completeShell")(function* (input: ShellCompletionInput) {
       yield* locationAccess.require(input.sessionID).pipe(Effect.catch(Effect.die))
       yield* sessions.get(input.sessionID)
-      const cfg = yield* config.get()
-      const sh = Shell.preferred(cfg.shell)
-      const enabled = cfg.experimental?.user_shell_cwd === true
       const locationRef = yield* sessionLocation(input.sessionID)
-      const location = {
-        target: locationRef.target.type === "rexd" ? locationRef.target.targetID : "local",
-        directory: locationRef.directory,
-      }
-      const cwd = yield* userShell.current({ sessionID: input.sessionID, location, enabled })
-      const shellEnv = yield* plugin.trigger("shell.env", { cwd, sessionID: input.sessionID }, { env: {} })
-      const environment = yield* Effect.flatMap(LocationEnvironment.Service, (service) =>
-        service.environment(shellEnv.env),
-      ).pipe(Effect.provide(locations.get(locationRef)))
-      const selected =
-        locationRef.target.type === "local"
-          ? UserShellLocal.provider(sh, fsys, spawner)
-          : yield* UserShellLocation.provider.pipe(Effect.provide(locations.get(locationRef)))
+      const context = yield* shellCompletionContext({ location: locationRef, sessionID: input.sessionID })
       return yield* userShell.complete({
         sessionID: input.sessionID,
-        location,
+        location: context.location,
         input: input.input,
         cursor: input.cursor,
-        environment,
-        enabled,
-        provider: selected,
+        environment: context.environment,
+        enabled: context.enabled,
+        provider: context.provider,
       })
+    })
+
+    const completeShellAtLocation = Effect.fn("SessionPrompt.completeShellAtLocation")(function* (
+      input: ShellLocationCompletionInput,
+    ) {
+      const context = yield* shellCompletionContext({ location: input.location })
+      const result = yield* context.provider.complete({
+        cwd: context.cwd,
+        input: input.input,
+        cursor: input.cursor,
+        environment: context.environment,
+      })
+      return { generation: 0, stale: false, ...result }
     })
 
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
@@ -1593,6 +1623,7 @@ const layer = Layer.effect(
       loop,
       shell,
       completeShell,
+      completeShellAtLocation,
       resetShell: userShell.reset,
       command,
       resolvePromptParts,
@@ -1648,6 +1679,13 @@ export const ShellCompletionInput = Schema.Struct({
   cursor: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 })
 export type ShellCompletionInput = Schema.Schema.Type<typeof ShellCompletionInput>
+
+export const ShellLocationCompletionInput = Schema.Struct({
+  location: Location.Ref,
+  input: Schema.String,
+  cursor: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+})
+export type ShellLocationCompletionInput = Schema.Schema.Type<typeof ShellLocationCompletionInput>
 
 export const ShellCompletionCandidate = Schema.Struct({
   value: Schema.String,

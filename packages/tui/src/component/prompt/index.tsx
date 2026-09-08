@@ -1933,7 +1933,7 @@ export function Prompt(props: PromptProps) {
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
         promptPartTypeId={() => promptPartTypeId}
-        shellMutation={cursorVersion() + (props.shellCompletionGeneration ?? 0)}
+        shellContextVersion={props.shellCompletionGeneration ?? 0}
         commandSlashes={activeCommandHost().slashes}
       />
     </>

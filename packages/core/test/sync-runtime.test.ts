@@ -12,23 +12,30 @@ import type { SyncTransferEvent } from "@opencode-ai/schema/sync-transfer-event"
 
 function provider() {
   const files = new Map<string, { bytes: Uint8Array; version: number }>()
+  const counts = { list: 0, stat: 0, download: 0, upload: 0, delete: 0 }
   const adapter: SyncProvider.Adapter = {
     id: "memory",
-    list: async (prefix) => ({
-      objects: [...files]
-        .filter(([path]) => path.startsWith(prefix))
-        .map(([path, value]) => ({ path, version: String(value.version), size: value.bytes.length })),
-    }),
+    list: async (prefix) => {
+      counts.list++
+      return {
+        objects: [...files]
+          .filter(([path]) => path.startsWith(prefix))
+          .map(([path, value]) => ({ path, version: String(value.version), size: value.bytes.length })),
+      }
+    },
     stat: async (path) => {
+      counts.stat++
       const value = files.get(path)
       return value && { path, version: String(value.version), size: value.bytes.length }
     },
     download: async (path, version) => {
+      counts.download++
       const value = files.get(path)
       if (!value || (version && version !== String(value.version))) throw new Error("missing")
       return { path, version: String(value.version), size: value.bytes.length, bytes: value.bytes }
     },
     uploadAtomic: async (path, bytes, precondition) => {
+      counts.upload++
       const current = files.get(path)
       if (precondition.type === "absent" && current)
         throw new SyncProvider.ProviderError("memory", "upload", "conflict", false)
@@ -38,17 +45,19 @@ function provider() {
       files.set(path, value)
       return { path, version: String(value.version), size: bytes.length }
     },
-    deleteBatch: async (objects) =>
-      objects.map((object) => {
+    deleteBatch: async (objects) => {
+      counts.delete++
+      return objects.map((object) => {
         const current = files.get(object.path)
         if (!current) return { path: object.path, status: "missing" as const }
         if (String(current.version) !== object.version)
           return { path: object.path, status: "conflict" as const, version: String(current.version) }
         files.delete(object.path)
         return { path: object.path, status: "deleted" as const }
-      }),
+      })
+    },
   }
-  return { adapter, files }
+  return { adapter, files, counts }
 }
 
 function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operations?: readonly SyncEvent.Operation[]) {
@@ -184,6 +193,33 @@ describe("SyncRuntime", () => {
       stored.bytes,
     )
     expect(JSON.parse(new TextDecoder().decode(raw)).generation).toBe(381)
+  })
+
+  test("does not republish an unchanged head or scan attachment history", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("idle-device")
+    const local = store(id)
+    let collections = 0
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: local.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+      attachment: {
+        externalize: async (event) => event,
+        references: () => new Set(),
+        collect: async () => void collections++,
+      },
+    })
+
+    await Effect.runPromise(runtime.upload())
+    await Effect.runPromise(runtime.upload())
+
+    expect(remote.counts.upload).toBe(1)
+    expect(collections).toBe(0)
   })
 
   test("includes safe provider identifiers in diagnostics", () => {
@@ -581,7 +617,7 @@ describe("SyncRuntime", () => {
       acknowledged: () => Effect.succeed({}),
       attachment: { ...attachment, collect: async (input: unknown) => void gated.push(input) },
     })
-    await Effect.runPromise(downloader.pull())
+    await Effect.runPromise(downloader.now())
     expect(gated[0]).toMatchObject({ liveObjectIDs: new Set(["image"]), allActiveDevicesAcknowledged: false })
   })
 

@@ -118,6 +118,7 @@ export function make(input: {
   let indexedSegments = new Map<string, SyncProvider.ObjectInfo>()
   let revokedDevices = new Set<SyncEvent.DeviceID>()
   let localHead: Head | undefined
+  let attachmentCollectionPending = false
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
   const projector = (deviceID: SyncEvent.DeviceID) => {
     if (typeof input.projector !== "function") return input.projector
@@ -134,6 +135,7 @@ export function make(input: {
     if (!acquired) return
     status = { ...status, running: "upload" }
     let stage: Diagnostic["stage"] = "segment"
+    let segmentsChanged = false
     try {
       while (true) {
         signal?.throwIfAborted()
@@ -141,6 +143,7 @@ export function make(input: {
         if (!renewed) throw new Error("Sync upload lease expired while draining queued segments")
         const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
         if (!segment) break
+        segmentsChanged = true
         stage = "attachment"
         const wire = input.attachment ? await externalizeSegment(segment, input.attachment) : segment
         stage = "segment"
@@ -189,10 +192,11 @@ export function make(input: {
         deletions: [],
         revoked: input.revoked ? [...(await Effect.runPromise(input.revoked()))] : [],
       }
-      localHead = head
       stage = "head"
       const path = headPath(input.config.deviceID, codec.suffix)
-      const published = await publishHeadMonotonic(input.provider, codec, head, path, signal)
+      const changed = !localHead || JSON.stringify(localHead) !== JSON.stringify(head)
+      const published = changed ? await publishHeadMonotonic(input.provider, codec, head, path, signal) : true
+      localHead = head
       // A device releases its cloud reference only after its replacement head,
       // which no longer advertises the Session, is durably visible. An ack
       // written before the head would let a crash resurrect stale metadata.
@@ -204,7 +208,10 @@ export function make(input: {
       }
       await collectDeletions(signal)
       stage = "collect"
-      await collectAttachments(signal)
+      if (segmentsChanged || attachmentCollectionPending || pendingDeletions.length) {
+        await collectAttachments(signal)
+        attachmentCollectionPending = false
+      }
       status = { ...status, running: "idle", lastUploadAt: now(), lastError: undefined }
     } catch (cause) {
       status = { ...status, running: "idle", lastError: diagnostic(stage, cause) }
@@ -245,11 +252,20 @@ export function make(input: {
       indexedHeads = heads
         .filter((head) => !revoked.has(head.deviceID))
         .sort((a, b) => String(a.deviceID).localeCompare(String(b.deviceID)))
+      if (input.attachment) {
+        for (const head of indexedHeads) {
+          if ((await Effect.runPromise(input.store.cursor(head.deviceID))) < head.generation) {
+            attachmentCollectionPending = true
+            break
+          }
+        }
+      }
       for (const head of indexedHeads) {
         if (revoked.has(head.deviceID)) continue
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
       }
       const markers = await deletions.list(signal)
+      if (markers.length) attachmentCollectionPending = true
       await Effect.runPromise(
         input.store.absorbDeletions(
           markers.map((item) => item.tombstone),
@@ -272,7 +288,6 @@ export function make(input: {
               .filter((id) => !deleted.has(id)),
           ),
         )
-      await collectAttachments(signal)
       status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }
     } catch (cause) {
       status = { ...status, running: "idle", lastError: diagnostic("pull", cause) }

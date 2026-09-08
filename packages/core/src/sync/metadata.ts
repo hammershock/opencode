@@ -33,6 +33,7 @@ export type Item = typeof Item.Type
 export interface Interface {
   readonly scope: (spaceID: string) => Interface
   readonly apply: (deviceID: string, values: readonly SyncRuntime.Metadata[]) => Effect.Effect<void, unknown>
+  readonly retain: (sessionIDs: readonly string[]) => Effect.Effect<void, unknown>
   readonly list: () => Effect.Effect<readonly Item[], unknown>
   readonly availability: (sessionID: string, value: Availability) => Effect.Effect<void, unknown>
   readonly remove: (sessionID: string) => Effect.Effect<void, unknown>
@@ -89,6 +90,16 @@ export const layer = Layer.effect(
             { discard: true },
           ),
         )
+      const retain = (sessionIDs: readonly string[]) =>
+        db
+          .run(
+            sql`
+            DELETE FROM sync_session_metadata
+            WHERE space_id = ${spaceID}
+              AND session_id NOT IN (SELECT value FROM json_each(${JSON.stringify(sessionIDs)}))
+          `,
+          )
+          .pipe(Effect.asVoid)
       const availability = (sessionID: string, value: Availability) =>
         db
           .run(
@@ -100,7 +111,7 @@ export const layer = Layer.effect(
           .run(sql`DELETE FROM sync_session_metadata WHERE session_id = ${sessionID} AND space_id = ${spaceID}`)
           .pipe(Effect.asVoid)
       const clear = () => db.run(sql`DELETE FROM sync_session_metadata WHERE space_id = ${spaceID}`).pipe(Effect.asVoid)
-      return { scope: scoped, apply, list, availability, remove, clear }
+      return { scope: scoped, apply, retain, list, availability, remove, clear }
     }
     return scoped("legacy")
   }),

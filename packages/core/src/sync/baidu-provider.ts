@@ -188,7 +188,8 @@ export function adapter(input: {
 
   const download = async (object: string, version?: string, signal?: AbortSignal) => {
     const remote = remotePath(root, object)
-    const before = await stat(object, signal)
+    const pinned = version ? objectInfoFromVersion(object, version) : undefined
+    const before = pinned ?? (await stat(object, signal))
     if (!before) throw error("download", "not-found", false)
     if (version && before.version !== version) throw error("download", "conflict", false)
     const fsID = Number(before.version.split(":", 1)[0])
@@ -216,8 +217,10 @@ export function adapter(input: {
       },
       signal,
     )
-    const after = await stat(object, signal)
-    if (!after || after.version !== before.version) throw error("download", "conflict", false)
+    if (!pinned) {
+      const after = await stat(object, signal)
+      if (!after || after.version !== before.version) throw error("download", "conflict", false)
+    }
     return { ...before, bytes }
   }
 
@@ -541,6 +544,21 @@ function listedObjectInfo(
   const size = number(value.size, operation, "file-list", value)
   const modifiedAt = number(value.server_mtime, operation, "file-list", value) * 1_000
   return { path: object, version: `${fsID}:${modifiedAt}:${size}`, size, modifiedAt }
+}
+
+function objectInfoFromVersion(object: string, version: string): SyncProvider.ObjectInfo {
+  const [fsID, modifiedAt, size, ...rest] = version.split(":").map(Number)
+  if (
+    rest.length ||
+    !Number.isSafeInteger(fsID) ||
+    fsID < 0 ||
+    !Number.isSafeInteger(modifiedAt) ||
+    modifiedAt < 0 ||
+    !Number.isSafeInteger(size) ||
+    size < 0
+  )
+    throw error("download", "invalid-response", false, undefined, undefined, undefined, "version")
+  return { path: object, version, size, modifiedAt }
 }
 
 function createdObjectInfo(object: string, value: Record<string, unknown>): SyncProvider.ObjectInfo {

@@ -270,7 +270,10 @@ const make = (input: LayerOptions) =>
               }))
             }),
           ),
-        metadataProjector: { apply: (values, deviceID) => metadata.apply(deviceID, values) },
+        metadataProjector: {
+          apply: (values, deviceID) => metadata.apply(deviceID, values),
+          retain: metadata.retain,
+        },
         acknowledged: () =>
           syncDB
             .all<{ device_id: string; cursor: number }>(

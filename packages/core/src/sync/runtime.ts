@@ -70,6 +70,7 @@ export type Status = {
 
 export interface MetadataProjector {
   readonly apply: (metadata: readonly Metadata[], deviceID: SyncEvent.DeviceID) => Effect.Effect<void, unknown>
+  readonly retain?: (sessionIDs: readonly string[]) => Effect.Effect<void, unknown>
 }
 
 /**
@@ -114,6 +115,7 @@ export function make(input: {
   let pullFlight: Promise<void> | undefined
   let hydrateFlight: Promise<void> | undefined
   let indexedHeads: readonly Head[] = []
+  let indexedSegments = new Map<string, SyncProvider.ObjectInfo>()
   let revokedDevices = new Set<SyncEvent.DeviceID>()
   let localHead: Head | undefined
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
@@ -223,7 +225,11 @@ export function make(input: {
     if (!acquired) return
     status = { ...status, running: "pull" }
     try {
-      const objects = await SyncProvider.listAll(input.provider, "devices", signal)
+      const [objects, segments] = await Promise.all([
+        SyncProvider.listAll(input.provider, "devices", signal),
+        SyncProvider.listAll(input.provider, "segments", signal),
+      ])
+      indexedSegments = new Map(segments.map((item) => [item.path, item]))
       const heads: Head[] = []
       for (const object of objects.filter((item) => item.path.endsWith(`.head${codec.suffix}`))) {
         const deviceID = deviceFromHeadPath(object.path, codec.suffix)
@@ -263,6 +269,14 @@ export function make(input: {
             head.deviceID,
           ),
         )
+      if (input.metadataProjector.retain)
+        await Effect.runPromise(
+          input.metadataProjector.retain(
+            indexedHeads
+              .flatMap((head) => head.metadata.map((item) => item.sessionID))
+              .filter((id) => !deleted.has(id)),
+          ),
+        )
       await collectAttachments(signal)
       status = { ...status, running: "idle", lastPullAt: now(), lastError: undefined }
     } catch (cause) {
@@ -285,22 +299,28 @@ export function make(input: {
         let cursor = await Effect.runPromise(input.store.cursor(head.deviceID))
         while (cursor < head.generation) {
           signal?.throwIfAborted()
-          const generation = cursor + 1
-          const path = segmentPath(head.deviceID, generation, codec.suffix)
-          const object = await input.provider.stat(path, signal)
-          if (!object) throw new Error("Remote sync segment is missing")
-          await input.transfer?.start("download", "sessions")
-          const downloaded = await input.provider.download(path, object.version, signal)
-          await input.transfer?.complete("download", "sessions", downloaded.bytes.length)
-          const segment = await decode(
-            (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
-            codec,
-            "event",
-            segmentContext(head.deviceID, generation, path),
-            downloaded.bytes,
+          const end = Math.min(head.generation, cursor + 8)
+          const batch = await Promise.all(
+            Array.from({ length: end - cursor }, (_, index) => cursor + index + 1).map(async (generation) => {
+              const path = segmentPath(head.deviceID, generation, codec.suffix)
+              const object = indexedSegments.get(path) ?? (await input.provider.stat(path, signal))
+              if (!object) throw new Error(`Remote sync segment ${generation} is missing`)
+              await input.transfer?.start("download", "sessions")
+              const downloaded = await input.provider.download(path, object.version, signal)
+              await input.transfer?.complete("download", "sessions", downloaded.bytes.length)
+              return decode(
+                (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+                codec,
+                "event",
+                segmentContext(head.deviceID, generation, path),
+                downloaded.bytes,
+              )
+            }),
           )
-          await Effect.runPromise(input.store.applyDurable(segment, projector(head.deviceID)))
-          cursor = generation
+          for (const segment of batch) {
+            await Effect.runPromise(input.store.applyDurable(segment, projector(head.deviceID)))
+            cursor = segment.generation
+          }
         }
       }
     } catch (cause) {
@@ -528,6 +548,7 @@ export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnost
     provider?.providerCode === undefined ? undefined : `code ${provider.providerCode}`,
     provider?.requestID ? `request ${provider.requestID}` : undefined,
   ].filter((item): item is string => Boolean(item))
+  const internal = provider ? undefined : internalReason(cause)
   return {
     stage,
     operation: provider?.operation,
@@ -538,8 +559,13 @@ export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnost
     message:
       provider?.providerID === "baidu"
         ? `Baidu Netdisk ${provider.providerPhase ?? provider.operation} failed: ${providerReason(provider.kind)}${details.length ? ` (${details.join(", ")})` : ""}`
-        : `Sync ${stage} failed${provider?.providerPhase ? ` (${provider.providerPhase}${details.length ? `, ${details.join(", ")}` : ""})` : details.length ? ` (${details.join(", ")})` : ""}`,
+        : `Sync ${stage} failed${provider?.providerPhase ? ` (${provider.providerPhase}${details.length ? `, ${details.join(", ")}` : ""})` : details.length ? ` (${details.join(", ")})` : internal ? `: ${internal}` : ""}`,
   }
+}
+
+function internalReason(cause: unknown) {
+  const value = cause instanceof Error ? cause.message : String(cause)
+  return value.replace(/\s+/g, " ").slice(0, 240)
 }
 
 function providerReason(kind: SyncProvider.ErrorKind) {

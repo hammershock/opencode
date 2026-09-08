@@ -154,16 +154,9 @@ export const layer = Layer.effect(
               LIMIT 1
             `)
               if (existing) return decodeSegment(existing.payload)
-              const first = yield* tx.get<{ aggregate_id: string }>(sql`
-              SELECT aggregate_id FROM sync_event_outbox
-              WHERE segment_id IS NULL AND space_id = ${spaceID}
-              ORDER BY created_at, event_id
-              LIMIT 1
-            `)
-              if (!first) return undefined
               const rows = yield* tx.all<OperationRow>(sql`
               SELECT aggregate_id, payload, kind FROM sync_event_outbox
-              WHERE segment_id IS NULL AND space_id = ${spaceID} AND aggregate_id = ${first.aggregate_id}
+              WHERE segment_id IS NULL AND space_id = ${spaceID}
               ORDER BY created_at, event_id
               LIMIT ${limit}
             `)

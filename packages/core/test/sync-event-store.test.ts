@@ -172,6 +172,22 @@ describe("SyncEventStore", () => {
     )
   })
 
+  test("packs pending events from multiple Sessions into one segment", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        yield* store.enqueue(event("first-session", 0), 10)
+        yield* store.enqueue({ ...event("second-session", 0), aggregateID: "session-b" }, 11)
+
+        const sealed = yield* store.seal(device, 256, 20)
+        expect(sealed?.operations.map((item) => item.kind === "event" && item.event.aggregateID)).toEqual([
+          "session-a",
+          "session-b",
+        ])
+      }),
+    )
+  })
+
   test("permits the same device identity and generation in two sync spaces", async () => {
     await run(
       Effect.gen(function* () {

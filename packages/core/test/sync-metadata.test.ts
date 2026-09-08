@@ -23,6 +23,15 @@ describe("SyncMetadata", () => {
         yield* metadata.availability("s", "ready")
         expect((yield* metadata.list())[0]?.availability).toBe("ready")
 
+        const remote = { ...base, ownerDeviceID: "remote", revision: 1, updatedAt: 4 }
+        yield* metadata.apply("remote", [
+          { ...remote, sessionID: "remote-live", title: "live" },
+          { ...remote, sessionID: "remote-deleted", title: "deleted" },
+        ])
+        yield* metadata.apply("remote", [{ ...remote, sessionID: "remote-live", title: "live" }])
+        yield* metadata.retain(["s", "remote-live"])
+        expect((yield* metadata.list()).some((item) => item.sessionID === "remote-deleted")).toBe(false)
+
         const other = metadata.scope("other-space")
         yield* other.apply("device-b", [
           {
@@ -34,7 +43,7 @@ describe("SyncMetadata", () => {
             updatedAt: 3,
           },
         ])
-        expect((yield* metadata.list()).map((item) => item.sessionID)).toEqual(["s"])
+        expect((yield* metadata.list()).map((item) => item.sessionID)).toEqual(["remote-live", "s"])
         expect((yield* other.list()).map((item) => item.sessionID)).toEqual(["s"])
 
         const database = (yield* SyncDatabase.Service).db
@@ -43,7 +52,7 @@ describe("SyncMetadata", () => {
           VALUES ('s', ${JSON.stringify({ id: "delete", sessionID: "s", deletedAt: 4 })}, 4, 'legacy')
         `)
         yield* metadata.apply("stale-device", [{ ...base, title: "resurrected", revision: 99, updatedAt: 99 }])
-        expect(yield* metadata.list()).toEqual([])
+        expect((yield* metadata.list()).some((item) => item.sessionID === "s")).toBe(false)
       }).pipe(Effect.scoped, Effect.provide(layers)),
     )
   })

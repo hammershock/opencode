@@ -30,6 +30,7 @@ export interface Interface {
     createdAt?: number,
   ) => Effect.Effect<SyncEvent.Segment | undefined, unknown>
   readonly acknowledge: (segmentID: SyncEvent.SegmentID) => Effect.Effect<void, unknown>
+  readonly requeueAcknowledgedBefore: (deviceID: SyncEvent.DeviceID, cutoff: number) => Effect.Effect<void, unknown>
   readonly head: (deviceID: SyncEvent.DeviceID) => Effect.Effect<number, unknown>
   readonly cursor: (deviceID: SyncEvent.DeviceID) => Effect.Effect<number, unknown>
   readonly apply: (
@@ -215,6 +216,19 @@ export const layer = Layer.effect(
             yield* tx.run(sql`DELETE FROM sync_event_outbox WHERE segment_id = ${segmentID} AND space_id = ${spaceID}`)
           }),
         )
+      })
+
+      const requeueAcknowledgedBefore = Effect.fn("SyncEventStore.requeueAcknowledgedBefore")(function* (
+        deviceID: SyncEvent.DeviceID,
+        cutoff: number,
+      ) {
+        yield* db.run(sql`
+          UPDATE sync_event_segment SET acknowledged_at = NULL
+          WHERE device_id = ${deviceID}
+            AND space_id = ${spaceID}
+            AND acknowledged_at IS NOT NULL
+            AND acknowledged_at < ${cutoff}
+        `)
       })
 
       const head = Effect.fn("SyncEventStore.head")(function* (deviceID: SyncEvent.DeviceID) {
@@ -528,6 +542,7 @@ export const layer = Layer.effect(
         pending,
         seal,
         acknowledge,
+        requeueAcknowledgedBefore,
         head,
         cursor,
         apply,

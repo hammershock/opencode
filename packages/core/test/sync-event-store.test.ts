@@ -232,6 +232,21 @@ describe("SyncEventStore", () => {
     )
   })
 
+  test("requeues retained segments acknowledged before a replacement cloud root", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        yield* store.enqueue(event("before-reset", 0), 10)
+        const sealed = yield* store.seal(device, 10, 20)
+        yield* store.acknowledge(sealed!.id)
+        expect(yield* store.seal(device, 10, 30)).toBeUndefined()
+
+        yield* store.requeueAcknowledgedBefore(device, Date.now() + 1_000)
+        expect(yield* store.seal(device, 10, 40)).toEqual(sealed)
+      }),
+    )
+  })
+
   test("advances a remote cursor only after every projection commits", async () => {
     await run(
       Effect.gen(function* () {

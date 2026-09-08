@@ -189,6 +189,12 @@ const make = (input: LayerOptions) =>
       if (!config || config.namespaceID !== SyncRoot.INTERNAL_SCOPE)
         return yield* new ControlError({ kind: "unconfigured" })
       const store = eventStore.scope(config.namespaceID)
+      const state = yield* setup.state().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      const joinedAt = state?.spaces.find((item) => item.descriptor.namespaceID === config.namespaceID)?.joinedAt
+      if (joinedAt !== undefined)
+        yield* store
+          .requeueAcknowledgedBefore(SyncEvent.DeviceID.make(config.deviceID), joinedAt)
+          .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       const metadata = metadataStore.scope(config.namespaceID)
       const devices = devicesFor(config.namespaceID)
       const identity = `${config.namespaceID}:${config.deviceID}:${config.encryption}`

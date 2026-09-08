@@ -154,6 +154,15 @@ export function invalidateShellCompletionContext(
   untrack(() => invalidateShellCompletion(generation, visible(), hide))
 }
 
+export function autocompleteTabAction(
+  visible: AutocompleteRef["visible"],
+  selected: Pick<AutocompleteOption, "isDirectory"> | undefined,
+) {
+  if (visible === "shell") return "move-next" as const
+  if (selected?.isDirectory) return "expand-directory" as const
+  return "select" as const
+}
+
 export function Autocomplete(props: {
   value: string
   shell: () => boolean
@@ -708,7 +717,12 @@ export function Autocomplete(props: {
         category: "Autocomplete",
         run() {
           const selected = options()[store.selected]
-          if (selected?.isDirectory) {
+          const action = autocompleteTabAction(store.visible, selected)
+          if (action === "move-next") {
+            move(1)
+            return
+          }
+          if (action === "expand-directory") {
             expandDirectory()
             return
           }

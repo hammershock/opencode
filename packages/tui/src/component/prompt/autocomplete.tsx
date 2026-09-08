@@ -25,6 +25,7 @@ import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 import type { TuiSlashCommand } from "../../command-toolkit/host"
 import { useToast } from "../../ui/toast"
+import { errorMessage } from "../../util/error"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -777,7 +778,12 @@ export function Autocomplete(props: {
               },
               { throwOnError: true },
             )
-        const result = await completion.then((response) => response.data).catch(() => undefined)
+        const result = await completion
+          .then((response) => response.data)
+          .catch((error) => {
+            toast.show({ title: "Shell completion failed", message: errorMessage(error), variant: "error" })
+            return undefined
+          })
         if (!result || !shellGeneration.accepts(generation) || result.stale) return
         if (input.plainText !== request.input || input.cursorOffset !== cursorOffset) return
         if (result.degraded) {

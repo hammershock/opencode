@@ -28,6 +28,7 @@ import {
   WorkspaceRoutingMiddleware,
   WorkspaceRoutingQuery,
   WorkspaceRouteContext,
+  instanceDirectory,
   workspaceRoutingLayer,
 } from "../../src/server/routes/instance/httpapi/middleware/workspace-routing"
 import { HEADER as FenceHeader } from "../../src/server/shared/fence"
@@ -258,6 +259,32 @@ const serveProbe = HttpApiBuilder.layer(ProbeApi).pipe(
 )
 
 describe("HttpApi workspace routing middleware", () => {
+  it.live("keeps rexd Location paths out of the controller InstanceStore", () =>
+    Effect.sync(() => {
+      const local = "/local/project"
+      const remote = "/home/remote/project"
+      const request = { headers: {} } as HttpServerRequest.HttpServerRequest
+
+      expect(instanceDirectory(request, new URL(`http://localhost/api/shell/completion?directory=${local}`))).toBe(
+        local,
+      )
+      expect(
+        instanceDirectory(
+          request,
+          new URL(
+            `http://localhost/api/shell/completion?directory=${remote}&location%5Btarget%5D=target-1&location%5Bdirectory%5D=${remote}`,
+          ),
+        ),
+      ).toBe(process.cwd())
+      expect(
+        instanceDirectory(request, new URL("http://localhost/session/ses_remote/shell/completion"), {
+          directory: remote,
+          target: { type: "rexd", targetID: "target-1" as never },
+        }),
+      ).toBe(process.cwd())
+    }),
+  )
+
   it.live("proxies remote workspace HTTP requests through the selected workspace target", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })

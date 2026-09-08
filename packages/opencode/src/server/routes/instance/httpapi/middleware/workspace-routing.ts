@@ -87,6 +87,25 @@ function defaultDirectory(request: HttpServerRequest.HttpServerRequest, url: URL
   return url.searchParams.get("directory") || request.headers["x-opencode-directory"] || process.cwd()
 }
 
+/**
+ * Rexd Location paths belong to the target machine. They must never become the
+ * controller's InstanceStore key, because project discovery would otherwise
+ * resolve (for example) /home/user/workspace on the local Mac.
+ *
+ * The Location middleware independently resolves the target directory and
+ * supplies its filesystem/process services. The controller instance remains
+ * rooted at the directory from which the server was started.
+ */
+export function instanceDirectory(
+  request: HttpServerRequest.HttpServerRequest,
+  url: URL,
+  session?: Pick<Session.Info, "directory" | "target">,
+): string {
+  const target = url.searchParams.get("location[target]") || request.headers["x-opencode-target"]
+  if (target || session?.target?.type === "rexd") return process.cwd()
+  return session?.directory || defaultDirectory(request, url)
+}
+
 function shouldStayOnControlPlane(request: HttpServerRequest.HttpServerRequest, url: URL): boolean {
   return isLocalWorkspaceRoute(request.method, url.pathname) || url.pathname.startsWith("/console")
 }
@@ -179,7 +198,7 @@ function planRequest(
     }
 
     return RequestPlan.Local({
-      directory: session?.directory || defaultDirectory(request, url),
+      directory: instanceDirectory(request, url, session),
       workspaceID: envWorkspaceID ?? workspaceID,
     })
   })

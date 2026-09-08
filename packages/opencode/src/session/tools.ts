@@ -144,7 +144,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   // canonical location registry so no controller filesystem/process captured
   // by the legacy registry can leak into a remote Session.
   if (input.locationTools) {
-    const names = new Set(["bash", "read", "write", "edit", "apply_patch", "grep"])
+    const names = new Set(["bash", "read", "write", "edit", "apply_patch", "grep", "glob"])
     for (const definition of input.locationTools.definitions) {
       if (!names.has(definition.name)) continue
       const schema = ProviderTransform.schema(input.model, definition.inputSchema)

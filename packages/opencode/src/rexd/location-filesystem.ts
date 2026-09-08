@@ -98,7 +98,7 @@ export function rexdFilesystemNodes(
         const absolute = (value: string) => files.resolve(value, directory)
         const stat = (value: string) =>
           Effect.promise(async () => {
-            const item = await files.stat(value, directory)
+            const item = await files.statFollowing(value, directory)
             if (!item.exists) throw new Error(`Remote path does not exist: ${absolute(value)}`)
             return {
               type:
@@ -167,9 +167,10 @@ export function rexdFilesystemNodes(
         const methods: Partial<FSUtil.Interface> = {
           resolve: (value) => Effect.succeed(absolute(value)),
           realPath: (value) => stat(value).pipe(Effect.as(absolute(value))),
-          exists: (value) => Effect.promise(() => files.stat(value, directory)).pipe(Effect.map((x) => x.exists)),
+          exists: (value) =>
+            Effect.promise(() => files.statFollowing(value, directory)).pipe(Effect.map((x) => x.exists)),
           existsSafe: (value) =>
-            Effect.promise(() => files.stat(value, directory)).pipe(
+            Effect.promise(() => files.statFollowing(value, directory)).pipe(
               Effect.map((x) => x.exists),
               Effect.orElseSucceed(() => false),
             ),
@@ -179,7 +180,7 @@ export function rexdFilesystemNodes(
               Effect.orElseSucceed(() => false),
             ),
           isFile: (value) =>
-            Effect.promise(() => files.stat(value, directory)).pipe(
+            Effect.promise(() => files.statFollowing(value, directory)).pipe(
               Effect.map((x) => x.type === "file"),
               Effect.orElseSucceed(() => false),
             ),

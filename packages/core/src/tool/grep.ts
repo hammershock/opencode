@@ -5,10 +5,8 @@ import { Effect, Layer, Schema } from "effect"
 import path from "path"
 import { makeLocationNode } from "../effect/app-node"
 import { FileSystem } from "../filesystem"
-import { FSUtil } from "../fs-util"
 import { Location } from "../location"
 import { PermissionV2 } from "../permission"
-import { Ripgrep } from "../ripgrep"
 import { RelativePath } from "../schema"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
@@ -53,8 +51,7 @@ export const toModelOutput = (output: ModelOutput) => {
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
-    const fs = yield* FSUtil.Service
-    const ripgrep = yield* Ripgrep.Service
+    const fs = yield* FileSystem.Service
     const location = yield* Location.Service
     const permission = yield* PermissionV2.Service
 
@@ -92,37 +89,12 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
-              const target = path.resolve(location.directory, input.path ?? ".")
-              const info = yield* fs.stat(target).pipe(Effect.catch(() => Effect.succeed(undefined)))
-              return yield* ripgrep
-                .grep({
-                  cwd: info?.type === "Directory" ? target : path.dirname(target),
-                  pattern: input.pattern,
-                  file: info?.type === "File" ? path.basename(target) : undefined,
-                  include: input.include,
-                  limit: input.limit ?? Number.MAX_SAFE_INTEGER,
-                })
-                .pipe(
-                  Effect.map((result) =>
-                    result.map((match) =>
-                      FileSystem.Match.make({
-                        ...match,
-                        entry: FileSystem.Entry.make({
-                          ...match.entry,
-                          path: RelativePath.make(
-                            path.relative(
-                              location.directory,
-                              path.resolve(
-                                info?.type === "Directory" ? target : path.dirname(target),
-                                match.entry.path,
-                              ),
-                            ),
-                          ),
-                        }),
-                      }),
-                    ),
-                  ),
-                )
+              return yield* fs.grep({
+                pattern: input.pattern,
+                path: input.path,
+                include: input.include,
+                limit: input.limit ?? Number.MAX_SAFE_INTEGER,
+              })
             }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to grep for ${input.pattern}` }))),
         }),
       })
@@ -133,5 +105,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/grep",
   layer,
-  deps: [ToolRegistry.node, FSUtil.locationNode, Ripgrep.node, Location.node, PermissionV2.node],
+  deps: [ToolRegistry.node, FileSystem.node, Location.node, PermissionV2.node],
 })

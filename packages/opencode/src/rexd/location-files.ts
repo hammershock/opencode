@@ -62,6 +62,11 @@ export class RexdFiles {
     )
   }
 
+  async statFollowing(value: string, cwd: string, signal?: AbortSignal) {
+    const requested = this.resolve(value, cwd)
+    return this.followStat(requested, new Set(), signal)
+  }
+
   async directoryStatus(value: string, cwd: string, signal?: AbortSignal): Promise<RexdDirectoryStatus> {
     const requested = this.resolve(value, cwd)
     return this.followDirectory(requested, requested, new Set(), signal)
@@ -143,6 +148,20 @@ export class RexdFiles {
     if (item.type !== "symlink" || !item.symlink_target) return { status: "not-directory", path: requested }
     const target = path.posix.resolve(path.posix.dirname(current), item.symlink_target)
     return this.followDirectory(requested, target, new Set([...visited, current]), signal)
+  }
+
+  private async followStat(
+    current: string,
+    visited: ReadonlySet<string>,
+    signal?: AbortSignal,
+  ): Promise<typeof Stat.Type> {
+    if (visited.has(current) || visited.size >= 40) throw new Error(`Remote symlink loop: ${current}`)
+    if (!this.roots.some((root) => contains(root, current)))
+      throw new Error(`Remote symlink target is outside negotiated roots: ${current}`)
+    const item = await this.stat(current, "/", signal)
+    if (item.type !== "symlink" || !item.symlink_target) return item
+    const target = path.posix.resolve(path.posix.dirname(current), item.symlink_target)
+    return this.followStat(target, new Set([...visited, current]), signal)
   }
 }
 

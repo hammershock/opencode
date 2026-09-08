@@ -45,10 +45,7 @@ export function capture(store: SyncEventStore.Interface, payload: DurablePayload
       aggregateID: payload.durable.aggregateID,
       seq: payload.durable.seq,
       type: EventV2.versionedType(payload.type, payload.durable.version),
-      // Runtime domain objects may retain optional keys with `undefined` even
-      // though the durable wire format is JSON. Normalize at the sync boundary
-      // so capture matches the bytes other devices can actually replay.
-      data: JSON.parse(JSON.stringify(payload.data)) as Record<string, any>,
+      data: normalizeCapturedData(payload.type, payload.data),
     }),
     createdAt,
   )
@@ -238,8 +235,28 @@ function serialized(event: SyncEvent.Envelope): EventV2.SerializedEvent {
     aggregateID: event.aggregateID,
     seq: event.seq,
     type: event.type,
-    data: event.data,
+    data: normalizeLegacyWireData(event),
   }
+}
+
+function normalizeLegacyWireData(event: SyncEvent.Envelope) {
+  // Early sync builds JSON-stringified DateTime values instead of applying
+  // the durable event schema encoder. Keep those already-published segments
+  // replayable while all new captures normalize the transformed field.
+  if (event.type === "session.next.location.rebound.1" && typeof event.data.timestamp === "string") {
+    const timestamp = Date.parse(event.data.timestamp)
+    if (Number.isFinite(timestamp)) return { ...event.data, timestamp }
+  }
+  return event.data
+}
+
+function normalizeCapturedData(type: string, data: Record<string, unknown>) {
+  const normalized = JSON.parse(JSON.stringify(data)) as Record<string, any>
+  if (type === "session.next.location.rebound" && typeof normalized.timestamp === "string") {
+    const timestamp = Date.parse(normalized.timestamp)
+    if (Number.isFinite(timestamp)) normalized.timestamp = timestamp
+  }
+  return normalized
 }
 
 function replayAs(

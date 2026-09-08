@@ -18,7 +18,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncDatabase") {}
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 const layer = Layer.effect(
   Service,
@@ -58,6 +58,10 @@ const layer = Layer.effect(
             yield* Effect.forEach(schemaV6, (statement) => tx.run(statement), { discard: true })
             yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (6)`)
           }
+          if ((current?.version ?? 1) < 7) {
+            yield* Effect.forEach(schemaV7, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (7)`)
+          }
         }),
       { behavior: "immediate" },
     )
@@ -88,6 +92,7 @@ export function purgeSpace(db: Interface["db"], spaceID: string) {
         sql`DELETE FROM sync_apply_journal WHERE space_id = ${spaceID}`,
         sql`DELETE FROM sync_session_metadata WHERE space_id = ${spaceID}`,
         sql`DELETE FROM sync_session_space WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_segment_aggregate WHERE space_id = ${spaceID}`,
       ],
       (statement) => tx.run(statement),
       { discard: true },
@@ -279,4 +284,31 @@ const schemaV6 = [
   sql`CREATE INDEX sync_event_outbox_space_idx ON sync_event_outbox(space_id, segment_id, created_at)`,
   sql`CREATE INDEX sync_event_segment_space_idx ON sync_event_segment(space_id, device_id, generation)`,
   sql`CREATE INDEX sync_event_cursor_space_idx ON sync_event_cursor(space_id, device_id)`,
+]
+
+const schemaV7 = [
+  sql`CREATE TABLE sync_segment_aggregate (
+    space_id TEXT NOT NULL, aggregate_id TEXT NOT NULL, device_id TEXT NOT NULL, generation INTEGER NOT NULL,
+    PRIMARY KEY(space_id, aggregate_id, device_id, generation)
+  )`,
+  sql`CREATE INDEX sync_segment_aggregate_lookup_idx
+    ON sync_segment_aggregate(space_id, aggregate_id, device_id, generation)`,
+  sql`INSERT OR IGNORE INTO sync_segment_aggregate (space_id, aggregate_id, device_id, generation)
+    SELECT source.space_id, json_extract(operation.value,
+      CASE json_extract(operation.value, '$.kind')
+        WHEN 'tombstone' THEN '$.tombstone.sessionID'
+        ELSE '$.event.aggregateID'
+      END
+    ), source.device_id, source.generation
+    FROM (
+      SELECT space_id, device_id, generation, payload FROM sync_event_segment
+      UNION ALL
+      SELECT space_id, device_id, generation, payload FROM sync_remote_segment
+    ) AS source, json_each(source.payload, '$.operations') AS operation
+    WHERE json_extract(operation.value,
+      CASE json_extract(operation.value, '$.kind')
+        WHEN 'tombstone' THEN '$.tombstone.sessionID'
+        ELSE '$.event.aggregateID'
+      END
+    ) IS NOT NULL`,
 ]

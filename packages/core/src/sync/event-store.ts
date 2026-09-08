@@ -61,6 +61,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Sy
 type OutboxRow = { payload: string }
 type OperationRow = { aggregate_id: string; payload: string; kind: "event" | "tombstone" }
 type SegmentRow = { payload: string }
+type SegmentLocationRow = { device_id: string; generation: number }
 type NumberRow = { value: number }
 type RemoteEventRow = { fingerprint: string }
 type RemoteSegmentRow = { payload: string }
@@ -73,6 +74,12 @@ export const layer = Layer.effect(
     const db = (yield* SyncDatabase.Service).db
 
     const scoped = (spaceID: string): Interface => {
+      const indexSegment = (tx: Transaction, segment: SyncEvent.Segment) =>
+        tx.run(sql`
+          INSERT OR IGNORE INTO sync_segment_aggregate (space_id, aggregate_id, device_id, generation)
+          SELECT ${spaceID}, value, ${segment.deviceID}, ${segment.generation}
+          FROM json_each(${JSON.stringify([...new Set(segment.operations.map(operationAggregateID))])})
+        `)
       const enqueue = Effect.fn("SyncEventStore.enqueue")(function* (
         event: SyncEvent.Envelope,
         createdAt = Date.now(),
@@ -186,6 +193,7 @@ export const layer = Layer.effect(
               INSERT INTO sync_event_segment (id, device_id, generation, payload, created_at, space_id)
               VALUES (${segment.id}, ${deviceID}, ${next}, ${payload}, ${createdAt}, ${spaceID})
             `)
+              yield* indexSegment(tx, segment)
               yield* tx.run(sql`
               UPDATE sync_event_outbox SET segment_id = ${segment.id}
               WHERE event_id IN (SELECT value FROM json_each(${JSON.stringify(segment.operations.map(operationID))}))
@@ -326,21 +334,15 @@ export const layer = Layer.effect(
 
       const segmentsFor = Effect.fn("SyncEventStore.segmentsFor")(function* (sessionIDs: readonly string[]) {
         if (!sessionIDs.length) return []
-        const selected = new Set(sessionIDs)
-        const rows = yield* db.all<SegmentRow>(sql`
-          SELECT payload FROM sync_event_segment WHERE space_id = ${spaceID}
-          UNION ALL
-          SELECT payload FROM sync_remote_segment WHERE space_id = ${spaceID}
+        const rows = yield* db.all<SegmentLocationRow>(sql`
+          SELECT DISTINCT device_id, generation FROM sync_segment_aggregate
+          WHERE space_id = ${spaceID}
+            AND aggregate_id IN (SELECT value FROM json_each(${JSON.stringify(sessionIDs)}))
         `)
-        return rows.flatMap((row) => {
-          const segment = decodeSegment(row.payload)
-          const found = segment.operations.some((operation) =>
-            selected.has(
-              operation.kind === "tombstone" ? operation.tombstone.sessionID : operation.event.aggregateID,
-            ),
-          )
-          return found ? [{ deviceID: segment.deviceID, generation: segment.generation }] : []
-        })
+        return rows.map((row) => ({
+          deviceID: SyncEvent.DeviceID.make(row.device_id),
+          generation: row.generation,
+        }))
       })
 
       const absorbDeletions = Effect.fn("SyncEventStore.absorbDeletions")(function* (
@@ -490,6 +492,7 @@ export const layer = Layer.effect(
               INSERT INTO sync_remote_segment (device_id, generation, payload, space_id)
               VALUES (${segment.deviceID}, ${segment.generation}, ${payload}, ${spaceID})
             `)
+              yield* indexSegment(tx, segment)
               yield* tx.run(sql`
               INSERT INTO sync_event_cursor (device_id, cursor, space_id)
               VALUES (${segment.deviceID}, ${segment.generation}, ${spaceID})
@@ -592,6 +595,10 @@ function decodeTombstone(value: string) {
 
 function operationID(operation: SyncEvent.Operation) {
   return operation.kind === "event" ? operation.event.id : operation.tombstone.id
+}
+
+function operationAggregateID(operation: SyncEvent.Operation) {
+  return operation.kind === "event" ? operation.event.aggregateID : operation.tombstone.sessionID
 }
 
 function operationFingerprint(operation: SyncEvent.Operation) {

@@ -267,6 +267,17 @@ describe("SyncRuntime", () => {
 
     await Effect.runPromise(runtime.upload())
     await Effect.runPromise(runtime.upload())
+    await Effect.runPromise(
+      SyncRuntime.make({
+        config: { deviceID: id, enabled: true },
+        codec: SyncCodec.plaintext(),
+        provider: remote.adapter,
+        store: local.service,
+        projector: { project: () => Effect.void, delete: () => Effect.void },
+        metadata: () => Effect.succeed([]),
+        metadataProjector: { apply: () => Effect.void },
+      }).upload(),
+    )
 
     expect(remote.counts.upload).toBe(1)
     expect(collections).toBe(0)

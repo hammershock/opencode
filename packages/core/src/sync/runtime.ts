@@ -614,6 +614,7 @@ async function publishHeadMonotonic(
         const downloaded = await provider.download(path, existing.version, signal)
         const remote = await decode((value) => Schema.decodeUnknownSync(Head)(value), codec, "metadata", context, downloaded.bytes)
         if (remote.generation > head.generation) return false
+        if (JSON.stringify(remote) === JSON.stringify(head)) return true
       } catch (cause) {
         if (cause instanceof SyncProvider.ProviderError && cause.kind === "conflict") continue
         throw cause

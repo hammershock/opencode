@@ -243,24 +243,27 @@ const make = (input: LayerOptions) =>
           collect: attachment.collect,
         },
         metadata: () =>
-          sessionDB
-            .select()
-            .from(SessionTable)
-            .where(eq(SessionTable.sync_space_id, config.namespaceID))
-            .all()
-            .pipe(
-              Effect.map((rows) =>
-                rows.map((row) => ({
-                  sessionID: row.id,
-                  title: row.title,
-                  ownerDeviceID: config.deviceID,
-                  ...(row.last_known_target_name ? { targetLabel: row.last_known_target_name } : {}),
-                  directory: row.directory,
-                  revision: row.time_updated,
-                  updatedAt: row.time_updated,
-                })),
-              ),
-            ),
+          Effect.all([
+            sessionDB.select().from(SessionTable).where(eq(SessionTable.sync_space_id, config.namespaceID)).all(),
+            metadata.list(),
+          ]).pipe(
+            Effect.map(([rows, indexed]) => {
+              const indexedBySession = new Map(indexed.map((item) => [item.sessionID, item]))
+              return rows.map((row) => ({
+                sessionID: row.id,
+                title: row.title,
+                ...portableTargetMetadata({
+                  deviceID: config.deviceID,
+                  deviceName: config.deviceName,
+                  lastKnownTargetName: row.last_known_target_name ?? undefined,
+                  indexed: indexedBySession.get(row.id),
+                }),
+                directory: row.directory,
+                revision: row.time_updated,
+                updatedAt: row.time_updated,
+              }))
+            }),
+          ),
         metadataProjector: { apply: (values, deviceID) => metadata.apply(deviceID, values) },
         acknowledged: () =>
           syncDB
@@ -326,6 +329,25 @@ const make = (input: LayerOptions) =>
       })
     })
     const status = () => readStatus().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+    const projectPortableTargets = (config: SyncState.Active) =>
+      metadataStore
+        .scope(config.namespaceID)
+        .list()
+        .pipe(
+          Effect.flatMap((items) =>
+            Effect.forEach(
+              items.filter((item) => item.ownerDeviceID !== config.deviceID && item.targetLabel),
+              (item) =>
+                sessionDB
+                  .update(SessionTable)
+                  .set({ portable_target_label: item.targetLabel })
+                  .where(eq(SessionTable.id, SessionV2.ID.make(item.sessionID)))
+                  .run(),
+              { discard: true },
+            ),
+          ),
+          Effect.mapError(() => new ControlError({ kind: "storage" })),
+        )
     const requireCloudReady = Effect.fn("SyncControl.requireCloudReady")(function* () {
       const cloud = yield* setup
         .cloudStatus()
@@ -345,6 +367,7 @@ const make = (input: LayerOptions) =>
           return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
         }),
       )
+      yield* projectPortableTargets(active)
       lastSuccessAt = Date.now()
       lastDiagnostic = undefined
     })
@@ -535,6 +558,7 @@ const make = (input: LayerOptions) =>
           if (input.revoke) assertCanRevoke(config.deviceID, input.id)
           const devices = devicesFor(config.namespaceID)
           if (input.name) await devices.rename(input.id, input.name)
+          if (input.name && input.id === config.deviceID) await Effect.runPromise(setup.setDeviceName(input.name))
           if (input.revoke) await devices.revoke(input.id)
         },
         catch: (cause) => (cause instanceof ControlError ? cause : new ControlError({ kind: "storage" })),
@@ -595,11 +619,14 @@ const make = (input: LayerOptions) =>
     })
     const availability = () => availabilityRaw().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
     const sessions = Effect.fn("SyncControl.sessions")(function* () {
+      const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!config) return yield* new ControlError({ kind: "unconfigured" })
       yield* requireCloudReady()
       const runtime = yield* load()
       // Do not call now(): its hydration phase would defeat metadata-first
       // browsing. Selecting one of these rows calls hydrate below.
       yield* runtime.pull().pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+      yield* projectPortableTargets(config)
       lastSuccessAt = Date.now()
       lastDiagnostic = undefined
       return yield* availability()
@@ -617,6 +644,7 @@ const make = (input: LayerOptions) =>
       if (!known) return yield* new ControlError({ kind: "storage" })
       yield* metadata.availability(input.sessionID, "hydrating")
       const result = yield* runtime.hydrate().pipe(
+        Effect.andThen(projectPortableTargets(config)),
         Effect.andThen(availability()),
         Effect.map((items) => items.find((item) => item.sessionID === input.sessionID)),
         Effect.catch(() =>
@@ -687,6 +715,20 @@ export function codecFor(config: Pick<SyncState.Active, "namespaceID" | "encrypt
     },
     catch: () => new ControlError({ kind: "locked" }),
   })
+}
+
+export function portableTargetMetadata(input: {
+  readonly deviceID: string
+  readonly deviceName: string
+  readonly lastKnownTargetName?: string
+  readonly indexed?: Pick<SyncMetadata.Item, "ownerDeviceID" | "targetLabel">
+}) {
+  if (input.indexed && input.indexed.ownerDeviceID !== input.deviceID)
+    return {
+      ownerDeviceID: input.indexed.ownerDeviceID,
+      ...(input.indexed.targetLabel ? { targetLabel: input.indexed.targetLabel } : {}),
+    }
+  return { ownerDeviceID: input.deviceID, targetLabel: input.lastKnownTargetName ?? input.deviceName }
 }
 
 export async function flushBeforeSwitch(input: {

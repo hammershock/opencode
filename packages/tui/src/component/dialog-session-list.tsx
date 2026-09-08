@@ -32,9 +32,9 @@ import { useTuiPaths } from "../context/runtime"
 
 type SessionListFilter = { scope?: "project"; path?: string }
 export type DialogSessionListFilters = {
-  readonly focus: "cwd" | "scope"
+  readonly focus: "cwd" | "target"
   readonly cwd: "cwd" | "all"
-  readonly scope: "current" | "all"
+  readonly target: string
 }
 
 export const SESSION_FILTER_FOOTER_HINT = { title: "tab", label: "filters" } as const
@@ -43,6 +43,7 @@ type SyncAvailability = "metadata-only" | "hydrating" | "ready" | "partial" | "c
 type SyncedSession = {
   readonly sessionID: string
   readonly title: string
+  readonly ownerDeviceID: string
   readonly targetLabel?: string
   readonly sourceDeviceID: string
   readonly deleted?: boolean
@@ -61,6 +62,7 @@ type DialogSessionEntry = {
   readonly syncSpaceID?: string
   readonly targetLabel?: string
   readonly sourceDeviceID?: string
+  readonly cloudOnly?: boolean
   readonly time: { readonly updated: number }
   readonly syncMetadata?: SyncedSession
 }
@@ -68,10 +70,17 @@ type DialogSessionEntry = {
 export function updateDialogSessionListFilters(
   filters: DialogSessionListFilters,
   key: "tab" | "left" | "right",
+  targets: readonly string[] = ["local", "all"],
 ): DialogSessionListFilters {
-  if (key === "tab") return { ...filters, focus: filters.focus === "cwd" ? "scope" : "cwd" }
-  if (filters.focus === "cwd") return { ...filters, cwd: filters.cwd === "cwd" ? "all" : "cwd" }
-  return { ...filters, scope: filters.scope === "current" ? "all" : "current" }
+  if (key === "tab") return { ...filters, focus: filters.focus === "cwd" ? "target" : "cwd" }
+  if (filters.focus === "cwd") {
+    const cwd = filters.cwd === "cwd" ? "all" : "cwd"
+    return { ...filters, cwd, target: cwd === "cwd" ? "local" : filters.target }
+  }
+  const current = Math.max(0, targets.indexOf(filters.target))
+  const offset = key === "right" ? 1 : -1
+  const target = targets[(current + offset + targets.length) % targets.length] ?? "local"
+  return { ...filters, target, cwd: target === "local" ? filters.cwd : "all" }
 }
 
 export function dialogSessionListLocationFilter(input: {
@@ -83,24 +92,25 @@ export function dialogSessionListLocationFilter(input: {
   return { path: path.relative(path.resolve(input.worktree), input.directory).replaceAll("\\", "/") }
 }
 
-export function sessionInDialogSyncScope(
-  session: { readonly syncSpaceID?: string },
-  scope: DialogSessionListFilters["scope"],
-  activeSpaceID?: string,
-) {
-  // Without an initialized account sync root there is no meaningful synced
-  // scope. Keep the view useful by degrading it to the local All view.
-  if (scope === "all" || activeSpaceID === undefined) return true
-  return activeSpaceID !== undefined && session.syncSpaceID === activeSpaceID
+export function dialogSessionListTargetOptions(sessions: readonly SessionListLocationRecord[], selected = "local") {
+  const remote = sessions
+    .map((session) => sessionListLocation(session).target)
+    .filter((target) => target !== "local" && target !== "all")
+    .toSorted((a, b) => a.localeCompare(b))
+  return ["local", "all", ...new Set([...remote, ...(selected === "local" || selected === "all" ? [] : [selected])])]
 }
 
-export function includeCloudSessionInDialogScope(scope: DialogSessionListFilters["scope"], activeSpaceID?: string) {
-  // The API exposes metadata for the single account sync root.
-  return activeSpaceID !== undefined
+export function sessionInDialogTarget(session: SessionListLocationRecord, target: string) {
+  return target === "all" || sessionListLocation(session).target === target
 }
 
-export function dialogSessionListScopeSelection(scope: DialogSessionListFilters["scope"]) {
-  return scope === "current" ? 0 : 1
+export function dialogSessionListTargetLabel(input: {
+  readonly lastKnownTargetName?: string
+  readonly remote?: Pick<SyncedSession, "ownerDeviceID" | "targetLabel">
+  readonly currentDeviceID?: string
+}) {
+  if (input.remote?.ownerDeviceID === input.currentDeviceID) return input.lastKnownTargetName
+  return input.remote?.targetLabel ?? input.lastKnownTargetName
 }
 
 export function syncAvailabilityLabel(availability: SyncAvailability) {
@@ -114,6 +124,11 @@ export function syncAvailabilityLabel(availability: SyncAvailability) {
   }[availability]
 }
 
+export function dialogSessionListSyncStatus(session: Pick<DialogSessionEntry, "cloudOnly" | "syncMetadata">) {
+  if (session.cloudOnly) return "cloud"
+  return session.syncMetadata ? syncAvailabilityLabel(session.syncMetadata.availability) : undefined
+}
+
 function fromSyncedSession(session: SyncedSession): DialogSessionEntry {
   return {
     id: session.sessionID,
@@ -121,6 +136,7 @@ function fromSyncedSession(session: SyncedSession): DialogSessionEntry {
     directory: session.directory,
     targetLabel: session.targetLabel,
     sourceDeviceID: session.sourceDeviceID,
+    cloudOnly: true,
     time: { updated: session.updatedAt },
     syncMetadata: session,
   }
@@ -163,10 +179,12 @@ export function DialogSessionList() {
   const [toDelete, setToDelete] = createSignal<string>()
   const [deleted, setDeleted] = createSignal(new Set<string>())
   const [search, setSearch] = createDebouncedSignal("", 150)
+  const savedTarget = kv.get("session_target_filter", "local")
+  const rememberedTarget = typeof savedTarget === "string" && savedTarget.trim() ? savedTarget : "local"
   const [filters, setFilters] = createSignal<DialogSessionListFilters>({
     focus: "cwd",
-    cwd: kv.get("session_directory_filter_enabled", true) ? "cwd" : "all",
-    scope: "all",
+    cwd: kv.get("session_directory_filter_enabled", true) && rememberedTarget === "local" ? "cwd" : "all",
+    target: rememberedTarget,
   })
   const deleteHint = useCommandShortcut("session.delete")
   const quickSwitch1 = useCommandShortcut("session.quick_switch.1")
@@ -193,15 +211,14 @@ export function DialogSessionList() {
       })
     },
   )
-  const [syncScope, { refetch: refetchSyncedSessions }] = createResource(
+  const [cloudSessions, { refetch: refetchSyncedSessions }] = createResource(
     async (): Promise<{
-      activeSpaceID?: string
-      sessions: SyncedSession[]
+      readonly deviceID?: string
+      readonly sessions: SyncedSession[]
     }> => {
       try {
         const [status, sessions] = await Promise.all([sdk.client.global.syncStatus(), sdk.client.global.syncSessions()])
-        const activeSpaceID = status.data?.namespaceID
-        return { activeSpaceID, sessions: activeSpaceID ? ((sessions.data ?? []) as SyncedSession[]) : [] }
+        return { deviceID: status.data?.deviceID, sessions: (sessions.data ?? []) as SyncedSession[] }
       } catch {
         // Sync is optional. A local session list remains usable when the secure
         // store is locked, sync is not configured, or the provider is offline.
@@ -211,7 +228,7 @@ export function DialogSessionList() {
   )
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
-  const sessions = createMemo(() => {
+  const allSessions = createMemo(() => {
     const searched = searchResults()
     const browsed = browseResults() ?? sync.data.session
     // The upstream server search only knows about titles. Keep its wider title
@@ -221,8 +238,7 @@ export function DialogSessionList() {
       ? [...searched, ...browsed.filter((candidate) => !searched.some((item) => item.id === candidate.id))]
       : browsed
     const synced = new Map(sync.data.session.map((session) => [session.id, session]))
-    const activeSpaceID = syncScope()?.activeSpaceID
-    const remote = new Map((syncScope()?.sessions ?? []).map((session) => [session.sessionID, session]))
+    const remote = new Map((cloudSessions()?.sessions ?? []).map((session) => [session.sessionID, session]))
     const ids = new Set(result.map((session) => session.id))
     const extra = [currentSessionID(), ...local.session.pinned()].flatMap((id) => {
       if (!id || ids.has(id)) return []
@@ -231,13 +247,17 @@ export function DialogSessionList() {
       return session ? [session] : []
     })
     const query = search().trim().toLowerCase()
-    const remoteOnly = (includeCloudSessionInDialogScope(filters().scope, activeSpaceID) ? [...remote.values()] : [])
+    const remoteOnly = [...remote.values()]
       .filter((session) => !ids.has(session.sessionID))
       .filter((session) => !session.deleted)
       .map(fromSyncedSession)
     const localEntry = (session: (typeof sync.data.session)[number]): DialogSessionEntry => ({
       ...session,
-      targetLabel: remote.get(session.id)?.targetLabel ?? session.lastKnownTargetName,
+      targetLabel: dialogSessionListTargetLabel({
+        lastKnownTargetName: session.lastKnownTargetName,
+        remote: remote.get(session.id),
+        currentDeviceID: cloudSessions()?.deviceID,
+      }),
       sourceDeviceID: remote.get(session.id)?.sourceDeviceID,
       syncMetadata: remote.get(session.id),
     })
@@ -247,9 +267,19 @@ export function DialogSessionList() {
       ...remoteOnly,
     ]
       .filter((session) => !deleted().has(session.id))
-      .filter((session) => session.syncMetadata || sessionInDialogSyncScope(session, filters().scope, activeSpaceID))
       .filter((session) => sessionListMatches(session as typeof session & SessionListLocationRecord, query))
   })
+  const targetOptions = createMemo(() =>
+    dialogSessionListTargetOptions(
+      allSessions() as (DialogSessionEntry & SessionListLocationRecord)[],
+      filters().target,
+    ),
+  )
+  const sessions = createMemo(() =>
+    allSessions().filter((session) =>
+      sessionInDialogTarget(session as typeof session & SessionListLocationRecord, filters().target),
+    ),
+  )
 
   onCleanup(
     event.on("session.deleted", (event) => {
@@ -385,7 +415,7 @@ export function DialogSessionList() {
       const x = sessionMap.get(id)
       if (!x) return undefined
       const location = sessionListLocation(x as typeof x & SessionListLocationRecord)
-      const syncStatus = x.syncMetadata ? syncAvailabilityLabel(x.syncMetadata.availability) : undefined
+      const syncStatus = dialogSessionListSyncStatus(x)
       const footer = sessionListFooter(
         location,
         syncStatus,
@@ -437,16 +467,16 @@ export function DialogSessionList() {
             Sessions
           </text>
           <SessionFilterRow
-            title="Filter"
+            title="Path"
             values={["Cwd", "All"]}
             selected={filters().cwd === "cwd" ? 0 : 1}
             focused={filters().focus === "cwd"}
           />
           <SessionFilterRow
-            title="Scope"
-            values={["Synced", "All"]}
-            selected={dialogSessionListScopeSelection(filters().scope)}
-            focused={filters().focus === "scope"}
+            title="Target"
+            values={targetOptions().map((target) => (target === "all" ? "All" : target))}
+            selected={Math.max(0, targetOptions().indexOf(filters().target))}
+            focused={filters().focus === "target"}
           />
         </box>
       }
@@ -604,24 +634,21 @@ export function DialogSessionList() {
         desc: key === "tab" ? "Switch Session filter row" : "Change Session filter",
         group: "Dialog",
         cmd: () => {
-          setFilters((current) => updateDialogSessionListFilters(current, key))
+          const next = updateDialogSessionListFilters(filters(), key, targetOptions())
+          setFilters(next)
+          kv.set("session_directory_filter_enabled", next.cwd === "cwd")
+          kv.set("session_target_filter", next.target)
         },
       }))}
     />
   )
 }
 
-function SessionFilterRow(props: {
-  title: string
-  values: readonly [string, string]
-  selected: number
-  focused: boolean
-}) {
+function SessionFilterRow(props: { title: string; values: readonly string[]; selected: number; focused: boolean }) {
   const { theme } = useTheme()
   return (
     <text fg={props.focused ? theme.text : theme.textMuted}>
-      {props.title}: {props.selected === 0 ? `[${props.values[0]}]` : props.values[0]}{" "}
-      {props.selected === 1 ? `[${props.values[1]}]` : props.values[1]}
+      {props.title}: {props.values.map((value, index) => (props.selected === index ? `[${value}]` : value)).join(" ")}
     </text>
   )
 }

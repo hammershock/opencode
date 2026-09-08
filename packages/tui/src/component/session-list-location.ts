@@ -33,18 +33,19 @@ const nonempty = (value: unknown) => (typeof value === "string" && value.trim() 
 
 export function sessionListLocation(session: SessionListLocationRecord): SessionListLocation {
   const targetValue = session.location?.target ?? session.target
+  const portableTarget = nonempty(session.targetLabel) ?? nonempty(session.portableTargetLabel)
   const recordedTarget =
-    nonempty(session.targetLabel) ??
-    nonempty(session.portableTargetLabel) ??
+    portableTarget ??
     nonempty(session.lastKnownTargetName) ??
     nonempty(session.targetName) ??
     (typeof targetValue === "object"
       ? (nonempty(targetValue.name) ?? nonempty(targetValue.targetName))
       : nonempty(targetValue))
   const local =
-    (typeof targetValue === "object" && targetValue.type === "local") ||
-    targetValue === "local" ||
-    (targetValue === undefined && recordedTarget === undefined)
+    portableTarget === undefined &&
+    ((typeof targetValue === "object" && targetValue.type === "local") ||
+      targetValue === "local" ||
+      (targetValue === undefined && recordedTarget === undefined))
   const target = local ? "local" : (recordedTarget ?? "remote")
   const directory = nonempty(session.location?.directory) ?? session.directory
   const device =

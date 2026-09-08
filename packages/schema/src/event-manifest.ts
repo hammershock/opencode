@@ -26,6 +26,7 @@ import { SessionEvent } from "./session-event"
 import { SessionStatusEvent } from "./session-status-event"
 import { SessionTodo } from "./session-todo"
 import { SyncTransferEvent } from "./sync-transfer-event"
+import { SyncInitializationEvent } from "./sync-initialization-event"
 import { SessionV1 } from "./session-v1"
 import { TuiEvent } from "./tui-event"
 import { VcsEvent } from "./vcs-event"
@@ -60,6 +61,7 @@ export const ServerDefinitions = Event.inventory(
   ...featureDefinitions,
   ...SessionTodo.Event.Definitions,
   ...SyncTransferEvent.Definitions,
+  ...SyncInitializationEvent.Definitions,
 )
 
 export const Definitions = Event.inventory(
@@ -69,6 +71,7 @@ export const Definitions = Event.inventory(
   ...featureDefinitions,
   ...SessionTodo.Event.Definitions,
   ...SyncTransferEvent.Definitions,
+  ...SyncInitializationEvent.Definitions,
   ...LspEvent.Definitions,
   ...PermissionV1.Event.Definitions,
   ...TuiEvent.Definitions,

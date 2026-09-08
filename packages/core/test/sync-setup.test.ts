@@ -5,6 +5,7 @@ import { SyncCrypto } from "@opencode-ai/core/sync/crypto"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncSecureStore } from "@opencode-ai/core/sync/secure-store"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
+import { SyncRoot } from "@opencode-ai/core/sync/root"
 import { tmpdir } from "./fixture/tmpdir"
 
 describe("SyncSetup lifecycle", () => {
@@ -58,6 +59,27 @@ describe("SyncSetup lifecycle", () => {
     expect(await run(restarted.config())).toBeUndefined()
   })
 
+  test("initializes and clears one account-wide cloud root without preserving legacy spaces", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    const setup = await authenticated(tmp.path, secure, provider, () => key("legacy"))
+    await run(setup.create({ name: "Legacy" }))
+    expect((await run(setup.cloudStatus())).status).toBe("uninitialized")
+
+    const initialized = await run(setup.initializeCloud())
+    expect(initialized.activeSpaceID).toBe(SyncRoot.INTERNAL_SCOPE)
+    expect(initialized.spaces.map((item) => item.descriptor.namespaceID)).toEqual([SyncRoot.INTERNAL_SCOPE])
+    expect((await run(setup.cloudStatus())).status).toBe("ready")
+    expect(await provider.stat("manifest.json")).toBeDefined()
+
+    await run(setup.setEnabled(true))
+    const cleared = await run(setup.clearCloud())
+    expect(cleared.enabled).toBeFalse()
+    expect(cleared.activeSpaceID).toBeUndefined()
+    expect(await provider.stat("manifest.json")).toBeUndefined()
+  })
+
   test("creates, binds and activates plain or encrypted spaces with immutable key handling", async () => {
     await using tmp = await tmpdir()
     const secure = store()
@@ -103,7 +125,7 @@ describe("SyncSetup lifecycle", () => {
     expect(joinerStore.values.has("space:encrypted:root")).toBe(true)
   })
 
-  test("keeps account mismatch strict and explicit switching preserves bindings but leaves active space", async () => {
+  test("keeps account mismatch strict and explicit switching clears account-scoped bindings", async () => {
     await using tmp = await tmpdir()
     const secure = store()
     const provider = memoryProvider()
@@ -128,7 +150,7 @@ describe("SyncSetup lifecycle", () => {
       }),
     )
     expect(switched.account?.id).toBe("account-b")
-    expect(switched.spaces).toHaveLength(1)
+    expect(switched.spaces).toHaveLength(0)
     expect(switched.activeSpaceID).toBeUndefined()
   })
 

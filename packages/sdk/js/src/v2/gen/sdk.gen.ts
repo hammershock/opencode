@@ -91,6 +91,12 @@ import type {
   GlobalSyncActivateResponses,
   GlobalSyncAssignUnassignedErrors,
   GlobalSyncAssignUnassignedResponses,
+  GlobalSyncCloudClearErrors,
+  GlobalSyncCloudClearResponses,
+  GlobalSyncCloudInitializeErrors,
+  GlobalSyncCloudInitializeResponses,
+  GlobalSyncCloudStatusErrors,
+  GlobalSyncCloudStatusResponses,
   GlobalSyncCreateErrors,
   GlobalSyncCreateResponses,
   GlobalSyncDeleteErrors,
@@ -1815,6 +1821,30 @@ export class Global extends HeyApiClient {
       url: "/global/sync/now",
       ...options,
     })
+  }
+
+  public syncCloudClear<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).delete<
+      GlobalSyncCloudClearResponses,
+      GlobalSyncCloudClearErrors,
+      ThrowOnError
+    >({ url: "/global/sync/cloud", ...options })
+  }
+
+  public syncCloudStatus<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<
+      GlobalSyncCloudStatusResponses,
+      GlobalSyncCloudStatusErrors,
+      ThrowOnError
+    >({ url: "/global/sync/cloud", ...options })
+  }
+
+  public syncCloudInitialize<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<
+      GlobalSyncCloudInitializeResponses,
+      GlobalSyncCloudInitializeErrors,
+      ThrowOnError
+    >({ url: "/global/sync/cloud", ...options })
   }
 
   public syncSessions<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {

@@ -17,10 +17,10 @@ const active = {
   deviceID: "device",
   deviceName: "Mac",
   account: { id: "account", maskedDisplay: "acc***" },
-  namespaceID: "space",
+  namespaceID: "account-v1",
   name: "Space",
   encryption: "none" as const,
-  remoteRoot: "/apps/opencode-sync/spaces/space",
+  remoteRoot: "/apps/opencode-sync/session-sync",
   enabled: false,
   intervalSeconds: 30 as const,
 }
@@ -36,6 +36,10 @@ const state = {
   intervalSeconds: 30 as const,
   spaces: [],
 }
+const readyCloud = {
+  status: "ready" as const,
+  manifest: { version: 1 as const, protocol: { major: 1 as const, minor: 0 }, createdAt: 1 },
+}
 const realControlIt = testEffect(
   LayerNode.compile(SyncControl.node, [
     [Database.node, Database.layerFromPath(":memory:")],
@@ -46,14 +50,15 @@ const realControlIt = testEffect(
         state: () => Effect.succeed(state),
         config: () => Effect.succeed(active),
         authenticated: () => Effect.succeed(true),
-        applyRemoteDeletion: () =>
+        cloudStatus: () =>
           Effect.promise(
             () =>
-              new Promise<boolean>((resolve) => {
+              new Promise<typeof readyCloud>((resolve) => {
                 remoteStarted = true
-                releaseRemote = () => resolve(false)
+                releaseRemote = () => resolve(readyCloud)
               }),
-          ).pipe(Effect.andThen(Effect.fail(new SyncSetup.SetupError({ kind: "remote" })))),
+          ),
+        applyRemoteDeletion: () => Effect.succeed(false),
       }),
     ],
   ]),
@@ -128,6 +133,7 @@ const recoveryControlIt = testEffect(
         state: () => Effect.succeed(encryptedState),
         config: () => Effect.succeed(encrypted),
         authenticated: () => Effect.succeed(true),
+        cloudStatus: () => Effect.succeed(readyCloud),
         applyRemoteDeletion: () => Effect.succeed(false),
         join: () =>
           Effect.promise(async () => {
@@ -147,12 +153,12 @@ describe("SyncControl lifecycle policy", () => {
     Effect.gen(function* () {
       const control = yield* SyncControl.Service
       const scope = yield* Scope.Scope
-      const running = yield* control.now().pipe(Effect.exit, Effect.forkIn(scope))
+      const running = yield* control.cloudStatus().pipe(Effect.exit, Effect.forkIn(scope))
       while (!remoteStarted) yield* Effect.yieldNow
 
       expect((yield* control.status().pipe(Effect.timeout("250 millis"))).namespaceID).toBe(active.namespaceID)
       releaseRemote()
-      expect((yield* Fiber.join(running))._tag).toBe("Failure")
+      expect((yield* Fiber.join(running))._tag).toBe("Success")
       expect((yield* control.status().pipe(Effect.timeout("250 millis"))).namespaceID).toBe(active.namespaceID)
     }),
   )

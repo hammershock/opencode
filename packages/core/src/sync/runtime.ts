@@ -8,6 +8,7 @@ import { SyncProvider } from "./provider"
 import { NonNegativeInt } from "../schema"
 import { SyncCodec } from "./codec"
 import { SyncTransfer } from "./transfer"
+import { SyncDeletion } from "./deletion"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true })
@@ -113,6 +114,7 @@ export function make(input: {
   let pullFlight: Promise<void> | undefined
   let hydrateFlight: Promise<void> | undefined
   let indexedHeads: readonly Head[] = []
+  let revokedDevices = new Set<SyncEvent.DeviceID>()
   let localHead: Head | undefined
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
   const projector = (deviceID: SyncEvent.DeviceID) => {
@@ -160,6 +162,17 @@ export function make(input: {
       }
       const generation = await Effect.runPromise(input.store.head(input.config.deviceID))
       const metadata = await Effect.runPromise(input.metadata())
+      const pendingDeletions: SyncDeletion.Marker[] = []
+      for (const tombstone of await Effect.runPromise(input.store.deletions())) {
+        const marker = await deletions.ensure(
+          tombstone,
+          indexedHeads
+            .filter((head) => head.metadata.some((item) => item.sessionID === tombstone.sessionID))
+            .map((head) => head.deviceID),
+          signal,
+        )
+        pendingDeletions.push(marker)
+      }
       const head: Head = {
         version: 1,
         deviceID: input.config.deviceID,
@@ -167,7 +180,7 @@ export function make(input: {
         generation,
         acknowledged: input.acknowledged ? await Effect.runPromise(input.acknowledged()) : {},
         metadata,
-        deletions: await Effect.runPromise(input.store.deletions()),
+        deletions: [],
         revoked: input.revoked ? [...(await Effect.runPromise(input.revoked()))] : [],
       }
       localHead = head
@@ -181,6 +194,14 @@ export function make(input: {
         existing ? { type: "version", version: existing.version } : { type: "absent" },
         signal,
       )
+      // A device releases its cloud reference only after its replacement head,
+      // which no longer advertises the Session, is durably visible. An ack
+      // written before the head would let a crash resurrect stale metadata.
+      for (const marker of pendingDeletions) {
+        await deletions.acknowledge(marker, input.config.deviceID, signal)
+        await Effect.runPromise(input.store.forgetDeletion(marker.tombstone.sessionID))
+      }
+      await collectDeletions(signal)
       stage = "collect"
       await collectAttachments(signal)
       status = { ...status, running: "idle", lastUploadAt: now(), lastError: undefined }
@@ -215,6 +236,7 @@ export function make(input: {
         )
       }
       const revoked = new Set(heads.flatMap((head) => head.revoked))
+      revokedDevices = revoked
       indexedHeads = heads
         .filter((head) => !revoked.has(head.deviceID))
         .sort((a, b) => String(a.deviceID).localeCompare(String(b.deviceID)))
@@ -222,11 +244,14 @@ export function make(input: {
         if (revoked.has(head.deviceID)) continue
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
       }
-      const advertised = new Map(
-        indexedHeads.flatMap((head) => head.deletions).map((item) => [item.sessionID, item] as const),
+      const markers = await deletions.list(signal)
+      await Effect.runPromise(
+        input.store.absorbDeletions(
+          markers.map((item) => item.tombstone),
+          projector(input.config.deviceID),
+        ),
       )
-      await Effect.runPromise(input.store.absorbDeletions([...advertised.values()], projector(input.config.deviceID)))
-      const deleted = new Set((await Effect.runPromise(input.store.deletions())).map((item) => item.sessionID))
+      const deleted = new Set(markers.map((item) => item.tombstone.sessionID))
       for (const head of indexedHeads)
         await Effect.runPromise(
           input.metadataProjector.apply(
@@ -339,6 +364,47 @@ export function make(input: {
       }
     }
     await input.attachment.collect({ liveObjectIDs, allActiveDevicesAcknowledged, signal })
+  }
+
+  const deletions = SyncDeletion.make({ provider: input.provider, now })
+
+  const collectDeletions = async (signal?: AbortSignal) => {
+    for (const marker of await deletions.list(signal)) {
+      const references = await deletions.references(marker, revokedDevices, signal)
+      if (references.length) continue
+      const objects = await SyncProvider.listAll(input.provider, "segments", signal)
+      for (const object of objects) {
+        const location = segmentFromPath(object.path, codec.suffix)
+        if (!location) continue
+        const downloaded = await input.provider.download(object.path, object.version, signal)
+        const segment = await decode(
+          (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+          codec,
+          "event",
+          segmentContext(location.deviceID, location.generation, object.path),
+          downloaded.bytes,
+        )
+        if (!segment.operations.length) continue
+        if (
+          !segment.operations.every((operation) =>
+            operation.kind === "tombstone"
+              ? operation.tombstone.sessionID === marker.tombstone.sessionID
+              : operation.event.aggregateID === marker.tombstone.sessionID,
+          )
+        )
+          continue
+        const purged = SyncEvent.Segment.make({ ...segment, operations: [] })
+        const bytes = await encode(
+          codec,
+          "event",
+          segmentContext(location.deviceID, location.generation, object.path),
+          purged,
+        )
+        await input.provider.uploadAtomic(object.path, bytes, { type: "version", version: object.version }, signal)
+      }
+      await collectAttachments(signal)
+      await deletions.remove(marker, signal)
+    }
   }
 
   const coalesce = (direction: "upload" | "pull", signal?: AbortSignal) => {

@@ -16,6 +16,7 @@ import { SyncState } from "@opencode-ai/core/sync/state"
 import { SyncSpace } from "@opencode-ai/core/sync/space"
 import { SyncRuntime } from "@opencode-ai/core/sync/runtime"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
+import { SyncRoot } from "@opencode-ai/core/sync/root"
 
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
@@ -114,6 +115,8 @@ export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("Syn
         "remote",
         "storage",
         "locked",
+        "remote-uninitialized",
+        "incompatible-remote",
       ]),
       message: Schema.String,
       diagnostic: Schema.optional(SyncRuntime.Diagnostic),
@@ -126,7 +129,17 @@ export class SyncControlApiError extends Schema.ErrorClass<SyncControlApiError>(
   {
     name: Schema.Literal("SyncControlError"),
     data: Schema.Struct({
-      kind: Schema.Literals(["unconfigured", "locked", "provider", "storage", "invalid", "pending", "deleted"]),
+      kind: Schema.Literals([
+        "unconfigured",
+        "remote-uninitialized",
+        "incompatible-remote",
+        "locked",
+        "provider",
+        "storage",
+        "invalid",
+        "pending",
+        "deleted",
+      ]),
       diagnostic: Schema.optional(SyncRuntime.Diagnostic),
     }),
   },
@@ -156,6 +169,7 @@ export const GlobalPaths = {
   syncRemove: "/global/sync/device",
   syncStatus: "/global/sync/status",
   syncNow: "/global/sync/now",
+  syncCloud: "/global/sync/cloud",
   syncSessions: "/global/sync/sessions",
   syncHydrate: "/global/sync/hydrate",
   syncDevices: "/global/sync/devices",
@@ -277,6 +291,18 @@ export const GlobalApi = HttpApi.make("global").add(
         error: HttpApiError.ServiceUnavailable,
       }),
       HttpApiEndpoint.post("syncNow", GlobalPaths.syncNow, {
+        success: Schema.Boolean,
+        error: SyncControlApiError,
+      }),
+      HttpApiEndpoint.get("syncCloudStatus", GlobalPaths.syncCloud, {
+        success: SyncRoot.Inspection,
+        error: SyncControlApiError,
+      }),
+      HttpApiEndpoint.post("syncCloudInitialize", GlobalPaths.syncCloud, {
+        success: Schema.Array(Schema.NonEmptyString),
+        error: SyncControlApiError,
+      }),
+      HttpApiEndpoint.delete("syncCloudClear", GlobalPaths.syncCloud, {
         success: Schema.Boolean,
         error: SyncControlApiError,
       }),

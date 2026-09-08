@@ -718,6 +718,7 @@ export function Prompt(props: PromptProps) {
     set(prompt) {
       input.setText(prompt.input)
       setStore("prompt", prompt)
+      setStore("mode", prompt.mode ?? "normal")
       restoreExtmarksFromParts(prompt.parts)
       input.gotoBufferEnd()
     },
@@ -1287,7 +1288,6 @@ export function Prompt(props: PromptProps) {
         },
         command: inputText,
       })
-      setStore("mode", "normal")
     } else if (slashDispatch.status === "session") {
       move.startSubmit()
       void sdk.client.session.command({
@@ -1359,6 +1359,7 @@ export function Prompt(props: PromptProps) {
         route.navigate({
           type: "session",
           sessionID,
+          prompt: { input: "", parts: [], mode: currentMode },
         })
       }, 50)
     }

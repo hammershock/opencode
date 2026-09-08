@@ -505,7 +505,6 @@ async function decode<A>(
 export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnostic {
   const provider = cause instanceof SyncProvider.ProviderError ? cause : undefined
   const details = [
-    provider?.providerPhase,
     provider?.httpStatus === undefined ? undefined : `HTTP ${provider.httpStatus}`,
     provider?.providerCode === undefined ? undefined : `code ${provider.providerCode}`,
     provider?.requestID ? `request ${provider.requestID}` : undefined,
@@ -517,6 +516,23 @@ export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnost
     retryable: provider?.retryable ?? false,
     outcome: provider?.outcome,
     retryAfter: provider?.retryAfter,
-    message: `Sync ${stage} failed${details.length ? ` (${details.join(", ")})` : ""}`,
+    message:
+      provider?.providerID === "baidu"
+        ? `Baidu Netdisk ${provider.providerPhase ?? provider.operation} failed: ${providerReason(provider.kind)}${details.length ? ` (${details.join(", ")})` : ""}`
+        : `Sync ${stage} failed${provider?.providerPhase ? ` (${provider.providerPhase}${details.length ? `, ${details.join(", ")}` : ""})` : details.length ? ` (${details.join(", ")})` : ""}`,
   }
+}
+
+function providerReason(kind: SyncProvider.ErrorKind) {
+  return {
+    unauthenticated: "sign-in required",
+    permission: "permission denied",
+    "not-found": "remote object not found",
+    conflict: "remote object changed",
+    "rate-limit": "request rate limited",
+    network: "network request failed",
+    provider: "provider rejected the request",
+    cancelled: "request cancelled",
+    "invalid-response": "response did not match the documented schema",
+  }[kind]
 }

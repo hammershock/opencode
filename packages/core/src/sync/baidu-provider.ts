@@ -201,9 +201,13 @@ export function adapter(input: {
           fsids: JSON.stringify([fsID]),
           dlink: "1",
         })
-        const body = await json(await request(url, { signal, headers: { "User-Agent": "pan.baidu.com" } }), "download")
-        const item = Array.isArray(body.list) ? record(body.list[0], "download") : undefined
-        if (!item || typeof item.dlink !== "string") throw error("download", "invalid-response", false)
+        const body = await json(
+          await request(url, { signal, headers: { "User-Agent": "pan.baidu.com" } }),
+          "download",
+          "file-metadata",
+        )
+        const item = Array.isArray(body.list) ? record(body.list[0], "download", "file-metadata") : undefined
+        if (!item || typeof item.dlink !== "string") throw invalidResponse("download", "file-metadata", body)
         const link = endpoint(item.dlink, { access_token: auth.accessToken })
         const response = await request(link, { signal, redirect: "follow", headers: { "User-Agent": "pan.baidu.com" } })
         if (!response.ok) throw responseFailure("download", response)
@@ -223,7 +227,7 @@ export function adapter(input: {
       "upload",
       async (auth) => {
         if (await directoryExists(auth, directory, request, signal)) return
-        await form(
+        const created = await form(
           endpoint(FILE_API, { method: "create", access_token: auth.accessToken }),
           { path: directory, isdir: "1", rtype: "0" },
           request,
@@ -235,6 +239,9 @@ export function adapter(input: {
           if (await directoryExists(auth, directory, request, signal)) return
           throw cause
         })
+        if (!created) return
+        if (created.path !== directory || Number(created.isdir) !== 1)
+          throw invalidResponse("upload", "directory-create", created)
       },
       signal,
     ).catch((cause) => {
@@ -288,14 +295,16 @@ export function adapter(input: {
             signal,
             "precreate",
           )
-          expectedUploadID = string(prepared.uploadid, "upload")
+          expectedUploadID = string(prepared.uploadid, "upload", "precreate", prepared)
+          const requiredParts = uploadParts(prepared.block_list, blocks.length, prepared)
           await Promise.all(
-            blocks.map(async (block, index) => {
+            requiredParts.map(async (index) => {
+              const block = blocks[index]!
               const body = new FormData()
               // Keep the explicit filename used by the proven prototype. Some
               // Baidu upload edges reject an unnamed multipart file with HTML.
               body.append("file", new Blob([Uint8Array.from(block.part)]), "blob")
-              await json(
+              const uploaded = await json(
                 await request(
                   endpoint(UPLOAD_API, {
                     method: "upload",
@@ -310,6 +319,8 @@ export function adapter(input: {
                 "upload",
                 "part-upload",
               )
+              if (string(uploaded.md5, "upload", "part-upload", uploaded).toLowerCase() !== block.md5)
+                throw invalidResponse("upload", "part-upload", uploaded)
             }),
           )
           checkPrecondition(await stat(object, signal), precondition, "upload")
@@ -342,7 +353,7 @@ export function adapter(input: {
               failure.httpStatus,
             )
           })
-          return objectInfo(object, created)
+          return createdObjectInfo(object, created)
         },
         signal,
       )
@@ -381,6 +392,7 @@ export function adapter(input: {
             request,
             "delete",
             signal,
+            "file-delete",
           ),
         signal,
       )
@@ -397,7 +409,7 @@ export function adapter(input: {
     list: async (prefix, cursor, signal) => {
       const remote = remotePath(root, prefix)
       const start = cursor ? requireCursor(cursor) : 0
-      const result = await call("list", (auth) => listPage(auth, remote, start, request, signal), signal).catch(
+      const result = await call("list", (auth) => listPage("list", auth, remote, start, request, signal), signal).catch(
         (cause) => {
           if (cause instanceof SyncProvider.ProviderError && cause.kind === "not-found")
             return { items: [], more: false }
@@ -443,7 +455,14 @@ async function token(
   return credential
 }
 
-async function listPage(auth: Credential, directory: string, start: number, request: Request, signal?: AbortSignal) {
+async function listPage(
+  operation: "list" | "stat",
+  auth: Credential,
+  directory: string,
+  start: number,
+  request: Request,
+  signal?: AbortSignal,
+) {
   const body = await json(
     await request(
       endpoint(FILE_API, {
@@ -456,11 +475,14 @@ async function listPage(auth: Credential, directory: string, start: number, requ
       }),
       { signal, headers: { "User-Agent": "pan.baidu.com" } },
     ),
-    "list",
+    operation,
+    "file-list",
   )
-  if (!Array.isArray(body.list)) throw error("list", "invalid-response", false)
+  if (!Array.isArray(body.list)) throw invalidResponse(operation, "file-list", body)
   return {
-    items: body.list.filter((item) => record(item, "list").isdir !== 1).map((item) => listed(record(item, "list"))),
+    items: body.list
+      .filter((item) => record(item, operation, "file-list").isdir !== 1)
+      .map((item) => listed(record(item, operation, "file-list"), operation)),
     more: body.has_more === 1,
   }
 }
@@ -468,11 +490,11 @@ async function listPage(auth: Credential, directory: string, start: number, requ
 async function listDirectory(auth: Credential, directory: string, request: Request, signal?: AbortSignal) {
   const output = []
   for (let start = 0; ; ) {
-    const page = await listPage(auth, directory, start, request, signal)
+    const page = await listPage("stat", auth, directory, start, request, signal)
     output.push(...page.items)
     if (!page.more) return output
     start += page.items.length
-    if (!page.items.length) throw error("stat", "invalid-response", false)
+    if (!page.items.length) throw invalidResponse("stat", "file-list")
   }
 }
 
@@ -495,24 +517,44 @@ async function directoryExists(auth: Credential, directory: string, request: Req
       "upload",
       "directory-list",
     )
-    if (!Array.isArray(body.list)) throw error("upload", "invalid-response", false)
-    if (body.list.some((item) => record(item, "upload").path === directory)) return true
+    if (!Array.isArray(body.list)) throw invalidResponse("upload", "directory-list", body)
+    if (body.list.some((item) => record(item, "upload", "directory-list").path === directory)) return true
     if (body.has_more !== 1) return false
-    if (!body.list.length) throw error("upload", "invalid-response", false)
+    if (!body.list.length) throw invalidResponse("upload", "directory-list", body)
     start += body.list.length
   }
 }
 
-function listed(value: Record<string, unknown>) {
-  const remotePath = string(value.path, "list")
-  return { remotePath, info: objectInfo(remotePath, value) }
+function listed(value: Record<string, unknown>, operation: "list" | "stat") {
+  const remotePath = string(value.path, operation, "file-list", value)
+  return { remotePath, info: listedObjectInfo(remotePath, value, operation) }
 }
 
-function objectInfo(object: string, value: Record<string, unknown>): SyncProvider.ObjectInfo {
-  const fsID = number(value.fs_id, "stat")
-  const size = number(value.size, "stat")
-  const modifiedAt = number(value.server_mtime, "stat") * 1_000
+function listedObjectInfo(
+  object: string,
+  value: Record<string, unknown>,
+  operation: "list" | "stat",
+): SyncProvider.ObjectInfo {
+  // Baidu's list endpoint names this server_mtime; the create endpoint below returns mtime instead.
+  const fsID = number(value.fs_id, operation, "file-list", value)
+  const size = number(value.size, operation, "file-list", value)
+  const modifiedAt = number(value.server_mtime, operation, "file-list", value) * 1_000
   return { path: object, version: `${fsID}:${modifiedAt}:${size}`, size, modifiedAt }
+}
+
+function createdObjectInfo(object: string, value: Record<string, unknown>): SyncProvider.ObjectInfo {
+  const fsID = number(value.fs_id, "upload", "create", value)
+  const size = number(value.size, "upload", "create", value)
+  const modifiedAt = number(value.mtime, "upload", "create", value) * 1_000
+  return { path: object, version: `${fsID}:${modifiedAt}:${size}`, size, modifiedAt }
+}
+
+function uploadParts(value: unknown, count: number, body: Record<string, unknown>) {
+  if (!Array.isArray(value)) throw invalidResponse("upload", "precreate", body)
+  const parts = value.length === 0 ? [0] : value
+  if (parts.some((part) => typeof part !== "number" || !Number.isSafeInteger(part) || part < 0 || part >= count))
+    throw invalidResponse("upload", "precreate", body)
+  return [...new Set(parts)]
 }
 
 async function verifyUpload(
@@ -569,7 +611,7 @@ async function json(response: Response, operation: SyncProvider.ProviderError["o
       value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined,
       providerPhase,
     )
-  const body = record(value, operation)
+  const body = record(value, operation, providerPhase)
   if (Number(body.errno ?? 0) !== 0) throw responseFailure(operation, response, body, providerPhase)
   return body
 }
@@ -687,21 +729,51 @@ function split(bytes: Uint8Array) {
   )
 }
 
-function record(value: unknown, operation: SyncProvider.ProviderError["operation"]): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw error(operation, "invalid-response", false)
+function record(
+  value: unknown,
+  operation: SyncProvider.ProviderError["operation"],
+  providerPhase?: string,
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalidResponse(operation, providerPhase)
   return value as Record<string, unknown>
 }
 
-function string(value: unknown, operation: SyncProvider.ProviderError["operation"]) {
-  if (typeof value !== "string" || !value) throw error(operation, "invalid-response", false)
+function string(
+  value: unknown,
+  operation: SyncProvider.ProviderError["operation"],
+  providerPhase?: string,
+  body?: Record<string, unknown>,
+) {
+  if (typeof value !== "string" || !value) throw invalidResponse(operation, providerPhase, body)
   return value
 }
 
-function number(value: unknown, operation: SyncProvider.ProviderError["operation"]) {
+function number(
+  value: unknown,
+  operation: SyncProvider.ProviderError["operation"],
+  providerPhase?: string,
+  body?: Record<string, unknown>,
+) {
   const parsed = typeof value === "string" ? Number(value) : value
   if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed < 0)
-    throw error(operation, "invalid-response", false)
+    throw invalidResponse(operation, providerPhase, body)
   return parsed
+}
+
+function invalidResponse(
+  operation: SyncProvider.ProviderError["operation"],
+  providerPhase?: string,
+  body?: Record<string, unknown>,
+) {
+  return error(
+    operation,
+    "invalid-response",
+    false,
+    undefined,
+    undefined,
+    safeRequestID(body?.request_id),
+    providerPhase,
+  )
 }
 
 function requireCursor(value: string) {

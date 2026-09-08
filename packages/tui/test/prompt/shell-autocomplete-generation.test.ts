@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  autocompleteTabAction,
   createShellCompletionGeneration,
   invalidateShellCompletion,
   invalidateShellCompletionContext,
@@ -48,6 +49,14 @@ test("shell completion degradation is concise and identifies the fallback", () =
   expect(shellCompletionDegradedMessage("native_unavailable")).toBe(
     "Native completion unavailable; showing basic matches",
   )
+})
+
+test("Tab cycles focus without applying a row in an open Shell completion menu", () => {
+  expect(autocompleteTabAction("shell", undefined)).toBe("move-next")
+  expect(autocompleteTabAction("shell", { isDirectory: false })).toBe("move-next")
+  expect(autocompleteTabAction("shell", { isDirectory: true })).toBe("move-next")
+  expect(autocompleteTabAction("@", { isDirectory: true })).toBe("expand-directory")
+  expect(autocompleteTabAction("/", { isDirectory: false })).toBe("select")
 })
 
 test("opening a multi-candidate shell popup does not invalidate its own generation", async () => {

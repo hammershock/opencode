@@ -153,9 +153,10 @@ export function adapter(input: {
     operation: SyncProvider.ProviderError["operation"],
     run: (credential: Credential) => Promise<A>,
     signal?: AbortSignal,
+    maxAttempts = 4,
   ) => {
     let auth = await credential(signal)
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       signal?.throwIfAborted()
       try {
         return await run(auth)
@@ -165,7 +166,7 @@ export function adapter(input: {
           auth = await credential(signal, true)
           continue
         }
-        if (!failure.retryable || attempt === 3) throw failure
+        if (!failure.retryable || attempt === maxAttempts - 1) throw failure
         await sleep(failure.retryAfter ?? Math.min(4_000, 250 * 2 ** attempt), signal)
       }
     }
@@ -216,6 +217,7 @@ export function adapter(input: {
         return new Uint8Array(await response.arrayBuffer())
       },
       signal,
+      8,
     )
     if (!pinned) {
       const after = await stat(object, signal)

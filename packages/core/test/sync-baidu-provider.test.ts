@@ -327,6 +327,29 @@ describe("BaiduSyncProvider", () => {
     expect(creates).toBe(1)
   })
 
+  test("preserves safe provider identifiers through an unknown create outcome", async () => {
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        const method = url.searchParams.get("method")
+        if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-failed" })
+        if (url.hostname === "d.pcs.baidu.com") return Response.json({ errno: 0 })
+        if (method === "create") return Response.json({ errno: 31326, request_id: "998877" })
+        throw new Error(`unexpected ${url}`)
+      },
+    })
+
+    await expect(provider.uploadAtomic("head.json", new Uint8Array(7), { type: "absent" })).rejects.toMatchObject({
+      providerCode: 31326,
+      requestID: "998877",
+      outcome: "unknown",
+    })
+  })
+
   test("checks versions before one batch delete and classifies throttling", async () => {
     const store = memoryStore(credential)
     const forms: string[] = []
@@ -372,10 +395,12 @@ describe("BaiduSyncProvider", () => {
       store: memoryStore(credential),
       deviceID: "device",
       root: "/apps/opencode-sync/space",
-      request: async () => Response.json({ errno: 123, error_msg: "access-secret" }, { status: 400 }),
+      request: async () =>
+        Response.json({ errno: 123, request_id: "445566", error_msg: "access-secret" }, { status: 400 }),
     })
     const failure = await provider.stat("x").catch((cause) => cause)
     expect(failure).toBeInstanceOf(SyncProvider.ProviderError)
+    expect(failure).toMatchObject({ providerCode: 123, requestID: "445566" })
     expect(String(failure)).not.toContain("access-secret")
   })
 })

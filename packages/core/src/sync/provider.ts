@@ -65,6 +65,8 @@ export class ProviderError extends Error {
     readonly retryable: boolean,
     readonly outcome: "failed" | "unknown" = "failed",
     readonly retryAfter?: number,
+    readonly providerCode?: number,
+    readonly requestID?: string,
   ) {
     super(`${providerID} ${operation} failed (${kind})`)
   }

@@ -323,7 +323,16 @@ export function adapter(input: {
             signal,
           ).catch((cause) => {
             const failure = classify("upload", cause)
-            throw new SyncProvider.ProviderError("baidu", "upload", failure.kind, false, "unknown", failure.retryAfter)
+            throw new SyncProvider.ProviderError(
+              "baidu",
+              "upload",
+              failure.kind,
+              false,
+              "unknown",
+              failure.retryAfter,
+              failure.providerCode,
+              failure.requestID,
+            )
           })
           return objectInfo(object, created)
         },
@@ -341,6 +350,8 @@ export function adapter(input: {
         failure.retryable,
         "unknown",
         failure.retryAfter,
+        failure.providerCode,
+        failure.requestID,
       )
     }
   }
@@ -549,14 +560,26 @@ function responseFailure(
   body?: Record<string, unknown>,
 ) {
   const code = Number(body?.errno ?? body?.error_code)
+  const providerCode = Number.isFinite(code) ? code : undefined
+  const requestID = safeRequestID(body?.request_id)
   const retryAfter = retryDelay(response.headers.get("retry-after"))
-  if (response.status === 401 || code === -6 || code === 111) return error(operation, "unauthenticated", false)
-  if (response.status === 403 || code === -7) return error(operation, "permission", false)
-  if (response.status === 404 || code === -9 || code === 31066) return error(operation, "not-found", false)
-  if (response.status === 409) return error(operation, "conflict", false)
+  if (response.status === 401 || code === -6 || code === 111)
+    return error(operation, "unauthenticated", false, undefined, providerCode, requestID)
+  if (response.status === 403 || code === -7)
+    return error(operation, "permission", false, undefined, providerCode, requestID)
+  if (response.status === 404 || code === -9 || code === 31066)
+    return error(operation, "not-found", false, undefined, providerCode, requestID)
+  if (response.status === 409) return error(operation, "conflict", false, undefined, providerCode, requestID)
   if (response.status === 429 || code === 31034 || code === 31045)
-    return error(operation, "rate-limit", true, retryAfter)
-  return error(operation, response.status >= 500 ? "network" : "provider", response.status >= 500, retryAfter)
+    return error(operation, "rate-limit", true, retryAfter, providerCode, requestID)
+  return error(
+    operation,
+    response.status >= 500 ? "network" : "provider",
+    response.status >= 500,
+    retryAfter,
+    providerCode,
+    requestID,
+  )
 }
 
 function classify(operation: SyncProvider.ProviderError["operation"], cause: unknown) {
@@ -580,8 +603,24 @@ function error(
   kind: SyncProvider.ErrorKind,
   retryable: boolean,
   retryAfter?: number,
+  providerCode?: number,
+  requestID?: string,
 ) {
-  return new SyncProvider.ProviderError("baidu", operation, kind, retryable, "failed", retryAfter)
+  return new SyncProvider.ProviderError(
+    "baidu",
+    operation,
+    kind,
+    retryable,
+    "failed",
+    retryAfter,
+    providerCode,
+    requestID,
+  )
+}
+
+function safeRequestID(value: unknown) {
+  const result = typeof value === "string" || typeof value === "number" ? String(value) : undefined
+  return result && /^[A-Za-z0-9_-]{1,128}$/.test(result) ? result : undefined
 }
 
 function endpoint(base: string, fields: Record<string, string>) {

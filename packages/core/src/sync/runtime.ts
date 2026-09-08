@@ -504,6 +504,10 @@ async function decode<A>(
 
 export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnostic {
   const provider = cause instanceof SyncProvider.ProviderError ? cause : undefined
+  const details = [
+    provider?.providerCode === undefined ? undefined : `code ${provider.providerCode}`,
+    provider?.requestID ? `request ${provider.requestID}` : undefined,
+  ].filter((item): item is string => Boolean(item))
   return {
     stage,
     operation: provider?.operation,
@@ -511,6 +515,6 @@ export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnost
     retryable: provider?.retryable ?? false,
     outcome: provider?.outcome,
     retryAfter: provider?.retryAfter,
-    message: `Sync ${stage} failed`,
+    message: `Sync ${stage} failed${details.length ? ` (${details.join(", ")})` : ""}`,
   }
 }

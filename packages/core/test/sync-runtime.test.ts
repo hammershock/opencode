@@ -111,6 +111,15 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
 }
 
 describe("SyncRuntime", () => {
+  test("includes safe provider identifiers in diagnostics", () => {
+    expect(
+      SyncRuntime.diagnostic(
+        "segment",
+        new SyncProvider.ProviderError("baidu", "upload", "provider", false, "failed", undefined, 31326, "998877"),
+      ),
+    ).toMatchObject({ message: "Sync segment failed (code 31326, request 998877)" })
+  })
+
   test("uses the plaintext codec without requiring a recovery key", async () => {
     const remote = provider()
     const id = SyncEvent.DeviceID.make("mac")

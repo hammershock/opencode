@@ -168,9 +168,9 @@ it.effect("preserves running tool start time across metadata updates", () =>
   }),
 )
 
-it.effect("remote location materialization replaces the legacy execution tool", () =>
+it.effect("remote location materialization replaces every location-bound search tool", () =>
   Effect.gen(function* () {
-    const calls: string[] = []
+    const calls: Array<{ name: string; input: unknown }> = []
     const processor = {
       message: {
         id: messageID,
@@ -196,12 +196,18 @@ it.effect("remote location materialization replaces the legacy execution tool", 
           description: "remote bash",
           inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
         }),
+        ToolDefinition.make({
+          name: "glob",
+          description: "remote glob",
+          inputSchema: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] },
+        }),
       ],
       settle: (input) =>
         Effect.sync(() => {
-          calls.push(String((input.call.input as { command: string }).command))
-          const output = ToolOutput.make({}, [{ type: "text", text: "remote-only-output" }])
-          return { result: { type: "text" as const, value: "remote-only-output" }, output }
+          calls.push({ name: input.call.name, input: input.call.input })
+          const value = `remote-${input.call.name}-output`
+          const output = ToolOutput.make({}, [{ type: "text", text: value }])
+          return { result: { type: "text" as const, value }, output }
         }),
     }
     const tools = yield* SessionTools.resolve({
@@ -219,7 +225,16 @@ it.effect("remote location materialization replaces the legacy execution tool", 
     const output = yield* Effect.promise(() =>
       execute({ command: "pwd" }, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }),
     )
-    expect(calls).toEqual(["pwd"])
-    expect(output).toMatchObject({ output: "remote-only-output", metadata: { locationBound: true } })
+    const glob = tools.glob.execute
+    if (!glob) throw new Error("glob tool is missing execute")
+    const globOutput = yield* Effect.promise(() =>
+      glob({ pattern: "*.ts" }, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }),
+    )
+    expect(calls).toEqual([
+      { name: "bash", input: { command: "pwd" } },
+      { name: "glob", input: { pattern: "*.ts" } },
+    ])
+    expect(output).toMatchObject({ output: "remote-bash-output", metadata: { locationBound: true } })
+    expect(globOutput).toMatchObject({ output: "remote-glob-output", metadata: { locationBound: true } })
   }),
 )

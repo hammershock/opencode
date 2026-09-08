@@ -236,6 +236,39 @@ describe("Rexd Location routing contract", () => {
     expect(await Bun.file(remoteRoot).exists()).toBe(false)
   })
 
+  test("location FS follows a directory symlink without replacing the Location path", async () => {
+    const { lease, calls } = processLease((method, params) => {
+      if (method !== "fs.stat") return undefined
+      if (params.path === "/workspace-link")
+        return {
+          path: params.path,
+          exists: true,
+          type: "symlink",
+          symlink_target: "/workspace-real",
+          mtime: 1,
+        }
+      if (params.path === "/workspace-real") return { path: params.path, exists: true, type: "dir", mtime: 2 }
+      return { path: params.path, exists: false }
+    })
+    lease.handshake.workspaceRoots = ["/"]
+    const directory = AbsolutePath.make("/workspace-link")
+    const ref = Location.Ref.make({ target: { type: "rexd", targetID }, directory })
+    const session = rexdSessionNode(ref)
+    const fsNode = rexdFilesystemNodes(session, targetID, directory)[2]
+    const testLayer = LayerNode.compile(fsNode, [[session, Layer.succeed(RexdLocationSession, lease)]])
+    const context = await Effect.runPromise(Effect.scoped(Layer.build(testLayer)))
+    const fs = Context.get(context, FSUtil.Service)
+
+    expect((await Effect.runPromise(fs.stat(directory))).type).toBe("Directory")
+    expect(await Effect.runPromise(fs.realPath(directory))).toBe(directory)
+    expect(calls.filter((call) => call.method === "fs.stat").map((call) => call.params.path)).toEqual([
+      "/workspace-link",
+      "/workspace-real",
+      "/workspace-link",
+      "/workspace-real",
+    ])
+  })
+
   test("user shell delegates execution and completion to location services", async () => {
     const executed: string[] = []
     let executionTimeout = 0

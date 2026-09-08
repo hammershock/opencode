@@ -4,6 +4,7 @@ import {
   experimentalCommandSettings,
   overrideDiagnostic,
   persistLocationEnvironment,
+  persistUserShellCwd,
 } from "../command-toolkit/experimental-settings"
 import { useKV } from "../context/kv"
 import { useSDK } from "../context/sdk"
@@ -34,11 +35,15 @@ export function DialogExperimentalCommands() {
   const sdk = useSDK()
   const toast = useToast()
   const [locationEnvironment, setLocationEnvironment] = createSignal<boolean>()
+  const [userShellCwd, setUserShellCwd] = createSignal<boolean>()
   onMount(
     () =>
       void sdk.client.global.config
         .get({ throwOnError: true })
-        .then((result) => setLocationEnvironment(result.data.experimental?.location_env === true))
+        .then((result) => {
+          setLocationEnvironment(result.data.experimental?.location_env === true)
+          setUserShellCwd(result.data.experimental?.user_shell_cwd === true)
+        })
         .catch(toast.error),
   )
   const options = createMemo(() => [
@@ -49,6 +54,14 @@ export function DialogExperimentalCommands() {
       footer: <Status setting={setting} />,
       category: "Experimental commands",
     })),
+    {
+      value: "fork.user-shell.cwd",
+      title: "User Shell CWD continuity",
+      description: "User setting · remember verified cwd until OpenCode exits",
+      footer: userShellCwd() === undefined ? "◐ checking" : userShellCwd() ? "● enabled" : "○ disabled",
+      category: "Experimental features",
+      disabled: userShellCwd() === undefined,
+    },
     {
       value: "fork.environment.location",
       title: "Location environment",
@@ -68,6 +81,17 @@ export function DialogExperimentalCommands() {
           command: "dialog.experimental.toggle",
           title: "toggle",
           onTrigger: (option: DialogSelectOption<string>) => {
+            if (option.value === "fork.user-shell.cwd") {
+              const current = userShellCwd()
+              if (current === undefined) return
+              const enabled = !current
+              void persistUserShellCwd(enabled, async (config) => {
+                await sdk.client.global.config.update({ config }, { throwOnError: true })
+              })
+                .then(setUserShellCwd)
+                .catch(toast.error)
+              return
+            }
             if (option.value === "fork.environment.location") {
               const current = locationEnvironment()
               if (current === undefined) return

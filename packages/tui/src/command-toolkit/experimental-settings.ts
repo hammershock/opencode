@@ -53,3 +53,11 @@ export async function persistLocationEnvironment(
   await update({ experimental: { location_env: enabled } })
   return enabled
 }
+
+export async function persistUserShellCwd(
+  enabled: boolean,
+  update: (config: { experimental: { user_shell_cwd: boolean } }) => Promise<void>,
+) {
+  await update({ experimental: { user_shell_cwd: enabled } })
+  return enabled
+}

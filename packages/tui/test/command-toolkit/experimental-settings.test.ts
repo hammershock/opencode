@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   experimentalCommandSettings,
   persistLocationEnvironment,
+  persistUserShellCwd,
 } from "../../src/command-toolkit/experimental-settings"
 
 describe("experimental settings", () => {
@@ -46,5 +47,15 @@ describe("experimental settings", () => {
         throw new Error("write failed")
       }),
     ).rejects.toThrow("write failed")
+  })
+
+  test("persists User Shell CWD continuity through the canonical config patch", async () => {
+    const patches: unknown[] = []
+    const enabled = await persistUserShellCwd(true, async (config) => {
+      patches.push(config)
+    })
+
+    expect(enabled).toBeTrue()
+    expect(patches).toEqual([{ experimental: { user_shell_cwd: true } }])
   })
 })

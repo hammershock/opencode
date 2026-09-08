@@ -5,6 +5,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventSequenceTable, EventTable } from "@opencode-ai/core/event/sql"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionActivity } from "@opencode-ai/core/session/activity"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
@@ -127,6 +128,9 @@ describe("SessionSync", () => {
           assign: () => Effect.void,
           unassign: () => Effect.void,
           list: () => Effect.fail(new Error("recovery unavailable")),
+        }),
+        Layer.mock(SessionActivity.Service, {
+          blockers: () => Effect.succeed([]),
         }),
         Layer.mock(Database.Service, {
           db: {

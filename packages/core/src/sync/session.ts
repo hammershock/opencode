@@ -14,6 +14,7 @@ import { SessionV2 } from "../session"
 import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
 import { eq } from "drizzle-orm"
+import { EventSequenceTable } from "../event/sql"
 import { SessionSyncDurable } from "@opencode-ai/schema/durable-event-manifest"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
 
@@ -90,6 +91,14 @@ export function backfill(
   spaceID: string,
 ) {
   return Effect.gen(function* () {
+    const sequence = yield* db
+      .select({ ownerID: EventSequenceTable.owner_id })
+      .from(EventSequenceTable)
+      .where(eq(EventSequenceTable.aggregate_id, sessionID))
+      .get()
+    // A non-null owner identifies an aggregate materialized from another
+    // device. Backfilling it would echo replayed history back into the cloud.
+    if (sequence?.ownerID) return
     let after = -1
     while (true) {
       const page = yield* EventV2.readAggregate(db, {
@@ -314,6 +323,7 @@ const captureEffect = Effect.gen(function* () {
   const events = yield* EventV2.Service
   const store = yield* SyncEventStore.Service
   const ownership = yield* SyncOwnership.Service
+  const activity = yield* SessionActivity.Service
   const db = (yield* Database.Service).db
   const persisted = (sessionID: string) =>
     db
@@ -329,11 +339,15 @@ const captureEffect = Effect.gen(function* () {
       )
   // Subscribe before taking the recovery snapshot. Any commit racing startup
   // is either observed live or appears in the subsequent durable backfill.
-  const unsubscribe = yield* events.listen((event) =>
-    captureOwned(ownership, store, event as DurablePayload, Date.now(), persisted).pipe(
-      Effect.catchCause((cause) => Effect.logWarning("Session sync live capture failed", { cause })),
-    ),
-  )
+  const unsubscribe = yield* events.listen((event) => {
+    const payload = event as DurablePayload
+    if (!payload.durable) return Effect.void
+    return Effect.gen(function* () {
+      const blockers = yield* activity.blockers(SessionV2.ID.make(payload.durable!.aggregateID))
+      if (blockers.includes("sync_replay")) return
+      yield* captureOwned(ownership, store, payload, Date.now(), persisted)
+    }).pipe(Effect.catchCause((cause) => Effect.logWarning("Session sync live capture failed", { cause })))
+  })
   yield* Effect.addFinalizer(() => unsubscribe)
   yield* Effect.gen(function* () {
     const existing = yield* db
@@ -369,7 +383,7 @@ const captureServiceLayer = Layer.effect(Capture, captureEffect.pipe(Effect.as(t
 export const node = makeGlobalNode({
   service: Capture,
   layer: captureServiceLayer,
-  deps: [EventV2.node, SyncEventStore.node, SyncOwnership.node, Database.node],
+  deps: [EventV2.node, SyncEventStore.node, SyncOwnership.node, Database.node, SessionActivity.node],
 })
 
 function isSessionDeleted(payload: DurablePayload) {

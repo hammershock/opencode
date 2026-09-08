@@ -65,9 +65,11 @@ describe("SyncSetup lifecycle", () => {
     const provider = memoryProvider()
     const setup = await authenticated(tmp.path, secure, provider, () => key("legacy"))
     await run(setup.create({ name: "Legacy" }))
+    await run(setup.setEnabled(true))
     expect((await run(setup.cloudStatus())).status).toBe("uninitialized")
 
     const initialized = await run(setup.initializeCloud())
+    expect(initialized.enabled).toBeFalse()
     expect(initialized.activeSpaceID).toBe(SyncRoot.INTERNAL_SCOPE)
     expect(initialized.spaces.map((item) => item.descriptor.namespaceID)).toEqual([SyncRoot.INTERNAL_SCOPE])
     expect((await run(setup.cloudStatus())).status).toBe("ready")

@@ -223,6 +223,7 @@ export function make(input: {
         }
         const accountState = {
           ...context.current,
+          enabled: false,
           activeSpaceID: undefined,
           spaces: [],
         }

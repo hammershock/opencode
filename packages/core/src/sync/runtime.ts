@@ -302,23 +302,37 @@ export function make(input: {
           const end = Math.min(head.generation, cursor + 8)
           const batch = await Promise.all(
             Array.from({ length: end - cursor }, (_, index) => cursor + index + 1).map(async (generation) => {
-              const path = segmentPath(head.deviceID, generation, codec.suffix)
-              const object = indexedSegments.get(path) ?? (await input.provider.stat(path, signal))
-              if (!object) throw new Error(`Remote sync segment ${generation} is missing`)
-              await input.transfer?.start("download", "sessions")
-              const downloaded = await input.provider.download(path, object.version, signal)
-              await input.transfer?.complete("download", "sessions", downloaded.bytes.length)
-              return decode(
-                (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
-                codec,
-                "event",
-                segmentContext(head.deviceID, generation, path),
-                downloaded.bytes,
-              )
+              try {
+                const path = segmentPath(head.deviceID, generation, codec.suffix)
+                const object = indexedSegments.get(path) ?? (await input.provider.stat(path, signal))
+                if (!object) throw new Error(`remote object is missing`)
+                await input.transfer?.start("download", "sessions")
+                const downloaded = await input.provider.download(path, object.version, signal)
+                await input.transfer?.complete("download", "sessions", downloaded.bytes.length)
+                return decode(
+                  (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+                  codec,
+                  "event",
+                  segmentContext(head.deviceID, generation, path),
+                  downloaded.bytes,
+                )
+              } catch (cause) {
+                throw new Error(
+                  `download/decode device ${head.deviceID} generation ${generation}: ${internalReason(cause)}`,
+                  { cause },
+                )
+              }
             }),
           )
           for (const segment of batch) {
-            await Effect.runPromise(input.store.applyDurable(segment, projector(head.deviceID)))
+            try {
+              await Effect.runPromise(input.store.applyDurable(segment, projector(head.deviceID)))
+            } catch (cause) {
+              throw new Error(
+                `apply device ${head.deviceID} generation ${segment.generation}: ${internalReason(cause)}`,
+                { cause },
+              )
+            }
             cursor = segment.generation
           }
         }
@@ -564,7 +578,17 @@ export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnost
 }
 
 function internalReason(cause: unknown) {
-  const value = cause instanceof Error ? cause.message : String(cause)
+  const tagged = cause && typeof cause === "object" ? cause : undefined
+  const fields = tagged
+    ? [
+        "_tag" in tagged && typeof tagged._tag === "string" ? tagged._tag : undefined,
+        "type" in tagged && typeof tagged.type === "string" ? `type ${tagged.type}` : undefined,
+        "expected" in tagged ? `expected ${String(tagged.expected)}` : undefined,
+        "received" in tagged ? `received ${String(tagged.received)}` : undefined,
+      ].filter((item): item is string => Boolean(item))
+    : []
+  const message = cause instanceof Error && cause.message ? cause.message : undefined
+  const value = [message, ...fields].filter((item): item is string => Boolean(item)).join(" · ") || String(cause)
   return value.replace(/\s+/g, " ").slice(0, 240)
 }
 

@@ -177,7 +177,9 @@ async function selectOverview(
       undefined,
       { confirmLabel: "Clear cloud sync data", destructive: true },
     )
-    if (second) await actions.clearCloud()
+    if (!second) return open()
+    await actions.clearCloud()
+    return
   }
   if (value === "logout") {
     const confirmed = await DialogConfirm.show(
@@ -185,9 +187,10 @@ async function selectOverview(
       "Log out of Baidu Netdisk?",
       "Automatic sync will turn off. Local Sessions and queued changes remain.",
     )
-    if (confirmed) await actions.logout()
+    if (!confirmed) return open()
+    await actions.logout()
+    return
   }
-  open()
 }
 
 export function showPostLoginSyncChoice(dialog: DialogContext) {
@@ -220,25 +223,41 @@ export function confirmInitializeCloud(dialog: DialogContext) {
 }
 
 function showAccount(dialog: DialogContext, actions: SyncSettingsActions, open: () => void) {
-  dialog.replace(() => (
+  const content = () => (
     <DialogSelect
       title="Baidu Netdisk account"
       options={[{ title: "Switch account", value: "switch" }]}
-      onSelect={() => void actions.connect("switch").then(open).catch(actions.onError)}
+      onSelect={() =>
+        void actions
+          .connect("switch")
+          .then(() => {
+            if (dialog.isCurrent(content)) open()
+          })
+          .catch(actions.onError)
+      }
     />
-  ))
+  )
+  dialog.replace(content)
 }
 
 function showIntervals(dialog: DialogContext, current: SyncInterval, actions: SyncSettingsActions, open: () => void) {
   const intervals = [30, 60, 300] as const
-  dialog.replace(() => (
+  const content = () => (
     <DialogSelect
       title="Sync interval"
       current={current}
       options={intervals.map((value) => ({ title: intervalLabel(value), value }))}
-      onSelect={(option) => void actions.setInterval(option.value).then(open).catch(actions.onError)}
+      onSelect={(option) =>
+        void actions
+          .setInterval(option.value)
+          .then(() => {
+            if (dialog.isCurrent(content)) open()
+          })
+          .catch(actions.onError)
+      }
     />
-  ))
+  )
+  dialog.replace(content)
 }
 
 export function showSyncDevices(

@@ -229,6 +229,7 @@ export function adapter(input: {
           request,
           "upload",
           signal,
+          "directory-create",
         ).catch(async (cause) => {
           // Another client may create the same directory between our list and create calls.
           if (await directoryExists(auth, directory, request, signal)) return
@@ -285,12 +286,15 @@ export function adapter(input: {
             request,
             "upload",
             signal,
+            "precreate",
           )
           expectedUploadID = string(prepared.uploadid, "upload")
           await Promise.all(
             blocks.map(async (block, index) => {
               const body = new FormData()
-              body.set("file", new Blob([Uint8Array.from(block.part)]))
+              // Keep the explicit filename used by the proven prototype. Some
+              // Baidu upload edges reject an unnamed multipart file with HTML.
+              body.append("file", new Blob([Uint8Array.from(block.part)]), "blob")
               await json(
                 await request(
                   endpoint(UPLOAD_API, {
@@ -304,6 +308,7 @@ export function adapter(input: {
                   { method: "POST", body, signal },
                 ),
                 "upload",
+                "part-upload",
               )
             }),
           )
@@ -321,6 +326,7 @@ export function adapter(input: {
             request,
             "upload",
             signal,
+            "create",
           ).catch((cause) => {
             const failure = classify("upload", cause)
             throw new SyncProvider.ProviderError(
@@ -332,6 +338,8 @@ export function adapter(input: {
               failure.retryAfter,
               failure.providerCode,
               failure.requestID,
+              failure.providerPhase,
+              failure.httpStatus,
             )
           })
           return objectInfo(object, created)
@@ -352,6 +360,8 @@ export function adapter(input: {
         failure.retryAfter,
         failure.providerCode,
         failure.requestID,
+        failure.providerPhase,
+        failure.httpStatus,
       )
     }
   }
@@ -483,6 +493,7 @@ async function directoryExists(auth: Credential, directory: string, request: Req
         { signal, headers: { "User-Agent": "pan.baidu.com" } },
       ),
       "upload",
+      "directory-list",
     )
     if (!Array.isArray(body.list)) throw error("upload", "invalid-response", false)
     if (body.list.some((item) => record(item, "upload").path === directory)) return true
@@ -535,6 +546,7 @@ async function form(
   request: Request,
   operation: SyncProvider.ProviderError["operation"],
   signal?: AbortSignal,
+  providerPhase?: string,
 ) {
   return json(
     await request(url, {
@@ -544,13 +556,21 @@ async function form(
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
     }),
     operation,
+    providerPhase,
   )
 }
 
-async function json(response: Response, operation: SyncProvider.ProviderError["operation"]) {
+async function json(response: Response, operation: SyncProvider.ProviderError["operation"], providerPhase?: string) {
   const value = await response.json().catch(() => undefined)
+  if (!response.ok)
+    throw responseFailure(
+      operation,
+      response,
+      value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined,
+      providerPhase,
+    )
   const body = record(value, operation)
-  if (!response.ok || Number(body.errno ?? 0) !== 0) throw responseFailure(operation, response, body)
+  if (Number(body.errno ?? 0) !== 0) throw responseFailure(operation, response, body, providerPhase)
   return body
 }
 
@@ -558,20 +578,35 @@ function responseFailure(
   operation: SyncProvider.ProviderError["operation"],
   response: Response,
   body?: Record<string, unknown>,
+  providerPhase?: string,
 ) {
   const code = Number(body?.errno ?? body?.error_code)
   const providerCode = Number.isFinite(code) ? code : undefined
-  const requestID = safeRequestID(body?.request_id)
+  const requestID =
+    safeRequestID(body?.request_id) ??
+    ["x-bs-request-id", "x-request-id", "x-bce-request-id"]
+      .map((name) => safeRequestID(response.headers.get(name)))
+      .find((value) => value !== undefined)
   const retryAfter = retryDelay(response.headers.get("retry-after"))
   if (response.status === 401 || code === -6 || code === 111)
-    return error(operation, "unauthenticated", false, undefined, providerCode, requestID)
+    return error(
+      operation,
+      "unauthenticated",
+      false,
+      undefined,
+      providerCode,
+      requestID,
+      providerPhase,
+      response.status,
+    )
   if (response.status === 403 || code === -7)
-    return error(operation, "permission", false, undefined, providerCode, requestID)
+    return error(operation, "permission", false, undefined, providerCode, requestID, providerPhase, response.status)
   if (response.status === 404 || code === -9 || code === 31066)
-    return error(operation, "not-found", false, undefined, providerCode, requestID)
-  if (response.status === 409) return error(operation, "conflict", false, undefined, providerCode, requestID)
+    return error(operation, "not-found", false, undefined, providerCode, requestID, providerPhase, response.status)
+  if (response.status === 409)
+    return error(operation, "conflict", false, undefined, providerCode, requestID, providerPhase, response.status)
   if (response.status === 429 || code === 31034 || code === 31045)
-    return error(operation, "rate-limit", true, retryAfter, providerCode, requestID)
+    return error(operation, "rate-limit", true, retryAfter, providerCode, requestID, providerPhase, response.status)
   return error(
     operation,
     response.status >= 500 ? "network" : "provider",
@@ -579,6 +614,8 @@ function responseFailure(
     retryAfter,
     providerCode,
     requestID,
+    providerPhase,
+    response.status,
   )
 }
 
@@ -605,6 +642,8 @@ function error(
   retryAfter?: number,
   providerCode?: number,
   requestID?: string,
+  providerPhase?: string,
+  httpStatus?: number,
 ) {
   return new SyncProvider.ProviderError(
     "baidu",
@@ -615,6 +654,8 @@ function error(
     retryAfter,
     providerCode,
     requestID,
+    providerPhase,
+    httpStatus,
   )
 }
 

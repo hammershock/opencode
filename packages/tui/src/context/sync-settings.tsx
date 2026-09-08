@@ -397,6 +397,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
 
     const completeOAuth = async (
       response: { type: "loopback"; callbackURL: string } | { type: "manual"; code: string },
+      showChoice = true,
     ) => {
       if (!oauth) throw new Error("OAuth attempt is missing")
       const input = { attemptID: oauth.attemptID, response }
@@ -404,10 +405,11 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       else await sdk.client.global.syncOAuthComplete(input, { throwOnError: true })
       oauth = undefined
       await refreshLocal()
-      await applyPostLoginChoice()
+      if (showChoice) await applyPostLoginChoice()
     }
 
     const beginManual = async () => {
+      const owner = dialog.stack.at(-1)?.element
       loopback?.close()
       loopback = undefined
       const mode = oauth?.mode ?? "connect"
@@ -421,10 +423,11 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         account: { state: "disconnected", oauth: { state: "manual", authorizationURL: result.data.authorizationURL } },
       }))
       await openBrowser(result.data.authorizationURL).catch(() => undefined)
-      showSyncSettings(dialog, model, actions)
+      if (dialog.isCurrent(owner)) showSyncSettings(dialog, model, actions)
     }
 
     const beginOAuth = async (mode: "connect" | "switch" = "connect") => {
+      let owner = dialog.stack.at(-1)?.element
       await sdk.client.global.syncInitialize({ deviceName: hostname() }, { throwOnError: true })
       loopback?.close()
       loopback = createLoopbackCallback()
@@ -440,7 +443,10 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
           oauth: { state: "waiting", authorizationURL: result.data.authorizationURL },
         },
       }))
-      showSyncSettings(dialog, model, actions)
+      if (dialog.isCurrent(owner)) {
+        showSyncSettings(dialog, model, actions)
+        owner = dialog.stack.at(-1)?.element
+      }
       const opened = await openBrowser(result.data.authorizationURL).then(
         () => true,
         () => false,
@@ -455,7 +461,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         return beginManual()
       }
       try {
-        await completeOAuth({ type: "loopback", callbackURL: callback.callbackURL })
+        await completeOAuth({ type: "loopback", callbackURL: callback.callbackURL }, dialog.isCurrent(owner))
         callback.respond({ status: "success" })
       } catch {
         callback.respond({ status: "error", detail: "Authorization could not be completed. Return to OpenCode." })
@@ -466,7 +472,6 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
           loopback = undefined
         }, 1_000)
       }
-      showSyncSettings(dialog, model, actions)
     }
 
     const mutate = async (effect: () => Promise<unknown>, remote = false) => {
@@ -535,15 +540,13 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
           true,
         ),
       targets: () =>
-        sdk.client.v2.target
-          .list({ throwOnError: true })
-          .then((result) =>
-            result.data.targets.map((target) => ({
-              id: target.id,
-              name: target.name,
-              description: target.connection.host,
-            })),
-          ),
+        sdk.client.v2.target.list({ throwOnError: true }).then((result) =>
+          result.data.targets.map((target) => ({
+            id: target.id,
+            name: target.name,
+            description: target.connection.host,
+          })),
+        ),
       onError: (error) => {
         const message = syncOperationFailure(error)
         setModel((current) => ({ ...current, state: "attention", detail: message }))

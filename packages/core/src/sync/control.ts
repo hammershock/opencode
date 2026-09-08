@@ -295,14 +295,6 @@ const make = (input: LayerOptions) =>
       const state = yield* setup.state().pipe(Effect.catch(() => Effect.succeed(undefined)))
       const resolved = yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined)))
       const config = resolved?.namespaceID === SyncRoot.INTERNAL_SCOPE ? resolved : undefined
-      const authenticated = yield* setup.authenticated().pipe(Effect.catch(() => Effect.succeed(false)))
-      const locked =
-        config?.encryption === "aes-256-gcm" && authenticated
-          ? yield* Effect.tryPromise({
-              try: async () => !(await (await SyncSecureStore.detect()).get(`space:${config.namespaceID}:root`)),
-              catch: () => true,
-            })
-          : false
       const outbox =
         (yield* syncDB.get<{ value: number }>(sql`
           SELECT COUNT(*) AS value FROM sync_event_outbox WHERE space_id = ${config?.namespaceID ?? "legacy"}
@@ -313,9 +305,11 @@ const make = (input: LayerOptions) =>
       return Status.make({
         configured: Boolean(config),
         initialized: Boolean(state),
-        authenticated,
+        // Status is a local presentation path. Credential and encryption-key
+        // availability are checked authoritatively when a cloud operation starts.
+        authenticated: Boolean(state?.account),
         enabled: state?.enabled ?? false,
-        locked,
+        locked: false,
         provider: state?.provider,
         namespaceID: config?.namespaceID,
         deviceID: state?.deviceID,

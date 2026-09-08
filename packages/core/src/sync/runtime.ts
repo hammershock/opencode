@@ -505,6 +505,8 @@ async function decode<A>(
 export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnostic {
   const provider = cause instanceof SyncProvider.ProviderError ? cause : undefined
   const details = [
+    provider?.providerPhase,
+    provider?.httpStatus === undefined ? undefined : `HTTP ${provider.httpStatus}`,
     provider?.providerCode === undefined ? undefined : `code ${provider.providerCode}`,
     provider?.requestID ? `request ${provider.requestID}` : undefined,
   ].filter((item): item is string => Boolean(item))

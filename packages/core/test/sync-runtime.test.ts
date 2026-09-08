@@ -118,6 +118,23 @@ describe("SyncRuntime", () => {
         new SyncProvider.ProviderError("baidu", "upload", "provider", false, "failed", undefined, 31326, "998877"),
       ),
     ).toMatchObject({ message: "Sync segment failed (code 31326, request 998877)" })
+    expect(
+      SyncRuntime.diagnostic(
+        "segment",
+        new SyncProvider.ProviderError(
+          "baidu",
+          "upload",
+          "provider",
+          false,
+          "unknown",
+          undefined,
+          undefined,
+          "header-request",
+          "part-upload",
+          400,
+        ),
+      ),
+    ).toMatchObject({ message: "Sync segment failed (part-upload, HTTP 400, request header-request)" })
   })
 
   test("uses the plaintext codec without requiring a recovery key", async () => {

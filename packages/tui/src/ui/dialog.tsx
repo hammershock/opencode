@@ -166,6 +166,9 @@ function init() {
     get stack() {
       return store.stack
     },
+    isCurrent(input: unknown) {
+      return store.stack.at(-1)?.element === input
+    },
     get size() {
       return store.size
     },

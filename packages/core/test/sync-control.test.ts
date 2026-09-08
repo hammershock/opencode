@@ -12,6 +12,7 @@ import { testEffect } from "./lib/effect"
 
 let remoteStarted = false
 let releaseRemote = () => {}
+let authenticationReads = 0
 const active = {
   provider: "baidu" as const,
   deviceID: "device",
@@ -49,7 +50,11 @@ const realControlIt = testEffect(
       Layer.mock(SyncSetup.Service, {
         state: () => Effect.succeed(state),
         config: () => Effect.succeed(active),
-        authenticated: () => Effect.succeed(true),
+        authenticated: () =>
+          Effect.sync(() => {
+            authenticationReads++
+            return true
+          }),
         cloudStatus: () =>
           Effect.promise(
             () =>
@@ -153,10 +158,12 @@ describe("SyncControl lifecycle policy", () => {
     Effect.gen(function* () {
       const control = yield* SyncControl.Service
       const scope = yield* Scope.Scope
+      authenticationReads = 0
       const running = yield* control.cloudStatus().pipe(Effect.exit, Effect.forkIn(scope))
       while (!remoteStarted) yield* Effect.yieldNow
 
       expect((yield* control.status().pipe(Effect.timeout("250 millis"))).namespaceID).toBe(active.namespaceID)
+      expect(authenticationReads).toBe(0)
       releaseRemote()
       expect((yield* Fiber.join(running))._tag).toBe("Success")
       expect((yield* control.status().pipe(Effect.timeout("250 millis"))).namespaceID).toBe(active.namespaceID)

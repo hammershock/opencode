@@ -67,6 +67,10 @@ test("opens from local state while a remote refresh is slow", async () => {
   let cloudUnavailable = false
   let cloudCalls = 0
   let delayNextCloud = false
+  let releaseSync!: () => void
+  const syncGate = new Promise<void>((resolve) => {
+    releaseSync = resolve
+  })
   const statusGate = new Promise<void>((resolve) => {
     releaseStatus = resolve
   })
@@ -79,6 +83,10 @@ test("opens from local state while a remote refresh is slow", async () => {
       const body = (await request.json()) as { enabled: boolean }
       state = { ...state, enabled: body.enabled }
       return json(state)
+    }
+    if (url.pathname === "/global/sync/now") {
+      await syncGate
+      return json(null)
     }
     if (url.pathname === "/global/sync/cloud") {
       cloudCalls++
@@ -199,6 +207,19 @@ test("opens from local state while a remote refresh is slow", async () => {
     await waitFrame("ready")
     expect(app.captureCharFrame()).toContain("lo***@example.com")
 
+    app.mockInput.pressArrow("down")
+    app.mockInput.pressEnter()
+    await wait("sync request", () => calls.some((call) => call.path === "/global/sync/now"))
+    app.mockInput.pressEscape()
+    await app.renderOnce()
+    expect(app.captureCharFrame()).not.toContain("Sync settings")
+    releaseSync()
+    await wait("sync refresh", () => cloudCalls >= 3 && settings.model().state === "off")
+    await app.renderOnce()
+    expect(app.captureCharFrame()).not.toContain("Sync settings")
+    await settings.open()
+    await waitFrame("Sync settings")
+
     cloudUnavailable = true
     await settings.refresh(true)
     await wait("unavailable model", () => settings.model().cloud === "unavailable")
@@ -207,8 +228,9 @@ test("opens from local state while a remote refresh is slow", async () => {
 
     cloudUnavailable = false
     delayNextCloud = true
+    const cloudCallsBeforeStale = cloudCalls
     const stale = settings.refresh(true)
-    await wait("stale cloud request", () => cloudCalls >= 3)
+    await wait("stale cloud request", () => cloudCalls > cloudCallsBeforeStale)
     const latest = settings.refresh(true)
     await latest
     await stale

@@ -212,7 +212,9 @@ describe("BaiduSyncProvider", () => {
         if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-1" })
         if (url.hostname === "d.pcs.baidu.com") {
           parts.push(Number(url.searchParams.get("partseq")))
-          expect((init?.body as FormData).get("file")).toBeInstanceOf(Blob)
+          const file = (init?.body as FormData).get("file")
+          expect(file).toBeInstanceOf(Blob)
+          expect(file).toHaveProperty("name", "blob")
           return Response.json({ errno: 0, md5: "part" })
         }
         if (method === "create") {
@@ -348,6 +350,37 @@ describe("BaiduSyncProvider", () => {
       requestID: "998877",
       outcome: "unknown",
     })
+  })
+
+  test("identifies the failed upload phase from an HTTP response without a JSON error body", async () => {
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        const method = url.searchParams.get("method")
+        if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-http-error" })
+        if (url.hostname === "d.pcs.baidu.com")
+          return new Response("upstream rejected the part", {
+            status: 400,
+            headers: { "x-bs-request-id": "safe-header-id" },
+          })
+        throw new Error(`unexpected ${url}`)
+      },
+    })
+
+    const failure = await provider
+      .uploadAtomic("head.json", new Uint8Array(7), { type: "absent" })
+      .catch((cause) => cause)
+    expect(failure).toMatchObject({
+      providerPhase: "part-upload",
+      httpStatus: 400,
+      requestID: "safe-header-id",
+      outcome: "unknown",
+    })
+    expect(String(failure)).not.toContain("upstream rejected the part")
   })
 
   test("checks versions before one batch delete and classifies throttling", async () => {

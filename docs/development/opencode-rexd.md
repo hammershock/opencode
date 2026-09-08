@@ -34,6 +34,22 @@ The installer validates the candidate and then directly replaces the existing
 compatibility copy or rollback entrypoint. Rexd connection configuration and
 user data are outside the build artifact and are not modified by installation.
 
+On macOS, repeated ad-hoc builds have a different code identity and can make
+Keychain treat every replacement as a new application. Developers with a
+trusted signing identity should preserve one stable application identity:
+
+```bash
+./script/install-rexd \
+  --binary dist/opencode-darwin-arm64/bin/opencode-rexd \
+  --manifest dist/opencode-darwin-arm64/bin/opencode-rexd.build.json \
+  --codesign-identity "Apple Development: account@example.com (TEAMID)"
+```
+
+The identity is used only to sign and verify the candidate as
+`ai.opencode.rexd`; it is not written to the manifest or repository. Signing
+finishes before the transactional replacement begins. This does not weaken or
+rewrite existing Keychain access controls.
+
 ### Provision the Baidu product OAuth application
 
 Production release operators may provision the product-owned Baidu OAuth

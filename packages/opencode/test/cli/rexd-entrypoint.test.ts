@@ -23,6 +23,38 @@ describe("opencode-rexd installer", () => {
     expect(await Bun.file(path.join(install, "opencode-rexd.previous")).exists()).toBe(false)
   })
 
+  test("signs a macOS candidate before replacing the installed build", async () => {
+    if (process.platform !== "darwin") return
+    const root = await createFixture()
+    const install = path.join(root, "install")
+    const candidate = await fakeBinary(root, "signed", "1.0.0-rexd.signed")
+    const commands = path.join(root, "commands")
+    const calls = path.join(root, "codesign-calls")
+    await Bun.$`mkdir -p ${commands}`
+    await Bun.write(
+      path.join(commands, "codesign"),
+      `#!/bin/sh
+printf '%s\n' "$*" >> "$CODESIGN_CALLS"
+exit 0
+`,
+    )
+    await Bun.$`chmod 755 ${path.join(commands, "codesign")}`
+
+    const result = Bun.spawn(
+      [installer, "--binary", candidate, "--install-dir", install, "--codesign-identity", "Test Identity"],
+      {
+        env: { ...process.env, CODESIGN_CALLS: calls, PATH: `${commands}:${process.env.PATH}` },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    expect(await result.exited).toBe(0)
+    const signed = await Bun.file(calls).text()
+    expect(signed).toContain("--force --sign Test Identity --identifier ai.opencode.rexd --timestamp=none")
+    expect(signed).toContain("--verify --strict")
+    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.signed\n")
+  })
+
   test("rejects a broken candidate without changing the installed build", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")

@@ -151,6 +151,7 @@ export const {
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
     const hydratingSessions = new Map<string, { messages: Set<string>; parts: Set<string> }>()
+    const optimisticMessages = new Set<string>()
     const touchMessage = (sessionID: string, messageID: string) => {
       hydratingSessions.get(sessionID)?.messages.add(messageID)
     }
@@ -353,6 +354,18 @@ export const {
             setStore("message", event.properties.info.sessionID, [event.properties.info])
             break
           }
+          const optimistic = messages.findIndex((message) => message.id === event.properties.info.id)
+          if (optimistic !== -1 && optimisticMessages.delete(event.properties.info.id)) {
+            setStore(
+              "message",
+              event.properties.info.sessionID,
+              produce((draft) => {
+                draft[optimistic] = event.properties.info
+                draft.sort(compareMessage)
+              }),
+            )
+            break
+          }
           const result = search(messages, messageKey(event.properties.info), messageKey)
           if (result.found) {
             setStore("message", event.properties.info.sessionID, result.index, reconcile(event.properties.info))
@@ -388,6 +401,7 @@ export const {
         }
         case "message.removed": {
           touchMessage(event.properties.sessionID, event.properties.messageID)
+          optimisticMessages.delete(event.properties.messageID)
           const messages = store.message[event.properties.sessionID]
           const index = messages.findIndex((message) => message.id === event.properties.messageID)
           if (index !== -1) {
@@ -692,6 +706,47 @@ export const {
           })
           syncingSessions.set(sessionID, task)
           return task
+        },
+      },
+      message: {
+        optimistic: {
+          add(input: { message: Message; parts: Part[] }) {
+            optimisticMessages.add(input.message.id)
+            batch(() => {
+              setStore(
+                "message",
+                input.message.sessionID,
+                produce((draft = []) => {
+                  const existing = draft.findIndex((message) => message.id === input.message.id)
+                  if (existing !== -1) draft[existing] = input.message
+                  if (existing === -1) draft.push(input.message)
+                  draft.sort(compareMessage)
+                  return draft
+                }),
+              )
+              setStore("part", input.message.id, input.parts)
+            })
+          },
+          remove(sessionID: string, messageID: string) {
+            if (!optimisticMessages.delete(messageID)) return
+            batch(() => {
+              setStore(
+                "message",
+                sessionID,
+                produce((draft = []) => {
+                  const index = draft.findIndex((message) => message.id === messageID)
+                  if (index !== -1) draft.splice(index, 1)
+                  return draft
+                }),
+              )
+              setStore(
+                "part",
+                produce((draft) => {
+                  delete draft[messageID]
+                }),
+              )
+            })
+          },
         },
       },
       bootstrap,

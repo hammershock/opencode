@@ -45,7 +45,7 @@ export async function connectRexd(
     close: () => closeSession(client, handshake.sessionID),
   }
   if (options.directory)
-    await validateDirectory(target.id, lease, options.directory, options.signal).catch(async (error) => {
+    await validateRexdDirectory(target.id, lease, options.directory, options.signal).catch(async (error) => {
       await lease.close()
       throw error
     })
@@ -62,7 +62,12 @@ export async function testRexdConnection(
   return { handshake: lease.handshake, prepared: lease.prepared }
 }
 
-async function validateDirectory(targetID: string, lease: RexdLease, directory: string, signal?: AbortSignal) {
+export async function validateRexdDirectory(
+  targetID: string,
+  lease: RexdLease,
+  directory: string,
+  signal?: AbortSignal,
+) {
   const normalized = path.posix.normalize(directory)
   if (!path.posix.isAbsolute(normalized)) throw new RexdError("directory", "Remote directory must be absolute", false)
   if (!lease.handshake.workspaceRoots.some((root) => withinRoot(normalized, root))) {

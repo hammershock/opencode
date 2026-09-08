@@ -12,6 +12,7 @@ import { RexdFiles } from "./location-files"
 import { REXD_BASELINE_VERSION } from "./manifest"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionTable } from "@opencode-ai/core/session/sql"
+import { RexdConnectionPool } from "./connection-pool"
 
 export const rexdTargetRegistryNode = makeGlobalNode({
   service: TargetRegistry.Service,
@@ -20,13 +21,29 @@ export const rexdTargetRegistryNode = makeGlobalNode({
     Effect.gen(function* () {
       const global = yield* Global.Service
       const db = (yield* Database.Service).db
+      const pool = yield* RexdConnectionPool.Service
+      const pooled = async (
+        target: TargetRegistry.Definition,
+        options: { directory?: string; clientVersion: string; signal?: AbortSignal },
+      ) => {
+        const handle = await pool.acquire(target, options)
+        await handle.release()
+        return { handshake: handle.lease.handshake, prepared: handle.lease.prepared }
+      }
       const wizard = yield* Effect.acquireRelease(
-        Effect.sync(() => makeWizardConnectionProbe()),
+        Effect.sync(() =>
+          makeWizardConnectionProbe({
+            connect: async (target, options) => {
+              const handle = await pool.acquire(target, options)
+              return { ...handle.lease, close: handle.release }
+            },
+          }),
+        ),
         (current) => Effect.promise(() => current.close()),
       )
       const probe: TargetRegistry.ConnectionProbe = {
         test: (target) => probeTarget(target, testInstalledRexdConnection, false),
-        prepare: (target, directory) => probeTarget(target, testRexdConnection, true, directory),
+        prepare: (target, directory) => probeTarget(target, pooled, true, directory),
         inspect: wizard.inspect,
         complete: wizard.complete,
       }
@@ -56,7 +73,7 @@ export const rexdTargetRegistryNode = makeGlobalNode({
       )
     }),
   ),
-  deps: [Global.node, Database.node],
+  deps: [Global.node, Database.node, RexdConnectionPool.node],
 })
 
 type WizardConnection = {

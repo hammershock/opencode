@@ -7,7 +7,8 @@ import { Hash } from "@opencode-ai/core/util/hash"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Context, Effect, Layer } from "effect"
 import path from "node:path"
-import { connectRexd, type RexdLease } from "./connection"
+import type { RexdLease } from "./connection"
+import { RexdConnectionPool } from "./connection-pool"
 
 export class RexdLocationSession extends Context.Service<RexdLocationSession, RexdLease>()(
   "@opencode/RexdLocationSession",
@@ -20,20 +21,22 @@ export function rexdSessionNode(ref: Location.Ref) {
     service: RexdLocationSession,
     layer: Layer.effect(
       RexdLocationSession,
-      Effect.acquireRelease(
-        Effect.gen(function* () {
-          const registry = yield* TargetRegistry.Service
-          const snapshot = yield* Effect.promise(() => registry.load())
-          const target = snapshot.targets.find((item) => item.id === targetID)
-          if (!target) return yield* Effect.die(new Error(`Rexd target is unavailable: ${targetID}`))
-          return yield* Effect.tryPromise(() =>
-            connectRexd(target, { directory: ref.directory, clientVersion: InstallationVersion }),
-          )
-        }),
-        (lease) => Effect.promise(() => lease.close()),
-      ),
+      Effect.gen(function* () {
+        const registry = yield* TargetRegistry.Service
+        const snapshot = yield* Effect.promise(() => registry.load())
+        const target = snapshot.targets.find((item) => item.id === targetID)
+        if (!target) return yield* Effect.die(new Error(`Rexd target is unavailable: ${targetID}`))
+        const pool = yield* RexdConnectionPool.Service
+        const handle = yield* Effect.acquireRelease(
+          Effect.tryPromise(() =>
+            pool.acquire(target, { directory: ref.directory, clientVersion: InstallationVersion }),
+          ),
+          (current) => Effect.promise(() => current.release()),
+        )
+        return handle.lease
+      }),
     ),
-    deps: [TargetRegistry.node],
+    deps: [TargetRegistry.node, RexdConnectionPool.node],
   })
 }
 

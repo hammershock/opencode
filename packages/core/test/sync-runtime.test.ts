@@ -117,7 +117,9 @@ describe("SyncRuntime", () => {
         "segment",
         new SyncProvider.ProviderError("baidu", "upload", "provider", false, "failed", undefined, 31326, "998877"),
       ),
-    ).toMatchObject({ message: "Sync segment failed (code 31326, request 998877)" })
+    ).toMatchObject({
+      message: "Baidu Netdisk upload failed: provider rejected the request (code 31326, request 998877)",
+    })
     expect(
       SyncRuntime.diagnostic(
         "segment",
@@ -134,7 +136,9 @@ describe("SyncRuntime", () => {
           400,
         ),
       ),
-    ).toMatchObject({ message: "Sync segment failed (part-upload, HTTP 400, request header-request)" })
+    ).toMatchObject({
+      message: "Baidu Netdisk part-upload failed: provider rejected the request (HTTP 400, request header-request)",
+    })
   })
 
   test("uses the plaintext codec without requiring a recovery key", async () => {

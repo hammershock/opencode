@@ -17,7 +17,6 @@ type FailureFields = {
   stage?: string
   operation?: string
   kind?: string
-  retryable?: boolean
   message?: string
 }
 
@@ -62,13 +61,7 @@ export const { use: useRemoteStatus, provider: RemoteStatusProvider } = createSi
 
 export function remoteFailureDetail(value: unknown) {
   const fields = failureFields(value, 0)
-  const detail = [
-    fields.stage,
-    fields.operation,
-    fields.kind,
-    fields.retryable === undefined ? undefined : fields.retryable ? "retryable" : "not retryable",
-    fields.message,
-  ]
+  const detail = [fields.stage, fields.operation, fields.kind, fields.message]
     .filter((item, index, values): item is string => Boolean(item) && values.indexOf(item) === index)
     .join(" · ")
   return redact(detail || "remote operation failed")
@@ -86,7 +79,6 @@ function failureFields(value: unknown, depth: number): FailureFields {
     stage: typeof record.stage === "string" ? record.stage : undefined,
     operation: typeof record.operation === "string" ? record.operation : undefined,
     kind: typeof record.kind === "string" ? record.kind : undefined,
-    retryable: typeof record.retryable === "boolean" ? record.retryable : undefined,
     message: typeof record.message === "string" ? record.message : undefined,
   }
   return [record.diagnostic, record.data, record.error, record.body, record.cause].reduce<FailureFields>(
@@ -96,7 +88,6 @@ function failureFields(value: unknown, depth: number): FailureFields {
         stage: result.stage ?? nested.stage,
         operation: result.operation ?? nested.operation,
         kind: result.kind ?? nested.kind,
-        retryable: result.retryable ?? nested.retryable,
         message: result.message ?? nested.message,
       }
     },

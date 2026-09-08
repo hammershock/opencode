@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import path from "node:path"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
@@ -30,6 +31,20 @@ function listed(path: string, fsID: number, size: number, modified = 10) {
 
 function listedDirectory(path: string) {
   return { path, isdir: 1 }
+}
+
+function createdFile(path: string, fsID: number, size: number, modified = 10) {
+  return { path, fs_id: fsID, size, mtime: modified, isdir: 0 }
+}
+
+async function uploadedPart(init?: RequestInit) {
+  const file = (init?.body as FormData).get("file")
+  if (!(file instanceof Blob)) throw new Error("missing uploaded part")
+  return Response.json({
+    md5: createHash("md5")
+      .update(new Uint8Array(await file.arrayBuffer()))
+      .digest("hex"),
+  })
 }
 
 const hungRequest: BaiduSyncProvider.Request = async (_input, init) =>
@@ -138,7 +153,7 @@ describe("BaiduSyncProvider", () => {
       deviceID: "device",
       root: "/apps/opencode-sync/space",
       now: () => 1_000,
-      request: async (input) => {
+      request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
         urls.push(url.toString())
         if (url.hostname === "openapi.baidu.com")
@@ -209,22 +224,22 @@ describe("BaiduSyncProvider", () => {
             list: created ? [listed("/apps/opencode-sync/space/a.enc", 9, bytes.length)] : [],
             has_more: 0,
           })
-        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-1" })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-1", block_list: [0, 1] })
         if (url.hostname === "d.pcs.baidu.com") {
           parts.push(Number(url.searchParams.get("partseq")))
           const file = (init?.body as FormData).get("file")
           expect(file).toBeInstanceOf(Blob)
           expect(file).toHaveProperty("name", "blob")
-          return Response.json({ errno: 0, md5: "part" })
+          return uploadedPart(init)
         }
         if (method === "create") {
           created = true
-          return Response.json({ errno: 0, ...listed("/apps/opencode-sync/space/a.enc", 9, bytes.length) })
+          return Response.json({ errno: 0, ...createdFile("/apps/opencode-sync/space/a.enc", 9, bytes.length) })
         }
         throw new Error(`unexpected ${url}`)
       },
     })
-    expect((await provider.uploadAtomic("a.enc", bytes, { type: "absent" })).size).toBe(bytes.length)
+    expect((await provider.uploadAtomic("a.enc", bytes, { type: "absent" })).version).toBe(`9:10000:${bytes.length}`)
     expect(parts).toEqual([0, 1])
     await expect(provider.uploadAtomic("a.enc", bytes, { type: "absent" })).rejects.toMatchObject({
       kind: "conflict",
@@ -266,10 +281,10 @@ describe("BaiduSyncProvider", () => {
         if (method === "precreate") {
           const target = String(new URLSearchParams(init?.body as URLSearchParams).get("path"))
           return directories.has(path.posix.dirname(target))
-            ? Response.json({ errno: 0, uploadid: "upload-nested" })
+            ? Response.json({ errno: 0, uploadid: "upload-nested", block_list: [0] })
             : Response.json({ errno: 2 })
         }
-        if (url.hostname === "d.pcs.baidu.com") return Response.json({ errno: 0 })
+        if (url.hostname === "d.pcs.baidu.com") return uploadedPart(init)
         if (method === "create") {
           const fields = new URLSearchParams(init?.body as URLSearchParams)
           const target = String(fields.get("path"))
@@ -283,7 +298,7 @@ describe("BaiduSyncProvider", () => {
             return Response.json({ errno: 0, ...listedDirectory(target) })
           }
           fileCreated = true
-          return Response.json({ errno: 0, ...listed(target, 12, 7) })
+          return Response.json({ errno: 0, ...createdFile(target, 12, 7) })
         }
         throw new Error(`unexpected ${url}`)
       },
@@ -303,7 +318,7 @@ describe("BaiduSyncProvider", () => {
       store,
       deviceID: "device",
       root: "/apps/opencode-sync/space",
-      request: async (input) => {
+      request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
         if (url.hostname === "download.test") return new Response(bytes)
@@ -315,8 +330,8 @@ describe("BaiduSyncProvider", () => {
             list: created ? [listed("/apps/opencode-sync/space/head.enc", 4, bytes.length)] : [],
             has_more: 0,
           })
-        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-2" })
-        if (url.hostname === "d.pcs.baidu.com") return Response.json({ errno: 0 })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-2", block_list: [0] })
+        if (url.hostname === "d.pcs.baidu.com") return uploadedPart(init)
         if (method === "create") {
           creates++
           created = true
@@ -334,12 +349,12 @@ describe("BaiduSyncProvider", () => {
       store: memoryStore(credential),
       deviceID: "device",
       root: "/apps/opencode-sync/space",
-      request: async (input) => {
+      request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
         if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
-        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-failed" })
-        if (url.hostname === "d.pcs.baidu.com") return Response.json({ errno: 0 })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-failed", block_list: [0] })
+        if (url.hostname === "d.pcs.baidu.com") return uploadedPart(init)
         if (method === "create") return Response.json({ errno: 31326, request_id: "998877" })
         throw new Error(`unexpected ${url}`)
       },
@@ -348,6 +363,61 @@ describe("BaiduSyncProvider", () => {
     await expect(provider.uploadAtomic("head.json", new Uint8Array(7), { type: "absent" })).rejects.toMatchObject({
       providerCode: 31326,
       requestID: "998877",
+      outcome: "unknown",
+    })
+  })
+
+  test("reports the documented Baidu phase when a successful response has the wrong shape", async () => {
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        const method = url.searchParams.get("method")
+        if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-schema", block_list: [0] })
+        if (url.hostname === "d.pcs.baidu.com") return uploadedPart(init)
+        if (method === "create")
+          return Response.json({
+            errno: 0,
+            fs_id: 9,
+            size: 7,
+            server_mtime: 10,
+            request_id: "create-request",
+          })
+        throw new Error(`unexpected ${url}`)
+      },
+    })
+
+    await expect(provider.uploadAtomic("head.json", new Uint8Array(7), { type: "absent" })).rejects.toMatchObject({
+      operation: "upload",
+      kind: "invalid-response",
+      providerPhase: "create",
+      requestID: "create-request",
+      outcome: "unknown",
+    })
+  })
+
+  test("rejects a part checksum that does not match the requested block", async () => {
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        const method = url.searchParams.get("method")
+        if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-checksum", block_list: [0] })
+        if (url.hostname === "d.pcs.baidu.com") return Response.json({ md5: "00000000000000000000000000000000" })
+        throw new Error(`unexpected ${url}`)
+      },
+    })
+
+    await expect(provider.uploadAtomic("head.json", new Uint8Array(7), { type: "absent" })).rejects.toMatchObject({
+      operation: "upload",
+      kind: "invalid-response",
+      providerPhase: "part-upload",
       outcome: "unknown",
     })
   })
@@ -361,7 +431,7 @@ describe("BaiduSyncProvider", () => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
         if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
-        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-http-error" })
+        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-http-error", block_list: [0] })
         if (url.hostname === "d.pcs.baidu.com")
           return new Response("upstream rejected the part", {
             status: 400,

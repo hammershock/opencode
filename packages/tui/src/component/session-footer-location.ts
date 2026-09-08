@@ -4,11 +4,12 @@ import { sessionListLocation, type SessionListLocationRecord } from "./session-l
 export function sessionFooterLocation(input: {
   session?: SessionListLocationRecord
   fallbackDirectory: string
+  directory?: string
   home: string
   branch?: string
 }) {
   const location = sessionListLocation(input.session ?? { directory: input.fallbackDirectory })
-  const directory = abbreviateHome(location.directory, input.home)
+  const directory = abbreviateHome(input.directory ?? location.directory, input.home)
   return {
     target: location.target,
     directory: input.branch ? `${directory}:${input.branch}` : directory,

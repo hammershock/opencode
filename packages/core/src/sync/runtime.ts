@@ -192,20 +192,15 @@ export function make(input: {
       localHead = head
       stage = "head"
       const path = headPath(input.config.deviceID, codec.suffix)
-      const bytes = await encode(codec, "metadata", headContext(input.config.deviceID, path), head)
-      const existing = await input.provider.stat(path, signal)
-      await input.provider.uploadAtomic(
-        path,
-        bytes,
-        existing ? { type: "version", version: existing.version } : { type: "absent" },
-        signal,
-      )
+      const published = await publishHeadMonotonic(input.provider, codec, head, path, signal)
       // A device releases its cloud reference only after its replacement head,
       // which no longer advertises the Session, is durably visible. An ack
       // written before the head would let a crash resurrect stale metadata.
-      for (const marker of pendingDeletions) {
-        await deletions.acknowledge(marker, input.config.deviceID, signal)
-        await Effect.runPromise(input.store.forgetDeletion(marker.tombstone.sessionID))
+      if (published) {
+        for (const marker of pendingDeletions) {
+          await deletions.acknowledge(marker, input.config.deviceID, signal)
+          await Effect.runPromise(input.store.forgetDeletion(marker.tombstone.sessionID))
+        }
       }
       await collectDeletions(signal)
       stage = "collect"
@@ -553,6 +548,44 @@ async function downloadLatest(provider: SyncProvider.Adapter, listed: SyncProvid
       current = latest
     }
   }
+}
+
+async function publishHeadMonotonic(
+  provider: SyncProvider.Adapter,
+  codec: SyncCodec.Interface,
+  head: Head,
+  path: string,
+  signal?: AbortSignal,
+) {
+  const context = headContext(head.deviceID, path)
+  const bytes = await encode(codec, "metadata", context, head)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    signal?.throwIfAborted()
+    const existing = await provider.stat(path, signal)
+    if (existing) {
+      try {
+        const downloaded = await provider.download(path, existing.version, signal)
+        const remote = await decode((value) => Schema.decodeUnknownSync(Head)(value), codec, "metadata", context, downloaded.bytes)
+        if (remote.generation > head.generation) return false
+      } catch (cause) {
+        if (cause instanceof SyncProvider.ProviderError && cause.kind === "conflict") continue
+        throw cause
+      }
+    }
+    try {
+      await provider.uploadAtomic(
+        path,
+        bytes,
+        existing ? { type: "version", version: existing.version } : { type: "absent" },
+        signal,
+      )
+      return true
+    } catch (cause) {
+      if (cause instanceof SyncProvider.ProviderError && cause.kind === "conflict") continue
+      throw cause
+    }
+  }
+  throw new Error("Remote device head changed repeatedly")
 }
 
 export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnostic {

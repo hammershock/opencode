@@ -156,6 +156,36 @@ describe("SyncRuntime", () => {
     expect(remaining).toBe(0)
   })
 
+  test("never lets a stale process regress its device head", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("shared-device")
+    const makeRuntime = (generation: number) => {
+      const local = store(id)
+      local.service.head = () => Effect.succeed(generation)
+      return SyncRuntime.make({
+        config: { deviceID: id, enabled: true },
+        codec: SyncCodec.plaintext(),
+        provider: remote.adapter,
+        store: local.service,
+        projector: { project: () => Effect.void, delete: () => Effect.void },
+        metadata: () => Effect.succeed([]),
+        metadataProjector: { apply: () => Effect.void },
+      })
+    }
+
+    await Effect.runPromise(makeRuntime(381).upload())
+    await Effect.runPromise(makeRuntime(271).upload())
+
+    const path = `devices/${id}.head.json`
+    const stored = remote.files.get(path)!
+    const raw = await SyncCodec.plaintext().open(
+      "metadata",
+      { path, type: "head", deviceID: id, generation: 0, range: "head", schemaVersion: 1 },
+      stored.bytes,
+    )
+    expect(JSON.parse(new TextDecoder().decode(raw)).generation).toBe(381)
+  })
+
   test("includes safe provider identifiers in diagnostics", () => {
     expect(
       SyncRuntime.diagnostic(

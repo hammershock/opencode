@@ -7,7 +7,7 @@ authors:
 created: 2026-09-06
 updated: 2026-09-08
 implemented-by:
-  - https://github.com/hammershock/opencode/pull/86
+  - https://github.com/hammershock/opencode/pull/195
 depends-on:
   - 0002
   - 0003

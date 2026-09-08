@@ -74,4 +74,69 @@ describe("Rexd Location filesystem boundary", () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]).not.toHaveProperty("offset")
   })
+
+  test("treats a bounded symlink chain ending in a directory as a directory", async () => {
+    const paths: string[] = []
+    const lease = {
+      handshake: { sessionID: "session-1", workspaceRoots: ["/workspace"] },
+      client: {
+        async request(method: string, params: Readonly<Record<string, unknown>>) {
+          expect(method).toBe("fs.stat")
+          paths.push(String(params.path))
+          if (params.path === "/workspace/link")
+            return { path: params.path, exists: true, type: "symlink", symlink_target: "nested" }
+          if (params.path === "/workspace/nested")
+            return { path: params.path, exists: true, type: "symlink", symlink_target: "/workspace/project" }
+          return { path: params.path, exists: true, type: "dir" }
+        },
+      },
+    } as unknown as RexdLease
+
+    expect(await new RexdFiles("gpu", lease).directoryStatus("link", "/workspace")).toEqual({
+      status: "directory",
+      path: "/workspace/link",
+      resolvedPath: "/workspace/project",
+    })
+    expect(paths).toEqual(["/workspace/link", "/workspace/nested", "/workspace/project"])
+  })
+
+  test("rejects broken, looping, file, and outside-root symlink targets", async () => {
+    const calls: string[] = []
+    const lease = {
+      handshake: { sessionID: "session-1", workspaceRoots: ["/workspace"] },
+      client: {
+        async request(_method: string, params: Readonly<Record<string, unknown>>) {
+          const value = String(params.path)
+          calls.push(value)
+          if (value === "/workspace/broken")
+            return { path: value, exists: true, type: "symlink", symlink_target: "missing" }
+          if (value === "/workspace/missing") return { path: value, exists: false }
+          if (value === "/workspace/loop-a")
+            return { path: value, exists: true, type: "symlink", symlink_target: "loop-b" }
+          if (value === "/workspace/loop-b")
+            return { path: value, exists: true, type: "symlink", symlink_target: "loop-a" }
+          if (value === "/workspace/file-link")
+            return { path: value, exists: true, type: "symlink", symlink_target: "file" }
+          if (value === "/workspace/file") return { path: value, exists: true, type: "file" }
+          return { path: value, exists: true, type: "symlink", symlink_target: "/outside" }
+        },
+      },
+    } as unknown as RexdLease
+    const files = new RexdFiles("gpu", lease)
+
+    expect(await files.directoryStatus("broken", "/workspace")).toMatchObject({
+      status: "not-directory",
+      reason: "broken-symlink",
+    })
+    expect(await files.directoryStatus("loop-a", "/workspace")).toMatchObject({
+      status: "not-directory",
+      reason: "symlink-loop",
+    })
+    expect(await files.directoryStatus("file-link", "/workspace")).toMatchObject({ status: "not-directory" })
+    expect(await files.directoryStatus("outside-link", "/workspace")).toMatchObject({
+      status: "not-directory",
+      reason: "outside-roots",
+    })
+    expect(calls).not.toContain("/outside")
+  })
 })

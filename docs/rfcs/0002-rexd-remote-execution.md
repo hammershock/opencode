@@ -246,6 +246,8 @@ gpu-server · /data/project
 
 用户确认工作目录后，QuickStart 必须在写入待创建 Session 的 Location 前执行一次 target-side 预检。结果分为既存目录、不存在和非目录：既存目录可以继续；非目录必须拒绝；不存在时必须弹出二次确认，只有用户明确同意后才通过类型化的 Location filesystem API 递归创建。取消确认或创建失败不得修改当前 destination，也不得创建 Session。local 与 Rexd 使用相同交互；Rexd 的检查和创建发生在目标机器，并受 negotiated workspace roots 限制。该能力不是通用远程 command execute API。
 
+指向目录的符号链接按既存目录处理：客户端必须有界解析链接链，确认最终目标仍位于 negotiated workspace roots 内且确实为目录；损坏链接、循环、越界目标或指向非目录的链接必须拒绝。验证成功后仍保留用户输入的链接路径作为 Location directory，不强制替换为物理路径。
+
 提交第一条 prompt 的顺序固定为：
 
 ```text

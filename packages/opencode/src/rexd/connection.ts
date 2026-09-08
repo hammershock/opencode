@@ -1,5 +1,6 @@
 import path from "node:path"
 import { RexdError } from "./error"
+import { RexdFiles } from "./location-files"
 import { prepareManagedRexd, managedRexdCommand, type PrepareDependencies, type PrepareResult } from "./prepare"
 import { RexdRpcClient, type RexdHandshake } from "./rpc"
 import { connectSsh, posixRemoteCommand, type RexdTarget, type Transport } from "./ssh"
@@ -37,17 +38,18 @@ export async function connectRexd(
       if (error instanceof RexdError) throw error
       throw new RexdError("handshake", "Could not negotiate Rexd session", true)
     })
-  if (options.directory)
-    await validateDirectory(client, handshake, options.directory, options.signal).catch(async (error) => {
-      await closeSession(client, handshake.sessionID)
-      throw error
-    })
-  return {
+  const lease: RexdLease = {
     client,
     handshake,
     prepared,
     close: () => closeSession(client, handshake.sessionID),
   }
+  if (options.directory)
+    await validateDirectory(target.id, lease, options.directory, options.signal).catch(async (error) => {
+      await lease.close()
+      throw error
+    })
+  return lease
 }
 
 export async function testRexdConnection(
@@ -60,19 +62,14 @@ export async function testRexdConnection(
   return { handshake: lease.handshake, prepared: lease.prepared }
 }
 
-async function validateDirectory(
-  client: RexdRpcClient,
-  handshake: RexdHandshake,
-  directory: string,
-  signal?: AbortSignal,
-) {
+async function validateDirectory(targetID: string, lease: RexdLease, directory: string, signal?: AbortSignal) {
   const normalized = path.posix.normalize(directory)
   if (!path.posix.isAbsolute(normalized)) throw new RexdError("directory", "Remote directory must be absolute", false)
-  if (!handshake.workspaceRoots.some((root) => withinRoot(normalized, root))) {
+  if (!lease.handshake.workspaceRoots.some((root) => withinRoot(normalized, root))) {
     throw new RexdError("directory", "Remote directory is outside negotiated workspace roots", false)
   }
-  const value = await client.request("fs.stat", { session_id: handshake.sessionID, path: normalized }, { signal })
-  if (!isRecord(value) || value.exists !== true || value.type !== "dir") {
+  const value = await new RexdFiles(targetID, lease).directoryStatus(normalized, "/", signal)
+  if (value.status !== "directory") {
     throw new RexdError("directory", "Remote directory does not exist or is not accessible", false)
   }
 }
@@ -87,8 +84,4 @@ async function closeSession(client: RexdRpcClient, sessionID: string) {
 function withinRoot(directory: string, root: string) {
   const relative = path.posix.relative(path.posix.normalize(root), directory)
   return relative === "" || (!relative.startsWith("..") && !path.posix.isAbsolute(relative))
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

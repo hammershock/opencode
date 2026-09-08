@@ -397,6 +397,28 @@ describe("SyncEventStore", () => {
     )
   })
 
+  test("treats legacy ISO and encoded location timestamps as equivalent", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const projector: SyncEvent.DurableProjector = { project: () => Effect.void, delete: () => Effect.void }
+        const legacy = SyncEvent.Envelope.make({
+          id: "location",
+          aggregateID: "session-a",
+          seq: 0,
+          type: "session.next.location.rebound.1",
+          data: { timestamp: "2026-09-08T19:02:18.875Z" },
+        })
+        const encoded = SyncEvent.Envelope.make({ ...legacy, data: { timestamp: 1_788_894_138_875 } })
+
+        yield* store.applyDurable(segment(1, [legacy]), projector)
+        yield* store.applyDurable(segment(2, [encoded]), projector)
+
+        expect(yield* store.cursor(remote)).toBe(2)
+      }),
+    )
+  })
+
   test("absorbs advertised deletions before stale local events can be sealed", async () => {
     await run(
       Effect.gen(function* () {

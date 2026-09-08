@@ -573,14 +573,17 @@ function operationID(operation: SyncEvent.Operation) {
 
 function operationFingerprint(operation: SyncEvent.Operation) {
   return operation.kind === "event"
-    ? encodeEvent(operation.event)
+    ? encodeEvent(normalizeFingerprintEvent(operation.event))
     : canonical({ kind: operation.kind, id: operation.tombstone.id, sessionID: operation.tombstone.sessionID })
 }
 
 function operationMatchesFingerprint(operation: SyncEvent.Operation, fingerprint: string) {
   if (fingerprint === operationFingerprint(operation)) return true
-  if (operation.kind !== "tombstone") return false
   try {
+    if (operation.kind === "event") {
+      const stored = Schema.decodeUnknownSync(SyncEvent.Envelope)(JSON.parse(fingerprint))
+      return encodeEvent(normalizeFingerprintEvent(stored)) === operationFingerprint(operation)
+    }
     const stored = JSON.parse(fingerprint) as {
       kind?: unknown
       id?: unknown
@@ -596,6 +599,14 @@ function operationMatchesFingerprint(operation: SyncEvent.Operation, fingerprint
   } catch {
     return false
   }
+}
+
+function normalizeFingerprintEvent(event: SyncEvent.Envelope) {
+  if (event.type === "session.next.location.rebound.1" && typeof event.data.timestamp === "string") {
+    const timestamp = Date.parse(event.data.timestamp)
+    if (Number.isFinite(timestamp)) return SyncEvent.Envelope.make({ ...event, data: { ...event.data, timestamp } })
+  }
+  return event
 }
 
 function encodeSegment(segment: SyncEvent.Segment) {

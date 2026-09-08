@@ -206,8 +206,9 @@ export function adapter(input: {
           "download",
           "file-metadata",
         )
-        const item = Array.isArray(body.list) ? record(body.list[0], "download", "file-metadata") : undefined
-        if (!item || typeof item.dlink !== "string") throw invalidResponse("download", "file-metadata", body)
+        const first = Array.isArray(body.list) ? body.list[0] : undefined
+        const item = first ? record(first, "download", "file-metadata") : undefined
+        if (!item || typeof item.dlink !== "string") throw invalidResponse("download", "file-metadata", body, true)
         const link = endpoint(item.dlink, { access_token: auth.accessToken })
         const response = await request(link, { signal, redirect: "follow", headers: { "User-Agent": "pan.baidu.com" } })
         if (!response.ok) throw responseFailure("download", response)
@@ -764,11 +765,12 @@ function invalidResponse(
   operation: SyncProvider.ProviderError["operation"],
   providerPhase?: string,
   body?: Record<string, unknown>,
+  retryable = false,
 ) {
   return error(
     operation,
     "invalid-response",
-    false,
+    retryable,
     undefined,
     undefined,
     safeRequestID(body?.request_id),

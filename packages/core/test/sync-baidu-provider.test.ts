@@ -206,6 +206,36 @@ describe("BaiduSyncProvider", () => {
     expect(object.version).toBe("1:10000:3")
   })
 
+  test("retries when a newly visible file temporarily has no download link", async () => {
+    let metadata = 0
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        if (url.hostname === "download.test") return new Response("abc")
+        if (url.pathname.includes("multimedia")) {
+          metadata++
+          return Response.json(
+            metadata === 1 ? { errno: 0, list: [] } : { errno: 0, list: [{ dlink: "https://download.test/file" }] },
+          )
+        }
+        if (url.searchParams.get("method") === "list")
+          return Response.json({
+            errno: 0,
+            list: [listed("/apps/opencode-sync/space/objects/1.json", 1, 3)],
+            has_more: 0,
+          })
+        throw new Error("unexpected")
+      },
+    })
+
+    const object = await provider.download("objects/1.json", "1:10000:3")
+    expect(new TextDecoder().decode(object.bytes)).toBe("abc")
+    expect(metadata).toBe(2)
+  })
+
   test("uploads with precreate, fixed 4MiB parts, create and absence precondition", async () => {
     const store = memoryStore(credential)
     const parts: number[] = []

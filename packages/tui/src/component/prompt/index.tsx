@@ -72,6 +72,7 @@ import { usePromptMove } from "./move"
 import { validateDestination } from "../../routes/home/target-workflow"
 import type { LocationRef } from "@opencode-ai/sdk/v2"
 import { readLocalAttachment } from "./local-attachment"
+import { optimisticPrompt } from "./optimistic"
 import { useLocation } from "../../context/location"
 import { canAdjustVariant } from "../../model-variant"
 import {
@@ -1300,26 +1301,36 @@ export function Prompt(props: PromptProps) {
       })
     } else {
       move.startSubmit()
+      const optimistic = optimisticPrompt({
+        sessionID,
+        agent: agent.name,
+        model: selectedModel,
+        variant,
+        parts: [
+          ...editorParts,
+          {
+            type: "text",
+            text: inputText,
+          },
+          ...nonTextParts,
+        ],
+      })
+      if (props.sessionID) sync.message.optimistic.add(optimistic)
       sdk.client.session
         .prompt(
           {
             sessionID,
+            messageID: optimistic.message.id,
             ...selectedModel,
             agent: agent.name,
             model: selectedModel,
             variant,
-            parts: [
-              ...editorParts,
-              {
-                type: "text",
-                text: inputText,
-              },
-              ...nonTextParts,
-            ],
+            parts: optimistic.requestParts,
           },
           { throwOnError: true },
         )
         .catch((error) => {
+          sync.message.optimistic.remove(sessionID, optimistic.message.id)
           toast.show({
             title: "Failed to send prompt",
             message: errorMessage(error),

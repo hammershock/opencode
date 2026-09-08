@@ -148,6 +148,27 @@ describe("SyncSecureStore", () => {
     if (!process.env.WSL_INTEROP) expect(calls[0]!.env?.WSL_INTEROP).toBe("/run/WSL/123_interop")
   })
 
+  test("caches PasswordVault reads across store instances and keeps mutations coherent", async () => {
+    let calls = 0
+    const runner: SyncSecureStore.Runner = async (_command, input) => {
+      calls++
+      const request = JSON.parse(input!)
+      return { exitCode: 0, stdout: request.operation === "get" ? "first" : "", stderr: "" }
+    }
+    const first = SyncSecureStore.windowsVault(runner, async () => undefined, "windows-cache")
+    const second = SyncSecureStore.windowsVault(runner, async () => undefined, "windows-cache")
+
+    expect(await first.get("oauth")).toBe("first")
+    expect(await second.get("oauth")).toBe("first")
+    expect(calls).toBe(1)
+    await second.set("oauth", "updated")
+    expect(await first.get("oauth")).toBe("updated")
+    expect(calls).toBe(2)
+    await first.remove("oauth")
+    expect(await second.get("oauth")).toBeUndefined()
+    expect(calls).toBe(3)
+  })
+
   test("replaces a stale inherited WSL interop before invoking PasswordVault", async () => {
     const previous = process.env.WSL_INTEROP
     process.env.WSL_INTEROP = "/run/WSL/stale_interop"

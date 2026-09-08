@@ -46,6 +46,9 @@ type CachedRead = {
 const macosReads = new WeakMap<MacosBackend, Map<string, CachedRead>>()
 const macosPending = new WeakMap<MacosBackend, Map<string, Promise<string | undefined>>>()
 const macosGenerations = new WeakMap<MacosBackend, Map<string, number>>()
+const windowsReads = new WeakMap<Runner, Map<string, CachedRead>>()
+const windowsPending = new WeakMap<Runner, Map<string, Promise<string | undefined>>>()
+const windowsGenerations = new WeakMap<Runner, Map<string, number>>()
 
 export class SecureStoreUnavailableError extends Error {
   override readonly name = "SyncSecureStore.UnavailableError"
@@ -345,6 +348,10 @@ function openMacosKeychain() {
 }
 
 export function windowsVault(runner: Runner, findInterop: () => Promise<string | undefined>, service = SERVICE): Store {
+  const reads = cacheFor(windowsReads, runner)
+  const pending = cacheFor(windowsPending, runner)
+  const generations = cacheFor(windowsGenerations, runner)
+  const key = (account: string) => `${service}\0${account}`
   const powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
   const invoke = async (operation: "get" | "set" | "remove", account: string, secret?: string) => {
     validateAccount(account)
@@ -372,9 +379,39 @@ export function windowsVault(runner: Runner, findInterop: () => Promise<string |
   }
   return {
     platform: "windows-password-vault",
-    get: (account) => invoke("get", account),
-    set: (account, secret) => invoke("set", account, secret).then(() => undefined),
-    remove: (account) => invoke("remove", account).then(() => undefined),
+    async get(account) {
+      validateAccount(account)
+      const id = key(account)
+      const generation = generations.get(id) ?? 0
+      const cached = reads.get(id)
+      if (cached?.generation === generation) return cached.value
+      const active = pending.get(id)
+      if (active) return active
+      const operation = invoke("get", account).then((value) => {
+        if ((generations.get(id) ?? 0) === generation) reads.set(id, { generation, value })
+        return value
+      })
+      pending.set(id, operation)
+      try {
+        return await operation
+      } finally {
+        if (pending.get(id) === operation) pending.delete(id)
+      }
+    },
+    async set(account, secret) {
+      const id = key(account)
+      await invoke("set", account, secret)
+      const generation = (generations.get(id) ?? 0) + 1
+      generations.set(id, generation)
+      reads.set(id, { generation, value: secret })
+    },
+    async remove(account) {
+      const id = key(account)
+      await invoke("remove", account)
+      const generation = (generations.get(id) ?? 0) + 1
+      generations.set(id, generation)
+      reads.set(id, { generation, value: undefined })
+    },
   }
 }
 

@@ -30,4 +30,19 @@ describe("Session footer location", () => {
       }).label,
     ).toBe("a100-2gpu · /home/ma-user/workspace/hanmo")
   })
+
+  test("uses the active Location directory for the prompt footer", () => {
+    const result = sessionFooterLocation({
+      session: {
+        directory: "/home/ma-user/workspace",
+        target: { type: "rexd", targetID: "device-local-id" },
+        lastKnownTargetName: "a100-2gpu",
+      },
+      fallbackDirectory: "/fallback",
+      directory: "/home/ma-user/workspace/opencode",
+      home: "/home/ma-user",
+    })
+
+    expect(result.label).toBe("a100-2gpu · ~/workspace/opencode")
+  })
 })

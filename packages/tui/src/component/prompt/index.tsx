@@ -75,6 +75,7 @@ import { readLocalAttachment } from "./local-attachment"
 import { optimisticPrompt } from "./optimistic"
 import { useLocation } from "../../context/location"
 import { canAdjustVariant } from "../../model-variant"
+import { sessionFooterLocation } from "../session-footer-location"
 import {
   activateCommandHost,
   createCommandHost,
@@ -190,6 +191,14 @@ export function Prompt(props: PromptProps) {
   const route = useRoute()
   const project = useProject()
   const sync = useSync()
+  const footerLocation = createMemo(() =>
+    sessionFooterLocation({
+      session: props.sessionID ? sync.session.get(props.sessionID) : undefined,
+      fallbackDirectory: location()?.directory ?? paths.cwd,
+      directory: location()?.directory,
+      home: paths.home,
+    }),
+  )
   const approvalMode = createMemo(() =>
     local.permission.effective(
       props.sessionID ? (sync.session.get(props.sessionID)?.approvalMode ?? "normal") : local.permission.defaultMode,
@@ -1868,7 +1877,7 @@ export function Prompt(props: PromptProps) {
               {props.hint ?? (
                 <Show when={props.sessionID} fallback={<text />}>
                   <box marginLeft={1}>
-                    <text fg={theme.textMuted}>{location()?.directory ?? paths.cwd}</text>
+                    <text fg={theme.textMuted}>{footerLocation().label}</text>
                   </box>
                 </Show>
               )}

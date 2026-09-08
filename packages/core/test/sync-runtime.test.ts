@@ -67,6 +67,7 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
   let acknowledgedHead = 0
   const cursors = new Map<string, number>()
   const applied: SyncEvent.Envelope[] = []
+  const knownSegments: SyncEvent.Segment[] = []
   const deletions = (operations ?? [])
     .filter((operation): operation is typeof operation & { kind: "tombstone" } => operation.kind === "tombstone")
     .map((operation) => operation.tombstone)
@@ -78,14 +79,16 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
       Effect.sync(() => {
         if (sealed) return sealed
         if (!local && !pendingOperations) return undefined
-        return (sealed = SyncEvent.Segment.make({
+        sealed = SyncEvent.Segment.make({
           version: 1,
           id: SyncEvent.SegmentID.make(`${deviceID}:1`),
           deviceID,
           generation: 1,
           createdAt: 1,
           operations: pendingOperations ?? [{ kind: "event", event: local! }],
-        }))
+        })
+        knownSegments.push(sealed)
+        return sealed
       }),
     acknowledge: () =>
       Effect.sync(() => {
@@ -103,11 +106,24 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
       }),
     applyDurable: (segment: SyncEvent.Segment) =>
       Effect.sync(() => {
+        knownSegments.push(segment)
         for (const operation of segment.operations) if (operation.kind === "event") applied.push(operation.event)
         cursors.set(segment.deviceID, segment.generation)
       }),
     pendingApply: () => Effect.succeed([]),
     deletions: () => Effect.succeed(deletions),
+    segmentsFor: (sessionIDs: readonly string[]) =>
+      Effect.succeed(
+        knownSegments.flatMap((segment) =>
+          segment.operations.some((operation) =>
+            sessionIDs.includes(
+              operation.kind === "tombstone" ? operation.tombstone.sessionID : operation.event.aggregateID,
+            ),
+          )
+            ? [{ deviceID: segment.deviceID, generation: segment.generation }]
+            : [],
+        ),
+      ),
     absorbDeletions: (items: readonly SyncEvent.Tombstone[], projector: SyncEvent.DurableProjector) =>
       Effect.gen(function* () {
         for (const item of items) {

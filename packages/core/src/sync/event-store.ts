@@ -43,6 +43,9 @@ export interface Interface {
   ) => Effect.Effect<void, unknown>
   readonly pendingApply: () => Effect.Effect<ReadonlyArray<SyncEvent.Segment>, unknown>
   readonly deletions: () => Effect.Effect<ReadonlyArray<SyncEvent.Tombstone>, unknown>
+  readonly segmentsFor: (
+    sessionIDs: readonly string[],
+  ) => Effect.Effect<ReadonlyArray<{ readonly deviceID: SyncEvent.DeviceID; readonly generation: number }>, unknown>
   readonly absorbDeletions: (
     tombstones: readonly SyncEvent.Tombstone[],
     projector: SyncEvent.DurableProjector,
@@ -321,6 +324,25 @@ export const layer = Layer.effect(
         return rows.map((row) => decodeTombstone(row.payload))
       })
 
+      const segmentsFor = Effect.fn("SyncEventStore.segmentsFor")(function* (sessionIDs: readonly string[]) {
+        if (!sessionIDs.length) return []
+        const selected = new Set(sessionIDs)
+        const rows = yield* db.all<SegmentRow>(sql`
+          SELECT payload FROM sync_event_segment WHERE space_id = ${spaceID}
+          UNION ALL
+          SELECT payload FROM sync_remote_segment WHERE space_id = ${spaceID}
+        `)
+        return rows.flatMap((row) => {
+          const segment = decodeSegment(row.payload)
+          const found = segment.operations.some((operation) =>
+            selected.has(
+              operation.kind === "tombstone" ? operation.tombstone.sessionID : operation.event.aggregateID,
+            ),
+          )
+          return found ? [{ deviceID: segment.deviceID, generation: segment.generation }] : []
+        })
+      })
+
       const absorbDeletions = Effect.fn("SyncEventStore.absorbDeletions")(function* (
         tombstones: readonly SyncEvent.Tombstone[],
         projector: SyncEvent.DurableProjector,
@@ -542,6 +564,7 @@ export const layer = Layer.effect(
         applyDurable,
         pendingApply,
         deletions,
+        segmentsFor,
         absorbDeletions,
         forgetDeletion,
         acquire,

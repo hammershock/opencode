@@ -23,16 +23,41 @@ describe("SyncDeletion", () => {
     await deletion.remove(marker)
     expect(await deletion.list()).toEqual([])
   })
+
+  test("scans and removes multiple deletion records with one provider call per phase", async () => {
+    const remote = memory()
+    const deletion = SyncDeletion.make({ provider: remote.adapter, now: () => 10 })
+    for (const sessionID of ["session-a", "session-b"]) {
+      const marker = await deletion.ensure(
+        { id: `delete-${sessionID}`, sessionID, deletedAt: 1 },
+        [SyncEvent.DeviceID.make("mac")],
+      )
+      await deletion.acknowledge(marker, SyncEvent.DeviceID.make("mac"))
+    }
+    remote.counts.list = 0
+
+    const snapshot = await deletion.scan()
+    expect(snapshot).toHaveLength(2)
+    expect(remote.counts.list).toBe(1)
+    const downloads = remote.counts.download
+    await deletion.scan()
+    expect(remote.counts.download).toBe(downloads)
+    await deletion.removeScanned(snapshot)
+    expect(remote.counts.delete).toBe(1)
+    expect(remote.values.size).toBe(0)
+  })
 })
 
 function memory() {
   const values = new Map<string, { version: string; bytes: Uint8Array }>()
+  const counts = { list: 0, download: 0, delete: 0 }
   let revision = 0
   const conflict = (operation: "download" | "upload") =>
     new SyncProvider.ProviderError("memory", operation, "conflict", false)
   const adapter: SyncProvider.Adapter = {
     id: "memory",
     async list(prefix) {
+      counts.list++
       return {
         objects: [...values]
           .filter(([path]) => path.startsWith(prefix))
@@ -44,6 +69,7 @@ function memory() {
       return value ? { path, version: value.version, size: value.bytes.length } : undefined
     },
     async download(path, version) {
+      counts.download++
       const value = values.get(path)
       if (!value || (version && version !== value.version)) throw conflict("download")
       return { path, version: value.version, size: value.bytes.length, bytes: value.bytes.slice() }
@@ -57,11 +83,12 @@ function memory() {
       return { path, version, size: bytes.length }
     },
     async deleteBatch(objects) {
+      counts.delete++
       return objects.map((object) => {
         values.delete(object.path)
         return { path: object.path, status: "deleted" as const }
       })
     },
   }
-  return { adapter, values }
+  return { adapter, values, counts }
 }

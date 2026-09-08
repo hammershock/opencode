@@ -23,18 +23,56 @@ export const Acknowledgement = Schema.Struct({
   acknowledgedAt: NonNegativeInt,
 })
 export type Acknowledgement = typeof Acknowledgement.Type
+export type Snapshot = {
+  readonly marker: Marker
+  readonly objects: readonly SyncProvider.ObjectInfo[]
+  readonly acknowledged: ReadonlySet<SyncEvent.DeviceID>
+}
 
 export function make(input: { readonly provider: SyncProvider.Adapter; readonly now?: () => number }) {
   const now = input.now ?? Date.now
+  const markerCache = new Map<string, { version: string; value: Marker }>()
+  const acknowledgementCache = new Map<string, { version: string; value: Acknowledgement }>()
 
-  const list = async (signal?: AbortSignal) => {
+  const scan = async (signal?: AbortSignal): Promise<readonly Snapshot[]> => {
     const objects = await SyncProvider.listAll(input.provider, "deletions", signal)
-    return Promise.all(
-      objects
-        .filter((item) => /^deletions\/[^/]+\/marker\.json$/.test(item.path))
-        .map(async (item) => decode(Marker, (await input.provider.download(item.path, item.version, signal)).bytes)),
+    const markers = objects.filter((item) => /^deletions\/[^/]+\/marker\.json$/.test(item.path))
+    const acknowledgements = objects.filter((item) => /^deletions\/[^/]+\/acks\/[^/]+\.json$/.test(item.path))
+    const decodedMarkers = await Promise.all(
+      markers.map(async (object) => {
+        const cached = markerCache.get(object.path)
+        const marker =
+          cached?.version === object.version
+            ? cached.value
+            : decode(Marker, (await input.provider.download(object.path, object.version, signal)).bytes)
+        markerCache.set(object.path, { version: object.version, value: marker })
+        return { object, marker }
+      }),
     )
+    const decodedAcknowledgements = await Promise.all(
+      acknowledgements.map(async (object) => {
+        const cached = acknowledgementCache.get(object.path)
+        const acknowledgement =
+          cached?.version === object.version
+            ? cached.value
+            : decode(Acknowledgement, (await input.provider.download(object.path, object.version, signal)).bytes)
+        acknowledgementCache.set(object.path, { version: object.version, value: acknowledgement })
+        return { object, acknowledgement }
+      }),
+    )
+    return decodedMarkers.map(({ marker, object }) => {
+      const matching = decodedAcknowledgements.filter(
+        (item) => item.acknowledgement.tombstoneID === marker.tombstone.id,
+      )
+      return {
+        marker,
+        objects: [object, ...matching.map((item) => item.object)],
+        acknowledged: new Set(matching.map((item) => item.acknowledgement.deviceID)),
+      }
+    })
   }
+
+  const list = async (signal?: AbortSignal) => (await scan(signal)).map((item) => item.marker)
 
   const ensure = async (
     tombstone: SyncEvent.Tombstone,
@@ -110,9 +148,28 @@ export function make(input: { readonly provider: SyncProvider.Adapter; readonly 
     )
     if (result.some((item) => item.status === "conflict"))
       throw new SyncProvider.ProviderError(input.provider.id, "delete", "conflict", true)
+    for (const item of values) {
+      markerCache.delete(item.path)
+      acknowledgementCache.delete(item.path)
+    }
   }
 
-  return { list, ensure, acknowledge, references, remove }
+  const removeScanned = async (items: readonly Snapshot[], signal?: AbortSignal) => {
+    const objects = items.flatMap((item) => item.objects)
+    if (!objects.length) return
+    const result = await input.provider.deleteBatch(
+      objects.map((item) => ({ path: item.path, version: item.version })),
+      signal,
+    )
+    if (result.some((item) => item.status === "conflict"))
+      throw new SyncProvider.ProviderError(input.provider.id, "delete", "conflict", true)
+    for (const object of objects) {
+      markerCache.delete(object.path)
+      acknowledgementCache.delete(object.path)
+    }
+  }
+
+  return { list, scan, ensure, acknowledge, references, remove, removeScanned }
 }
 
 function markerPath(sessionID: string) {

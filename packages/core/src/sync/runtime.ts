@@ -118,7 +118,6 @@ export function make(input: {
   let indexedSegments = new Map<string, SyncProvider.ObjectInfo>()
   let revokedDevices = new Set<SyncEvent.DeviceID>()
   let localHead: Head | undefined
-  let attachmentCollectionPending = false
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
   const acquireLease = async (kind: "upload" | "pull" | "hydrate", signal?: AbortSignal) => {
     const deadline = Date.now() + 65_000
@@ -137,6 +136,13 @@ export function make(input: {
         signal?.addEventListener("abort", aborted, { once: true })
       })
     }
+  }
+  const mapConcurrent = async <A, B>(items: readonly A[], limit: number, fn: (item: A) => Promise<B>) => {
+    const result: B[] = []
+    for (let offset = 0; offset < items.length; offset += limit) {
+      result.push(...(await Promise.all(items.slice(offset, offset + limit).map(fn))))
+    }
+    return result
   }
   const projector = (deviceID: SyncEvent.DeviceID) => {
     if (typeof input.projector !== "function") return input.projector
@@ -218,14 +224,13 @@ export function make(input: {
       if (published) {
         for (const marker of pendingDeletions) {
           await deletions.acknowledge(marker, input.config.deviceID, signal)
-          await Effect.runPromise(input.store.forgetDeletion(marker.tombstone.sessionID))
         }
       }
-      await collectDeletions(signal)
       stage = "collect"
-      if (attachmentCollectionPending || pendingDeletions.length) {
-        await collectAttachments(signal)
-        attachmentCollectionPending = false
+      if (pendingDeletions.length) {
+        await collectDeletions(signal)
+        for (const marker of pendingDeletions)
+          await Effect.runPromise(input.store.forgetDeletion(marker.tombstone.sessionID))
       }
       status = { ...status, running: "idle", lastUploadAt: now(), lastError: undefined }
     } catch (cause) {
@@ -271,7 +276,6 @@ export function make(input: {
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
       }
       const markers = await deletions.list(signal)
-      if (markers.length) attachmentCollectionPending = true
       await Effect.runPromise(
         input.store.absorbDeletions(
           markers.map((item) => item.tombstone),
@@ -387,22 +391,27 @@ export function make(input: {
             (observer.acknowledged[String(target.deviceID)] ?? -1) >= target.generation,
         ),
       )
-    const objects = await SyncProvider.listAll(input.provider, "segments", signal)
     const liveObjectIDs = new Set<string>()
-    const segments: SyncEvent.Segment[] = []
-    for (const object of objects) {
-      const location = segmentFromPath(object.path, codec.suffix)
-      if (!location) continue
-      segments.push(
-        await decode(
-          (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
-          codec,
-          "event",
-          segmentContext(location.deviceID, location.generation, object.path),
-          (await input.provider.download(object.path, object.version, signal)).bytes,
-        ),
-      )
-    }
+    const segments = await mapConcurrent(
+      (await SyncProvider.listAll(input.provider, "segments", signal)).flatMap((object) => {
+        const location = segmentFromPath(object.path, codec.suffix)
+        if (!location) return []
+        return [{ object, location }]
+      }),
+      8,
+      ({ object, location }) =>
+        input.provider
+          .download(object.path, object.version, signal)
+          .then((downloaded) =>
+            decode(
+              (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+              codec,
+              "event",
+              segmentContext(location.deviceID, location.generation, object.path),
+              downloaded.bytes,
+            ),
+          ),
+    )
     // Global session deletion is monotonic.  First collect tombstones from the
     // complete observed history so an attachment in an old event is not kept
     // alive merely because that event was encountered before its tombstone.
@@ -422,42 +431,60 @@ export function make(input: {
   const deletions = SyncDeletion.make({ provider: input.provider, now })
 
   const collectDeletions = async (signal?: AbortSignal) => {
-    for (const marker of await deletions.list(signal)) {
-      const references = await deletions.references(marker, revokedDevices, signal)
-      if (references.length) continue
-      const objects = await SyncProvider.listAll(input.provider, "segments", signal)
-      for (const object of objects) {
-        const location = segmentFromPath(object.path, codec.suffix)
-        if (!location) continue
-        const downloaded = await input.provider.download(object.path, object.version, signal)
-        const segment = await decode(
-          (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
-          codec,
-          "event",
-          segmentContext(location.deviceID, location.generation, object.path),
-          downloaded.bytes,
-        )
-        if (!segment.operations.length) continue
-        if (
-          !segment.operations.every((operation) =>
-            operation.kind === "tombstone"
-              ? operation.tombstone.sessionID === marker.tombstone.sessionID
-              : operation.event.aggregateID === marker.tombstone.sessionID,
+    const eligible = (await deletions.scan(signal)).filter((item) =>
+      item.marker.requiredDevices.every(
+        (deviceID) => item.acknowledged.has(deviceID) || revokedDevices.has(deviceID),
+      ),
+    )
+    if (!eligible.length) return
+    const deleted = new Set(eligible.map((item) => item.marker.tombstone.sessionID))
+    const affected = new Set(
+      (await Effect.runPromise(input.store.segmentsFor([...deleted]))).map(({ deviceID, generation }) =>
+        segmentPath(deviceID, generation, codec.suffix),
+      ),
+    )
+    const indexed = (await SyncProvider.listAll(input.provider, "segments", signal)).flatMap((object) => {
+      if (!affected.has(object.path)) return []
+      const location = segmentFromPath(object.path, codec.suffix)
+      return location ? [{ object, location }] : []
+    })
+    const downloaded = await mapConcurrent(indexed, 8, async ({ object, location }) => ({
+      object,
+      location,
+      segment: await input.provider
+        .download(object.path, object.version, signal)
+        .then((result) =>
+          decode(
+            (value) => Schema.decodeUnknownSync(SyncEvent.Segment)(value),
+            codec,
+            "event",
+            segmentContext(location.deviceID, location.generation, object.path),
+            result.bytes,
+          ),
+        ),
+    }))
+    let deletedHadAttachments = false
+    for (const { object, location, segment } of downloaded) {
+      if (input.attachment)
+        for (const operation of segment.operations)
+          if (
+            operation.kind === "event" &&
+            deleted.has(operation.event.aggregateID) &&
+            input.attachment.references(operation.event.data).size
           )
-        )
-          continue
-        const purged = SyncEvent.Segment.make({ ...segment, operations: [] })
-        const bytes = await encode(
-          codec,
-          "event",
-          segmentContext(location.deviceID, location.generation, object.path),
-          purged,
-        )
-        await input.provider.uploadAtomic(object.path, bytes, { type: "version", version: object.version }, signal)
-      }
-      await collectAttachments(signal)
-      await deletions.remove(marker, signal)
+            deletedHadAttachments = true
+      const operations = segment.operations.filter((operation) =>
+        operation.kind === "tombstone"
+          ? !deleted.has(operation.tombstone.sessionID)
+          : !deleted.has(operation.event.aggregateID),
+      )
+      const purged = operations.length === segment.operations.length ? segment : SyncEvent.Segment.make({ ...segment, operations })
+      if (purged === segment) continue
+      const bytes = await encode(codec, "event", segmentContext(location.deviceID, location.generation, object.path), purged)
+      await input.provider.uploadAtomic(object.path, bytes, { type: "version", version: object.version }, signal)
     }
+    if (deletedHadAttachments) await collectAttachments(signal)
+    await deletions.removeScanned(eligible, signal)
   }
 
   const coalesce = (direction: "upload" | "pull", signal?: AbortSignal) => {

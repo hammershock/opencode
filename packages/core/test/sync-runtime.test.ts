@@ -236,6 +236,44 @@ describe("SyncRuntime", () => {
     expect(progress).toEqual([])
   })
 
+  test("retries a mutable device head that changes between list and download", async () => {
+    const remote = provider()
+    const macID = SyncEvent.DeviceID.make("head-mac")
+    const windowsID = SyncEvent.DeviceID.make("head-windows")
+    const uploader = SyncRuntime.make({
+      config: { deviceID: macID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: store(macID).service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(uploader.upload())
+
+    let conflicts = 0
+    const flaky: SyncProvider.Adapter = {
+      ...remote.adapter,
+      download: async (path, version, signal) => {
+        if (path.startsWith("devices/") && conflicts++ === 0)
+          throw new SyncProvider.ProviderError("memory", "download", "conflict", false)
+        return remote.adapter.download(path, version, signal)
+      },
+    }
+    const downloader = SyncRuntime.make({
+      config: { deviceID: windowsID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: flaky,
+      store: store(windowsID).service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+
+    await Effect.runPromise(downloader.pull())
+    expect(conflicts).toBe(2)
+  })
+
   test("uploads encrypted heads and segments, then hydrates metadata and events", async () => {
     const remote = provider()
     const space = SyncCrypto.createSpace()

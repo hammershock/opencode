@@ -228,7 +228,7 @@ export function make(input: {
       for (const object of objects.filter((item) => item.path.endsWith(`.head${codec.suffix}`))) {
         const deviceID = deviceFromHeadPath(object.path, codec.suffix)
         if (deviceID === input.config.deviceID) continue
-        const downloaded = await input.provider.download(object.path, object.version, signal)
+        const downloaded = await downloadLatest(input.provider, object, signal)
         heads.push(
           await decode(
             (value) => Schema.decodeUnknownSync(Head)(value),
@@ -504,6 +504,21 @@ async function decode<A>(
 ) {
   const plaintext = await codec.open(purpose, context, bytes)
   return decode(JSON.parse(decoder.decode(plaintext)))
+}
+
+async function downloadLatest(provider: SyncProvider.Adapter, listed: SyncProvider.ObjectInfo, signal?: AbortSignal) {
+  let current = listed
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await provider.download(current.path, current.version, signal)
+    } catch (cause) {
+      if (!(cause instanceof SyncProvider.ProviderError) || cause.kind !== "conflict" || attempt >= 2) throw cause
+      signal?.throwIfAborted()
+      const latest = await provider.stat(current.path, signal)
+      if (!latest) throw cause
+      current = latest
+    }
+  }
 }
 
 export function diagnostic(stage: Diagnostic["stage"], cause: unknown): Diagnostic {

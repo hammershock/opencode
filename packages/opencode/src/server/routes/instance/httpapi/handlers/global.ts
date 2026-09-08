@@ -196,6 +196,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         syncControl.status().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
       )
       .handle("syncNow", () => controlApi(syncControl.now()).pipe(Effect.as(true)))
+      .handle("syncCloudStatus", () => controlApi(syncControl.cloudStatus()))
+      .handle("syncCloudInitialize", () => controlApi(syncControl.initializeCloud()))
+      .handle("syncCloudClear", () => controlApi(syncControl.clearCloud()).pipe(Effect.as(true)))
       .handle("syncSessions", () => controlApi(syncControl.sessions()))
       .handle("syncHydrate", (ctx) => controlApi(syncControl.hydrate(ctx.payload)))
       .handle("syncDevices", () => controlApi(syncControl.devices()))

@@ -71,6 +71,7 @@ export type Event =
   | EventQuestionV2Rejected
   | EventTodoUpdated
   | EventSyncTransferUpdated
+  | EventSyncInitializationRequired
   | EventLspUpdated
   | EventPermissionAsked
   | EventPermissionReplied
@@ -1417,6 +1418,13 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "sync.initialization.required"
+        properties: {
+          trigger: "automatic"
+        }
+      }
+    | {
+        id: string
         type: "lsp.updated"
         properties: {
           [key: string]: unknown
@@ -2099,6 +2107,8 @@ export type SyncSetupApiError = {
       | "remote"
       | "storage"
       | "locked"
+      | "remote-uninitialized"
+      | "incompatible-remote"
     message: string
     diagnostic?: {
       stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "catalog" | "delete"
@@ -2124,7 +2134,16 @@ export type SyncSetupApiError = {
 export type SyncControlApiError = {
   name: "SyncControlError"
   data: {
-    kind: "unconfigured" | "locked" | "provider" | "storage" | "invalid" | "pending" | "deleted"
+    kind:
+      | "unconfigured"
+      | "remote-uninitialized"
+      | "incompatible-remote"
+      | "locked"
+      | "provider"
+      | "storage"
+      | "invalid"
+      | "pending"
+      | "deleted"
     diagnostic?: {
       stage: "attachment" | "segment" | "head" | "pull" | "hydrate" | "collect" | "catalog" | "delete"
       operation?: "list" | "stat" | "download" | "upload" | "delete"
@@ -3090,6 +3109,7 @@ export type V2Event =
   | QuestionV2Rejected
   | TodoUpdated
   | SyncTransferUpdated
+  | SyncInitializationRequired
   | LspUpdated
   | PermissionAsked
   | PermissionReplied
@@ -5983,6 +6003,23 @@ export type SyncTransferUpdated = {
   }
 }
 
+export type SyncInitializationRequired = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "sync.initialization.required"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    trigger: "automatic"
+  }
+}
+
 export type LspUpdated = {
   id: string
   metadata?: {
@@ -7361,6 +7398,14 @@ export type EventSyncTransferUpdated = {
           items?: number
           bytes?: number
         }
+  }
+}
+
+export type EventSyncInitializationRequired = {
+  id: string
+  type: "sync.initialization.required"
+  properties: {
+    trigger: "automatic"
   }
 }
 
@@ -8825,6 +8870,112 @@ export type GlobalSyncNowResponses = {
 }
 
 export type GlobalSyncNowResponse = GlobalSyncNowResponses[keyof GlobalSyncNowResponses]
+
+export type GlobalSyncCloudClearData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/cloud"
+}
+
+export type GlobalSyncCloudClearErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
+}
+
+export type GlobalSyncCloudClearError = GlobalSyncCloudClearErrors[keyof GlobalSyncCloudClearErrors]
+
+export type GlobalSyncCloudClearResponses = {
+  /**
+   * Success
+   */
+  200: boolean
+}
+
+export type GlobalSyncCloudClearResponse = GlobalSyncCloudClearResponses[keyof GlobalSyncCloudClearResponses]
+
+export type GlobalSyncCloudStatusData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/cloud"
+}
+
+export type GlobalSyncCloudStatusErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
+}
+
+export type GlobalSyncCloudStatusError = GlobalSyncCloudStatusErrors[keyof GlobalSyncCloudStatusErrors]
+
+export type GlobalSyncCloudStatusResponses = {
+  /**
+   * Success
+   */
+  200:
+    | {
+        status: "uninitialized"
+      }
+    | {
+        status: "ready"
+        manifest: {
+          version: 1
+          protocol: {
+            major: number
+            minor: number
+          }
+          createdAt: number
+        }
+      }
+    | {
+        status: "incompatible"
+        version: number
+      }
+}
+
+export type GlobalSyncCloudStatusResponse = GlobalSyncCloudStatusResponses[keyof GlobalSyncCloudStatusResponses]
+
+export type GlobalSyncCloudInitializeData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/cloud"
+}
+
+export type GlobalSyncCloudInitializeErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
+}
+
+export type GlobalSyncCloudInitializeError = GlobalSyncCloudInitializeErrors[keyof GlobalSyncCloudInitializeErrors]
+
+export type GlobalSyncCloudInitializeResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncCloudInitializeResponse =
+  GlobalSyncCloudInitializeResponses[keyof GlobalSyncCloudInitializeResponses]
 
 export type GlobalSyncSessionsData = {
   body?: never

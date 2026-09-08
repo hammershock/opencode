@@ -12,6 +12,8 @@ export type DialogConfirmProps = {
   onConfirm?: () => void
   onCancel?: () => void
   label?: string
+  confirmLabel?: string
+  destructive?: boolean
 }
 
 export type DialogConfirmResult = boolean | undefined
@@ -72,15 +74,31 @@ export function DialogConfirm(props: DialogConfirmProps) {
             <box
               paddingLeft={1}
               paddingRight={1}
-              backgroundColor={key === store.active ? theme.primary : undefined}
+              backgroundColor={
+                key === store.active
+                  ? key === "confirm" && props.destructive
+                    ? theme.error
+                    : theme.primary
+                  : undefined
+              }
               onMouseUp={() => {
                 if (key === "confirm") props.onConfirm?.()
                 if (key === "cancel") props.onCancel?.()
                 dialog.clear()
               }}
             >
-              <text fg={key === store.active ? theme.selectedListItemText : theme.textMuted}>
-                {Locale.titlecase(key === "cancel" ? (props.label ?? key) : key)}
+              <text
+                fg={
+                  key === store.active
+                    ? theme.selectedListItemText
+                    : key === "confirm" && props.destructive
+                      ? theme.error
+                      : theme.textMuted
+                }
+              >
+                {Locale.titlecase(
+                  key === "cancel" ? (props.label ?? key) : props.confirmLabel ? props.confirmLabel : key,
+                )}
               </text>
             </box>
           )}
@@ -90,13 +108,21 @@ export function DialogConfirm(props: DialogConfirmProps) {
   )
 }
 
-DialogConfirm.show = (dialog: DialogContext, title: string, message: string, label?: string) => {
+DialogConfirm.show = (
+  dialog: DialogContext,
+  title: string,
+  message: string,
+  label?: string,
+  options?: Pick<DialogConfirmProps, "confirmLabel" | "destructive">,
+) => {
   return new Promise<DialogConfirmResult>((resolve) => {
     dialog.replace(
       () => (
         <DialogConfirm
           title={title}
           message={message}
+          confirmLabel={options?.confirmLabel}
+          destructive={options?.destructive}
           onConfirm={() => resolve(true)}
           onCancel={() => resolve(false)}
           label={label}

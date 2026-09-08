@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
-  buildSpaceRows,
   buildDeviceRows,
   buildSyncOverviewRows,
-  maskRecoveryKey,
+  syncCloudStatus,
   syncStatus,
   type SyncSettingsViewModel,
 } from "../../src/component/dialog-sync-settings"
@@ -13,59 +12,42 @@ const connected = {
   enabled: true,
   interval: 30,
   state: "idle",
-  remote: "idle",
-  activeSpace: {
-    id: "space-1",
-    name: "Research",
-    supported: true,
-    protocol: "1",
-    encryption: "off",
-    devices: 2,
-    sessions: 12,
-    membership: "active",
-    state: "idle",
-  },
-  spaces: [],
+  cloud: "unknown",
   devices: [],
   bindings: [],
   pending: 0,
-  unassigned: [],
 } satisfies SyncSettingsViewModel
 
 describe("Sync Settings presentation", () => {
-  test("keeps overview labels short and statuses separate", () => {
+  test("presents one account-wide synchronization workflow", () => {
     expect(buildSyncOverviewRows(connected)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ title: "ha***@example.com", status: "● connected" }),
-        expect.objectContaining({ title: "Check cloud status", status: "○ not checked" }),
-        expect.objectContaining({ title: "Research", status: "● idle" }),
-        expect.objectContaining({ title: "Auto sync", status: "● on" }),
+        expect.objectContaining({ title: "Automatic sync", status: "● on" }),
+        expect.objectContaining({ title: "Sync now", status: "● idle" }),
         expect.objectContaining({ title: "Interval", status: "30 sec" }),
+        expect.objectContaining({ title: "Check cloud status", status: "○ not checked" }),
+        expect.objectContaining({ title: "Clear cloud sync data" }),
       ]),
     )
+    const text = JSON.stringify(buildSyncOverviewRows(connected)).toLowerCase()
+    expect(text).not.toContain("space")
+    expect(text).not.toContain("recovery")
+    expect(text).not.toContain("encryption")
   })
 
-  test("shows bounded remote refresh states without replacing local rows", () => {
-    expect(buildSyncOverviewRows({ ...connected, remote: "checking" })).toEqual(
+  test("shows bounded remote cloud states without replacing local rows", () => {
+    expect(buildSyncOverviewRows({ ...connected, cloud: "checking" })).toEqual(
       expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "◐ checking" })]),
     )
-    expect(buildSyncOverviewRows({ ...connected, remote: "ready" })).toEqual(
+    expect(buildSyncOverviewRows({ ...connected, cloud: "ready" })).toEqual(
       expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "● ready" })]),
     )
-    expect(buildSyncOverviewRows({ ...connected, remote: "unavailable" })).toEqual(
-      expect.arrayContaining([expect.objectContaining({ title: "Retry cloud status", status: "! unavailable" })]),
+    expect(buildSyncOverviewRows({ ...connected, cloud: "uninitialized" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "○ not initialized" })]),
     )
-  })
-
-  test("makes an unconfigured manual sync actionable instead of looking runnable", () => {
-    expect(buildSyncOverviewRows({ ...connected, activeSpace: undefined })).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          title: "Sync now",
-          description: "Select a space first",
-          status: "! unavailable",
-        }),
-      ]),
+    expect(buildSyncOverviewRows({ ...connected, cloud: "unavailable" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Retry cloud status", status: "! unavailable" })]),
     )
   })
 
@@ -82,22 +64,7 @@ describe("Sync Settings presentation", () => {
     expect(rows.join(" ")).not.toContain("Secret")
   })
 
-  test("keeps unsupported spaces visible as summary-only rows", () => {
-    const rows = buildSpaceRows([
-      {
-        ...connected.activeSpace,
-        id: "future",
-        protocol: "9",
-        supported: false,
-        membership: "available",
-        state: "attention",
-      },
-    ])
-    expect(rows[0]).toMatchObject({ title: "Research", status: "! unsupported", disabled: true })
-    expect(rows[0]?.details).toContain("Protocol 9 · Encryption Off")
-  })
-
-  test("uses the shared status vocabulary and masks recovery keys", () => {
+  test("uses the shared status vocabulary", () => {
     expect([
       syncStatus("off"),
       syncStatus("idle"),
@@ -105,7 +72,7 @@ describe("Sync Settings presentation", () => {
       syncStatus("locked"),
       syncStatus("attention"),
     ]).toEqual(["● off", "● idle", "◐ syncing", "! locked", "! attention"])
-    expect(maskRecoveryKey("oc-sync-secret-1234")).toBe("•••• 1234")
+    expect(syncCloudStatus("incompatible")).toBe("! incompatible")
   })
 
   test("keeps the current device visible but non-revocable", () => {

@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  createLoopbackCallback,
-  syncOperationFailure,
-  unassignedFingerprint,
-  withSyncRefreshTimeout,
-} from "../../src/context/sync-settings"
+import { createLoopbackCallback, syncOperationFailure, withSyncRefreshTimeout } from "../../src/context/sync-settings"
 
 describe("sync settings deployment errors", () => {
   test("maps a missing product app to an actionable message without credential terminology", () => {
@@ -25,14 +20,13 @@ describe("sync settings deployment errors", () => {
       }),
     ).toBe("Local sync state is incompatible. Archive the local sync folder and restart opencode-rexd.")
     expect(syncOperationFailure({ message: "incompatible-local-state" })).toBe("Sync operation failed")
-    expect(syncOperationFailure({ data: { kind: "unconfigured" } })).toBe("Select a sync space first")
-    expect(syncOperationFailure({ body: { data: { kind: "locked" } } })).toBe(
-      "Import the recovery key for the active space",
-    )
-    expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "pull" } } })).toBe(
+    expect(syncOperationFailure({ data: { kind: "unconfigured" } })).toBe("Cloud sync is not initialized")
+    expect(syncOperationFailure({ data: { kind: "remote-uninitialized" } })).toBe("Cloud sync is not initialized")
+    expect(syncOperationFailure({ data: { kind: "incompatible-remote" } })).toBe("Cloud sync protocol is incompatible")
+    expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "pull" } } })).toContain(
       "Sync failed during pull",
     )
-    expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "delete" } } })).toBe(
+    expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "delete" } } })).toContain(
       "Sync failed during delete",
     )
     expect(syncOperationFailure({ data: { diagnostic: { stage: "token secret" } } })).toBe("Sync operation failed")
@@ -59,15 +53,6 @@ describe("sync settings OAuth loopback", () => {
     const loopback = createLoopbackCallback(5)
     expect(await loopback.callback).toBeUndefined()
     loopback.close()
-  })
-})
-
-describe("unassigned Session prompt identity", () => {
-  test("is stable by ID order and isolated by active space", () => {
-    expect(unassignedFingerprint("space-a", ["session-b", "session-a"])).toBe(
-      unassignedFingerprint("space-a", ["session-a", "session-b"]),
-    )
-    expect(unassignedFingerprint("space-a", ["session-a"])).not.toBe(unassignedFingerprint("space-b", ["session-a"]))
   })
 })
 

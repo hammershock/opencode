@@ -69,8 +69,8 @@ describe("SyncSpaceCatalog contract", () => {
         throw new Error("crash after marker")
       },
     }
-    await expect(SyncSpaceCatalog.make({ provider: crashing, now: () => 30 }).remove("gone")).rejects.toMatchObject({
-      kind: "cleanup",
+    await expect(SyncSpaceCatalog.make({ provider: crashing, now: () => 30 }).remove("gone")).resolves.toMatchObject({
+      cleanup: "pending",
     })
     expect(await base.stat("deleted-spaces/gone.json")).toBeDefined()
     expect(await base.stat("catalog/gone.json")).toBeDefined()

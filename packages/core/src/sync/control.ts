@@ -33,6 +33,8 @@ import { TargetBindingRegistry } from "../target-binding-registry"
 import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
 import { SyncTransferEvent } from "@opencode-ai/schema/sync-transfer-event"
+import { SyncInitializationEvent } from "@opencode-ai/schema/sync-initialization-event"
+import { SyncRoot } from "./root"
 
 export const Status = Schema.Struct({
   configured: Schema.Boolean,
@@ -86,13 +88,26 @@ export const SwitchResult = Schema.Union([
 export const AssignInput = Schema.Struct({ sessionIDs: Schema.Array(Schema.NonEmptyString) })
 
 export class ControlError extends Schema.TaggedErrorClass<ControlError>()("SyncControlError", {
-  kind: Schema.Literals(["unconfigured", "locked", "provider", "storage", "invalid", "pending", "deleted"]),
+  kind: Schema.Literals([
+    "unconfigured",
+    "remote-uninitialized",
+    "incompatible-remote",
+    "locked",
+    "provider",
+    "storage",
+    "invalid",
+    "pending",
+    "deleted",
+  ]),
   diagnostic: Schema.optional(SyncRuntime.Diagnostic),
 }) {}
 
 export interface Interface {
   readonly status: () => Effect.Effect<Status, ControlError>
   readonly now: () => Effect.Effect<void, ControlError>
+  readonly cloudStatus: () => Effect.Effect<SyncRoot.Inspection, ControlError>
+  readonly initializeCloud: () => Effect.Effect<readonly string[], ControlError>
+  readonly clearCloud: () => Effect.Effect<void, ControlError>
   readonly enable: (enabled: boolean) => Effect.Effect<void, ControlError>
   readonly setInterval: (seconds: SyncState.IntervalSeconds) => Effect.Effect<void, ControlError>
   readonly switchSpace: (input: typeof SwitchInput.Type) => Effect.Effect<typeof SwitchResult.Type, ControlError>
@@ -171,7 +186,8 @@ const make = (input: LayerOptions) =>
 
     const load = Effect.fn("SyncControl.load")(function* () {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
-      if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      if (!config || config.namespaceID !== SyncRoot.INTERNAL_SCOPE)
+        return yield* new ControlError({ kind: "unconfigured" })
       const store = eventStore.scope(config.namespaceID)
       const metadata = metadataStore.scope(config.namespaceID)
       const devices = devicesFor(config.namespaceID)
@@ -277,7 +293,8 @@ const make = (input: LayerOptions) =>
 
     const readStatus = Effect.fn("SyncControl.status")(function* () {
       const state = yield* setup.state().pipe(Effect.catch(() => Effect.succeed(undefined)))
-      const config = yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const resolved = yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const config = resolved?.namespaceID === SyncRoot.INTERNAL_SCOPE ? resolved : undefined
       const authenticated = yield* setup.authenticated().pipe(Effect.catch(() => Effect.succeed(false)))
       const locked =
         config?.encryption === "aes-256-gcm" && authenticated
@@ -315,18 +332,18 @@ const make = (input: LayerOptions) =>
       })
     })
     const status = () => readStatus().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+    const requireCloudReady = Effect.fn("SyncControl.requireCloudReady")(function* () {
+      const cloud = yield* setup
+        .cloudStatus()
+        .pipe(Effect.mapError((error) => new ControlError({ kind: "provider", diagnostic: error.diagnostic })))
+      if (cloud.status === "uninitialized") return yield* new ControlError({ kind: "remote-uninitialized" })
+      if (cloud.status === "incompatible") return yield* new ControlError({ kind: "incompatible-remote" })
+    })
     const now = Effect.fn("SyncControl.now")(function* () {
       const active = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
-      if (!active) return yield* new ControlError({ kind: "unconfigured" })
-      const deleted = yield* setup
-        .applyRemoteDeletion(active.namespaceID)
-        .pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
-      if (deleted) {
-        scheduler?.stop()
-        engine = undefined
-        yield* purgeSpace(active.namespaceID)
-        return yield* new ControlError({ kind: "deleted" })
-      }
+      if (!active || active.namespaceID !== SyncRoot.INTERNAL_SCOPE)
+        return yield* new ControlError({ kind: "unconfigured" })
+      yield* requireCloudReady()
       const runtime = yield* load()
       yield* runtime.now().pipe(
         Effect.mapError(() => {
@@ -340,16 +357,18 @@ const make = (input: LayerOptions) =>
     const restartScheduler = (config?: SyncState.Active) => {
       scheduler?.stop()
       scheduler = undefined
-      if (!config?.enabled) return
+      if (!config?.enabled || config.namespaceID !== SyncRoot.INTERNAL_SCOPE) return
       scheduler = SyncScheduler.make({
         intervalMs: schedulerInterval(config.intervalSeconds),
         run: () =>
           Effect.runPromise(
             now().pipe(
               Effect.catch((error) =>
-                Effect.sync(() => {
+                Effect.gen(function* () {
+                  if (error.kind === "remote-uninitialized") {
+                    yield* events.publish(SyncInitializationEvent.Required, { trigger: "automatic" })
+                  }
                   lastDiagnostic = error.diagnostic ?? SyncRuntime.diagnostic("pull", error)
-                  return undefined
                 }),
               ),
             ),
@@ -364,6 +383,31 @@ const make = (input: LayerOptions) =>
       yield* setup.setEnabled(enabled).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       engine = undefined
       restartScheduler(yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined))))
+    })
+    const cloudStatus = () =>
+      setup
+        .cloudStatus()
+        .pipe(Effect.mapError((error) => new ControlError({ kind: "provider", diagnostic: error.diagnostic })))
+    const initializeCloud = Effect.fn("SyncControl.initializeCloud")(function* () {
+      const state = yield* setup
+        .initializeCloud()
+        .pipe(Effect.mapError((error) => new ControlError({ kind: "provider", diagnostic: error.diagnostic })))
+      const active = SyncState.active(state)
+      if (!active) return yield* new ControlError({ kind: "storage" })
+      const sessions = yield* membership
+        .assignAll(active.namespaceID)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      engine = undefined
+      restartScheduler(active)
+      return sessions
+    })
+    const clearCloud = Effect.fn("SyncControl.clearCloud")(function* () {
+      yield* setup
+        .clearCloud()
+        .pipe(Effect.mapError((error) => new ControlError({ kind: "provider", diagnostic: error.diagnostic })))
+      engine = undefined
+      scheduler?.stop()
+      scheduler = undefined
     })
     const setInterval = Effect.fn("SyncControl.setInterval")(function* (seconds: SyncState.IntervalSeconds) {
       yield* setup.setInterval(seconds).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
@@ -557,6 +601,7 @@ const make = (input: LayerOptions) =>
     })
     const availability = () => availabilityRaw().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
     const sessions = Effect.fn("SyncControl.sessions")(function* () {
+      yield* requireCloudReady()
       const runtime = yield* load()
       // Do not call now(): its hydration phase would defeat metadata-first
       // browsing. Selecting one of these rows calls hydrate below.
@@ -568,6 +613,7 @@ const make = (input: LayerOptions) =>
     const hydrateRaw = Effect.fn("SyncControl.hydrate")(function* (input: typeof HydrateInput.Type) {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      yield* requireCloudReady()
       const metadata = metadataStore.scope(config.namespaceID)
       const runtime = yield* load()
       // Keep the typed API self-contained: callers are not required to visit
@@ -594,6 +640,9 @@ const make = (input: LayerOptions) =>
     return {
       status,
       now,
+      cloudStatus,
+      initializeCloud,
+      clearCloud,
       enable,
       setInterval,
       switchSpace,

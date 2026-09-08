@@ -46,6 +46,7 @@ export interface Interface {
     tombstones: readonly SyncEvent.Tombstone[],
     projector: SyncEvent.DurableProjector,
   ) => Effect.Effect<void, unknown>
+  readonly forgetDeletion: (sessionID: string) => Effect.Effect<void, unknown>
   readonly acquire: (name: string, owner: string, ttl: number, now?: number) => Effect.Effect<boolean, unknown>
   readonly renew: (name: string, owner: string, ttl: number, now?: number) => Effect.Effect<boolean, unknown>
   readonly release: (name: string, owner: string) => Effect.Effect<void, unknown>
@@ -54,7 +55,7 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncEventStore") {}
 
 type OutboxRow = { payload: string }
-type OperationRow = { payload: string; kind: "event" | "tombstone" }
+type OperationRow = { aggregate_id: string; payload: string; kind: "event" | "tombstone" }
 type SegmentRow = { payload: string }
 type NumberRow = { value: number }
 type RemoteEventRow = { fingerprint: string }
@@ -152,9 +153,16 @@ export const layer = Layer.effect(
               LIMIT 1
             `)
               if (existing) return decodeSegment(existing.payload)
-              const rows = yield* tx.all<OperationRow>(sql`
-              SELECT payload, kind FROM sync_event_outbox
+              const first = yield* tx.get<{ aggregate_id: string }>(sql`
+              SELECT aggregate_id FROM sync_event_outbox
               WHERE segment_id IS NULL AND space_id = ${spaceID}
+              ORDER BY created_at, event_id
+              LIMIT 1
+            `)
+              if (!first) return undefined
+              const rows = yield* tx.all<OperationRow>(sql`
+              SELECT aggregate_id, payload, kind FROM sync_event_outbox
+              WHERE segment_id IS NULL AND space_id = ${spaceID} AND aggregate_id = ${first.aggregate_id}
               ORDER BY created_at, event_id
               LIMIT ${limit}
             `)
@@ -340,6 +348,11 @@ export const layer = Layer.effect(
         // above and removal of the local Session projection.
         yield* Effect.forEach(tombstones, (tombstone) => projector.delete(tombstone), { discard: true })
       })
+      const forgetDeletion = Effect.fn("SyncEventStore.forgetDeletion")((sessionID: string) =>
+        db
+          .run(sql`DELETE FROM sync_deletion_set WHERE session_id = ${sessionID} AND space_id = ${spaceID}`)
+          .pipe(Effect.asVoid),
+      )
 
       const applyDurable = Effect.fn("SyncEventStore.applyDurable")(function* (
         segment: SyncEvent.Segment,
@@ -522,6 +535,7 @@ export const layer = Layer.effect(
         pendingApply,
         deletions,
         absorbDeletions,
+        forgetDeletion,
         acquire,
         renew,
         release,

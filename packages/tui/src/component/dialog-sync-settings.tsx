@@ -1,25 +1,11 @@
 import type { DialogContext } from "../ui/dialog"
-import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
+import { DialogSelect } from "../ui/dialog-select"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogConfirm } from "../ui/dialog-confirm"
-import { DialogAlert } from "../ui/dialog-alert"
 
 export type SyncState = "off" | "idle" | "syncing" | "locked" | "attention"
 export type SyncInterval = 30 | 60 | 300
-
-export type SyncSpace = {
-  id: string
-  name: string
-  supported: boolean
-  protocol: string
-  encryption: "off" | "encrypted"
-  updatedAt?: string
-  devices?: number
-  sessions?: number
-  membership: "available" | "joined" | "active"
-  state: SyncState
-  detail?: string
-}
+export type SyncCloudState = "unknown" | "checking" | "ready" | "uninitialized" | "incompatible" | "unavailable"
 
 export type SyncDevice = {
   id: string
@@ -48,21 +34,11 @@ export type SyncSettingsViewModel = {
   enabled: boolean
   interval: SyncInterval
   state: SyncState
-  remote: "idle" | "checking" | "ready" | "unavailable"
+  cloud: SyncCloudState
   detail?: string
-  activeSpace?: SyncSpace
-  spaces: readonly SyncSpace[]
   devices: readonly SyncDevice[]
   bindings: readonly SyncBinding[]
   pending: number
-  unassigned: readonly string[]
-}
-
-export type SyncDiff = {
-  localOnly?: number
-  cloudOnly?: number
-  shared?: number
-  conflicts?: number
 }
 
 export type SyncSettingsActions = {
@@ -70,30 +46,18 @@ export type SyncSettingsActions = {
   useManualOAuth: () => Promise<void>
   copy: (value: string) => Promise<void>
   submitOAuthCode: (code: string) => Promise<void>
+  checkCloud: () => Promise<void>
+  initializeCloud: () => Promise<void>
+  clearCloud: () => Promise<void>
   syncNow: () => Promise<void>
   setEnabled: (enabled: boolean) => Promise<void>
   setInterval: (interval: SyncInterval) => Promise<void>
-  discoverSpaces: () => Promise<void>
-  createSpace: (input: { name: string; encryption: "off" | "encrypted" }) => Promise<{
-    recoveryKey?: string
-    spaceID: string
-    activation: "switched" | "blocked"
-  }>
-  prepareEnter: (input: { spaceID: string; recoveryKey?: string }) => Promise<SyncDiff>
-  enterSpace: (input: { spaceID: string; recoveryKey?: string }) => Promise<{ status: "switched" | "blocked" }>
-  switchSpace: (input: { spaceID: string; force: boolean }) => Promise<{ status: "switched" | "blocked" | "failed" }>
-  leaveSpace: (spaceID: string) => Promise<void>
-  deleteSpace: (spaceID: string) => Promise<void>
   logout: () => Promise<void>
-  removeFromDevice: () => Promise<void>
   revokeDevice: (deviceID: string) => Promise<void>
-  exportRecoveryKey: () => Promise<string>
   renameDevice: (deviceID: string, name: string) => Promise<void>
   updateBinding: (label: string, targetID: string, sessionIDs: readonly string[]) => Promise<void>
   removeBinding: (label: string, sessionIDs: readonly string[]) => Promise<void>
   targets: () => Promise<readonly { id: string; name: string; description?: string }[]>
-  assignUnassigned: (sessionIDs: readonly string[]) => Promise<void>
-  promptUnassigned: (force: boolean) => Promise<void>
   onError: (error: unknown) => void
 }
 
@@ -107,15 +71,13 @@ export function syncStatus(state: SyncState) {
   return "● off"
 }
 
-export function syncRemoteStatus(state: SyncSettingsViewModel["remote"]) {
+export function syncCloudStatus(state: SyncCloudState) {
   if (state === "checking") return "◐ checking"
-  if (state === "unavailable") return "! unavailable"
   if (state === "ready") return "● ready"
+  if (state === "uninitialized") return "○ not initialized"
+  if (state === "incompatible") return "! incompatible"
+  if (state === "unavailable") return "! unavailable"
   return "○ not checked"
-}
-
-export function maskRecoveryKey(value: string) {
-  return value.length <= 4 ? "••••" : `•••• ${value.slice(-4)}`
 }
 
 export function buildSyncOverviewRows(model: SyncSettingsViewModel): Row[] {
@@ -130,47 +92,22 @@ export function buildSyncOverviewRows(model: SyncSettingsViewModel): Row[] {
   }
   return [
     { title: model.account.maskedAccount, description: "Baidu Netdisk", status: "● connected" },
+    { title: "Automatic sync", status: model.enabled ? "● on" : "● off" },
+    { title: "Sync now", status: syncStatus(model.state) },
+    { title: "Interval", status: intervalLabel(model.interval) },
+    { title: "Devices", status: String(model.devices.filter((item) => item.state !== "revoked").length) },
     {
       title:
-        model.remote === "unavailable"
+        model.cloud === "unavailable"
           ? "Retry cloud status"
-          : model.remote === "idle"
+          : model.cloud === "unknown"
             ? "Check cloud status"
             : "Cloud status",
-      status: syncRemoteStatus(model.remote),
+      status: syncCloudStatus(model.cloud),
     },
-    {
-      title: model.activeSpace?.name ?? "No active space",
-      description: model.activeSpace ? spaceSummary(model.activeSpace) : "Create or enter a space",
-      status: model.activeSpace ? syncStatus(model.activeSpace.state) : "! attention",
-    },
-    {
-      title: "Sync now",
-      description: model.activeSpace ? undefined : "Select a space first",
-      status: model.activeSpace ? syncStatus(model.state) : "! unavailable",
-    },
-    { title: "Auto sync", status: model.enabled ? "● on" : "● off" },
-    { title: "Interval", status: intervalLabel(model.interval) },
-    { title: "Spaces", status: String(model.spaces.length) },
-    { title: "Devices", status: String(model.devices.length) },
-    ...(model.activeSpace?.encryption === "encrypted" ? [{ title: "Recovery key" }] : []),
-    { title: "Remove from this device" },
+    { title: "Clear cloud sync data", description: "Permanently remove all cloud Session history" },
     { title: "Log out" },
   ]
-}
-
-export function buildSpaceRows(spaces: readonly SyncSpace[]): Row[] {
-  return spaces.map((space) => ({
-    title: space.name,
-    description: spaceSummary(space),
-    status: space.supported ? syncStatus(space.state) : "! unsupported",
-    disabled: !space.supported,
-    details: [
-      `Protocol ${space.protocol} · Encryption ${space.encryption === "off" ? "Off" : "On"}`,
-      ...(space.updatedAt ? [`Updated ${space.updatedAt}`] : []),
-      ...(space.detail ? [space.detail] : []),
-    ],
-  }))
 }
 
 export function buildDeviceRows(devices: readonly SyncDevice[]): Row[] {
@@ -191,16 +128,11 @@ export function showSyncSettings(
   const open = () => showSyncSettings(dialog, model, actions)
   const Content = () => {
     const rows = () => buildSyncOverviewRows(model())
-    const values = () =>
-      model().account.state === "disconnected" ? disconnectedValues(model()) : connectedValues(model())
+    const values = () => (model().account.state === "disconnected" ? disconnectedValues(model()) : connectedValues())
     return (
       <DialogSelect
         title="Sync settings"
-        options={rows().map((row, index) => ({
-          ...row,
-          footer: row.status,
-          value: values()[index]!,
-        }))}
+        options={rows().map((row, index) => ({ ...row, footer: row.status, value: values()[index]! }))}
         footer={model().detail ? <text>{model().detail}</text> : undefined}
         onSelect={(option) => void selectOverview(option.value, dialog, model, actions, open).catch(actions.onError)}
       />
@@ -226,54 +158,65 @@ async function selectOverview(
     if (code?.trim()) await actions.submitOAuthCode(code.trim())
   }
   if (value === "account") return showAccount(dialog, actions, open)
-  // This dialog is reactive, so a completed background refresh must not
-  // replace it. Replacing here would resurrect a panel the user closed while
-  // the provider request was still in flight.
-  if (value === "refresh") return actions.discoverSpaces()
-  if (value === "active") {
-    await actions.discoverSpaces()
-    return showSpaces(dialog, model, actions)
-  }
-  if (value === "sync") {
-    if (!current.activeSpace) {
-      await actions.discoverSpaces()
-      return showSpaces(dialog, model, actions)
-    }
-    await actions.syncNow()
-    await showAssignUnassignedSessions(dialog, {
-      sessionIDs: model().unassigned,
-      decide: async (assign, sessionIDs) => {
-        if (!assign) return
-        await actions.assignUnassigned(sessionIDs)
-        await actions.syncNow()
-      },
-    })
-  }
   if (value === "enabled") await actions.setEnabled(!current.enabled)
+  if (value === "sync") await actions.syncNow()
   if (value === "interval") return showIntervals(dialog, current.interval, actions, open)
-  if (value === "spaces") {
-    await actions.discoverSpaces()
-    return showSpaces(dialog, model, actions)
-  }
   if (value === "devices") return showSyncDevices(dialog, model, actions)
-  if (value === "recovery") return showRecoveryKey(dialog, await actions.exportRecoveryKey(), actions, open)
-  if (value === "remove") {
-    const confirm = await DialogConfirm.show(
+  if (value === "cloud") return actions.checkCloud()
+  if (value === "clear") {
+    const first = await DialogConfirm.show(
       dialog,
-      "Remove sync from this device?",
-      "Remove local sync settings and keys. Local Sessions remain unassigned; cloud data and other devices remain unchanged.",
+      "Clear cloud sync data?",
+      "All Session history in the OpenCode Baidu sync directory will be permanently deleted. Local Sessions remain.",
     )
-    if (confirm) await actions.removeFromDevice()
+    if (!first) return open()
+    const second = await DialogConfirm.show(
+      dialog,
+      "This cannot be undone",
+      "Clear all cloud Session data and turn off automatic sync on this device?",
+      undefined,
+      { confirmLabel: "Clear cloud sync data", destructive: true },
+    )
+    if (second) await actions.clearCloud()
   }
   if (value === "logout") {
-    const confirm = await DialogConfirm.show(
+    const confirmed = await DialogConfirm.show(
       dialog,
       "Log out of Baidu Netdisk?",
-      "Disconnect this device. Sync spaces and cloud data remain unchanged.",
+      "Automatic sync will turn off. Local Sessions and queued changes remain.",
     )
-    if (confirm) await actions.logout()
+    if (confirmed) await actions.logout()
   }
   open()
+}
+
+export function showPostLoginSyncChoice(dialog: DialogContext) {
+  return new Promise<"enable-now" | "enable" | "disabled" | undefined>((resolve) =>
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title="Enable automatic sync?"
+          options={[
+            { title: "Enable and sync now", value: "enable-now" as const },
+            { title: "Enable", value: "enable" as const },
+            { title: "Keep disabled", value: "disabled" as const },
+          ]}
+          onSelect={(option) => resolve(option.value)}
+        />
+      ),
+      () => resolve(undefined),
+    ),
+  )
+}
+
+export function confirmInitializeCloud(dialog: DialogContext) {
+  return DialogConfirm.show(
+    dialog,
+    "Initialize cloud sync?",
+    "Create the OpenCode Session sync directory in Baidu Netdisk and start synchronizing.",
+    undefined,
+    { confirmLabel: "Initialize and sync" },
+  )
 }
 
 function showAccount(dialog: DialogContext, actions: SyncSettingsActions, open: () => void) {
@@ -296,184 +239,6 @@ function showIntervals(dialog: DialogContext, current: SyncInterval, actions: Sy
       onSelect={(option) => void actions.setInterval(option.value).then(open).catch(actions.onError)}
     />
   ))
-}
-
-function showSpaces(dialog: DialogContext, model: () => SyncSettingsViewModel, actions: SyncSettingsActions) {
-  const open = () => showSpaces(dialog, model, actions)
-  const spaces = model().spaces
-  const rows = buildSpaceRows(spaces)
-  dialog.replace(() => (
-    <DialogSelect
-      title="Sync spaces"
-      options={[
-        { title: "Create space", value: "create", category: "Actions" },
-        ...spaces.map((space, index) => ({
-          ...rows[index]!,
-          footer: rows[index]!.status,
-          value: space.id,
-          category: "Spaces",
-        })),
-      ]}
-      onSelect={(option) => {
-        if (option.value === "create") return void createSpace(dialog, actions, open).catch(actions.onError)
-        const space = model().spaces.find((item) => item.id === option.value)
-        if (space?.supported) showSpaceActions(dialog, space, actions, open)
-      }}
-    />
-  ))
-}
-
-async function createSpace(dialog: DialogContext, actions: SyncSettingsActions, open: () => void) {
-  const name = await DialogPrompt.show(dialog, "Space name", { placeholder: "My sessions" })
-  if (!name?.trim()) return open()
-  dialog.replace(() => (
-    <DialogSelect<"off" | "encrypted">
-      title="Encryption"
-      current="off"
-      options={[
-        {
-          title: "Off",
-          description: "Integrity protected; content is visible to the storage provider",
-          value: "off" as const,
-        },
-        { title: "On", description: "Requires the recovery key on every device", value: "encrypted" as const },
-      ]}
-      onSelect={(option) =>
-        void actions
-          .createSpace({ name: name.trim(), encryption: option.value })
-          .then(async (result) => {
-            const finish = async () => {
-              const activated = await finishActivation(dialog, name.trim(), result.spaceID, result.activation, actions)
-              if (activated) await actions.promptUnassigned(false)
-              open()
-            }
-            if (result.recoveryKey) return showRecoveryKey(dialog, result.recoveryKey, actions, finish)
-            await finish()
-          })
-          .catch(actions.onError)
-      }
-    />
-  ))
-}
-
-function showRecoveryKey(
-  dialog: DialogContext,
-  key: string,
-  actions: SyncSettingsActions,
-  next: () => void | Promise<void>,
-) {
-  let finished = false
-  const finish = () => {
-    if (finished) return
-    finished = true
-    void Promise.resolve(next()).catch(actions.onError)
-  }
-  dialog.replace(
-    () => (
-      <DialogSelect
-        title="Recovery key"
-        options={[
-          { title: maskRecoveryKey(key), description: "Keep this key outside OpenCode", value: "summary" },
-          { title: "Copy recovery key", value: "copy" },
-        ]}
-        onSelect={(option) => {
-          if (option.value === "copy") void actions.copy(key).then(finish)
-        }}
-      />
-    ),
-    finish,
-  )
-}
-
-function showSpaceActions(dialog: DialogContext, space: SyncSpace, actions: SyncSettingsActions, open: () => void) {
-  const options: DialogSelectOption<string>[] = []
-  if (space.membership === "available") options.push({ title: "Enter space", value: "enter" })
-  if (space.membership === "joined") options.push({ title: "Switch to this space", value: "switch" })
-  if (space.membership !== "available") options.push({ title: "Leave on this device", value: "leave" })
-  if (space.supported) options.push({ title: "Delete space globally", value: "delete" })
-  dialog.replace(() => (
-    <DialogSelect
-      title={space.name}
-      options={options}
-      onSelect={(option) => void runSpaceAction(dialog, space, option.value, actions, open).catch(actions.onError)}
-    />
-  ))
-}
-
-async function runSpaceAction(
-  dialog: DialogContext,
-  space: SyncSpace,
-  value: string,
-  actions: SyncSettingsActions,
-  open: () => void,
-) {
-  if (value === "enter") {
-    const recoveryKey =
-      space.encryption === "encrypted"
-        ? await DialogPrompt.show(dialog, "Recovery key", { placeholder: "Paste recovery key" })
-        : undefined
-    if (space.encryption === "encrypted" && !recoveryKey?.trim()) return open()
-    const diff = await actions.prepareEnter({ spaceID: space.id, recoveryKey: recoveryKey?.trim() })
-    const confirmed = await DialogConfirm.show(dialog, `Enter ${space.name}?`, diffSummary(diff))
-    if (confirmed) {
-      const result = await actions.enterSpace({ spaceID: space.id, recoveryKey: recoveryKey?.trim() })
-      if (await finishActivation(dialog, space.name, space.id, result.status, actions)) {
-        await actions.promptUnassigned(false)
-      }
-    }
-  }
-  if (value === "switch") {
-    if (space.state === "syncing") return open()
-    const confirmed = await DialogConfirm.show(
-      dialog,
-      `Switch to ${space.name}?`,
-      "Stop the current space and activate this space on this device. Membership and pending data remain.",
-    )
-    if (!confirmed) return open()
-    const result = await actions.switchSpace({ spaceID: space.id, force: false })
-    if (result.status === "blocked") {
-      const force = await DialogConfirm.show(
-        dialog,
-        `Force switch to ${space.name}?`,
-        "Pending data stays with the old space and is not uploaded to the new space.",
-      )
-      if (force) await actions.switchSpace({ spaceID: space.id, force: true })
-    }
-  }
-  if (value === "leave") {
-    const confirmed = await DialogConfirm.show(
-      dialog,
-      `Leave ${space.name} on this device?`,
-      "Remove this space's local membership and key. Local Sessions become unassigned; cloud data remains.",
-    )
-    if (confirmed) await actions.leaveSpace(space.id)
-  }
-  if (value === "delete") {
-    const confirmed = await DialogConfirm.show(
-      dialog,
-      `Delete ${space.name} globally?`,
-      "Permanently delete this sync space for all devices. Local Sessions remain unassigned; the space cannot be restored.",
-    )
-    if (confirmed) await actions.deleteSpace(space.id)
-  }
-  open()
-}
-
-async function finishActivation(
-  dialog: DialogContext,
-  name: string,
-  spaceID: string,
-  status: "switched" | "blocked",
-  actions: SyncSettingsActions,
-) {
-  if (status === "switched") return true
-  const force = await DialogConfirm.show(
-    dialog,
-    `Force switch to ${name}?`,
-    "Pending data stays with the old space and is not uploaded to the new space.",
-  )
-  if (!force) return false
-  return (await actions.switchSpace({ spaceID, force: true })).status === "switched"
 }
 
 export function showSyncDevices(
@@ -501,7 +266,7 @@ export function showSyncDevices(
             category: "Location",
           },
         ]}
-        footer={<text>{syncRemoteStatus(model().remote)}</text>}
+        footer={<text>{syncCloudStatus(model().cloud)}</text>}
         onSelect={(option) => {
           if (option.value.type === "bindings") return showBindings(dialog, model, actions, open)
           showDeviceActions(dialog, option.value.device, actions, open)
@@ -531,7 +296,7 @@ function showDeviceActions(dialog: DialogContext, device: SyncDevice, actions: S
         void DialogConfirm.show(
           dialog,
           `Revoke ${device.name}?`,
-          "Remove this device from the active space. Existing local data is not remotely erased.",
+          "This device will no longer block deletion cleanup. Its local data is not remotely erased.",
         )
           .then(async (confirmed) => {
             if (confirmed) await actions.revokeDevice(device.id)
@@ -559,7 +324,7 @@ function showBindings(
         value: binding,
         category: "Bindings",
         disabled: binding.sessionIDs.length === 0,
-        details: binding.sessionIDs.length === 0 ? ["No active-space Sessions use this label"] : undefined,
+        details: binding.sessionIDs.length === 0 ? ["No synced Sessions use this label"] : undefined,
       }))}
       onSelect={(option) => void editBinding(dialog, option.value, actions, open).catch(actions.onError)}
     />
@@ -607,40 +372,6 @@ async function editBinding(
   open()
 }
 
-export async function showAssignUnassignedSessions(
-  dialog: DialogContext,
-  input: {
-    sessionIDs: readonly string[]
-    decide: (assignAll: boolean, sessionIDs: readonly string[]) => Promise<void>
-  },
-) {
-  if (input.sessionIDs.length === 0) return input.decide(false, input.sessionIDs)
-  let decided = false
-  await new Promise<void>((resolve, reject) =>
-    dialog.replace(
-      () => (
-        <DialogSelect
-          title="Add unassigned Sessions?"
-          footer={<text>Add all {input.sessionIDs.length} unassigned Sessions to the active sync space?</text>}
-          options={[
-            { title: "Yes, add all", value: true },
-            { title: "No", value: false },
-          ]}
-          onSelect={(option) => {
-            decided = true
-            void input.decide(option.value, input.sessionIDs).then(resolve, reject)
-          }}
-        />
-      ),
-      () => {
-        if (decided) return resolve()
-        decided = true
-        void input.decide(false, input.sessionIDs).then(resolve, reject)
-      },
-    ),
-  )
-}
-
 function disconnectedValues(model: SyncSettingsViewModel) {
   if (model.account.state !== "disconnected") return []
   return [
@@ -651,20 +382,8 @@ function disconnectedValues(model: SyncSettingsViewModel) {
   ]
 }
 
-function connectedValues(model: SyncSettingsViewModel) {
-  return [
-    "account",
-    "refresh",
-    "active",
-    "sync",
-    "enabled",
-    "interval",
-    "spaces",
-    "devices",
-    ...(model.activeSpace?.encryption === "encrypted" ? ["recovery"] : []),
-    "remove",
-    "logout",
-  ]
+function connectedValues() {
+  return ["account", "enabled", "sync", "interval", "devices", "cloud", "clear", "logout"]
 }
 
 function oauthStatus(state: Extract<SyncSettingsViewModel["account"], { state: "disconnected" }>["oauth"]["state"]) {
@@ -678,25 +397,6 @@ function intervalLabel(value: SyncInterval) {
   if (value === 30) return "30 sec"
   if (value === 60) return "1 min"
   return "5 min"
-}
-
-function spaceSummary(space: SyncSpace) {
-  return [
-    `Encryption ${space.encryption === "off" ? "Off" : "On"}`,
-    ...(space.devices === undefined ? [] : [`${space.devices} devices`]),
-    ...(space.sessions === undefined ? [] : [`${space.sessions} Sessions`]),
-  ].join(" · ")
-}
-
-function diffSummary(diff: SyncDiff) {
-  return (
-    [
-      ...(diff.localOnly === undefined ? [] : [`Local only ${diff.localOnly}`]),
-      ...(diff.cloudOnly === undefined ? [] : [`Cloud only ${diff.cloudOnly}`]),
-      ...(diff.shared === undefined ? [] : [`Shared ${diff.shared}`]),
-      ...(diff.conflicts === undefined ? [] : [`Conflicts ${diff.conflicts}`]),
-    ].join(" · ") || "Review this space before entering"
-  )
 }
 
 function deviceStatus(state: SyncDevice["state"]) {

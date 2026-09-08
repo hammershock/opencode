@@ -30,14 +30,23 @@ function provider() {
     },
     uploadAtomic: async (path, bytes, precondition) => {
       const current = files.get(path)
-      if (precondition.type === "absent" && current) throw new Error("exists")
+      if (precondition.type === "absent" && current)
+        throw new SyncProvider.ProviderError("memory", "upload", "conflict", false)
       if (precondition.type === "version" && String(current?.version) !== precondition.version)
-        throw new Error("conflict")
+        throw new SyncProvider.ProviderError("memory", "upload", "conflict", false)
       const value = { bytes: bytes.slice(), version: (current?.version ?? 0) + 1 }
       files.set(path, value)
       return { path, version: String(value.version), size: bytes.length }
     },
-    deleteBatch: async () => [],
+    deleteBatch: async (objects) =>
+      objects.map((object) => {
+        const current = files.get(object.path)
+        if (!current) return { path: object.path, status: "missing" as const }
+        if (String(current.version) !== object.version)
+          return { path: object.path, status: "conflict" as const, version: String(current.version) }
+        files.delete(object.path)
+        return { path: object.path, status: "deleted" as const }
+      }),
   }
   return { adapter, files }
 }
@@ -88,6 +97,11 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
           if (!deletions.some((known) => known.sessionID === item.sessionID)) deletions.push(item)
           yield* projector.delete(item)
         }
+      }),
+    forgetDeletion: (sessionID: string) =>
+      Effect.sync(() => {
+        const index = deletions.findIndex((item) => item.sessionID === sessionID)
+        if (index >= 0) deletions.splice(index, 1)
       }),
     acquire: () => Effect.succeed(true),
     renew: () => Effect.succeed(true),
@@ -472,18 +486,6 @@ describe("SyncRuntime", () => {
     const codec = SyncCodec.plaintext()
     const sessionID = "deleted-session"
     const tombstone = SyncEvent.Tombstone.make({ id: "delete-on-a", sessionID, deletedAt: 2 })
-    const deviceA = store(SyncEvent.DeviceID.make("a"), undefined, [{ kind: "tombstone", tombstone }])
-    const runtimeA = SyncRuntime.make({
-      config: { deviceID: SyncEvent.DeviceID.make("a"), enabled: true },
-      codec,
-      provider: remote.adapter,
-      store: deviceA.service,
-      projector: { project: () => Effect.void, delete: () => Effect.void },
-      metadata: () => Effect.succeed([]),
-      metadataProjector: { apply: () => Effect.void },
-    })
-    await Effect.runPromise(runtimeA.upload())
-
     const stale = SyncEvent.Envelope.make({
       id: "stale-on-b",
       aggregateID: sessionID,
@@ -519,8 +521,32 @@ describe("SyncRuntime", () => {
         ),
       metadataProjector: { apply: () => Effect.void },
     })
+    // B first publishes a reference, then goes offline while A deletes the
+    // Session. A must retain the marker and payload until B returns.
     await Effect.runPromise(runtimeB.upload())
+
+    const deviceA = store(SyncEvent.DeviceID.make("a"), undefined, [{ kind: "tombstone", tombstone }])
+    const runtimeA = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("a"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceA.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(runtimeA.upload())
+    expect([...remote.files.keys()].some((path) => path === `deletions/${sessionID}/marker.json`)).toBeTrue()
+
+    // Pulling applies the deletion locally, but is deliberately not enough to
+    // release B's reference: its stale remote head has not been replaced yet.
+    await Effect.runPromise(runtimeB.pull())
     expect(visibleOnB).toBeFalse()
+    expect([...remote.files.keys()].some((path) => path === `deletions/${sessionID}/acks/b.json`)).toBeFalse()
+    expect([...remote.files.keys()].some((path) => path === `deletions/${sessionID}/marker.json`)).toBeTrue()
+
+    await Effect.runPromise(runtimeB.upload())
+    expect([...remote.files.keys()].some((path) => path.startsWith(`deletions/${sessionID}/`))).toBeFalse()
 
     const deviceC = store(SyncEvent.DeviceID.make("c"))
     const visibleOnC: SyncRuntime.Metadata[] = []
@@ -538,7 +564,7 @@ describe("SyncRuntime", () => {
       metadataProjector: { apply: (items) => Effect.sync(() => void visibleOnC.push(...items)) },
     })
     await Effect.runPromise(runtimeC.pull())
-    expect(deletedOnC).toBeTrue()
+    expect(deletedOnC).toBeFalse()
     expect(visibleOnC.some((item) => item.sessionID === sessionID)).toBeFalse()
     expect(deviceC.applied).toEqual([])
   })

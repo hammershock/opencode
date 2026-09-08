@@ -12,6 +12,7 @@ import { SyncSpace } from "./space"
 import { SyncSpaceCatalog } from "./space-catalog"
 import { SyncState } from "./state"
 import { SyncRuntime } from "./runtime"
+import { SyncRoot } from "./root"
 
 export const BeginInput = Schema.Struct({
   redirectURI: Schema.NonEmptyString,
@@ -52,6 +53,8 @@ export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetup
     "remote",
     "storage",
     "locked",
+    "remote-uninitialized",
+    "incompatible-remote",
   ]),
   diagnostic: Schema.optional(SyncRuntime.Diagnostic),
 }) {}
@@ -67,6 +70,9 @@ export interface Interface {
   readonly complete: (input: CompleteInput) => Effect.Effect<SyncState.State, SetupError>
   readonly switchAccount: (input: CompleteInput) => Effect.Effect<SyncState.State, SetupError>
   readonly logout: () => Effect.Effect<SyncState.State, SetupError>
+  readonly cloudStatus: () => Effect.Effect<SyncRoot.Inspection, SetupError>
+  readonly initializeCloud: () => Effect.Effect<SyncState.State, SetupError>
+  readonly clearCloud: () => Effect.Effect<SyncState.State, SetupError>
   readonly discover: () => Effect.Effect<SyncSpaceCatalog.Discovery, SetupError>
   readonly create: (input: CreateInput) => Effect.Effect<
     {
@@ -148,7 +154,9 @@ export function make(input: {
           {
             ...current,
             account: { id: account.id, maskedDisplay: account.maskedDisplay },
+            enabled: false,
             activeSpaceID: current.account?.id === account.id ? current.activeSpaceID : undefined,
+            spaces: current.account?.id === account.id ? current.spaces : [],
           },
           current.revision,
         ),
@@ -175,23 +183,81 @@ export function make(input: {
     const credentialAccount = await BaiduAuth.account(input.store, current.deviceID)
     if (!credentialAccount) throw new SetupError({ kind: "unauthenticated" })
     if (credentialAccount.id !== current.account.id) throw new SetupError({ kind: "account-mismatch" })
+    const provider =
+      input.provider ??
+      BaiduSyncProvider.adapter({
+        store: input.store,
+        deviceID: current.deviceID,
+        root: SyncRoot.REMOTE_ROOT,
+        request: input.request,
+        now,
+      })
     return {
       current,
+      root: SyncRoot.make({ provider, now }),
       catalog: SyncSpaceCatalog.make({
-        provider:
-          input.provider ??
-          BaiduSyncProvider.adapter({
-            store: input.store,
-            deviceID: current.deviceID,
-            root: "/apps/opencode-sync",
-            request: input.request,
-            now,
-          }),
+        provider,
         now,
         createSpace: input.createSpace,
       }),
     }
   }
+  const cloudStatus = Effect.fn("SyncSetup.cloudStatus")(() =>
+    effect("remote", async () => (await remote()).root.inspect(), "catalog"),
+  )
+  const initializeCloud = Effect.fn("SyncSetup.initializeCloud")(() =>
+    effect(
+      "remote",
+      async () => {
+        const context = await remote()
+        const manifest = await context.root.initialize()
+        const descriptor: SyncSpace.Descriptor = {
+          namespaceID: SyncRoot.INTERNAL_SCOPE,
+          name: "Baidu Netdisk",
+          protocol: manifest.protocol,
+          encryption: "none",
+          createdAt: manifest.createdAt,
+          updatedAt: manifest.createdAt,
+          summary: { sessions: 0, devices: 0, updatedAt: manifest.createdAt },
+          revision: 1,
+        }
+        const accountState = {
+          ...context.current,
+          activeSpaceID: undefined,
+          spaces: [],
+        }
+        return states.write(
+          SyncState.activate(
+            SyncState.bind(accountState, {
+              accountID: context.current.account!.id,
+              descriptor,
+              remoteRoot: SyncRoot.REMOTE_ROOT,
+              joinedAt: now(),
+            }),
+            SyncRoot.INTERNAL_SCOPE,
+          ),
+          context.current.revision,
+        )
+      },
+      "catalog",
+    ),
+  )
+  const clearCloud = Effect.fn("SyncSetup.clearCloud")(() =>
+    effect(
+      "remote",
+      async () => {
+        const context = await remote()
+        await context.root.clear()
+        return states.update((current) => ({
+          ...current,
+          enabled: false,
+          activeSpaceID: undefined,
+          spaces: current.spaces.filter((item) => item.descriptor.namespaceID !== SyncRoot.INTERNAL_SCOPE),
+        }))
+      },
+      "delete",
+    ),
+  )
   const discover = Effect.fn("SyncSetup.discover")(() =>
     effect("remote", async () => (await remote()).catalog.discover(), "catalog"),
   )
@@ -338,6 +404,9 @@ export function make(input: {
     complete,
     switchAccount,
     logout,
+    cloudStatus,
+    initializeCloud,
+    clearCloud,
     discover,
     create,
     join,
@@ -361,7 +430,10 @@ function binding(state: SyncState.State, descriptor: SyncSpace.Descriptor, joine
   return {
     accountID: state.account.id,
     descriptor,
-    remoteRoot: `/apps/opencode-sync/spaces/${descriptor.namespaceID}`,
+    remoteRoot:
+      descriptor.namespaceID === SyncRoot.INTERNAL_SCOPE
+        ? SyncRoot.REMOTE_ROOT
+        : `${SyncRoot.REMOTE_ROOT}/spaces/${descriptor.namespaceID}`,
     joinedAt,
   }
 }

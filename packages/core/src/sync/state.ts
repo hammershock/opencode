@@ -67,7 +67,7 @@ export function empty(deviceName: string, deviceID: string = crypto.randomUUID()
     provider: "baidu",
     deviceID,
     deviceName: deviceName.trim(),
-    enabled: true,
+    enabled: false,
     intervalSeconds: 30,
     spaces: [],
   }

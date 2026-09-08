@@ -16,6 +16,7 @@ export interface Interface {
     sessionIDs: readonly string[],
     spaceID: string,
   ) => Effect.Effect<readonly string[], unknown>
+  readonly assignAll: (spaceID: string) => Effect.Effect<readonly string[], unknown>
   readonly unassignSpace: (spaceID: string) => Effect.Effect<readonly string[], unknown>
   readonly unassignAll: () => Effect.Effect<readonly string[], unknown>
   readonly reconcile: (validSpaceIDs: ReadonlySet<string>) => Effect.Effect<readonly string[], unknown>
@@ -67,6 +68,29 @@ export const layer = Layer.effect(
       )
       return ids
     })
+    const assignAll = Effect.fn("SyncMembership.assignAll")(function* (spaceID: string) {
+      const rows = yield* db.select({ id: SessionTable.id }).from(SessionTable).all()
+      const ids = rows.map((row) => String(row.id))
+      const existing = yield* ownership.list()
+      yield* db
+        .update(SessionTable)
+        .set({ sync_space_id: spaceID, time_updated: sql`${SessionTable.time_updated}` })
+        .run()
+      yield* Effect.forEach(
+        existing.filter((item) => item.spaceID !== spaceID),
+        (item) => ownership.unassign(item.sessionID),
+        { discard: true },
+      )
+      yield* Effect.forEach(
+        ids,
+        (sessionID) =>
+          ownership
+            .assign(sessionID, spaceID)
+            .pipe(Effect.andThen(SessionSync.backfill(db, store, sessionID, spaceID))),
+        { discard: true },
+      )
+      return ids
+    })
     const unassignSpace = Effect.fn("SyncMembership.unassignSpace")(function* (spaceID: string) {
       const ids = (yield* ownership.list(spaceID)).map((item) => item.sessionID)
       yield* db
@@ -102,7 +126,7 @@ export const layer = Layer.effect(
       const spaces = yield* stale(validSpaceIDs)
       return (yield* Effect.forEach(spaces, unassignSpace)).flat()
     })
-    return Service.of({ unassigned, assignUnassigned, unassignSpace, unassignAll, reconcile, stale })
+    return Service.of({ unassigned, assignUnassigned, assignAll, unassignSpace, unassignAll, reconcile, stale })
   }),
 )
 

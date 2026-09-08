@@ -340,8 +340,9 @@ export function bareCommand(shell: string, command: string) {
 export function parseCompletionOutput(text: string, token: string, range: { start: number; end: number }) {
   let kind: CompletionKind = "command"
   return text.split(/\r?\n/).flatMap((candidate) => {
+    if (!candidate) return []
     if (candidate.startsWith("__OPENCODE_NATIVE__\t"))
-      return candidate.length === "__OPENCODE_NATIVE__\t".length
+      return candidate.length === "__OPENCODE_NATIVE__\t".length || candidate.startsWith("__OPENCODE_NATIVE__\t\t")
         ? []
         : [nativeItem(candidate.slice("__OPENCODE_NATIVE__\t".length), range)]
     if (candidate === "__OPENCODE_ALIAS__") {

@@ -3,7 +3,17 @@ import { pathToFileURL } from "bun"
 import fuzzysort from "fuzzysort"
 import path from "path"
 import { firstBy } from "remeda"
-import { createMemo, createResource, createEffect, onMount, onCleanup, Index, Show, createSignal } from "solid-js"
+import {
+  createMemo,
+  createResource,
+  createEffect,
+  onMount,
+  onCleanup,
+  Index,
+  Show,
+  createSignal,
+  untrack,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { useEditorContext } from "../../context/editor"
 import { useProject } from "../../context/project"
@@ -136,6 +146,14 @@ export function invalidateShellCompletion(
   if (visible === "shell") hide()
 }
 
+export function invalidateShellCompletionContext(
+  generation: ReturnType<typeof createShellCompletionGeneration>,
+  visible: () => AutocompleteRef["visible"],
+  hide: () => void,
+) {
+  untrack(() => invalidateShellCompletion(generation, visible(), hide))
+}
+
 export function Autocomplete(props: {
   value: string
   shell: () => boolean
@@ -179,7 +197,7 @@ export function Autocomplete(props: {
   createEffect(() => {
     props.shellContextVersion
     if (!props.shell()) return
-    invalidateShellCompletion(shellGeneration, store.visible, hide)
+    invalidateShellCompletionContext(shellGeneration, () => store.visible, hide)
   })
 
   const [positionTick, setPositionTick] = createSignal(0)

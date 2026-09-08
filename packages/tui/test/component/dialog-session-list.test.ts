@@ -86,7 +86,7 @@ describe("dialog session list", () => {
     expect(dialogSessionListLocationFilter({ mode: "cwd" })).toEqual({ scope: "project" })
   })
 
-  test("Current Sync Space excludes unassigned and inactive local Sessions while All keeps every local Session", () => {
+  test("Synced filters the internal account scope while All keeps every local Session", () => {
     const active = { syncSpaceID: "active" }
     const inactive = { syncSpaceID: "inactive" }
     const unassigned = {}
@@ -103,11 +103,11 @@ describe("dialog session list", () => {
     ).toHaveLength(3)
   })
 
-  test("keeps the selected Scope independent from delayed sync-space discovery", () => {
+  test("keeps the selected Scope independent from delayed sync discovery", () => {
     const selected = { focus: "scope" as const, cwd: "cwd" as const, scope: "all" as const }
     expect(dialogSessionListScopeSelection(selected.scope)).toBe(1)
 
-    // An active space arriving asynchronously changes the result set, not the
+    // The internal sync scope arriving asynchronously changes the result set, not the
     // user's dialog-local selection.
     expect(sessionInDialogSyncScope({ syncSpaceID: "active" }, selected.scope)).toBe(true)
     expect(sessionInDialogSyncScope({ syncSpaceID: "active" }, selected.scope, "active")).toBe(true)

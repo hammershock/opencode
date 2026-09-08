@@ -43,7 +43,7 @@ export const syncCommands = [
     id: "fork.sync.devices",
     path: ["devices"],
     title: "Sync devices",
-    description: "Manage devices for the active sync space",
+    description: "Manage devices connected to Session sync",
     category: "Sync",
     provenance: { type: "core", feature: "cloud-sync" },
     requires: {},

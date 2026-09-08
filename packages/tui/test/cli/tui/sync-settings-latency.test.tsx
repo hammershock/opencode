@@ -9,6 +9,7 @@ import { TuiConfigProvider } from "../../../src/config"
 import { ClipboardProvider } from "../../../src/context/clipboard"
 import { KVProvider } from "../../../src/context/kv"
 import { SDKProvider } from "../../../src/context/sdk"
+import { RemoteStatusProvider } from "../../../src/context/remote-status"
 import { SyncSettingsProvider, useSyncSettings } from "../../../src/context/sync-settings"
 import { ThemeProvider } from "../../../src/context/theme"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "../../../src/keymap"
@@ -40,15 +41,15 @@ test("opens from local state while a remote refresh is slow", async () => {
     deviceID: "device-local",
     deviceName: "Local device",
     account: { id: "account-local", maskedDisplay: "lo***@example.com" },
-    activeSpaceID: "space-local",
+    activeSpaceID: "account-v1",
     enabled: true,
     intervalSeconds: 30,
     spaces: [
       {
         accountID: "account-local",
         descriptor: {
-          namespaceID: "space-local",
-          name: "Local space",
+          namespaceID: "account-v1",
+          name: "Baidu Netdisk",
           protocol: { major: 1, minor: 0 },
           encryption: "none",
           createdAt: 1,
@@ -56,29 +57,16 @@ test("opens from local state while a remote refresh is slow", async () => {
           summary: { sessions: 3, devices: 2, updatedAt: 2 },
           revision: 0,
         },
-        remoteRoot: "/apps/opencode-sync/spaces/space-local",
+        remoteRoot: "/apps/opencode-sync/session-sync",
         joinedAt: 1,
       },
     ],
   }
   const calls: Array<{ method: string; path: string }> = []
   let releaseStatus!: () => void
-  let statusUnavailable = false
-  const remoteSpaces = Array.from({ length: 6 }, (_, index) => ({
-    status: "compatible",
-    descriptor: {
-      namespaceID: `space-remote-${index}`,
-      name: `Remote ${index}`,
-      protocol: { major: 1, minor: 0 },
-      encryption: "none",
-      createdAt: 1,
-      updatedAt: 2,
-      summary: { sessions: 0, devices: 0, updatedAt: 2 },
-      revision: 0,
-    },
-  }))
-  let discoveryCalls = 0
-  let delayNextDiscovery = false
+  let cloudUnavailable = false
+  let cloudCalls = 0
+  let delayNextCloud = false
   const statusGate = new Promise<void>((resolve) => {
     releaseStatus = resolve
   })
@@ -92,9 +80,18 @@ test("opens from local state while a remote refresh is slow", async () => {
       state = { ...state, enabled: body.enabled }
       return json(state)
     }
-    if (url.pathname === "/global/sync/status") {
+    if (url.pathname === "/global/sync/cloud") {
+      cloudCalls++
+      if (delayNextCloud) {
+        delayNextCloud = false
+        await new Promise<void>((resolve) => request.signal.addEventListener("abort", () => resolve(), { once: true }))
+        return new Response(null, { status: 503 })
+      }
       await statusGate
-      if (statusUnavailable) return new Response(null, { status: 503 })
+      if (cloudUnavailable) return new Response(null, { status: 503 })
+      return json({ status: "ready", manifest: { version: 1, protocol: { major: 1, minor: 0 }, createdAt: 1 } })
+    }
+    if (url.pathname === "/global/sync/status") {
       return json({
         configured: true,
         initialized: true,
@@ -102,28 +99,18 @@ test("opens from local state while a remote refresh is slow", async () => {
         enabled: true,
         locked: false,
         provider: "baidu",
-        namespaceID: "space-local",
+        namespaceID: "account-v1",
         deviceID: "device-local",
         account: state.account,
-        activeSpace: { namespaceID: "space-local", name: "Local space", encryption: "none" },
+        activeSpace: { namespaceID: "account-v1", name: "Baidu Netdisk", encryption: "none" },
         intervalSeconds: 30,
         outbox: 0,
         cursors: {},
       })
     }
-    if (url.pathname === "/global/sync/spaces") {
-      discoveryCalls++
-      if (delayNextDiscovery) {
-        delayNextDiscovery = false
-        await new Promise<void>((resolve) => request.signal.addEventListener("abort", () => resolve(), { once: true }))
-        return new Response(null, { status: 503 })
-      }
-      return json({ account: state.account, spaces: remoteSpaces })
-    }
     if (url.pathname === "/global/sync/sessions") return json([])
     if (url.pathname === "/global/sync/devices")
-      return json({ namespaceID: "space-local", devices: [], acknowledgements: {} })
-    if (url.pathname === "/global/sync/unassigned") return json([])
+      return json({ namespaceID: "account-v1", devices: [], acknowledgements: {} })
     if (url.pathname === "/api/target-binding") return json({ revision: "revision-local", bindings: {} })
     throw new Error(`unexpected request: ${request.method} ${url.pathname}`)
   }) as typeof globalThis.fetch
@@ -154,13 +141,15 @@ test("opens from local state while a remote refresh is slow", async () => {
               <KVProvider>
                 <ThemeProvider mode="dark">
                   <ToastProvider>
-                    <SDKProvider url="http://test" fetch={fetch} events={eventSource()}>
-                      <DialogProvider>
-                        <SyncSettingsProvider>
-                          <Probe />
-                        </SyncSettingsProvider>
-                      </DialogProvider>
-                    </SDKProvider>
+                    <RemoteStatusProvider>
+                      <SDKProvider url="http://test" fetch={fetch} events={eventSource()}>
+                        <DialogProvider>
+                          <SyncSettingsProvider>
+                            <Probe />
+                          </SyncSettingsProvider>
+                        </DialogProvider>
+                      </SDKProvider>
+                    </RemoteStatusProvider>
                   </ToastProvider>
                 </ThemeProvider>
               </KVProvider>
@@ -171,7 +160,7 @@ test("opens from local state while a remote refresh is slow", async () => {
     )
   }
 
-  const app = await testRender(() => <Harness />, { width: 72, height: 22, kittyKeyboard: true })
+  const app = await testRender(() => <Harness />, { width: 72, height: 30, kittyKeyboard: true })
   const waitFrame = async (value: string) => {
     await wait(`${value} frame`, async () => {
       await app.renderOnce()
@@ -186,47 +175,44 @@ test("opens from local state while a remote refresh is slow", async () => {
     const started = performance.now()
     expect(await settings.open()).toBe("completed")
     expect(performance.now() - started).toBeLessThan(100)
-    await waitFrame("Local space")
+    await waitFrame("lo***@example.com")
 
     expect(app.captureCharFrame()).toContain("not checked")
     expect(calls).toEqual([{ method: "GET", path: "/global/sync/state" }])
     expect(calls.some((call) => call.method !== "GET")).toBe(false)
 
-    for (let index = 0; index < 4; index++) app.mockInput.pressArrow("down")
+    app.mockInput.pressArrow("down")
     app.mockInput.pressEnter()
     await wait("local enabled edit", () => calls.some((call) => call.path === "/global/sync/enabled"))
     await wait("local enabled model", () => settings.model().enabled === false)
     expect(calls.filter((call) => call.method !== "GET")).toEqual([{ method: "PATCH", path: "/global/sync/enabled" }])
-    expect(calls.some((call) => call.path === "/global/sync/status" || call.path === "/global/sync/spaces")).toBe(false)
+    expect(calls.some((call) => call.path === "/global/sync/status" || call.path === "/global/sync/cloud")).toBe(false)
 
     const refreshing = settings.refresh(true)
-    await wait("checking model", () => settings.model().remote === "checking")
+    await wait("checking model", () => settings.model().cloud === "checking")
     await waitFrame("checking")
-    expect(app.captureCharFrame()).toContain("Local space")
+    expect(app.captureCharFrame()).toContain("lo***@example.com")
 
     releaseStatus()
     await refreshing
-    await wait("ready model", () => settings.model().remote === "ready")
-    expect(settings.model().spaces).toHaveLength(7)
+    await wait("ready model", () => settings.model().cloud === "ready")
     await waitFrame("ready")
-    expect(app.captureCharFrame()).toContain("Local space")
+    expect(app.captureCharFrame()).toContain("lo***@example.com")
 
-    statusUnavailable = true
+    cloudUnavailable = true
     await settings.refresh(true)
-    await wait("unavailable model", () => settings.model().remote === "unavailable")
-    expect(settings.model().spaces).toHaveLength(7)
+    await wait("unavailable model", () => settings.model().cloud === "unavailable")
     await waitFrame("unavailable")
-    expect(app.captureCharFrame()).toContain("Local space")
+    expect(app.captureCharFrame()).toContain("lo***@example.com")
 
-    statusUnavailable = false
-    delayNextDiscovery = true
+    cloudUnavailable = false
+    delayNextCloud = true
     const stale = settings.refresh(true)
-    await wait("stale discovery", () => discoveryCalls === 2)
+    await wait("stale cloud request", () => cloudCalls >= 3)
     const latest = settings.refresh(true)
     await latest
     await stale
-    expect(settings.model().remote).toBe("ready")
-    expect(settings.model().spaces).toHaveLength(7)
+    expect(settings.model().cloud).toBe("ready")
   } finally {
     app.renderer.destroy()
   }

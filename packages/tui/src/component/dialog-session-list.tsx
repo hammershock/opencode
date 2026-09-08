@@ -88,16 +88,14 @@ export function sessionInDialogSyncScope(
   scope: DialogSessionListFilters["scope"],
   activeSpaceID?: string,
 ) {
-  // Without an active space there is no meaningful "current" scope.  Keep
-  // the default view useful by degrading it to the locally-held All view.
+  // Without an initialized account sync root there is no meaningful synced
+  // scope. Keep the view useful by degrading it to the local All view.
   if (scope === "all" || activeSpaceID === undefined) return true
   return activeSpaceID !== undefined && session.syncSpaceID === activeSpaceID
 }
 
 export function includeCloudSessionInDialogScope(scope: DialogSessionListFilters["scope"], activeSpaceID?: string) {
-  // The API exposes cloud-only metadata for the active space only.  Both
-  // views may include that already-fetched metadata; All must never fetch a
-  // non-active space to fill the list.
+  // The API exposes metadata for the single account sync root.
   return activeSpaceID !== undefined
 }
 
@@ -168,7 +166,7 @@ export function DialogSessionList() {
   const [filters, setFilters] = createSignal<DialogSessionListFilters>({
     focus: "cwd",
     cwd: kv.get("session_directory_filter_enabled", true) ? "cwd" : "all",
-    scope: "current",
+    scope: "all",
   })
   const deleteHint = useCommandShortcut("session.delete")
   const quickSwitch1 = useCommandShortcut("session.quick_switch.1")
@@ -446,7 +444,7 @@ export function DialogSessionList() {
           />
           <SessionFilterRow
             title="Scope"
-            values={["Current Sync Space", "All"]}
+            values={["Synced", "All"]}
             selected={dialogSessionListScopeSelection(filters().scope)}
             focused={filters().focus === "scope"}
           />

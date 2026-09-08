@@ -224,6 +224,12 @@ function syncOperation(pathname: string, method: string) {
   if (pathname === "/global/sync/oauth/begin") return { operation: "connect account", phase: "authorization" }
   if (pathname === "/global/sync/oauth/complete" || pathname === "/global/sync/oauth/switch-account")
     return { operation: "connect account", phase: "token exchange" }
+  if (pathname === "/global/sync/cloud" && method === "GET")
+    return { operation: "check cloud status", phase: "manifest" }
+  if (pathname === "/global/sync/cloud" && method === "POST")
+    return { operation: "initialize cloud sync", phase: "prepare directory" }
+  if (pathname === "/global/sync/cloud" && method === "DELETE")
+    return { operation: "clear cloud sync data", phase: "invalidate and delete" }
   if (pathname === "/global/sync/spaces" && method === "GET")
     return { operation: "refresh cloud status", phase: "discover spaces" }
   if (pathname === "/global/sync/spaces" && method === "POST")

@@ -201,7 +201,7 @@ function remoteRequest(input: RequestInfo | URL, init?: RequestInit) {
   if (sync) return { area: "Sync" as const, ...sync }
 
   if (url.pathname === "/api/target/wizard/inspect")
-    return { area: "Target" as const, operation: "inspect environment", phase: "SSH" }
+    return { area: "Target" as const, operation: "open target connection", phase: "SSH and Rexd" }
   if (url.pathname === "/api/target/wizard/complete")
     return { area: "Target" as const, operation: "complete remote path", phase: "filesystem" }
   if (/^\/api\/target\/[^/]+\/test$/.test(url.pathname))

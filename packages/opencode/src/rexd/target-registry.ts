@@ -6,7 +6,7 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Layer } from "effect"
 import { RexdError } from "./error"
 import { testRexdConnection } from "./connection"
-import { connectRexd } from "./connection"
+import { connectRexd, type RexdLease } from "./connection"
 import { detectRemotePlatform } from "./prepare"
 import { RexdFiles } from "./location-files"
 import { REXD_BASELINE_VERSION } from "./manifest"
@@ -20,11 +20,15 @@ export const rexdTargetRegistryNode = makeGlobalNode({
     Effect.gen(function* () {
       const global = yield* Global.Service
       const db = (yield* Database.Service).db
+      const wizard = yield* Effect.acquireRelease(
+        Effect.sync(() => makeWizardConnectionProbe()),
+        (current) => Effect.promise(() => current.close()),
+      )
       const probe: TargetRegistry.ConnectionProbe = {
         test: (target) => probeTarget(target, testInstalledRexdConnection, false),
         prepare: (target, directory) => probeTarget(target, testRexdConnection, true, directory),
-        inspect: async (target) => ({ home: (await detectRemotePlatform({ ...target, id: "target-wizard" })).home }),
-        complete: (target, input) => completeRemotePath(target, input),
+        inspect: wizard.inspect,
+        complete: wizard.complete,
       }
       return TargetRegistry.Service.of(
         TargetRegistry.make({
@@ -54,6 +58,82 @@ export const rexdTargetRegistryNode = makeGlobalNode({
   ),
   deps: [Global.node, Database.node],
 })
+
+type WizardConnection = {
+  readonly lease: RexdLease
+  readonly home: string
+}
+
+type WizardEntry = {
+  readonly connection: Promise<WizardConnection>
+  users: number
+  timer?: ReturnType<typeof setTimeout>
+  closed: boolean
+}
+
+export function makeWizardConnectionProbe(
+  dependencies: {
+    readonly connect?: typeof connectRexd
+    readonly detect?: typeof detectRemotePlatform
+    readonly idleMs?: number
+  } = {},
+) {
+  const entries = new Map<string, WizardEntry>()
+  const connect = dependencies.connect ?? connectRexd
+  const detect = dependencies.detect ?? detectRemotePlatform
+  const idleMs = dependencies.idleMs ?? 2 * 60_000
+
+  const evict = (key: string, entry: WizardEntry) => {
+    if (entry.closed) return Promise.resolve()
+    entry.closed = true
+    if (entries.get(key) === entry) entries.delete(key)
+    if (entry.timer) clearTimeout(entry.timer)
+    return entry.connection.then((value) => value.lease.close()).catch(() => undefined)
+  }
+
+  const use = async <T>(target: TargetRegistry.Input, run: (connection: WizardConnection) => Promise<T>) => {
+    const key = wizardConnectionKey(target)
+    const current = entries.get(key)
+    const entry =
+      current ??
+      (() => {
+        const created: WizardEntry = {
+          connection: openWizardConnection(target, connect, detect),
+          users: 0,
+          closed: false,
+        }
+        entries.set(key, created)
+        return created
+      })()
+    if (entry.timer) clearTimeout(entry.timer)
+    entry.timer = undefined
+    entry.users++
+    try {
+      return await run(await entry.connection)
+    } catch (error) {
+      void evict(key, entry)
+      throw error
+    } finally {
+      entry.users--
+      if (entry.users === 0 && !entry.closed) {
+        entry.timer = setTimeout(() => void evict(key, entry), idleMs)
+        entry.timer.unref?.()
+      }
+    }
+  }
+
+  return {
+    inspect: (target: TargetRegistry.Input) => use(target, async (connection) => ({ home: connection.home })),
+    complete: (
+      target: TargetRegistry.Input,
+      input: { readonly value: string; readonly cursor: number; readonly cwd: string },
+    ) => use(target, (connection) => completeRemotePath(connection, input)),
+    close: async () => {
+      const active = [...entries.entries()]
+      await Promise.allSettled(active.map(([key, entry]) => evict(key, entry)))
+    },
+  }
+}
 
 export async function probeTarget(
   target: TargetRegistry.Definition,
@@ -108,18 +188,20 @@ async function testInstalledRexdConnection(
 }
 
 async function completeRemotePath(
-  target: TargetRegistry.Input,
+  connection: WizardConnection,
   input: { readonly value: string; readonly cursor: number; readonly cwd: string },
 ) {
-  const draft = { ...target, id: "target-wizard" }
-  const home = (await detectRemotePlatform(draft)).home
   const prefix = input.value.slice(0, input.cursor)
-  const expanded = prefix === "~" ? home : prefix.startsWith("~/") ? path.posix.join(home, prefix.slice(2)) : prefix
+  const expanded =
+    prefix === "~"
+      ? connection.home
+      : prefix.startsWith("~/")
+        ? path.posix.join(connection.home, prefix.slice(2))
+        : prefix
   const absolute = path.posix.isAbsolute(expanded) ? expanded : path.posix.join(input.cwd, expanded)
   const directory = absolute.endsWith("/") ? absolute : path.posix.dirname(absolute)
   const fragment = absolute.endsWith("/") ? "" : path.posix.basename(absolute)
-  const lease = await connectRexd(draft, { clientVersion: InstallationVersion })
-  const entries = await new RexdFiles("target-wizard", lease).list(directory, input.cwd).finally(() => lease.close())
+  const entries = await new RexdFiles("target-wizard", connection.lease).list(directory, input.cwd)
   const candidates = entries
     .filter((entry) => entry.type === "dir" && entry.name.startsWith(fragment))
     .map((entry) => path.posix.join(directory, entry.name) + "/")
@@ -131,6 +213,42 @@ async function completeRemotePath(
   }, candidates[0] ?? "")
   if (!completion) return { value: input.value, cursor: input.cursor, candidates }
   return { value: completion + input.value.slice(input.cursor), cursor: completion.length, candidates }
+}
+
+async function openWizardConnection(
+  target: TargetRegistry.Input,
+  connect: typeof connectRexd,
+  detect: typeof detectRemotePlatform,
+): Promise<WizardConnection> {
+  const draft = { ...target, id: "target-wizard", workspaceRoots: ["/"] }
+  const lease = await connect(draft, { clientVersion: InstallationVersion })
+  const home =
+    lease.prepared?.home ??
+    (await detect(draft).then(
+      (remote) => remote.home,
+      async (error) => {
+        await lease.close()
+        throw error
+      },
+    ))
+  return {
+    lease,
+    home,
+  }
+}
+
+function wizardConnectionKey(target: TargetRegistry.Input) {
+  const connection =
+    target.connection.type === "ssh-config"
+      ? [target.connection.type, target.connection.host]
+      : [
+          target.connection.type,
+          target.connection.host,
+          target.connection.user,
+          target.connection.port,
+          target.connection.identityFile ?? null,
+        ]
+  return JSON.stringify([connection, target.command ? [target.command.program, target.command.args] : null])
 }
 
 function stage(error: unknown): TargetRegistry.ConnectionStage {

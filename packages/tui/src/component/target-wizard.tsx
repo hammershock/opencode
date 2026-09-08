@@ -2,6 +2,7 @@ import { DialogSelect } from "../ui/dialog-select"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import type { DialogContext } from "../ui/dialog"
+import { useTheme } from "../context/theme"
 
 export type TargetDefinition = {
   id: string
@@ -60,9 +61,7 @@ export async function targetWizard(
   const inspected = !services ? undefined : await services.inspect(draft(["/"]))
   const roots = await DialogPrompt.show(dialog, "Workspace root", {
     value: current?.workspaceRoots.join(", ") ?? "/",
-    description: () => (
-      <text>Comma-separated absolute paths. “/” grants the widest filesystem scope and is not a shell sandbox.</text>
-    ),
+    description: () => <WorkspaceRootDescription />,
     ...(services
       ? {
           complete: (value: string, cursor: number) =>
@@ -77,11 +76,7 @@ export async function targetWizard(
   if (!workspaceRoots?.length) return
   const defaultDirectory = await DialogPrompt.show(dialog, "Default working directory", {
     value: current?.defaultDirectory ?? inspected?.home,
-    description: () => (
-      <text>
-        Initial directory for new Sessions. It must be inside a workspace root; the default is the remote HOME.
-      </text>
-    ),
+    description: () => <DefaultDirectoryDescription />,
     ...(services
       ? {
           complete: (value: string, cursor: number) =>
@@ -104,6 +99,24 @@ export async function targetWizard(
     ...(defaultDirectory.trim() ? { defaultDirectory: defaultDirectory.trim() } : {}),
     ...(current?.command ? { command: current.command } : {}),
   }
+}
+
+function WorkspaceRootDescription() {
+  const { theme } = useTheme()
+  return (
+    <text fg={theme.textMuted}>
+      Filesystem boundary available to Rexd. “/” allows the whole target; separate multiple roots with commas.
+    </text>
+  )
+}
+
+function DefaultDirectoryDescription() {
+  const { theme } = useTheme()
+  return (
+    <text fg={theme.textMuted}>
+      Starting directory for new Sessions. Defaults to the target user’s HOME and must be inside a workspace root.
+    </text>
+  )
 }
 
 async function completeRoots(

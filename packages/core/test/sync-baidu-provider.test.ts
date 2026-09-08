@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncSecureStore } from "@opencode-ai/core/sync/secure-store"
@@ -25,6 +26,10 @@ const credential = {
 
 function listed(path: string, fsID: number, size: number, modified = 10) {
   return { path, fs_id: fsID, size, server_mtime: modified, isdir: 0 }
+}
+
+function listedDirectory(path: string) {
+  return { path, isdir: 1 }
 }
 
 const hungRequest: BaiduSyncProvider.Request = async (_input, init) =>
@@ -201,7 +206,7 @@ describe("BaiduSyncProvider", () => {
         if (method === "list")
           return Response.json({
             errno: 0,
-            list: created ? [listed("/apps/opencode-sync/space/chunks/a.enc", 9, bytes.length)] : [],
+            list: created ? [listed("/apps/opencode-sync/space/a.enc", 9, bytes.length)] : [],
             has_more: 0,
           })
         if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-1" })
@@ -212,16 +217,79 @@ describe("BaiduSyncProvider", () => {
         }
         if (method === "create") {
           created = true
-          return Response.json({ errno: 0, ...listed("/apps/opencode-sync/space/chunks/a.enc", 9, bytes.length) })
+          return Response.json({ errno: 0, ...listed("/apps/opencode-sync/space/a.enc", 9, bytes.length) })
         }
         throw new Error(`unexpected ${url}`)
       },
     })
-    expect((await provider.uploadAtomic("chunks/a.enc", bytes, { type: "absent" })).size).toBe(bytes.length)
+    expect((await provider.uploadAtomic("a.enc", bytes, { type: "absent" })).size).toBe(bytes.length)
     expect(parts).toEqual([0, 1])
-    await expect(provider.uploadAtomic("chunks/a.enc", bytes, { type: "absent" })).rejects.toMatchObject({
+    await expect(provider.uploadAtomic("a.enc", bytes, { type: "absent" })).rejects.toMatchObject({
       kind: "conflict",
     })
+  })
+
+  test("creates missing parent directories before uploading a nested object", async () => {
+    const root = "/apps/opencode-sync/space"
+    const directories = new Set([root])
+    const attemptedDirectories: string[] = []
+    const createdDirectories: string[] = []
+    let fileCreated = false
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root,
+      request: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        const method = url.searchParams.get("method")
+        if (method === "list") {
+          const directory = url.searchParams.get("dir")!
+          if (url.searchParams.get("folder") === "1")
+            return Response.json({
+              errno: 0,
+              list: [...directories]
+                .filter((item) => item !== root && path.posix.dirname(item) === directory)
+                .map(listedDirectory),
+              has_more: 0,
+            })
+          return Response.json({
+            errno: 0,
+            list:
+              fileCreated && directory === `${root}/segments/device`
+                ? [listed(`${root}/segments/device/1-1.json`, 12, 7)]
+                : [],
+            has_more: 0,
+          })
+        }
+        if (method === "precreate") {
+          const target = String(new URLSearchParams(init?.body as URLSearchParams).get("path"))
+          return directories.has(path.posix.dirname(target))
+            ? Response.json({ errno: 0, uploadid: "upload-nested" })
+            : Response.json({ errno: 2 })
+        }
+        if (url.hostname === "d.pcs.baidu.com") return Response.json({ errno: 0 })
+        if (method === "create") {
+          const fields = new URLSearchParams(init?.body as URLSearchParams)
+          const target = String(fields.get("path"))
+          if (fields.get("isdir") === "1") {
+            attemptedDirectories.push(target)
+            if (directories.has(target)) return Response.json({ errno: 2 })
+            if (!directories.has(path.posix.dirname(target))) return Response.json({ errno: -9 })
+            directories.add(target)
+            if (target.endsWith("/device")) return Response.json({ errno: 2 })
+            createdDirectories.push(target)
+            return Response.json({ errno: 0, ...listedDirectory(target) })
+          }
+          fileCreated = true
+          return Response.json({ errno: 0, ...listed(target, 12, 7) })
+        }
+        throw new Error(`unexpected ${url}`)
+      },
+    })
+
+    await provider.uploadAtomic("segments/device/1-1.json", new Uint8Array(7), { type: "absent" })
+    expect(attemptedDirectories).toEqual([`${root}/segments`, `${root}/segments/device`])
+    expect(createdDirectories).toEqual([`${root}/segments`])
   })
 
   test("verifies an unknown create outcome instead of blindly retrying", async () => {

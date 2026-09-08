@@ -122,6 +122,7 @@ export function adapter(input: {
   const now = input.now ?? Date.now
   const sleep = input.sleep ?? delay
   const root = normalizeRoot(input.root)
+  const directories = new Map<string, Promise<void>>()
 
   const credential = async (signal?: AbortSignal, force = false) => {
     signal?.throwIfAborted()
@@ -215,6 +216,46 @@ export function adapter(input: {
     return { ...before, bytes }
   }
 
+  const ensureDirectory = (directory: string, signal?: AbortSignal) => {
+    const active = directories.get(directory)
+    if (active) return active
+    const pending = call(
+      "upload",
+      async (auth) => {
+        if (await directoryExists(auth, directory, request, signal)) return
+        await form(
+          endpoint(FILE_API, { method: "create", access_token: auth.accessToken }),
+          { path: directory, isdir: "1", rtype: "0" },
+          request,
+          "upload",
+          signal,
+        ).catch(async (cause) => {
+          // Another client may create the same directory between our list and create calls.
+          if (await directoryExists(auth, directory, request, signal)) return
+          throw cause
+        })
+      },
+      signal,
+    ).catch((cause) => {
+      directories.delete(directory)
+      throw cause
+    })
+    directories.set(directory, pending)
+    return pending
+  }
+
+  const ensureParents = async (object: string, signal?: AbortSignal) => {
+    const parent = path.posix.dirname(SyncProvider.objectPath(object))
+    if (parent === ".") return
+    await parent
+      .split("/")
+      .reduce(
+        (ready, _part, index, parts) =>
+          ready.then(() => ensureDirectory(`${root}/${parts.slice(0, index + 1).join("/")}`, signal)),
+        Promise.resolve(),
+      )
+  }
+
   const uploadAtomic = async (
     object: string,
     bytes: Uint8Array,
@@ -223,6 +264,7 @@ export function adapter(input: {
   ) => {
     const current = await stat(object, signal)
     checkPrecondition(current, precondition, "upload")
+    await ensureParents(object, signal)
     const remote = remotePath(root, object)
     const blocks = split(bytes).map((part) => ({ part, md5: createHash("md5").update(part).digest("hex") }))
     let expectedUploadID: string | undefined
@@ -410,6 +452,32 @@ async function listDirectory(auth: Credential, directory: string, request: Reque
     if (!page.more) return output
     start += page.items.length
     if (!page.items.length) throw error("stat", "invalid-response", false)
+  }
+}
+
+async function directoryExists(auth: Credential, directory: string, request: Request, signal?: AbortSignal) {
+  const parent = path.posix.dirname(directory)
+  for (let start = 0; ; ) {
+    const body = await json(
+      await request(
+        endpoint(FILE_API, {
+          method: "list",
+          access_token: auth.accessToken,
+          dir: parent,
+          folder: "1",
+          start: String(start),
+          limit: "1000",
+          order: "name",
+        }),
+        { signal, headers: { "User-Agent": "pan.baidu.com" } },
+      ),
+      "upload",
+    )
+    if (!Array.isArray(body.list)) throw error("upload", "invalid-response", false)
+    if (body.list.some((item) => record(item, "upload").path === directory)) return true
+    if (body.has_more !== 1) return false
+    if (!body.list.length) throw error("upload", "invalid-response", false)
+    start += body.list.length
   }
 }
 

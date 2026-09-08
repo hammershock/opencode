@@ -17,6 +17,16 @@ describe("Session list location presentation", () => {
     ).toBe("local · /Users/hammer/workspace/opencode")
   })
 
+  test("treats a foreign device's local target as its portable target name", () => {
+    expect(
+      sessionListLocation({
+        directory: "/Users/hammer/workspace/opencode",
+        target: { type: "local" },
+        portableTargetLabel: "mymac",
+      }).label,
+    ).toBe("mymac · /Users/hammer/workspace/opencode")
+  })
+
   test("presents and searches remote target, directory, and optional device", () => {
     const session = {
       title: "Training",

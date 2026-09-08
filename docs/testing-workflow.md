@@ -143,7 +143,7 @@ Run bidirectionally between Mac and `mywindows`:
 - the fixed account-wide manifest is the only initialization fact; missing or incompatible manifests never accept uploads;
 - explicit initialization backfills every existing Session, and every future Session participates without assignment or a user-visible space;
 - disabling automatic sync stops queue consumption while durable outbox events continue to accumulate and later resume from checkpoints;
-- `Scope: All` remains the default Session browser scope; the optional `Synced` filter never changes by itself after delayed discovery;
+- `/sessions` keeps its device-local Path and Target filters stable while delayed cloud metadata is discovered;
 - initial metadata appears before lazy content hydration;
 - each device can create and append while the other is offline, then converge deterministically;
 - attachments and large tool payloads hydrate, verify and retry independently;
@@ -179,7 +179,7 @@ For account-wide cloud reset, verify the manifest is invalidated before object c
 - fork Core commands resolve to the same identity and availability from slash autocomplete, direct submit and `Ctrl+P`.
 - User Shell and path completion share the eight-row candidate interaction; accepting a candidate never submits or executes.
 - `/permissions` distinguishes device Default from durable Session mode; changing either leaves the other unchanged, and old Sessions open in normal mode.
-- `/sessions` keeps search separate from the `Filter` and `Scope` rows; `Tab` changes row focus and left/right changes only that row's value.
+- `/sessions` keeps search separate from the Path and Target rows; `Tab` changes row focus, left/right changes the focused row, and `Cwd` only coexists with `local`.
 - list statuses use the shared symbols, remain right-aligned as asynchronous state changes, expose long errors only in focused detail and contain no emoji.
 - v1 sync setup and management are present only in the TUI; Web/Desktop retain upstream behavior and expose no partial sync product flow.
 

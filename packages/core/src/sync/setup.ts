@@ -87,6 +87,7 @@ export interface Interface {
   readonly leave: (namespaceID: string) => Effect.Effect<SyncState.State, SetupError>
   readonly setEnabled: (enabled: boolean) => Effect.Effect<SyncState.State, SetupError>
   readonly setInterval: (seconds: SyncState.IntervalSeconds) => Effect.Effect<SyncState.State, SetupError>
+  readonly setDeviceName: (name: string) => Effect.Effect<SyncState.State, SetupError>
   readonly deleteSpace: (namespaceID: string) => Effect.Effect<string, SetupError>
   readonly applyRemoteDeletion: (namespaceID: string) => Effect.Effect<boolean, SetupError>
   readonly removeFromDevice: () => Effect.Effect<readonly string[], SetupError>
@@ -327,6 +328,9 @@ export function make(input: {
   const setInterval = Effect.fn("SyncSetup.setInterval")((intervalSeconds: SyncState.IntervalSeconds) =>
     update(states, (current) => ({ ...current, intervalSeconds })),
   )
+  const setDeviceName = Effect.fn("SyncSetup.setDeviceName")((deviceName: string) =>
+    update(states, (current) => ({ ...current, deviceName })),
+  )
   const deleteSpace = Effect.fn("SyncSetup.deleteSpace")(function* (namespaceID: string) {
     const context = yield* effect("remote", remote)
     const binding = context.current.spaces.find(
@@ -415,6 +419,7 @@ export function make(input: {
     leave,
     setEnabled,
     setInterval,
+    setDeviceName,
     deleteSpace,
     applyRemoteDeletion,
     removeFromDevice,

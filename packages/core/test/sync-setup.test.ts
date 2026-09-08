@@ -59,6 +59,14 @@ describe("SyncSetup lifecycle", () => {
     expect(await run(restarted.config())).toBeUndefined()
   })
 
+  test("persists the advertised device target name", async () => {
+    await using tmp = await tmpdir()
+    const setup = SyncSetup.make({ configDirectory: tmp.path, store: store() })
+    await run(setup.initialize("Mac"))
+    expect((await run(setup.setDeviceName("mymac"))).deviceName).toBe("mymac")
+    expect((await run(setup.state()))?.deviceName).toBe("mymac")
+  })
+
   test("initializes and clears one account-wide cloud root without preserving legacy spaces", async () => {
     await using tmp = await tmpdir()
     const secure = store()

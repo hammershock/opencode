@@ -186,7 +186,7 @@ referenceCount = size(references)
 
 同一 aggregate/seq 的 event ID、type 和 canonical payload 完全相同才是重复。发生真正分叉时，使用稳定的 device/event 顺序选 winner，loser 从首次冲突点物化为确定性的 sibling Session。删除始终胜过同一 Session 的旧事件。
 
-云端 Location 只保存 owner device、portable target label、directory、revision 和 updater，不保存设备本地 target ID、连接配置或 credential。另一设备缺少相应 target 时，Session 只读打开并按 RFC-0009 配置或重绑定。
+云端 Location 只保存 owner device、portable target label、directory、revision 和 updater，不保存设备本地 target ID、连接配置或 credential。Rexd Session 使用当时记录的 target name；源设备本地执行的 Session 使用该设备稳定的 `deviceName` 作为 portable target label。源设备仍将自己的本地 Session 显示为 `local`，其他设备将该 label（例如 `mymac`）视为非本机 target；缺少相应配置或绑定时，Session 只读打开并按 RFC-0009 配置或重绑定，不能按名称自动绑定。
 
 ## 设备管理
 
@@ -242,7 +242,7 @@ Log out
 
 `/devices` 与上述 Devices 子视图等价。所有 Sync command 都是 RFC-0003 control-plane command，不进入 Session 或模型上下文。
 
-`/sessions` 默认展示本机 Session 和已索引的云端 metadata；同步不再提供 `Current Sync Space` scope。Target + Location 继续按 RFC-0009 展示。
+`/sessions` 默认展示本机 Session 和已索引的云端 metadata；cloud-only 行使用 `cloud` 标记。同步不再提供 `Current Sync Space` 或 `Synced` scope；Path + Target 筛选、设备本机 target 名称和 Location 展示由 RFC-0006 与 RFC-0009 共同定义。
 
 ## 安全与凭据边界
 

@@ -154,6 +154,27 @@ const recoveryControlIt = testEffect(
 )
 
 describe("SyncControl lifecycle policy", () => {
+  test("uses the Rexd target or source device name and preserves foreign ownership", () => {
+    expect(
+      SyncControl.portableTargetMetadata({
+        deviceID: "mac",
+        deviceName: "mymac",
+        lastKnownTargetName: "a100-2gpu",
+      }),
+    ).toEqual({ ownerDeviceID: "mac", targetLabel: "a100-2gpu" })
+    expect(SyncControl.portableTargetMetadata({ deviceID: "mac", deviceName: "mymac" })).toEqual({
+      ownerDeviceID: "mac",
+      targetLabel: "mymac",
+    })
+    expect(
+      SyncControl.portableTargetMetadata({
+        deviceID: "windows",
+        deviceName: "mywindows",
+        indexed: { ownerDeviceID: "mac", targetLabel: "mymac" },
+      }),
+    ).toEqual({ ownerDeviceID: "mac", targetLabel: "mymac" })
+  })
+
   realControlIt.live("keeps real local status responsive while a remote check is hung and after release", () =>
     Effect.gen(function* () {
       const control = yield* SyncControl.Service

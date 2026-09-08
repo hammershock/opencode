@@ -2,11 +2,12 @@ import { describe, expect, test } from "bun:test"
 import {
   SESSION_FILTER_FOOTER_HINT,
   createDialogSessionListQuery,
-  dialogSessionListScopeSelection,
   dialogSessionListLocationFilter,
-  includeCloudSessionInDialogScope,
+  dialogSessionListSyncStatus,
+  dialogSessionListTargetLabel,
+  dialogSessionListTargetOptions,
   loadDialogSessionList,
-  sessionInDialogSyncScope,
+  sessionInDialogTarget,
   syncAvailabilityLabel,
   updateDialogSessionListFilters,
 } from "../../src/component/dialog-session-list"
@@ -67,13 +68,28 @@ describe("dialog session list", () => {
     expect(syncAvailabilityLabel("unresolved")).toBe("! unresolved")
   })
 
-  test("tabs between fixed filter rows and arrows change only the focused value", () => {
-    const initial = { focus: "cwd" as const, cwd: "cwd" as const, scope: "current" as const }
-    expect(updateDialogSessionListFilters(initial, "right")).toEqual({ ...initial, cwd: "all" })
-    const scope = updateDialogSessionListFilters(initial, "tab")
-    expect(scope).toEqual({ ...initial, focus: "scope" })
-    expect(updateDialogSessionListFilters(scope, "left")).toEqual({ ...scope, scope: "all" })
-    expect(updateDialogSessionListFilters(scope, "tab")).toEqual(initial)
+  test("tabs between Path and Target while enforcing their valid combinations", () => {
+    const targets = ["local", "all", "a100-2gpu"]
+    const initial = { focus: "cwd" as const, cwd: "cwd" as const, target: "local" }
+    expect(updateDialogSessionListFilters(initial, "right", targets)).toEqual({ ...initial, cwd: "all" })
+
+    const target = updateDialogSessionListFilters(initial, "tab", targets)
+    expect(target).toEqual({ ...initial, focus: "target" })
+    expect(updateDialogSessionListFilters(target, "right", targets)).toEqual({
+      focus: "target",
+      cwd: "all",
+      target: "all",
+    })
+    expect(updateDialogSessionListFilters({ ...target, cwd: "all", target: "all" }, "right", targets)).toEqual({
+      focus: "target",
+      cwd: "all",
+      target: "a100-2gpu",
+    })
+    expect(updateDialogSessionListFilters({ focus: "cwd", cwd: "all", target: "a100-2gpu" }, "left", targets)).toEqual({
+      focus: "cwd",
+      cwd: "cwd",
+      target: "local",
+    })
   })
 
   test("maps Cwd to the upstream path query and All to the upstream project query", () => {
@@ -86,37 +102,60 @@ describe("dialog session list", () => {
     expect(dialogSessionListLocationFilter({ mode: "cwd" })).toEqual({ scope: "project" })
   })
 
-  test("Synced filters the internal account scope while All keeps every local Session", () => {
-    const active = { syncSpaceID: "active" }
-    const inactive = { syncSpaceID: "inactive" }
-    const unassigned = {}
-    expect(sessionInDialogSyncScope(active, "current", "active")).toBe(true)
-    expect(sessionInDialogSyncScope(inactive, "current", "active")).toBe(false)
-    expect(sessionInDialogSyncScope(unassigned, "current", "active")).toBe(false)
-    expect(sessionInDialogSyncScope(active, "current")).toBe(true)
-    expect(sessionInDialogSyncScope(unassigned, "current")).toBe(true)
-    expect(includeCloudSessionInDialogScope("current", "active")).toBe(true)
-    expect(includeCloudSessionInDialogScope("current")).toBe(false)
-    expect(includeCloudSessionInDialogScope("all", "active")).toBe(true)
-    expect(
-      [active, inactive, unassigned].filter((session) => sessionInDialogSyncScope(session, "all", "active")),
-    ).toHaveLength(3)
+  test("builds stable target choices from local, remote, cloud, and delayed persisted state", () => {
+    const sessions = [
+      { directory: "/local" },
+      { directory: "/gpu", targetLabel: "a100-2gpu" },
+      { directory: "/gpu-duplicate", targetLabel: "a100-2gpu" },
+      { directory: "/windows", targetLabel: "mywindows" },
+    ]
+    expect(dialogSessionListTargetOptions(sessions)).toEqual(["local", "all", "a100-2gpu", "mywindows"])
+    expect(dialogSessionListTargetOptions(sessions, "mymac")).toEqual([
+      "local",
+      "all",
+      "a100-2gpu",
+      "mywindows",
+      "mymac",
+    ])
   })
 
-  test("keeps the selected Scope independent from delayed sync discovery", () => {
-    const selected = { focus: "scope" as const, cwd: "cwd" as const, scope: "all" as const }
-    expect(dialogSessionListScopeSelection(selected.scope)).toBe(1)
+  test("filters by target name without conflating local with a foreign device", () => {
+    const local = { directory: "/repo" }
+    const foreignLocal = { directory: "/repo", targetLabel: "mymac" }
+    expect(sessionInDialogTarget(local, "local")).toBe(true)
+    expect(sessionInDialogTarget(foreignLocal, "local")).toBe(false)
+    expect(sessionInDialogTarget(foreignLocal, "mymac")).toBe(true)
+    expect(sessionInDialogTarget(local, "all")).toBe(true)
+    expect(sessionInDialogTarget(foreignLocal, "all")).toBe(true)
+  })
 
-    // The internal sync scope arriving asynchronously changes the result set, not the
-    // user's dialog-local selection.
-    expect(sessionInDialogSyncScope({ syncSpaceID: "active" }, selected.scope)).toBe(true)
-    expect(sessionInDialogSyncScope({ syncSpaceID: "active" }, selected.scope, "active")).toBe(true)
-    expect(dialogSessionListScopeSelection(selected.scope)).toBe(1)
+  test("keeps this device local and exposes a foreign device through its target name", () => {
+    expect(
+      dialogSessionListTargetLabel({
+        remote: { ownerDeviceID: "mac", targetLabel: "mymac" },
+        currentDeviceID: "mac",
+      }),
+    ).toBeUndefined()
+    expect(
+      dialogSessionListTargetLabel({
+        remote: { ownerDeviceID: "mac", targetLabel: "mymac" },
+        currentDeviceID: "windows",
+      }),
+    ).toBe("mymac")
+  })
 
-    const current = { ...selected, scope: "current" as const }
-    expect(dialogSessionListScopeSelection(current.scope)).toBe(0)
-    expect(sessionInDialogSyncScope({}, current.scope)).toBe(true)
-    expect(sessionInDialogSyncScope({}, current.scope, "active")).toBe(false)
-    expect(dialogSessionListScopeSelection(current.scope)).toBe(0)
+  test("marks cloud-only rows without changing hydrated availability labels", () => {
+    const metadata = {
+      sessionID: "session",
+      title: "Cloud",
+      ownerDeviceID: "device",
+      sourceDeviceID: "device",
+      directory: "/repo",
+      updatedAt: 1,
+      availability: "unresolved" as const,
+    }
+    expect(dialogSessionListSyncStatus({ cloudOnly: true, syncMetadata: metadata })).toBe("cloud")
+    expect(dialogSessionListSyncStatus({ syncMetadata: metadata })).toBe("! unresolved")
+    expect(dialogSessionListSyncStatus({})).toBeUndefined()
   })
 })

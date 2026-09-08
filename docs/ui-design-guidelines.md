@@ -23,11 +23,11 @@ This document defines the normative interaction and presentation rules for fork-
 - Use two rows only when the controls represent independent dimensions. For `/sessions`, the required controls are exactly:
 
   ```text
-  Filter: [Cwd] All
-  Scope:  [Current Sync Space] All
+  Path:   [Cwd] All
+  Target: [local] All mywindows a100-2gpu
   ```
 
-  The search input is separate. `Tab` moves between Filter and Scope; left/right changes the focused value.
+  The search input is separate. `Tab` moves between Path and Target; left/right changes the focused value. `Cwd` only coexists with `local`; selecting another target or Target `All` moves Path to `All`.
 
 ## Status language and symbols
 

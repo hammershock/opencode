@@ -194,19 +194,22 @@ Upstream baseline：打开 Session 列表并进行选择。
 - 云端 Session 的发现、按需打开和 ownership 规则由 RFC-0010 定义；
 - `/sessions` 只调用可复用 Session query service，不直接实现云端下载或冲突处理。
 
-列表在搜索框之外提供两个彼此独立的单行筛选器，并始终保持两行稳定布局：
+列表在搜索框之外提供两个有约束关系的单行筛选器，并始终保持两行稳定布局：
 
 ```text
-Filter: [Cwd] All
-Scope:  [Current Sync Space] All
+Path:   [Cwd] All
+Target: [local] All mywindows a100-2gpu
 ```
 
-- `Filter` 选择已有的 Session 属性筛选方式；`Cwd` 按执行目录筛选，`All` 不施加该维度的约束；
-- `Scope` 选择 `Current Sync Space` 或 `All`。前者只显示归属于当前 active sync space 的 Session，不包含未归属 Session；后者显示本机已经持有的所有空间归属 Session 和未归属 Session；
-- 未配置 active sync space 时，默认的 `Current Sync Space` 视图退化为 `All`，显示本机 Session，不能因为没有同步空间而得到空列表；
-- `Scope: All` 不查询非当前空间的 cloud-only metadata，不隐式加入、激活或切换任何同步空间；
+- `Path` 的 `Cwd` 按当前工作目录筛选，`All` 不施加目录维度约束；
+- `Target` 的 `local` 表示本设备本地执行位置，`All` 不施加 target 约束，其余值来自列表中可见的 Rexd target 或其他设备对外声明的本机 target 名称；
+- `Cwd` 只可与 `local` 共存：选择 `Cwd` 时同时选择 `local`；选择非 `local` target 或 `Target: All` 时同时切换为 `Path: All`；选择 `local` 时保留当前的 `Cwd`/`All`；
+- 本设备的 local Session 始终显示为 `local`。同步到其他设备后，以源设备稳定的 `deviceName` 作为 portable target label，例如 `mymac`；接收设备将它作为非本机 target 处理，且在用户显式配置或绑定前保持 unresolved；
+- target name 只承载可移植语义提示，不能同步 target ID、SSH 配置或 credential，也不能仅因名称相同自动绑定；
+- cloud-only metadata 与本机 Session 位于同一个列表，使用 `cloud` 标记；不再提供 `Synced` 或 sync-space 筛选；
 - `Tab` 只在两行筛选器之间移动焦点，左右方向键改变当前行的值；搜索框仍是独立焦点和独立过滤条件；
-- 筛选只影响当前列表视图，不改变 Session ownership、active sync space、同步配置或 durable Session 数据。
+- 两个筛选值写入本设备 OpenCode TUI KV；异步发现 cloud metadata 不得自动改变选择，已保存但暂时没有匹配项的 target 仍保留为可切换值；
+- 筛选只影响当前列表视图，不改变 Session ownership、同步配置或 durable Session 数据。
 
 `/sessions` 还可以承载 RFC-0009 定义的实验性 `Force rebind location...` 管理操作。该入口默认隐藏，只在设备级实验设置开启时显示，并必须标注为不推荐。Location 校验、空闲检查、事务提交、运行时重建和同步 revision 全部属于 RFC-0009 domain workflow，不在 Session list 组件中实现。
 
@@ -309,6 +312,6 @@ Upstream baseline：`/variants` 打开当前模型的 variant 选择；另有循
 8. `/rename <title>`、`/permissions`、`/expand`、`/collapse` 和 `/delete` 均由 toolkit 消费，不会成为 prompt、Session message 或 Agent 调用。
 9. `/sessions` 可以显示并搜索 local、Rexd 和同步 metadata 所描述的执行位置，unresolved Session 不会静默消失或改为 local。
 10. 实验性 Location 重绑定只暴露 RFC-0009 workflow；全局同步删除只消费 RFC-0010 domain event，不在 TUI command handler 中重复实现，也不提供 local-only 分支。
-11. `/sessions` 的 Filter 与 Scope 是独立视图条件；`Current Sync Space` 与 `All` 不会查询其他空间的 cloud-only metadata 或切换 active space。
+11. `/sessions` 的 Path 与 Target 筛选遵守 `Cwd => local` 约束并在本机持久化；cloud-only metadata 使用 `cloud` 标记，异步发现不会自行改变筛选值。
 12. fork Core command 在 slash autocomplete、直接 submit 和 `Ctrl+P` 中由同一 registry host 发现和执行。
 13. `/permissions` 分离设备 Default 与 durable Session mode；复制、迁移、持久化和同步不会意外扩大已有 Session 权限。

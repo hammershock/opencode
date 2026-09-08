@@ -1,8 +1,8 @@
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
-import { abbreviateHome } from "../../runtime"
 import { useTuiPaths } from "../../context/runtime"
+import { sessionFooterLocation } from "../../component/session-footer-location"
 
 const id = "internal:sidebar-footer"
 
@@ -18,12 +18,16 @@ function View(props: { api: TuiPluginApi; sessionID: string }) {
   const show = createMemo(() => !has() && !done())
   const path = createMemo(() => {
     const session = props.api.state.session.get(props.sessionID)
-    const dir = session?.directory || props.api.state.path.directory || paths.cwd
-    const out = abbreviateHome(dir, paths.home)
     const branch = session?.directory === props.api.state.path.directory ? props.api.state.vcs?.branch : undefined
-    const text = branch ? out + ":" + branch : out
-    const list = text.split("/")
+    const location = sessionFooterLocation({
+      session,
+      fallbackDirectory: props.api.state.path.directory || paths.cwd,
+      home: paths.home,
+      branch,
+    })
+    const list = location.directory.split("/")
     return {
+      target: location.target,
       parent: list.slice(0, -1).join("/"),
       name: list.at(-1) ?? "",
     }
@@ -65,7 +69,8 @@ function View(props: { api: TuiPluginApi; sessionID: string }) {
         </box>
       </Show>
       <text>
-        <span style={{ fg: theme().textMuted }}>{path().parent}/</span>
+        <span style={{ fg: theme().text }}>{path().target}</span>
+        <span style={{ fg: theme().textMuted }}> · {path().parent}/</span>
         <span style={{ fg: theme().text }}>{path().name}</span>
       </text>
       <text fg={theme().textMuted}>

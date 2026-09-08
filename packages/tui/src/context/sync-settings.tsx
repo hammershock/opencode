@@ -231,9 +231,9 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
           : current.account.state === "disconnected"
             ? current.account
             : initial.account,
-        enabled: state.enabled,
+        enabled: localConfigured && state.enabled,
         interval: state.intervalSeconds,
-        state: state.enabled ? "idle" : "off",
+        state: localConfigured && state.enabled ? "idle" : "off",
       }))
     }
 

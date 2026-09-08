@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -216,6 +216,17 @@ ${UserShellLocal.bashCompletion("external c", 10)}`
       expect(text).toContain("__OPENCODE_NATIVE__\tcommand-choice")
     }),
   )
+
+  test("does not turn a trailing native output newline into an empty candidate", () => {
+    expect(UserShellLocal.parseCompletionOutput("__OPENCODE_NATIVE__\talpha\n", "", { start: 3, end: 3 })).toEqual([
+      {
+        value: "alpha",
+        display: "alpha",
+        replacement: { start: 3, end: 3 },
+        kind: "argument",
+      },
+    ])
+  })
 
   it(
     "invokes zsh compdef completion in a bare helper",

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   createShellCompletionGeneration,
   invalidateShellCompletion,
+  settleShellCompletionKeyEvent,
   shellCompletionDegradedMessage,
 } from "../../src/component/prompt/autocomplete"
 
@@ -27,6 +28,15 @@ describe("Shell autocomplete generation", () => {
 
     expect(hidden).toBe(true)
     expect(generation.accepts(request)).toBe(false)
+  })
+
+  test("starts the request after the Tab editor notification settles", async () => {
+    const generation = createShellCompletionGeneration()
+    const request = settleShellCompletionKeyEvent().then(() => generation.begin())
+
+    invalidateShellCompletion(generation, false, () => undefined)
+
+    expect(generation.accepts(await request)).toBe(true)
   })
 })
 

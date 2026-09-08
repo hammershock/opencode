@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { Context, Schema } from "effect"
+import path from "path"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
@@ -11,6 +12,7 @@ const context = Context.empty() as Context.Context<unknown>
 function request(route: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
   headers.set("x-opencode-directory", directory)
+  if (init.body) headers.set("content-type", "application/json")
   return HttpApiApp.webHandler().handler(
     new Request(`http://localhost${route}`, {
       ...init,
@@ -103,6 +105,30 @@ describe("v2 location HttpApi", () => {
       expect(body.location.directory).toBe(tmp.path)
       expect(body.location.project.id).toBeTruthy()
     }
+  })
+
+  test("completes User Shell input at a Location without creating a Session", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Bun.write(path.join(tmp.path, "shell-completion-marker"), "")
+    expect(await (await request("/session", tmp.path)).json()).toEqual([])
+
+    const response = await request("/api/shell/completion", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({ input: "shell-comp", cursor: 10 }),
+    })
+
+    expect(response.status, await response.clone().text()).toBe(200)
+    expect(await response.json()).toMatchObject({
+      stale: false,
+      candidates: [
+        expect.objectContaining({
+          value: "shell-completion-marker",
+          replacement: { start: 0, end: 10 },
+          kind: "file",
+        }),
+      ],
+    })
+    expect(await (await request("/session", tmp.path)).json()).toEqual([])
   })
 
   test("runs environment init through the production Session workflow adapter", async () => {

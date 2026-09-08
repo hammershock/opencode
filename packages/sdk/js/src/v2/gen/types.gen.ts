@@ -12440,6 +12440,62 @@ export type PartUpdateResponses = {
 
 export type PartUpdateResponse = PartUpdateResponses[keyof PartUpdateResponses]
 
+export type V2ShellCompleteData = {
+  body: {
+    input: string
+    cursor: number
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+  }
+  url: "/api/shell/completion"
+}
+
+export type V2ShellCompleteErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * Unauthorized
+   */
+  401: unknown
+}
+
+export type V2ShellCompleteError = V2ShellCompleteErrors[keyof V2ShellCompleteErrors]
+
+export type V2ShellCompleteResponses = {
+  /**
+   * Shell completion candidates
+   */
+  200: {
+    generation: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    stale: boolean
+    candidates: Array<{
+      value: string
+      display: string
+      replacement: {
+        start: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        end: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+      kind: "command" | "file" | "directory" | "alias" | "function" | "option" | "argument"
+      description?: string
+    }>
+    degraded?: {
+      reason: "native_unavailable" | "native_timeout" | "native_failed"
+    }
+  }
+}
+
+export type V2ShellCompleteResponse = V2ShellCompleteResponses[keyof V2ShellCompleteResponses]
+
 export type SyncStartData = {
   body?: never
   path?: never

@@ -122,6 +122,10 @@ export function shellCompletionDegradedMessage(reason: "native_unavailable" | "n
   return "Native completion unavailable; showing basic matches"
 }
 
+export function settleShellCompletionKeyEvent() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 0))
+}
+
 export function invalidateShellCompletion(
   generation: ReturnType<typeof createShellCompletionGeneration>,
   visible: AutocompleteRef["visible"],
@@ -143,7 +147,7 @@ export function Autocomplete(props: {
   fileStyleId: number
   agentStyleId: number
   promptPartTypeId: () => number
-  shellMutation: number
+  shellContextVersion: number
   commandSlashes?: () => readonly TuiSlashCommand[]
 }) {
   const editor = useEditorContext()
@@ -169,9 +173,10 @@ export function Autocomplete(props: {
   })
   const [shellOptions, setShellOptions] = createSignal<AutocompleteOption[]>([])
   const shellGeneration = createShellCompletionGeneration()
+  let shellInput = props.value
 
   createEffect(() => {
-    props.shellMutation
+    props.shellContextVersion
     if (!props.shell()) return
     invalidateShellCompletion(shellGeneration, store.visible, hide)
   })
@@ -737,24 +742,44 @@ export function Autocomplete(props: {
         return store.visible
       },
       async completeShell() {
-        if (!props.sessionID) return
+        // OpenTUI reports the Tab key through the editor callbacks after the keymap
+        // handler. Let that no-op notification settle before starting a generation.
+        await settleShellCompletionKeyEvent()
         const input = props.input()
         const generation = shellGeneration.begin()
         const current = location()
-        const result = await sdk.client.session
-          .shellCompletion(
-            {
-              sessionID: props.sessionID,
-              input: input.plainText,
-              cursor: shellStringOffset(input.plainText, input.cursorOffset),
-              directory: current?.directory,
-              workspace: current?.workspaceID,
-            },
-            { throwOnError: true },
-          )
-          .then((response) => response.data)
-          .catch(() => undefined)
+        if (!current) return
+        const request = {
+          input: input.plainText,
+          cursor: shellStringOffset(input.plainText, input.cursorOffset),
+        }
+        const cursorOffset = input.cursorOffset
+        const completion = props.sessionID
+          ? sdk.client.session.shellCompletion(
+              {
+                sessionID: props.sessionID,
+                ...request,
+                directory: current.directory,
+                workspace: current.workspaceID,
+              },
+              { throwOnError: true },
+            )
+          : sdk.client.v2.shell.complete(
+              {
+                ...request,
+                directory: current.directory,
+                workspace: current.workspaceID,
+                location: {
+                  directory: current.directory,
+                  workspace: current.workspaceID,
+                  ...(current.target?.type === "rexd" ? { target: current.target.targetID } : {}),
+                },
+              },
+              { throwOnError: true },
+            )
+        const result = await completion.then((response) => response.data).catch(() => undefined)
         if (!result || !shellGeneration.accepts(generation) || result.stale) return
+        if (input.plainText !== request.input || input.cursorOffset !== cursorOffset) return
         if (result.degraded) {
           toast.show({
             message: shellCompletionDegradedMessage(result.degraded.reason),
@@ -786,8 +811,10 @@ export function Autocomplete(props: {
         setStore({ visible: result.candidates.length ? "shell" : false, selected: 0, input: "keyboard" })
       },
       onInput(value) {
+        const shellInputChanged = shellInput !== value
+        shellInput = value
         if (props.shell()) {
-          invalidateShellCompletion(shellGeneration, store.visible, hide)
+          if (shellInputChanged) invalidateShellCompletion(shellGeneration, store.visible, hide)
           if (store.visible && store.visible !== "shell") hide()
           return
         }

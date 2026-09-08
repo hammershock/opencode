@@ -14,12 +14,7 @@ export type PromptTraits = EditorTraits & {
 
 /** The managed textarea keymap owns `suspend`; these traits only describe capture and status. */
 export function computePromptTraits(input: PromptTraitsInput): PromptTraits {
-  const capture =
-    input.mode === "normal"
-      ? input.autocompleteVisible
-        ? (["escape", "navigate", "submit", "tab"] as const)
-        : (["tab"] as const)
-      : undefined
+  const capture = input.autocompleteVisible ? (["escape", "navigate", "submit", "tab"] as const) : (["tab"] as const)
   return {
     capture,
     status: input.mode === "shell" ? "SHELL" : undefined,

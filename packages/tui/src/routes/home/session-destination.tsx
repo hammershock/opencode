@@ -9,6 +9,7 @@ import {
 } from "solid-js"
 import { useSync } from "../../context/sync"
 import { useTuiPaths } from "../../context/runtime"
+import { LocationProvider } from "../../context/location"
 
 export type HomeSessionTarget = { type: "local" } | { type: "rexd"; targetID: string; name: string }
 export type HomeSessionDestination = { type: "directory"; directory: string; subdirectory: boolean } | { type: "new" }
@@ -31,6 +32,18 @@ export function HomeSessionDestinationProvider(props: ParentProps) {
   const destination = createMemo<HomeSessionDestination>(
     () => selected() ?? { type: "directory", directory: sync.path.directory || paths.cwd, subdirectory: false },
   )
+  const location = createMemo(() => {
+    const current = destination()
+    if (current.type !== "directory") return
+    const currentTarget = target()
+    return {
+      target:
+        currentTarget.type === "rexd"
+          ? ({ type: "rexd", targetID: currentTarget.targetID } as const)
+          : ({ type: "local" } as const),
+      directory: current.directory,
+    }
+  })
   return (
     <HomeSessionDestinationContext.Provider
       value={{
@@ -44,7 +57,7 @@ export function HomeSessionDestinationProvider(props: ParentProps) {
         },
       }}
     >
-      {props.children}
+      <LocationProvider location={location()}>{props.children}</LocationProvider>
     </HomeSessionDestinationContext.Provider>
   )
 }

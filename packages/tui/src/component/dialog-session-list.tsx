@@ -580,9 +580,9 @@ export function DialogSessionList() {
               const status = session?.workspaceID ? project.workspace.status(session.workspaceID) : undefined
 
               try {
-                const result = await sdk.client.session.delete({
-                  sessionID: option.value,
-                })
+                const result = session?.cloudOnly
+                  ? await sdk.client.global.syncSessionDelete({ sessionID: option.value })
+                  : await sdk.client.session.delete({ sessionID: option.value })
                 if (result.error) {
                   if (session?.workspaceID) {
                     recover(session)
@@ -609,6 +609,8 @@ export function DialogSessionList() {
                 setToDelete(undefined)
                 return
               }
+              setDeleted((current) => new Set(current).add(option.value))
+              if (session?.cloudOnly) await refetchSyncedSessions()
               if (status && status !== "connected") {
                 await sync.session.refresh()
               }

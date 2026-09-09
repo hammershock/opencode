@@ -201,6 +201,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncCloudClear", () => controlApi(syncControl.clearCloud()).pipe(Effect.as(true)))
       .handle("syncSessions", () => controlApi(syncControl.sessions()))
       .handle("syncHydrate", (ctx) => controlApi(syncControl.hydrate(ctx.payload)))
+      .handle("syncSessionDelete", (ctx) => controlApi(syncControl.deleteSession(ctx.payload)).pipe(Effect.as(true)))
       .handle("syncDevices", () => controlApi(syncControl.devices()))
       .handle("syncDeviceUpdate", (ctx) => controlApi(syncControl.updateDevice(ctx.payload)))
       .handle("syncRecoveryExport", () =>

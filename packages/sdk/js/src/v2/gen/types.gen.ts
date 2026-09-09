@@ -9051,6 +9051,37 @@ export type GlobalSyncHydrateResponses = {
 
 export type GlobalSyncHydrateResponse = GlobalSyncHydrateResponses[keyof GlobalSyncHydrateResponses]
 
+export type GlobalSyncSessionDeleteData = {
+  body?: {
+    sessionID: string
+  }
+  path?: never
+  query?: never
+  url: "/global/sync/sessions/delete"
+}
+
+export type GlobalSyncSessionDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
+}
+
+export type GlobalSyncSessionDeleteError = GlobalSyncSessionDeleteErrors[keyof GlobalSyncSessionDeleteErrors]
+
+export type GlobalSyncSessionDeleteResponses = {
+  /**
+   * Success
+   */
+  200: boolean
+}
+
+export type GlobalSyncSessionDeleteResponse = GlobalSyncSessionDeleteResponses[keyof GlobalSyncSessionDeleteResponses]
+
 export type GlobalSyncDevicesData = {
   body?: never
   path?: never

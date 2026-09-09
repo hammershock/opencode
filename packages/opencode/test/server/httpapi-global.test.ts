@@ -129,6 +129,7 @@ const makeApiLayer = (
           ),
         sessions: () => Effect.succeed([remoteSession]),
         hydrate: (input) => Effect.succeed(SyncControl.HydrateResult.make({ ...input, availability: "ready" })),
+        deleteSession: () => Effect.void,
         switchAccount: () => Effect.succeed(syncState),
         logout: () => Effect.void,
         switchSpace: (input) =>
@@ -460,7 +461,7 @@ describe("global HttpApi", () => {
     }),
   )
 
-  it.live("lists metadata-only sessions and hydrates a selected session", () =>
+  it.live("lists, hydrates, and deletes a metadata-only session", () =>
     Effect.gen(function* () {
       const sessions = yield* HttpClientRequest.get(GlobalPaths.syncSessions).pipe(HttpClient.execute)
       expect(sessions.status).toBe(200)
@@ -472,6 +473,13 @@ describe("global HttpApi", () => {
       )
       expect(hydrate.status).toBe(200)
       expect(yield* hydrate.json).toEqual({ sessionID: remoteSession.sessionID, availability: "ready" })
+
+      const deleted = yield* HttpClientRequest.post(GlobalPaths.syncSessionDelete).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ sessionID: remoteSession.sessionID }),
+        HttpClient.execute,
+      )
+      expect(deleted.status).toBe(200)
+      expect(yield* deleted.json).toBe(true)
     }),
   )
 

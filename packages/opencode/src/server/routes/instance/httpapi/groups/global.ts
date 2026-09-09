@@ -172,6 +172,7 @@ export const GlobalPaths = {
   syncCloud: "/global/sync/cloud",
   syncSessions: "/global/sync/sessions",
   syncHydrate: "/global/sync/hydrate",
+  syncSessionDelete: "/global/sync/sessions/delete",
   syncDevices: "/global/sync/devices",
   syncRecovery: "/global/sync/recovery-key",
 } as const
@@ -313,6 +314,11 @@ export const GlobalApi = HttpApi.make("global").add(
       HttpApiEndpoint.post("syncHydrate", GlobalPaths.syncHydrate, {
         payload: SyncControl.HydrateInput,
         success: SyncControl.HydrateResult,
+        error: SyncControlApiError,
+      }),
+      HttpApiEndpoint.post("syncSessionDelete", GlobalPaths.syncSessionDelete, {
+        payload: SyncControl.DeleteSessionInput,
+        success: Schema.Boolean,
         error: SyncControlApiError,
       }),
       HttpApiEndpoint.get("syncDevices", GlobalPaths.syncDevices, {

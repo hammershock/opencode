@@ -68,6 +68,7 @@ export const DeviceUpdate = Schema.Struct({
 })
 export const Recovery = Schema.Struct({ recoveryString: Schema.NonEmptyString })
 export const HydrateInput = Schema.Struct({ sessionID: Schema.NonEmptyString })
+export const DeleteSessionInput = Schema.Struct({ sessionID: Schema.NonEmptyString })
 export const HydrateResult = Schema.Struct({
   sessionID: Schema.NonEmptyString,
   availability: SyncMetadata.Availability,
@@ -126,6 +127,8 @@ export interface Interface {
   readonly sessions: () => Effect.Effect<readonly SyncMetadata.Item[], ControlError>
   /** Hydrates the selected metadata-only Session before it is opened locally. */
   readonly hydrate: (input: typeof HydrateInput.Type) => Effect.Effect<typeof HydrateResult.Type, ControlError>
+  /** Deletes a synchronized Session even when only its cloud metadata exists locally. */
+  readonly deleteSession: (input: typeof DeleteSessionInput.Type) => Effect.Effect<void, ControlError>
 }
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncControl") {}
 
@@ -669,6 +672,30 @@ const make = (input: LayerOptions) =>
     })
     const hydrate = (input: typeof HydrateInput.Type) =>
       hydrateRaw(input).pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+    const deleteSession = Effect.fn("SyncControl.deleteSession")(function* (input: typeof DeleteSessionInput.Type) {
+      const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!config) return yield* new ControlError({ kind: "unconfigured" })
+      const metadata = metadataStore.scope(config.namespaceID)
+      const known = (yield* metadata.list()).some((item) => item.sessionID === input.sessionID)
+      if (!known) return yield* new ControlError({ kind: "invalid" })
+      const runtime = yield* load()
+      yield* eventStore.scope(config.namespaceID).delete(
+        SyncEvent.Tombstone.make({
+          id: `sync-delete:${config.deviceID}:${crypto.randomUUID()}`,
+          sessionID: input.sessionID,
+          deletedAt: Date.now(),
+        }),
+      ).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      yield* metadata.remove(input.sessionID).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      yield* runtime.upload().pipe(
+        Effect.mapError(() => {
+          lastDiagnostic = runtime.status().lastError
+          return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
+        }),
+      )
+      lastSuccessAt = Date.now()
+      lastDiagnostic = undefined
+    })
     return {
       status,
       now,
@@ -691,6 +718,7 @@ const make = (input: LayerOptions) =>
       exportKey,
       sessions,
       hydrate,
+      deleteSession,
     }
   })
 

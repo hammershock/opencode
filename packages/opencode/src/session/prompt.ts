@@ -61,7 +61,6 @@ import { UserShellLocal } from "./user-shell-local"
 import { UserShellLocation } from "./user-shell-location"
 import { LocationEnvironment } from "@opencode-ai/core/location-environment"
 import { Location } from "@opencode-ai/core/location"
-import { AbsolutePath } from "@opencode-ai/core/schema"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { ToolRegistry as LocationToolRegistry } from "@opencode-ai/core/tool/registry"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
@@ -161,16 +160,7 @@ const layer = Layer.effect(
     const targetRegistry = yield* TargetRegistry.Service
     const locationAccess = yield* SessionLocationAccess.Service
     const { db } = database
-    const sessionLocation = Effect.fn("SessionPrompt.sessionLocation")(function* (sessionID: SessionID) {
-      const row = yield* db
-        .select({ target: SessionTable.target, directory: SessionTable.directory })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      if (!row) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
-      return Location.Ref.make({ target: row.target ?? { type: "local" }, directory: AbsolutePath.make(row.directory) })
-    })
+    const sessionLocation = (sessionID: SessionID) => locationAccess.require(sessionID).pipe(Effect.catch(Effect.die))
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),

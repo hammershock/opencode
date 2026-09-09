@@ -210,7 +210,15 @@ export function adapter(input: {
         )
         const first = Array.isArray(body.list) ? body.list[0] : undefined
         const item = first ? record(first, "download", "file-metadata") : undefined
-        if (!item || typeof item.dlink !== "string") throw invalidResponse("download", "file-metadata", body, true)
+        if (!item || typeof item.dlink !== "string") {
+          // Baidu's directory listing can briefly retain the fs_id of a file
+          // replaced with rtype=3. Repeating filemetas for that stale ID only
+          // delays the inevitable; refresh the path version so callers can
+          // retry the current object immediately.
+          const latest = await stat(object, signal)
+          if (!latest || latest.version !== before.version) throw error("download", "conflict", false)
+          throw invalidResponse("download", "file-metadata", body, true)
+        }
         const link = endpoint(item.dlink, { access_token: auth.accessToken })
         const response = await request(link, { signal, redirect: "follow", headers: { "User-Agent": "pan.baidu.com" } })
         if (!response.ok) throw responseFailure("download", response)

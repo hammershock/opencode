@@ -236,6 +236,33 @@ describe("BaiduSyncProvider", () => {
     expect(metadata).toBe(2)
   })
 
+  test("refreshes a replaced file instead of retrying metadata for its stale fs id", async () => {
+    let metadata = 0
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      sleep: async () => undefined,
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        if (url.pathname.includes("multimedia")) {
+          metadata++
+          return Response.json({ errno: 0, list: [] })
+        }
+        if (url.searchParams.get("method") === "list")
+          return Response.json({
+            errno: 0,
+            list: [listed("/apps/opencode-sync/space/objects/1.json", 2, 3)],
+            has_more: 0,
+          })
+        throw new Error("unexpected")
+      },
+    })
+
+    await expect(provider.download("objects/1.json", "1:10000:3")).rejects.toMatchObject({ kind: "conflict" })
+    expect(metadata).toBe(1)
+  })
+
   test("uploads with precreate, fixed 4MiB parts, create and absence precondition", async () => {
     const store = memoryStore(credential)
     const parts: number[] = []

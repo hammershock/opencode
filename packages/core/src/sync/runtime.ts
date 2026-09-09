@@ -116,6 +116,7 @@ export function make(input: {
   let hydrateFlight: Promise<void> | undefined
   let indexedHeads: readonly Head[] = []
   let indexedSegments = new Map<string, SyncProvider.ObjectInfo>()
+  const cachedHeads = new Map<string, { readonly version: string; readonly head: Head }>()
   let revokedDevices = new Set<SyncEvent.DeviceID>()
   let localHead: Head | undefined
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
@@ -246,26 +247,33 @@ export function make(input: {
     await acquireLease("pull", signal)
     status = { ...status, running: "pull" }
     try {
-      const [objects, segments] = await Promise.all([
+      const [objects, segments, markers] = await Promise.all([
         SyncProvider.listAll(input.provider, "devices", signal),
         SyncProvider.listAll(input.provider, "segments", signal),
+        deletions.list(signal),
       ])
       indexedSegments = new Map(segments.map((item) => [item.path, item]))
-      const heads: Head[] = []
-      for (const object of objects.filter((item) => item.path.endsWith(`.head${codec.suffix}`))) {
+      const remoteHeads = objects.flatMap((object) => {
+        if (!object.path.endsWith(`.head${codec.suffix}`)) return []
         const deviceID = deviceFromHeadPath(object.path, codec.suffix)
-        if (deviceID === input.config.deviceID) continue
+        return deviceID === input.config.deviceID ? [] : [{ object, deviceID }]
+      })
+      const visible = new Set(remoteHeads.map(({ deviceID }) => String(deviceID)))
+      for (const deviceID of cachedHeads.keys()) if (!visible.has(deviceID)) cachedHeads.delete(deviceID)
+      const heads = await mapConcurrent(remoteHeads, 8, async ({ object, deviceID }) => {
+        const cached = cachedHeads.get(String(deviceID))
+        if (cached?.version === object.version) return cached.head
         const downloaded = await downloadLatest(input.provider, object, signal)
-        heads.push(
-          await decode(
-            (value) => Schema.decodeUnknownSync(Head)(value),
-            codec,
-            "metadata",
-            headContext(deviceID, object.path),
-            downloaded.bytes,
-          ),
+        const head = await decode(
+          (value) => Schema.decodeUnknownSync(Head)(value),
+          codec,
+          "metadata",
+          headContext(deviceID, object.path),
+          downloaded.bytes,
         )
-      }
+        cachedHeads.set(String(deviceID), { version: downloaded.version, head })
+        return head
+      })
       const revoked = new Set(heads.flatMap((head) => head.revoked))
       revokedDevices = revoked
       indexedHeads = heads
@@ -275,7 +283,6 @@ export function make(input: {
         if (revoked.has(head.deviceID)) continue
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
       }
-      const markers = await deletions.list(signal)
       await Effect.runPromise(
         input.store.absorbDeletions(
           markers.map((item) => item.tombstone),

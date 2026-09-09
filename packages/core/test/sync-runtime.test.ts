@@ -363,6 +363,53 @@ describe("SyncRuntime", () => {
     expect(progress).toEqual([])
   })
 
+  test("reuses an unchanged remote head and refreshes it when its version changes", async () => {
+    const remote = provider()
+    const macID = SyncEvent.DeviceID.make("cached-head-mac")
+    const windowsID = SyncEvent.DeviceID.make("cached-head-windows")
+    let title = "first"
+    const uploader = SyncRuntime.make({
+      config: { deviceID: macID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: store(macID).service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () =>
+        Effect.succeed([
+          {
+            sessionID: "session-1",
+            title,
+            ownerDeviceID: macID,
+            directory: "/workspace",
+            revision: 1,
+            updatedAt: 1,
+          },
+        ]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    const downloader = SyncRuntime.make({
+      config: { deviceID: windowsID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: store(windowsID).service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+
+    await Effect.runPromise(uploader.upload())
+    await Effect.runPromise(downloader.pull())
+    const afterFirstPull = remote.counts.download
+    await Effect.runPromise(downloader.pull())
+    expect(remote.counts.download).toBe(afterFirstPull)
+
+    title = "second"
+    await Effect.runPromise(uploader.upload())
+    const beforeRefresh = remote.counts.download
+    await Effect.runPromise(downloader.pull())
+    expect(remote.counts.download).toBe(beforeRefresh + 1)
+  })
+
   test("retries a mutable device head that changes between list and download", async () => {
     const remote = provider()
     const macID = SyncEvent.DeviceID.make("head-mac")

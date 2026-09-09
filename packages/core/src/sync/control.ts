@@ -676,7 +676,9 @@ const make = (input: LayerOptions) =>
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
       const metadata = metadataStore.scope(config.namespaceID)
-      const known = (yield* metadata.list()).some((item) => item.sessionID === input.sessionID)
+      const known = (yield* metadata.list().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))).some(
+        (item) => item.sessionID === input.sessionID,
+      )
       if (!known) return yield* new ControlError({ kind: "invalid" })
       const runtime = yield* load()
       yield* eventStore.scope(config.namespaceID).delete(

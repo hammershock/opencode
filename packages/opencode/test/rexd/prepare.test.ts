@@ -15,12 +15,14 @@ const target: RexdTarget = {
 
 describe("managed Rexd prepare", () => {
   test.each([
-    ["x86_64", "linux-amd64"],
-    ["aarch64", "linux-arm64"],
-  ] as const)("detects Linux %s including WSL userspace", async (architecture, platform) => {
+    ["Linux", "x86_64", "linux-amd64", "wsl"],
+    ["Linux", "aarch64", "linux-arm64", "linux"],
+    ["Darwin", "x86_64", "darwin-amd64", "darwin"],
+    ["Darwin", "arm64", "darwin-arm64", "darwin"],
+  ] as const)("detects %s %s as %s", async (system, architecture, platform, environment) => {
     const detected = await detectRemotePlatform(target, undefined, {
       run: async () => ({
-        stdout: `Linux\n${architecture}\n/home/hammer\n/home/hammer/.local/share\n/home/hammer/.config\nwsl\n`,
+        stdout: `${system}\n${architecture}\n/home/hammer\n/home/hammer/.local/share\n/home/hammer/.config\n${environment}\n`,
         stderr: "",
       }),
     })
@@ -29,7 +31,7 @@ describe("managed Rexd prepare", () => {
       home: "/home/hammer",
       dataHome: "/home/hammer/.local/share",
       configHome: "/home/hammer/.config",
-      wsl: true,
+      wsl: environment === "wsl",
     })
   })
 
@@ -39,7 +41,7 @@ describe("managed Rexd prepare", () => {
       prepareManagedRexd(target, undefined, {
         run: async () => {
           calls++
-          return { stdout: "Darwin\narm64\n/Users/test\n/data\n/config\nlinux\n", stderr: "" }
+          return { stdout: "FreeBSD\narm64\n/Users/test\n/data\n/config\nfreebsd\n", stderr: "" }
         },
       }),
     ).rejects.toMatchObject({ phase: "unsupported-platform" })

@@ -140,7 +140,7 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
     renew: () => Effect.succeed(true),
     release: () => Effect.void,
   } as any
-  return { service, applied }
+  return { service, applied, deletionRecords: deletions }
 }
 
 describe("SyncRuntime", () => {
@@ -824,6 +824,7 @@ describe("SyncRuntime", () => {
     })
     await Effect.runPromise(runtimeA.upload())
     expect([...remote.files.keys()].some((path) => path === `deletions/${sessionID}/marker.json`)).toBeTrue()
+    expect(deviceA.deletionRecords).toEqual([tombstone])
 
     // Pulling applies the deletion locally, but is deliberately not enough to
     // release B's reference: its stale remote head has not been replaced yet.
@@ -832,8 +833,24 @@ describe("SyncRuntime", () => {
     expect([...remote.files.keys()].some((path) => path === `deletions/${sessionID}/acks/b.json`)).toBeFalse()
     expect([...remote.files.keys()].some((path) => path === `deletions/${sessionID}/marker.json`)).toBeTrue()
 
-    await Effect.runPromise(runtimeB.upload())
+    const collectedOnB: string[][] = []
+    const collectingB = SyncRuntime.make({
+      config: { deviceID: SyncEvent.DeviceID.make("b"), enabled: true },
+      codec,
+      provider: remote.adapter,
+      store: deviceB.service,
+      projector: {
+        project: () => Effect.void,
+        delete: () => Effect.sync(() => void (visibleOnB = false)),
+      },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+      deletionCollected: (sessionIDs) => Effect.sync(() => void collectedOnB.push([...sessionIDs])),
+    })
+    await Effect.runPromise(collectingB.upload())
     expect([...remote.files.keys()].some((path) => path.startsWith(`deletions/${sessionID}/`))).toBeFalse()
+    expect(collectedOnB).toEqual([[sessionID]])
+    expect(deviceB.deletionRecords).toEqual([])
 
     const deviceC = store(SyncEvent.DeviceID.make("c"))
     const visibleOnC: SyncRuntime.Metadata[] = []

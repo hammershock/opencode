@@ -101,6 +101,10 @@ export function make(input: {
   readonly acknowledged?: () => Effect.Effect<Readonly<Record<string, number>>, unknown>
   readonly revoked?: () => Effect.Effect<readonly SyncEvent.DeviceID[], unknown>
   readonly deviceProjector?: (head: Head) => Effect.Effect<void, unknown>
+  /** Finalizes local routing after every active device acknowledged a deletion.
+   * It runs after payload collection but before the cloud marker is removed, so
+   * a crash cannot lose both the durable local route and the recovery marker. */
+  readonly deletionCollected?: (sessionIDs: readonly string[]) => Effect.Effect<void, unknown>
   readonly attachment?: AttachmentPipeline
   readonly transfer?: SyncTransfer.Observer
   readonly now?: () => number
@@ -229,9 +233,10 @@ export function make(input: {
       }
       stage = "collect"
       if (pendingDeletions.length) {
-        await collectDeletions(signal)
-        for (const marker of pendingDeletions)
-          await Effect.runPromise(input.store.forgetDeletion(marker.tombstone.sessionID))
+        const collected = await collectDeletions(signal)
+        if (collected.length) {
+          for (const sessionID of collected) await Effect.runPromise(input.store.forgetDeletion(sessionID))
+        }
       }
       status = { ...status, running: "idle", lastUploadAt: now(), lastError: undefined }
     } catch (cause) {
@@ -443,7 +448,7 @@ export function make(input: {
         (deviceID) => item.acknowledged.has(deviceID) || revokedDevices.has(deviceID),
       ),
     )
-    if (!eligible.length) return
+    if (!eligible.length) return []
     const deleted = new Set(eligible.map((item) => item.marker.tombstone.sessionID))
     const affected = new Set(
       (await Effect.runPromise(input.store.segmentsFor([...deleted]))).map(({ deviceID, generation }) =>
@@ -491,7 +496,10 @@ export function make(input: {
       await input.provider.uploadAtomic(object.path, bytes, { type: "version", version: object.version }, signal)
     }
     if (deletedHadAttachments) await collectAttachments(signal)
+    const collected = eligible.map((item) => item.marker.tombstone.sessionID)
+    await Effect.runPromise(input.deletionCollected?.(collected) ?? Effect.void)
     await deletions.removeScanned(eligible, signal)
+    return collected
   }
 
   const coalesce = (direction: "upload" | "pull", signal?: AbortSignal) => {

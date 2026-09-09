@@ -298,6 +298,7 @@ const make = (input: LayerOptions) =>
               revoked: false,
             }),
           ).pipe(Effect.asVoid),
+        deletionCollected: (sessionIDs) => Effect.forEach(sessionIDs, ownership.unassign, { discard: true }),
       })
       engineIdentity = identity
       return engine

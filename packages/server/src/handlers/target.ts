@@ -160,6 +160,7 @@ export const TargetHandler = HttpApiBuilder.group(Api, "server.target", (handler
         }),
       )
       .handle("target.test", (ctx) => invoke(() => target.testConnection(ctx.params.targetID)))
+      .handle("target.refresh", (ctx) => invoke(() => target.refreshConnection(ctx.params.targetID)))
       .handle("target.prepare", (ctx) => invoke(() => target.prepare(ctx.params.targetID)))
       .handle("target.legacy.preview", () => read(target.previewLegacyImport))
       .handle("target.legacy.import", (ctx) =>

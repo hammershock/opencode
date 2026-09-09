@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm"
 import { EventSequenceTable } from "../event/sql"
 import { SessionSyncDurable } from "@opencode-ai/schema/durable-event-manifest"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
+import { SessionEvent } from "@opencode-ai/schema/session-event"
 
 type DurablePayload = {
   readonly id: string
@@ -46,7 +47,7 @@ export function capture(store: SyncEventStore.Interface, payload: DurablePayload
       aggregateID: payload.durable.aggregateID,
       seq: payload.durable.seq,
       type: EventV2.versionedType(payload.type, payload.durable.version),
-      data: normalizeCapturedData(payload.type, payload.data),
+      data: normalizeCapturedData(payload.data),
     }),
     createdAt,
   )
@@ -89,6 +90,7 @@ export function backfill(
   store: SyncEventStore.Interface,
   sessionID: string,
   spaceID: string,
+  options?: { readonly includeForeignHistory?: boolean },
 ) {
   return Effect.gen(function* () {
     const sequence = yield* db
@@ -97,8 +99,10 @@ export function backfill(
       .where(eq(EventSequenceTable.aggregate_id, sessionID))
       .get()
     // A non-null owner identifies an aggregate materialized from another
-    // device. Backfilling it would echo replayed history back into the cloud.
-    if (sequence?.ownerID) return
+    // device. Routine crash recovery avoids echoing that replayed history.
+    // A newly bound account namespace explicitly opts in because its complete
+    // local snapshot is the recovery source after a destructive cloud reset.
+    if (sequence?.ownerID && !options?.includeForeignHistory) return
     let after = -1
     while (true) {
       const page = yield* EventV2.readAggregate(db, {
@@ -176,10 +180,17 @@ export function projector(
         const hydrated = spaceID ? bindCreatedSpace(restored, spaceID) : restored
         const existing = siblings.get(hydrated.aggregateID)
         if (existing) return yield* replayAs(events, hydrated, existing, sourceDeviceID)
-        const replay = events.replay(serialized(hydrated), {
-          publish: true,
-          ...(sourceDeviceID ? { ownerID: sourceDeviceID, strictOwner: true } : {}),
-        })
+        const replay = events.replay(
+          serialized(hydrated),
+          replayOptions(hydrated, {
+            publish: true,
+            // A Session may move between devices. Ownership identifies where
+            // its history originated; it must not fence a later, sequential
+            // append from another device. Same-sequence divergence is still
+            // rejected below and materialized as a deterministic sibling.
+            ...(sourceDeviceID ? { ownerID: sourceDeviceID, allowForeignAppend: true } : {}),
+          }),
+        )
         const exit = yield* Effect.exit(replay)
         if (exit._tag === "Success") {
           if (spaceID && onOwned && isCreatedEnvelope(hydrated))
@@ -215,7 +226,10 @@ export function projector(
               type: item.type,
               data: replaceSessionID(item.data as Record<string, unknown>, hydrated.aggregateID, sibling),
             },
-            { publish: true, ownerID: sourceDeviceID, strictOwner: true, allowEquivalent: true },
+            replayOptions(
+              { type: item.type },
+              { publish: true, ownerID: sourceDeviceID, strictOwner: true, allowEquivalent: true },
+            ),
           )
         }
         yield* replayAs(events, hydrated, sibling, sourceDeviceID)
@@ -249,19 +263,19 @@ function serialized(event: SyncEvent.Envelope): EventV2.SerializedEvent {
 }
 
 function normalizeLegacyWireData(event: SyncEvent.Envelope) {
-  // Early sync builds JSON-stringified DateTime values instead of applying
-  // the durable event schema encoder. Keep those already-published segments
-  // replayable while all new captures normalize the transformed field.
-  if (event.type === "session.next.location.rebound.1" && typeof event.data.timestamp === "string") {
+  // Sync capture crosses a JSON boundary before the durable schema encoder.
+  // DateTime values therefore arrive as ISO strings in both historical and
+  // current segments; restore the schema's millisecond wire representation.
+  if (typeof event.data.timestamp === "string") {
     const timestamp = Date.parse(event.data.timestamp)
     if (Number.isFinite(timestamp)) return { ...event.data, timestamp }
   }
   return event.data
 }
 
-function normalizeCapturedData(type: string, data: Record<string, unknown>) {
+function normalizeCapturedData(data: Record<string, unknown>) {
   const normalized = JSON.parse(JSON.stringify(data)) as Record<string, any>
-  if (type === "session.next.location.rebound" && typeof normalized.timestamp === "string") {
+  if (typeof normalized.timestamp === "string") {
     const timestamp = Date.parse(normalized.timestamp)
     if (Number.isFinite(timestamp)) normalized.timestamp = timestamp
   }
@@ -274,15 +288,30 @@ function replayAs(
   sessionID: string,
   ownerID?: SyncEvent.DeviceID,
 ) {
+  const replayed = {
+    ...serialized(event),
+    id: EventV2.ID.create(),
+    aggregateID: sessionID,
+    data: replaceSessionID(event.data, event.aggregateID, sessionID),
+  }
   return events.replay(
-    {
-      ...serialized(event),
-      id: EventV2.ID.create(),
-      aggregateID: sessionID,
-      data: replaceSessionID(event.data, event.aggregateID, sessionID),
-    },
-    { publish: true, allowEquivalent: true, ...(ownerID ? { ownerID, strictOwner: true } : {}) },
+    replayed,
+    replayOptions(replayed, {
+      publish: true,
+      allowEquivalent: true,
+      ...(ownerID ? { ownerID, strictOwner: true } : {}),
+    }),
   )
+}
+
+/** Execution Location is device-local. Keep its durable sequence in the shared
+ * history, but never project or publish a remote rebind into this device. */
+function replayOptions(event: Pick<SyncEvent.Envelope, "type">, options: EventV2.ReplayOptions) {
+  const rebound =
+    event.type === SessionEvent.LocationRebound.type ||
+    event.type ===
+      EventV2.versionedType(SessionEvent.LocationRebound.type, SessionEvent.LocationRebound.durable!.version)
+  return rebound ? { ...options, publish: false, project: false } : options
 }
 
 function replaceSessionID(value: unknown, source: string, target: string): any {

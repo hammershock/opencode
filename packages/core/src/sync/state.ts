@@ -4,6 +4,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { Schema } from "effect"
 import { NonNegativeInt } from "../schema"
+import { SyncRoot } from "./root"
 import { SyncSpace } from "./space"
 
 export const IntervalSeconds = Schema.Literals([30, 60, 300])
@@ -79,6 +80,8 @@ export function active(state: State): Active | undefined {
     (item) => item.descriptor.namespaceID === state.activeSpaceID && item.accountID === state.account!.id,
   )
   if (!binding || !SyncSpace.compatible(binding.descriptor.protocol)) return
+  const instanceID = SyncRoot.accountInstanceID(binding.descriptor.namespaceID)
+  if (instanceID && binding.remoteRoot !== SyncRoot.instanceRoot(instanceID)) return
   return {
     provider: "baidu",
     deviceID: state.deviceID,
@@ -94,6 +97,9 @@ export function active(state: State): Active | undefined {
 }
 
 export function bind(state: State, binding: Binding): State {
+  const instanceID = SyncRoot.accountInstanceID(binding.descriptor.namespaceID)
+  if (instanceID && binding.remoteRoot !== SyncRoot.instanceRoot(instanceID))
+    throw new ConflictError("Account sync scope does not match its remote instance root")
   const previous = state.spaces.find((item) => item.descriptor.namespaceID === binding.descriptor.namespaceID)
   if (
     previous &&

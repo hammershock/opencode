@@ -7,18 +7,16 @@ describe("SyncDeletion", () => {
   test("derives reference count from an idempotent device acknowledgement set", async () => {
     const remote = memory()
     const deletion = SyncDeletion.make({ provider: remote.adapter, now: () => 10 })
-    const marker = await deletion.ensure(
-      { id: "delete-1", sessionID: "session-1", deletedAt: 1 },
-      [SyncEvent.DeviceID.make("mac"), SyncEvent.DeviceID.make("windows")],
-    )
+    const marker = await deletion.ensure({ id: "delete-1", sessionID: "session-1", deletedAt: 1 }, [
+      SyncEvent.DeviceID.make("mac"),
+      SyncEvent.DeviceID.make("windows"),
+    ])
     expect((await deletion.references(marker, new Set())).map(String)).toEqual(["mac", "windows"])
 
     await deletion.acknowledge(marker, SyncEvent.DeviceID.make("mac"))
     await deletion.acknowledge(marker, SyncEvent.DeviceID.make("mac"))
     expect((await deletion.references(marker, new Set())).map(String)).toEqual(["windows"])
-    expect(
-      await deletion.references(marker, new Set([SyncEvent.DeviceID.make("windows")])),
-    ).toEqual([])
+    expect(await deletion.references(marker, new Set([SyncEvent.DeviceID.make("windows")]))).toEqual([])
 
     await deletion.remove(marker)
     expect(await deletion.list()).toEqual([])
@@ -28,10 +26,9 @@ describe("SyncDeletion", () => {
     const remote = memory()
     const deletion = SyncDeletion.make({ provider: remote.adapter, now: () => 10 })
     for (const sessionID of ["session-a", "session-b"]) {
-      const marker = await deletion.ensure(
-        { id: `delete-${sessionID}`, sessionID, deletedAt: 1 },
-        [SyncEvent.DeviceID.make("mac")],
-      )
+      const marker = await deletion.ensure({ id: `delete-${sessionID}`, sessionID, deletedAt: 1 }, [
+        SyncEvent.DeviceID.make("mac"),
+      ])
       await deletion.acknowledge(marker, SyncEvent.DeviceID.make("mac"))
     }
     remote.counts.list = 0
@@ -45,6 +42,20 @@ describe("SyncDeletion", () => {
     await deletion.removeScanned(snapshot)
     expect(remote.counts.delete).toBe(1)
     expect(remote.values.size).toBe(0)
+  })
+
+  test("monotonically expands the frozen required-device set", async () => {
+    const remote = memory()
+    const deletion = SyncDeletion.make({ provider: remote.adapter, now: () => 10 })
+    const tombstone = { id: "delete-union", sessionID: "session-union", deletedAt: 1 }
+    await deletion.ensure(tombstone, [SyncEvent.DeviceID.make("mac")])
+    const marker = await deletion.ensure(tombstone, [
+      SyncEvent.DeviceID.make("mac"),
+      SyncEvent.DeviceID.make("windows"),
+    ])
+
+    expect(marker.requiredDevices.map(String)).toEqual(["mac", "windows"])
+    expect((await deletion.read("session-union"))?.requiredDevices.map(String)).toEqual(["mac", "windows"])
   })
 })
 

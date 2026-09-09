@@ -326,6 +326,12 @@ describe("session HttpApi", () => {
         const child = yield* createSession({ title: "child", parentID: parent.id })
         const message = yield* createTextMessage(parent.id, "hello")
         yield* createTextMessage(parent.id, "world")
+        yield* (yield* Database.Service).db
+          .update(SessionTable)
+          .set({ portable_target_label: "mywindows" })
+          .where(eq(SessionTable.id, parent.id))
+          .run()
+          .pipe(Effect.orDie)
 
         const listed = yield* requestJson<Session.Info[]>(`${SessionPaths.list}?roots=true`, { headers })
         expect(listed.map((item) => item.id)).toContain(parent.id)
@@ -335,7 +341,14 @@ describe("session HttpApi", () => {
 
         expect(
           yield* requestJson<Session.Info>(pathFor(SessionPaths.get, { sessionID: parent.id }), { headers }),
-        ).toMatchObject({ id: parent.id, title: "parent" })
+        ).toMatchObject({ id: parent.id, title: "parent", portableTargetLabel: "mywindows" })
+
+        yield* (yield* Database.Service).db
+          .update(SessionTable)
+          .set({ portable_target_label: null })
+          .where(eq(SessionTable.id, parent.id))
+          .run()
+          .pipe(Effect.orDie)
 
         expect(
           (yield* requestJson<Session.Info[]>(pathFor(SessionPaths.children, { sessionID: parent.id }), {

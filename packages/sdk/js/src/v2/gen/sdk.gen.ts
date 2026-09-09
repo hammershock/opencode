@@ -95,6 +95,8 @@ import type {
   GlobalSyncCloudClearResponses,
   GlobalSyncCloudInitializeErrors,
   GlobalSyncCloudInitializeResponses,
+  GlobalSyncCloudJoinErrors,
+  GlobalSyncCloudJoinResponses,
   GlobalSyncCloudStatusErrors,
   GlobalSyncCloudStatusResponses,
   GlobalSyncCreateErrors,
@@ -485,6 +487,8 @@ import type {
   V2TargetListResponses,
   V2TargetPrepareErrors,
   V2TargetPrepareResponses,
+  V2TargetRefreshErrors,
+  V2TargetRefreshResponses,
   V2TargetRemoveErrors,
   V2TargetRemoveResponses,
   V2TargetRestoreErrors,
@@ -1849,6 +1853,12 @@ export class Global extends HeyApiClient {
       GlobalSyncCloudInitializeErrors,
       ThrowOnError
     >({ url: "/global/sync/cloud", ...options })
+  }
+
+  public syncCloudJoin<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).post<GlobalSyncCloudJoinResponses, GlobalSyncCloudJoinErrors, ThrowOnError>(
+      { url: "/global/sync/cloud/join", ...options },
+    )
   }
 
   public syncSessions<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
@@ -7691,6 +7701,23 @@ export class Target extends HeyApiClient {
     const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "targetID" }] }])
     return (options?.client ?? this.client).post<V2TargetTestResponses, V2TargetTestErrors, ThrowOnError>({
       url: "/api/target/{targetID}/test",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Force refresh a target connection
+   */
+  public refresh<ThrowOnError extends boolean = false>(
+    parameters: {
+      targetID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "targetID" }] }])
+    return (options?.client ?? this.client).post<V2TargetRefreshResponses, V2TargetRefreshErrors, ThrowOnError>({
+      url: "/api/target/{targetID}/refresh",
       ...options,
       ...params,
     })

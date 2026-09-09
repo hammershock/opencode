@@ -30,7 +30,15 @@ export interface Adapter {
    * stores can omit it because their normal list already returns descendants. */
   readonly listRecursive?: (prefix: string, cursor?: Cursor, signal?: AbortSignal) => Promise<ListPage>
   readonly stat: (path: string, signal?: AbortSignal) => Promise<ObjectInfo | undefined>
+  /** Exact-path metadata lookup for several objects in one provider request.
+   * Results preserve input order. This is an optimization only: absence is
+   * never an authoritative deletion fact. */
+  readonly statMany?: (paths: readonly string[], signal?: AbortSignal) => Promise<readonly (ObjectInfo | undefined)[]>
   readonly download: (path: string, version?: string, signal?: AbortSignal) => Promise<Download>
+  /** `absent` is the only correctness-grade precondition required by the
+   * protocol: providers must create without replacing an occupied path.
+   * `version` is an advisory conflict check for mutable discovery hints and is
+   * not a transaction/CAS guarantee on filesystem-style providers. */
   readonly uploadAtomic: (
     path: string,
     bytes: Uint8Array,
@@ -97,12 +105,7 @@ export async function listAllRecursive(adapter: Adapter, prefix: string, signal?
   return collect(adapter, adapter.listRecursive ?? adapter.list, prefix, signal)
 }
 
-async function collect(
-  adapter: Adapter,
-  list: Adapter["list"],
-  prefix: string,
-  signal?: AbortSignal,
-) {
+async function collect(adapter: Adapter, list: Adapter["list"], prefix: string, signal?: AbortSignal) {
   objectPath(prefix)
   const objects: ObjectInfo[] = []
   const cursors = new Set<string>()

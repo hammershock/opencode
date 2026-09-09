@@ -243,13 +243,19 @@ describe("Session", () => {
         targetID: Location.TargetID.make("00000000-0000-4000-8000-000000000120"),
       })
       const lastKnownTargetName = "test-rexd"
+      const portableTargetLabel = "mywindows"
       const syncSpaceID = "test-sync-space"
       const created = yield* Effect.acquireRelease(session.create({ title: "before" }), (info) =>
         session.remove(info.id).pipe(Effect.ignore),
       )
       yield* db
         .update(SessionTable)
-        .set({ target, last_known_target_name: lastKnownTargetName, sync_space_id: syncSpaceID })
+        .set({
+          target,
+          last_known_target_name: lastKnownTargetName,
+          portable_target_label: portableTargetLabel,
+          sync_space_id: syncSpaceID,
+        })
         .where(eq(SessionTable.id, created.id))
         .run()
         .pipe(Effect.orDie)
@@ -265,13 +271,19 @@ describe("Session", () => {
       GlobalBus.on("event", listener)
       yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", listener)))
 
-      expect(yield* session.get(created.id)).toMatchObject({ target, lastKnownTargetName, syncSpaceID })
+      expect(yield* session.get(created.id)).toMatchObject({
+        target,
+        lastKnownTargetName,
+        portableTargetLabel,
+        syncSpaceID,
+      })
       yield* session.setTitle({ sessionID: created.id, title: "after" })
 
       expect(yield* session.get(created.id)).toMatchObject({
         title: "after",
         target,
         lastKnownTargetName,
+        portableTargetLabel,
         syncSpaceID,
       })
       expect(
@@ -279,15 +291,16 @@ describe("Session", () => {
           .select({
             target: SessionTable.target,
             lastKnownTargetName: SessionTable.last_known_target_name,
+            portableTargetLabel: SessionTable.portable_target_label,
             syncSpaceID: SessionTable.sync_space_id,
           })
           .from(SessionTable)
           .where(eq(SessionTable.id, created.id))
           .get()
           .pipe(Effect.orDie),
-      ).toEqual({ target, lastKnownTargetName, syncSpaceID })
+      ).toEqual({ target, lastKnownTargetName, portableTargetLabel, syncSpaceID })
       expect(yield* awaitDeferred(received, "timed out waiting for placement-preserving update event")).toMatchObject({
-        data: { info: { target, lastKnownTargetName, syncSpaceID } },
+        data: { info: { target, lastKnownTargetName, portableTargetLabel, syncSpaceID } },
       })
     }),
   )

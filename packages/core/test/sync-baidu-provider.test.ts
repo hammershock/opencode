@@ -37,6 +37,19 @@ function createdFile(path: string, fsID: number, size: number, modified = 10) {
   return { path, fs_id: fsID, size, mtime: modified, isdir: 0 }
 }
 
+function metadataFile(path: string, fsID: number, size: number, modified = 10, dlink?: string) {
+  const entries = [{ ...listed(path, fsID, size, modified), errno: 0, ...(dlink ? { dlink } : {}) }]
+  return {
+    errno: 0,
+    info: entries,
+    list: entries,
+  }
+}
+
+function missingMetadata() {
+  return { errno: 0, info: [], list: [] }
+}
+
 async function uploadedPart(init?: RequestInit) {
   const file = (init?.body as FormData).get("file")
   if (!(file instanceof Blob)) throw new Error("missing uploaded part")
@@ -63,7 +76,7 @@ describe("BaiduSyncProvider", () => {
       requestTimeoutMs: 10,
       sleep: async () => undefined,
       request: async (_input, init) => {
-        if (!hung) return Response.json({ errno: 0, list: [], has_more: 0 })
+        if (!hung) return Response.json(missingMetadata())
         return new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener(
             "abort",
@@ -158,7 +171,7 @@ describe("BaiduSyncProvider", () => {
         urls.push(url.toString())
         if (url.hostname === "openapi.baidu.com")
           return Response.json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 })
-        return Response.json({ errno: 0, list: [], has_more: 0 })
+        return Response.json(missingMetadata())
       },
     })
     expect(await provider.stat("heads/device.enc")).toBeUndefined()
@@ -178,8 +191,10 @@ describe("BaiduSyncProvider", () => {
       request: async (input) => {
         const url = new URL(input instanceof Request ? input.url : input)
         if (url.hostname === "download.test") return new Response("abc")
-        if (url.pathname.includes("multimedia"))
-          return Response.json({ errno: 0, list: [{ dlink: "https://download.test/file" }] })
+        if (url.searchParams.get("method") === "filemetas")
+          return Response.json(
+            metadataFile("/apps/opencode-sync/space/objects/1.enc", 1, 3, 10, "https://download.test/file"),
+          )
         if (url.searchParams.get("method") === "list") {
           if (!paging)
             return Response.json({
@@ -204,6 +219,82 @@ describe("BaiduSyncProvider", () => {
     const object = await provider.download("objects/1.enc", "1:10000:3")
     expect(new TextDecoder().decode(object.bytes)).toBe("abc")
     expect(object.version).toBe("1:10000:3")
+  })
+
+  test("batches exact-path head metadata without using a directory listing", async () => {
+    let requests = 0
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        expect(url.searchParams.get("method")).toBe("filemetas")
+        requests++
+        const targets = JSON.parse(String(new URLSearchParams(init?.body as URLSearchParams).get("target"))) as string[]
+        expect(targets).toEqual([
+          "/apps/opencode-sync/space/devices/mac.head.json",
+          "/apps/opencode-sync/space/devices/windows.head.json",
+        ])
+        return Response.json({
+          errno: 0,
+          info: [
+            { ...listed(targets[0]!, 1, 3), errno: 0 },
+            { path: targets[1], errno: -9 },
+          ],
+        })
+      },
+    })
+
+    expect(await provider.statMany?.(["devices/mac.head.json", "devices/windows.head.json"])).toEqual([
+      {
+        path: "devices/mac.head.json",
+        version: "1:10000:3",
+        size: 3,
+        modifiedAt: 10_000,
+      },
+      undefined,
+    ])
+    expect(requests).toBe(1)
+  })
+
+  test("falls back to single-path metadata when Baidu rejects a batch containing an absent path", async () => {
+    const requested: string[] = []
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        const method = url.searchParams.get("method")
+        if (method === "filemetas") {
+          const targets = JSON.parse(
+            String(new URLSearchParams(init?.body as URLSearchParams).get("target")),
+          ) as string[]
+          if (targets.length > 1) return Response.json({ errno: 12, request_id: "batch-rejected" })
+          const target = targets[0]!
+          requested.push(target)
+          return Response.json(
+            target.endsWith("/mac.head.json") ? metadataFile(target, 1, 3) : { errno: 12, request_id: "missing-path" },
+          )
+        }
+        throw new Error("unexpected")
+      },
+    })
+
+    expect(await provider.statMany?.(["devices/mac.head.json", "devices/windows.head.json"])).toEqual([
+      {
+        path: "devices/mac.head.json",
+        version: "1:10000:3",
+        size: 3,
+        modifiedAt: 10_000,
+      },
+      undefined,
+    ])
+    expect(requested).toEqual([
+      "/apps/opencode-sync/space/devices/mac.head.json",
+      "/apps/opencode-sync/space/devices/windows.head.json",
+    ])
   })
 
   test("uses Baidu listall cursors for recursive deletion traversal", async () => {
@@ -275,18 +366,14 @@ describe("BaiduSyncProvider", () => {
       request: async (input) => {
         const url = new URL(input instanceof Request ? input.url : input)
         if (url.hostname === "download.test") return new Response("abc")
-        if (url.pathname.includes("multimedia")) {
+        if (url.searchParams.get("method") === "filemetas") {
           metadata++
           return Response.json(
-            metadata === 1 ? { errno: 0, list: [] } : { errno: 0, list: [{ dlink: "https://download.test/file" }] },
+            metadata === 1
+              ? metadataFile("/apps/opencode-sync/space/objects/1.json", 1, 3)
+              : metadataFile("/apps/opencode-sync/space/objects/1.json", 1, 3, 10, "https://download.test/file"),
           )
         }
-        if (url.searchParams.get("method") === "list")
-          return Response.json({
-            errno: 0,
-            list: [listed("/apps/opencode-sync/space/objects/1.json", 1, 3)],
-            has_more: 0,
-          })
         throw new Error("unexpected")
       },
     })
@@ -296,7 +383,8 @@ describe("BaiduSyncProvider", () => {
     expect(metadata).toBe(2)
   })
 
-  test("refreshes a replaced file instead of retrying metadata for its stale fs id", async () => {
+  test("refreshes path metadata and dlink after a transient content 404", async () => {
+    let downloads = 0
     let metadata = 0
     const provider = BaiduSyncProvider.adapter({
       store: memoryStore(credential),
@@ -305,16 +393,39 @@ describe("BaiduSyncProvider", () => {
       sleep: async () => undefined,
       request: async (input) => {
         const url = new URL(input instanceof Request ? input.url : input)
-        if (url.pathname.includes("multimedia")) {
+        if (url.hostname === "download.test")
+          return ++downloads === 1 ? new Response(undefined, { status: 404 }) : new Response("abc")
+        if (url.searchParams.get("method") === "filemetas") {
           metadata++
-          return Response.json({ errno: 0, list: [] })
+          return Response.json(
+            metadataFile("/apps/opencode-sync/space/objects/1.json", 1, 3, 10, "https://download.test/file"),
+          )
         }
-        if (url.searchParams.get("method") === "list")
-          return Response.json({
-            errno: 0,
-            list: [listed("/apps/opencode-sync/space/objects/1.json", 2, 3)],
-            has_more: 0,
-          })
+        throw new Error("unexpected")
+      },
+    })
+
+    const object = await provider.download("objects/1.json", "1:10000:3")
+    expect(new TextDecoder().decode(object.bytes)).toBe("abc")
+    expect(metadata).toBe(2)
+    expect(downloads).toBe(2)
+  })
+
+  test("detects a replaced file through canonical path metadata", async () => {
+    let metadata = 0
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      sleep: async () => undefined,
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        if (url.searchParams.get("method") === "filemetas") {
+          metadata++
+          return Response.json(
+            metadataFile("/apps/opencode-sync/space/objects/1.json", 2, 3, 10, "https://download.test/file"),
+          )
+        }
         throw new Error("unexpected")
       },
     })
@@ -326,6 +437,8 @@ describe("BaiduSyncProvider", () => {
   test("uploads with precreate, fixed 4MiB parts, create and absence precondition", async () => {
     const store = memoryStore(credential)
     const parts: number[] = []
+    const replacementTypes: string[] = []
+    let metadataReads = 0
     let created = false
     const bytes = new Uint8Array(4 * 1024 * 1024 + 7)
     const provider = BaiduSyncProvider.adapter({
@@ -335,13 +448,24 @@ describe("BaiduSyncProvider", () => {
       request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
+        if (method === "filemetas") {
+          metadataReads++
+          return Response.json(
+            created ? metadataFile("/apps/opencode-sync/space/a.enc", 9, bytes.length) : missingMetadata(),
+          )
+        }
         if (method === "list")
           return Response.json({
             errno: 0,
             list: created ? [listed("/apps/opencode-sync/space/a.enc", 9, bytes.length)] : [],
             has_more: 0,
           })
-        if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-1", block_list: [0, 1] })
+        if (method === "precreate") {
+          const fields = new URLSearchParams(init?.body as URLSearchParams)
+          replacementTypes.push(String(fields.get("rtype")))
+          if (created) return Response.json({ errno: -8 })
+          return Response.json({ errno: 0, uploadid: "upload-1", block_list: [0, 1] })
+        }
         if (url.hostname === "d.pcs.baidu.com") {
           parts.push(Number(url.searchParams.get("partseq")))
           const file = (init?.body as FormData).get("file")
@@ -350,6 +474,7 @@ describe("BaiduSyncProvider", () => {
           return uploadedPart(init)
         }
         if (method === "create") {
+          replacementTypes.push(String(new URLSearchParams(init?.body as URLSearchParams).get("rtype")))
           created = true
           return Response.json({ errno: 0, ...createdFile("/apps/opencode-sync/space/a.enc", 9, bytes.length) })
         }
@@ -358,6 +483,8 @@ describe("BaiduSyncProvider", () => {
     })
     expect((await provider.uploadAtomic("a.enc", bytes, { type: "absent" })).version).toBe(`9:10000:${bytes.length}`)
     expect(parts).toEqual([0, 1])
+    expect(replacementTypes).toEqual(["0", "0"])
+    expect(metadataReads).toBe(0)
     await expect(provider.uploadAtomic("a.enc", bytes, { type: "absent" })).rejects.toMatchObject({
       kind: "conflict",
     })
@@ -376,6 +503,10 @@ describe("BaiduSyncProvider", () => {
       request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
+        if (method === "filemetas")
+          return Response.json(
+            fileCreated ? metadataFile(`${root}/segments/device/1-1.json`, 12, 7) : missingMetadata(),
+          )
         if (method === "list") {
           const directory = url.searchParams.get("dir")!
           if (url.searchParams.get("folder") === "1")
@@ -439,8 +570,12 @@ describe("BaiduSyncProvider", () => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
         if (url.hostname === "download.test") return new Response(bytes)
-        if (url.pathname.includes("multimedia"))
-          return Response.json({ errno: 0, list: [{ dlink: "https://download.test/file" }] })
+        if (method === "filemetas")
+          return Response.json(
+            created
+              ? metadataFile("/apps/opencode-sync/space/head.enc", 4, bytes.length, 10, "https://download.test/file")
+              : missingMetadata(),
+          )
         if (method === "list")
           return Response.json({
             errno: 0,
@@ -469,6 +604,7 @@ describe("BaiduSyncProvider", () => {
       request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
+        if (method === "filemetas") return Response.json(missingMetadata())
         if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
         if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-failed", block_list: [0] })
         if (url.hostname === "d.pcs.baidu.com") return uploadedPart(init)
@@ -492,6 +628,7 @@ describe("BaiduSyncProvider", () => {
       request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
+        if (method === "filemetas") return Response.json(missingMetadata())
         if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
         if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-schema", block_list: [0] })
         if (url.hostname === "d.pcs.baidu.com") return uploadedPart(init)
@@ -524,6 +661,7 @@ describe("BaiduSyncProvider", () => {
       request: async (input) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
+        if (method === "filemetas") return Response.json(missingMetadata())
         if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
         if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-checksum", block_list: [0] })
         if (url.hostname === "d.pcs.baidu.com") return Response.json({ md5: "00000000000000000000000000000000" })
@@ -547,6 +685,7 @@ describe("BaiduSyncProvider", () => {
       request: async (input) => {
         const url = new URL(input instanceof Request ? input.url : input)
         const method = url.searchParams.get("method")
+        if (method === "filemetas") return Response.json(missingMetadata())
         if (method === "list") return Response.json({ errno: 0, list: [], has_more: 0 })
         if (method === "precreate") return Response.json({ errno: 0, uploadid: "upload-http-error", block_list: [0] })
         if (url.hostname === "d.pcs.baidu.com")
@@ -581,16 +720,15 @@ describe("BaiduSyncProvider", () => {
       sleep: async () => undefined,
       request: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input)
-        if (url.searchParams.get("method") === "list") {
+        if (url.searchParams.get("method") === "filemetas") {
           if (throttled) {
             throttled = false
             return Response.json({ errno: 31034 }, { status: 429, headers: { "retry-after": "2" } })
           }
-          return Response.json({
-            errno: 0,
-            list: [listed("/apps/opencode-sync/space/a", 1, 2), listed("/apps/opencode-sync/space/b", 2, 2)],
-            has_more: 0,
-          })
+          const target = JSON.parse(String(new URLSearchParams(init?.body as URLSearchParams).get("target")))[0]
+          if (target.endsWith("/a")) return Response.json(metadataFile(target, 1, 2))
+          if (target.endsWith("/b")) return Response.json(metadataFile(target, 2, 2))
+          return Response.json(missingMetadata())
         }
         if (url.searchParams.get("method") === "filemanager") {
           forms.push(String(init?.body))

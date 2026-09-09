@@ -73,7 +73,7 @@ describe("SyncEventStore", () => {
         return yield* db.get<{ version: number }>(sql`SELECT MAX(version) AS version FROM sync_schema`)
       }).pipe(Effect.scoped, Effect.provide(database)),
     )
-    expect(version).toEqual({ version: 8 })
+    expect(version).toEqual({ version: 13 })
   })
 
   test("preserves v5 rows while rebuilding space-composite keys and the immutable trigger", async () => {
@@ -112,7 +112,7 @@ describe("SyncEventStore", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = (yield* SyncDatabase.Service).db
-        expect(yield* db.get(sql`SELECT MAX(version) AS version FROM sync_schema`)).toEqual({ version: 8 })
+        expect(yield* db.get(sql`SELECT MAX(version) AS version FROM sync_schema`)).toEqual({ version: 13 })
         for (const table of [
           "sync_event_outbox",
           "sync_event_segment",

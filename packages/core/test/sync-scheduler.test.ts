@@ -49,8 +49,29 @@ describe("SyncScheduler", () => {
     await expect(scheduler.trigger()).rejects.toThrow("offline")
     expect(scheduler.status()).toMatchObject({ failures: 1, nextDelay: 1_000 })
     expect(timers.at(-1)?.delay).toBe(1_000)
-    scheduler.stop()
+    await scheduler.stop()
     expect(cleared.length).toBeGreaterThan(0)
     expect(scheduler.status().enabled).toBe(false)
+  })
+
+  test("stop aborts and waits for the active flight", async () => {
+    let completed = false
+    let started!: () => void
+    const active = new Promise<void>((resolve) => (started = resolve))
+    const scheduler = SyncScheduler.make({
+      run: async (signal) => {
+        started()
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))
+        await Promise.resolve()
+        completed = true
+      },
+    })
+
+    scheduler.start()
+    await active
+    await scheduler.stop()
+
+    expect(completed).toBe(true)
+    expect(scheduler.status()).toMatchObject({ enabled: false, running: false })
   })
 })

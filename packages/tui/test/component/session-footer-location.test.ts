@@ -45,4 +45,18 @@ describe("Session footer location", () => {
 
     expect(result.label).toBe("a100-2gpu · ~/workspace/opencode")
   })
+
+  test("shows a foreign device's local Session as its portable target", () => {
+    expect(
+      sessionFooterLocation({
+        session: {
+          directory: "/home/hammer",
+          target: { type: "local" },
+          portableTargetLabel: "mywindows",
+        },
+        fallbackDirectory: "/Users/hammer",
+        home: "/Users/hammer",
+      }).label,
+    ).toBe("mywindows · /home/hammer")
+  })
 })

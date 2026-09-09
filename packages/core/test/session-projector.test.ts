@@ -78,6 +78,45 @@ describe("SessionProjector", () => {
     }),
   )
 
+  it.effect("clears a cloud target placeholder when Location is rebound on this device", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const events = yield* EventV2.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/foreign/home",
+          title: "test",
+          version: "test",
+          portable_target_label: "foreign-device",
+          location_revision: 0,
+        })
+        .run()
+
+      yield* events.publish(SessionEvent.LocationRebound, {
+        sessionID,
+        timestamp: DateTime.makeUnsafe(1),
+        previous: Location.Ref.make({ directory: AbsolutePath.make("/foreign/home") }),
+        location: Location.Ref.make({ directory: AbsolutePath.make("/local/home") }),
+        revision: 1,
+      })
+
+      expect(
+        yield* db
+          .select({ directory: SessionTable.directory, portable: SessionTable.portable_target_label })
+          .from(SessionTable)
+          .get(),
+      ).toEqual({ directory: "/local/home", portable: null })
+    }),
+  )
+
   it.effect("projects staged, cleared, and committed reverts", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db

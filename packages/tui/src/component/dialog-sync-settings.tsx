@@ -5,7 +5,15 @@ import { DialogConfirm } from "../ui/dialog-confirm"
 
 export type SyncState = "off" | "idle" | "syncing" | "locked" | "attention"
 export type SyncInterval = 30 | 60 | 300
-export type SyncCloudState = "unknown" | "checking" | "ready" | "uninitialized" | "incompatible" | "unavailable"
+export type SyncCloudState =
+  | "unknown"
+  | "checking"
+  | "ready"
+  | "uninitialized"
+  | "upgrade-required"
+  | "replaced"
+  | "incompatible"
+  | "unavailable"
 
 export type SyncDevice = {
   id: string
@@ -75,6 +83,8 @@ export function syncCloudStatus(state: SyncCloudState) {
   if (state === "checking") return "◐ checking"
   if (state === "ready") return "● ready"
   if (state === "uninitialized") return "○ not initialized"
+  if (state === "upgrade-required") return "! upgrade required"
+  if (state === "replaced") return "! cloud data replaced"
   if (state === "incompatible") return "! incompatible"
   if (state === "unavailable") return "! unavailable"
   return "○ not checked"
@@ -219,6 +229,16 @@ export function confirmInitializeCloud(dialog: DialogContext) {
     "Create the OpenCode Session sync directory in Baidu Netdisk and start synchronizing.",
     undefined,
     { confirmLabel: "Initialize and sync" },
+  )
+}
+
+export function confirmJoinCloud(dialog: DialogContext) {
+  return DialogConfirm.show(
+    dialog,
+    "Use existing cloud sync?",
+    "Download existing cloud Sessions and add this device's local Sessions to the same history.",
+    undefined,
+    { confirmLabel: "Use cloud and sync" },
   )
 }
 

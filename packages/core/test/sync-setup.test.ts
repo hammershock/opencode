@@ -71,23 +71,91 @@ describe("SyncSetup lifecycle", () => {
     await using tmp = await tmpdir()
     const secure = store()
     const provider = memoryProvider()
-    const setup = await authenticated(tmp.path, secure, provider, () => key("legacy"))
+    const setup = await authenticated(
+      tmp.path,
+      secure,
+      provider,
+      () => key("legacy"),
+      () => "instance-a",
+    )
     await run(setup.create({ name: "Legacy" }))
     await run(setup.setEnabled(true))
     expect((await run(setup.cloudStatus())).status).toBe("uninitialized")
 
     const initialized = await run(setup.initializeCloud())
     expect(initialized.enabled).toBeFalse()
-    expect(initialized.activeSpaceID).toBe(SyncRoot.INTERNAL_SCOPE)
-    expect(initialized.spaces.map((item) => item.descriptor.namespaceID)).toEqual([SyncRoot.INTERNAL_SCOPE])
+    expect(initialized.activeSpaceID).toBe("account-v2:instance-a")
+    expect(initialized.spaces.map((item) => item.descriptor.namespaceID)).toEqual(["account-v2:instance-a"])
+    expect(await run(setup.config())).toMatchObject({
+      namespaceID: "account-v2:instance-a",
+      remoteRoot: `${SyncRoot.REMOTE_ROOT}/instances/instance-a`,
+    })
     expect((await run(setup.cloudStatus())).status).toBe("ready")
-    expect(await provider.stat("manifest.json")).toBeDefined()
+    expect(await provider.stat(SyncRoot.CONTROL_PATH)).toBeDefined()
 
     await run(setup.setEnabled(true))
     const cleared = await run(setup.clearCloud())
     expect(cleared.enabled).toBeFalse()
     expect(cleared.activeSpaceID).toBeUndefined()
-    expect(await provider.stat("manifest.json")).toBeUndefined()
+    expect((await run(setup.cloudStatus())).status).toBe("uninitialized")
+  })
+
+  test("reports a positive instance mismatch instead of treating a replacement root as ready", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    const setup = await authenticated(tmp.path, secure, provider, undefined, () => "instance-a")
+    await run(setup.initializeCloud())
+    const rootIDs = ["reset-a", "instance-b"]
+    const root = SyncRoot.make({ provider, now: () => 20, randomUUID: () => rootIDs.shift()! })
+    await root.clear()
+    await root.initialize()
+
+    expect(await run(setup.cloudStatus())).toEqual({
+      status: "replaced",
+      expectedInstanceID: "instance-a",
+      manifest: {
+        version: 2,
+        state: "ready",
+        protocol: { major: 1, minor: 0 },
+        instanceID: "instance-b",
+        createdAt: 20,
+      },
+    })
+  })
+
+  test("keeps joining an existing cloud instance distinct from initialization", async () => {
+    await using firstDirectory = await tmpdir()
+    await using secondDirectory = await tmpdir()
+    const provider = memoryProvider()
+    const first = await authenticated(firstDirectory.path, store(), provider, undefined, () => "shared-instance")
+    await run(first.initializeCloud())
+
+    const second = await authenticated(secondDirectory.path, store(), provider)
+    expect((await run(second.cloudStatus())).status).toBe("ready")
+    await expect(run(second.initializeCloud())).rejects.toMatchObject({ kind: "invalid" })
+    const joined = await run(second.joinCurrentCloud())
+    expect(joined.activeSpaceID).toBe("account-v2:shared-instance")
+    expect(await run(second.config())).toMatchObject({
+      namespaceID: "account-v2:shared-instance",
+      remoteRoot: `${SyncRoot.REMOTE_ROOT}/instances/shared-instance`,
+      enabled: false,
+    })
+  })
+
+  test("surfaces legacy cloud data as an explicit upgrade requirement", async () => {
+    await using tmp = await tmpdir()
+    const secure = store()
+    const provider = memoryProvider()
+    await provider.uploadAtomic(
+      SyncRoot.LEGACY_MANIFEST_PATH,
+      new TextEncoder().encode(JSON.stringify({ version: 1, protocol: { major: 1, minor: 0 }, createdAt: 4 })),
+      { type: "absent" },
+    )
+    const setup = await authenticated(tmp.path, secure, provider)
+
+    expect((await run(setup.cloudStatus())).status).toBe("legacy-upgrade-required")
+    await expect(run(setup.initializeCloud())).rejects.toMatchObject({ kind: "invalid" })
   })
 
   test("creates, binds and activates plain or encrypted spaces with immutable key handling", async () => {
@@ -277,6 +345,7 @@ async function authenticated(
   secure: ReturnType<typeof store>,
   provider: SyncProvider.Adapter,
   createSpace?: () => SyncCrypto.SpaceKey,
+  createInstanceID?: () => string,
 ) {
   provision(secure)
   const ids = ["device", "attempt", "state"]
@@ -285,6 +354,7 @@ async function authenticated(
     store: secure,
     provider,
     createSpace,
+    createInstanceID,
     randomUUID: () => ids.shift()!,
     request: authRequest("account-a"),
     now: () => 10,

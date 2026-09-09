@@ -111,7 +111,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
                     : error.kind === "incompatible-local-state"
                       ? SyncIncompatibleLocalStateMessage
                       : `Sync setup failed (${error.kind})`,
-                diagnostic: error.diagnostic,
+                ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
               },
             }),
         ),
@@ -122,7 +122,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           (error) =>
             new SyncControlApiError({
               name: "SyncControlError",
-              data: { kind: error.kind, diagnostic: error.diagnostic },
+              data: { kind: error.kind, ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}) },
             }),
         ),
       )
@@ -198,6 +198,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("syncNow", () => controlApi(syncControl.now()).pipe(Effect.as(true)))
       .handle("syncCloudStatus", () => controlApi(syncControl.cloudStatus()))
       .handle("syncCloudInitialize", () => controlApi(syncControl.initializeCloud()))
+      .handle("syncCloudJoin", () => controlApi(syncControl.joinCurrentCloud()))
       .handle("syncCloudClear", () => controlApi(syncControl.clearCloud()).pipe(Effect.as(true)))
       .handle("syncSessions", () => controlApi(syncControl.sessions()))
       .handle("syncHydrate", (ctx) => controlApi(syncControl.hydrate(ctx.payload)))

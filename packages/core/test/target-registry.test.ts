@@ -209,6 +209,49 @@ describe("TargetRegistry", () => {
     expect(calls).toEqual(["test:gpu", "prepare:gpu:/historical/worktree", "inspect:draft", "complete:draft:/ho"])
   })
 
+  test("shares trusted health while refresh and prepare always update it", async () => {
+    await using root = await tmpdir()
+    let tests = 0
+    let prepares = 0
+    let online = true
+    const registry = TargetRegistry.make({
+      directory: root.path,
+      healthTrustMs: 10,
+      probe: {
+        test: async () => {
+          tests++
+          return online
+            ? { status: "ready", stages: ["ssh", "handshake"] }
+            : { status: "unavailable", stage: "ssh", message: "offline" }
+        },
+        prepare: async () => {
+          prepares++
+          return { status: "ready", stages: ["ssh", "prepare", "handshake"] }
+        },
+      },
+    })
+    const created = await registry.create(manual("gpu"), (await registry.load()).revision)
+
+    const first = await registry.testConnection(created.target.id)
+    expect(first.status).toBe("ready")
+    expect(first.trustedUntil).toBeGreaterThan(first.checkedAt)
+    expect((await registry.testConnection(created.target.id)).checkedAt).toBe(first.checkedAt)
+    expect(tests).toBe(1)
+
+    online = false
+    expect(await registry.refreshConnection(created.target.id)).toMatchObject({ status: "unavailable" })
+    expect(tests).toBe(2)
+    expect((await registry.load()).targets[0]?.health).toMatchObject({ status: "unavailable" })
+
+    expect(await registry.prepare(created.target.id, "/historical/worktree")).toMatchObject({ status: "ready" })
+    expect(prepares).toBe(1)
+    expect((await registry.load()).targets[0]?.health).toMatchObject({ status: "ready" })
+
+    await Bun.sleep(15)
+    await registry.testConnection(created.target.id)
+    expect(tests).toBe(3)
+  })
+
   test("previews and explicitly imports legacy config without changing the source", async () => {
     await using root = await tmpdir()
     const legacy = path.join(root.path, "legacy-targets.json")

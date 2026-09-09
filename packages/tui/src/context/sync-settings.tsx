@@ -15,6 +15,7 @@ import { remoteFailureDetail, useRemoteStatus } from "./remote-status"
 import { syncTransferSummary } from "../component/sync-transfer-summary"
 import {
   confirmInitializeCloud,
+  confirmJoinCloud,
   showPostLoginSyncChoice,
   showSyncDevices,
   showSyncSettings,
@@ -223,7 +224,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         }))
         return
       }
-      localConfigured = state.activeSpaceID === SyncRoot.INTERNAL_SCOPE
+      localConfigured = Boolean(state.activeSpaceID && SyncRoot.isAccountScope(state.activeSpaceID))
       setModel((current) => ({
         ...current,
         account: state.account
@@ -270,7 +271,29 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         )
         if (generation !== remoteGeneration) return
         if (cloud.status !== "ready") {
-          setModel((current) => ({ ...current, cloud: cloud.status, devices: [], bindings: [] }))
+          // The checked-in SDK can lag the source HTTP schema during protocol
+          // development; the generated client is refreshed before release.
+          const status: string = cloud.status
+          const presentation =
+            status === "legacy-upgrade-required"
+              ? {
+                  cloud: "upgrade-required" as const,
+                  detail: "Legacy cloud data must be cleared or explicitly migrated before sync can continue",
+                }
+              : status === "replaced"
+                ? {
+                    cloud: "replaced" as const,
+                    detail: "Cloud sync data was reset or replaced on another device",
+                  }
+                : status === "unavailable"
+                  ? {
+                      cloud: "unavailable" as const,
+                      detail: "Cloud control is temporarily unavailable; no data was changed",
+                    }
+                  : status === "incompatible"
+                    ? { cloud: "incompatible" as const, detail: "Cloud sync protocol is incompatible" }
+                    : { cloud: "uninitialized" as const, detail: undefined }
+          setModel((current) => ({ ...current, ...presentation, devices: [], bindings: [] }))
           return
         }
         if (!localConfigured) {
@@ -341,7 +364,13 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       await checkCloud(true, false)
       if (model().cloud === "ready") {
         if (!localConfigured) {
-          await sdk.client.global.syncCloudInitialize({ throwOnError: true })
+          const confirmed = await confirmJoinCloud(dialog)
+          if (!confirmed) {
+            if (automatic) await sdk.client.global.syncEnabled({ enabled: false }, { throwOnError: true })
+            await refreshLocal()
+            return false
+          }
+          await sdk.client.global.syncCloudJoin({ throwOnError: true })
           await refreshLocal()
           await checkCloud(true)
         }
@@ -365,14 +394,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       try {
         await refreshLocal()
         if (!model().enabled) return
-        const confirmed = await confirmInitializeCloud(dialog)
-        if (!confirmed) {
-          await sdk.client.global.syncEnabled({ enabled: false }, { throwOnError: true })
-          await refreshLocal()
-          return
-        }
-        await sdk.client.global.syncCloudInitialize({ throwOnError: true })
-        await refreshLocal()
+        if (!(await ensureCloud(true))) return
         await sdk.client.global.syncNow({ throwOnError: true })
       } catch (error) {
         const message = syncOperationFailure(error)

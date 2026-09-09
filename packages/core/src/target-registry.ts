@@ -31,6 +31,7 @@ export type Definition = {
   readonly id: Location.TargetID
   /** Runtime view only. A saved config never claims current connectivity without a fresh probe. */
   readonly status: "unverified"
+  readonly health?: HealthResult
   readonly name: string
   readonly transport: "ssh"
   readonly connection: Connection
@@ -39,7 +40,7 @@ export type Definition = {
   readonly command?: { readonly program: string; readonly args: readonly string[] }
 }
 
-export type Input = Omit<Definition, "id" | "status">
+export type Input = Omit<Definition, "id" | "status" | "health">
 
 export type Diagnostic = {
   readonly severity: "error" | "warning"
@@ -61,6 +62,9 @@ export type ConnectionStage = "ssh" | "environment" | "prepare" | "handshake" | 
 export type ProbeResult =
   | { readonly status: "ready"; readonly stages: readonly ConnectionStage[] }
   | { readonly status: "unavailable" | "invalid"; readonly stage: ConnectionStage; readonly message: string }
+
+export type HealthResult = ProbeResult & { readonly checkedAt: number; readonly trustedUntil: number }
+export const HEALTH_TRUST_MS = 30_000
 
 export type ImportPreview = {
   readonly source: string
@@ -128,8 +132,9 @@ export interface Interface {
     referencedSessionIDs: readonly string[],
     expectedRevision: string,
   ) => Promise<{ target: Definition; snapshot: Snapshot }>
-  readonly testConnection: (targetID: Location.TargetID) => Promise<ProbeResult>
-  readonly prepare: (targetID: Location.TargetID, directory?: string) => Promise<ProbeResult>
+  readonly testConnection: (targetID: Location.TargetID) => Promise<HealthResult>
+  readonly refreshConnection: (targetID: Location.TargetID) => Promise<HealthResult>
+  readonly prepare: (targetID: Location.TargetID, directory?: string) => Promise<HealthResult>
   readonly validate: (input: Input) => Promise<void>
   readonly inspect: (input: Input) => Promise<{ readonly home: string }>
   readonly complete: (
@@ -151,11 +156,26 @@ export function make(options: {
   readonly legacyFile?: string
   readonly probe?: ConnectionProbe
   readonly restoreAuthorizer?: RestoreAuthorizer
+  readonly healthTrustMs?: number
 }): Interface {
   const filepath = path.join(options.directory, "targets.jsonc")
   const legacyFile = options.legacyFile ?? path.join(path.dirname(options.directory), "rexd", "targets.json")
+  const health = new Map<Location.TargetID, HealthResult>()
+  const probes = new Map<string, Promise<HealthResult>>()
 
-  const load = async () => read(filepath)
+  const currentHealth = (targetID: Location.TargetID) => {
+    const value = health.get(targetID)
+    if (!value || value.trustedUntil <= Date.now()) {
+      health.delete(targetID)
+      return undefined
+    }
+    return value
+  }
+  const decorate = (snapshot: Snapshot): Snapshot => ({
+    ...snapshot,
+    targets: snapshot.targets.map((target) => ({ ...target, health: currentHealth(target.id) })),
+  })
+  const load = async () => decorate(await read(filepath))
 
   const mutate = async <A>(expectedRevision: string, change: (text: string, snapshot: Snapshot) => [string, A]) =>
     Flock.withLock(`target-registry:${filepath}`, async () => {
@@ -180,6 +200,34 @@ export function make(options: {
     const target = snapshot.targets.find((item) => item.id === targetID)
     if (!target) throw new NotFoundError({ targetID })
     return target
+  }
+
+  const record = (targetID: Location.TargetID, result: ProbeResult) => {
+    const checkedAt = Date.now()
+    const value = { ...result, checkedAt, trustedUntil: checkedAt + (options.healthTrustMs ?? HEALTH_TRUST_MS) }
+    health.set(targetID, value)
+    return value
+  }
+  const probe = async (target: Definition, mode: "test" | "prepare", directory?: string) => {
+    const key = `${mode}:${target.id}:${directory ?? ""}`
+    const active = probes.get(key)
+    if (active) return active
+    const operation = Promise.resolve()
+      .then(() =>
+        !options.probe
+          ? ({
+              status: "unavailable",
+              stage: mode === "prepare" ? "prepare" : "ssh",
+              message: "Rexd transport is not registered",
+            } as const)
+          : mode === "test"
+            ? options.probe.test(target)
+            : options.probe.prepare(target, directory),
+      )
+      .then((result) => record(target.id, result))
+      .finally(() => probes.delete(key))
+    probes.set(key, operation)
+    return operation
   }
 
   return {
@@ -212,6 +260,7 @@ export function make(options: {
         )
         return [updated, target]
       })
+      health.delete(targetID)
       return { target: result.value, snapshot: result.snapshot }
     },
     async remove(targetID, expectedRevision) {
@@ -219,6 +268,7 @@ export function make(options: {
         if (!snapshot.targets.some((target) => target.id === targetID)) throw new NotFoundError({ targetID })
         return [edit(text, ["targets", targetID], undefined), undefined]
       })
+      health.delete(targetID)
       return result.snapshot
     },
     async restoreMissing(targetID, input, referencedSessionIDs, expectedRevision) {
@@ -238,14 +288,15 @@ export function make(options: {
     },
     async testConnection(targetID) {
       const target = await find(targetID)
-      if (!options.probe) return { status: "unavailable", stage: "ssh", message: "Rexd transport is not registered" }
-      return options.probe.test(target)
+      return currentHealth(targetID) ?? probe(target, "test")
+    },
+    async refreshConnection(targetID) {
+      const target = await find(targetID)
+      return probe(target, "test")
     },
     async prepare(targetID, directory) {
       const target = await find(targetID)
-      if (!options.probe)
-        return { status: "unavailable", stage: "prepare", message: "Rexd transport is not registered" }
-      return options.probe.prepare(target, directory)
+      return probe(target, "prepare", directory)
     },
     async validate(input) {
       validateInput(input, (await load()).targets)

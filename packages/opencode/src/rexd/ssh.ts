@@ -19,6 +19,8 @@ export type Transport = {
   close(): Promise<void>
 }
 
+export const SSH_CONNECT_TIMEOUT_SECONDS = 5
+
 export function sshArguments(connection: SshConnection, command: string) {
   return [
     ...(connection.type === "manual" ? ["-p", String(connection.port)] : []),
@@ -27,20 +29,52 @@ export function sshArguments(connection: SshConnection, command: string) {
     "BatchMode=yes",
     "-o",
     "ClearAllForwardings=yes",
+    "-o",
+    `ConnectTimeout=${SSH_CONNECT_TIMEOUT_SECONDS}`,
+    "-o",
+    "ConnectionAttempts=1",
     "-T",
     connection.type === "manual" ? `${connection.user}@${connection.host}` : connection.host,
     command,
   ]
 }
 
+function spawnSsh(sshBinary: string, args: readonly string[]) {
+  return spawn(sshBinary, args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    // ProxyCommand and similar transports may outlive the ssh process and keep
+    // its stdio open. A separate process group lets cancellation terminate the
+    // whole connection attempt instead of waiting for the proxy's own timeout.
+    detached: process.platform !== "win32",
+  })
+}
+
+function killSsh(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
+  if (child.exitCode !== null) return
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch {
+      // Fall back to the direct child if its process group has already gone.
+    }
+  }
+  child.kill(signal)
+}
+
 export async function runSshScript(connection: SshConnection, script: string, signal?: AbortSignal, sshBinary = "ssh") {
   if (signal?.aborted) throw cancelled(signal)
-  const child = spawn(sshBinary, sshArguments(connection, "sh -s"), { stdio: ["pipe", "pipe", "pipe"] })
+  const child = spawnSsh(sshBinary, sshArguments(connection, "sh -s"))
   const stdout: Buffer[] = []
   const stderr: Buffer[] = []
   child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk))
   child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
-  const abort = () => child.kill("SIGTERM")
+  let forceKill: ReturnType<typeof setTimeout> | undefined
+  const abort = () => {
+    killSsh(child, "SIGTERM")
+    forceKill = setTimeout(() => killSsh(child, "SIGKILL"), 250)
+    forceKill.unref?.()
+  }
   signal?.addEventListener("abort", abort, { once: true })
   child.stdin.end(script)
   const result = await new Promise<{ code: number | null; spawnError?: Error }>((resolve) => {
@@ -48,6 +82,7 @@ export async function runSshScript(connection: SshConnection, script: string, si
     child.once("close", (code) => resolve({ code }))
   })
   signal?.removeEventListener("abort", abort)
+  if (forceKill) clearTimeout(forceKill)
   if (signal?.aborted) throw cancelled(signal)
   const output = Buffer.concat(stdout).toString("utf8")
   const detail = redactDiagnostic(Buffer.concat(stderr).toString("utf8"), connectionSecrets(connection))
@@ -64,12 +99,17 @@ export async function runSshInput(
   sshBinary = "ssh",
 ) {
   if (signal?.aborted) throw cancelled(signal)
-  const child = spawn(sshBinary, sshArguments(connection, command), { stdio: ["pipe", "pipe", "pipe"] })
+  const child = spawnSsh(sshBinary, sshArguments(connection, command))
   const stdout: Buffer[] = []
   const stderr: Buffer[] = []
   child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk))
   child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk))
-  const abort = () => child.kill("SIGTERM")
+  let forceKill: ReturnType<typeof setTimeout> | undefined
+  const abort = () => {
+    killSsh(child, "SIGTERM")
+    forceKill = setTimeout(() => killSsh(child, "SIGKILL"), 250)
+    forceKill.unref?.()
+  }
   signal?.addEventListener("abort", abort, { once: true })
   child.stdin.end(payload)
   const result = await new Promise<{ code: number | null; spawnError?: Error }>((resolve) => {
@@ -77,6 +117,7 @@ export async function runSshInput(
     child.once("close", (code) => resolve({ code }))
   })
   signal?.removeEventListener("abort", abort)
+  if (forceKill) clearTimeout(forceKill)
   if (signal?.aborted) throw cancelled(signal)
   const output = Buffer.concat(stdout).toString("utf8")
   const detail = redactDiagnostic(Buffer.concat(stderr).toString("utf8"), connectionSecrets(connection))
@@ -86,10 +127,7 @@ export async function runSshInput(
 }
 
 export function connectSsh(connection: SshConnection, command: string, sshBinary = "ssh"): Transport {
-  return new SshTransport(
-    spawn(sshBinary, sshArguments(connection, command), { stdio: ["pipe", "pipe", "pipe"] }),
-    connection,
-  )
+  return new SshTransport(spawnSsh(sshBinary, sshArguments(connection, command)), connection)
 }
 
 export function posixRemoteCommand(command: NonNullable<RexdTarget["command"]>) {
@@ -155,10 +193,10 @@ export class SshTransport implements Transport {
     this.#close.clear()
     this.child.stdin.end()
     if (this.child.exitCode !== null) return
-    if (!this.child.killed) this.child.kill("SIGTERM")
+    if (!this.child.killed) killSsh(this.child, "SIGTERM")
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
-        if (this.child.exitCode === null) this.child.kill("SIGKILL")
+        if (this.child.exitCode === null) killSsh(this.child, "SIGKILL")
       }, 1_000)
       this.child.once("close", () => {
         clearTimeout(timer)

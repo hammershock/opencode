@@ -550,6 +550,7 @@ export const SessionInfo = Schema.Struct({
   directory: Schema.String,
   target: optional(Location.Target),
   lastKnownTargetName: optional(Schema.String),
+  portableTargetLabel: optional(Schema.String),
   syncSpaceID: optional(Schema.String),
   path: optional(Schema.String),
   parentID: optional(SessionID),

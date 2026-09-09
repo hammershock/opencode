@@ -170,6 +170,7 @@ export const GlobalPaths = {
   syncStatus: "/global/sync/status",
   syncNow: "/global/sync/now",
   syncCloud: "/global/sync/cloud",
+  syncCloudJoin: "/global/sync/cloud/join",
   syncSessions: "/global/sync/sessions",
   syncHydrate: "/global/sync/hydrate",
   syncSessionDelete: "/global/sync/sessions/delete",
@@ -300,6 +301,10 @@ export const GlobalApi = HttpApi.make("global").add(
         error: SyncControlApiError,
       }),
       HttpApiEndpoint.post("syncCloudInitialize", GlobalPaths.syncCloud, {
+        success: Schema.Array(Schema.NonEmptyString),
+        error: SyncControlApiError,
+      }),
+      HttpApiEndpoint.post("syncCloudJoin", GlobalPaths.syncCloudJoin, {
         success: Schema.Array(Schema.NonEmptyString),
         error: SyncControlApiError,
       }),

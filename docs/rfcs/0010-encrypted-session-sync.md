@@ -5,7 +5,7 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-06
-updated: 2026-09-08
+updated: 2026-09-09
 implemented-by:
   - https://github.com/hammershock/opencode/pull/195
 depends-on:
@@ -83,7 +83,7 @@ Session transaction / durable event
 <OpenCode user config directory>/sync/sync.db
 ```
 
-`config.json` 只保存 provider、本设备 ID/name、已连接账户摘要、automatic sync、interval 和远端是否已经在本机确认初始化。`sync.db` 使用 WAL，保存 outbox、cursor、segment cache、lease、deletion marker 和 acknowledgement。OAuth credential 只进入系统安全存储。
+`config.json` 只保存 provider、本设备 ID/name、已连接账户摘要、automatic sync、interval 和远端是否已经在本机确认初始化。每次云端初始化生成一个不暴露给用户的随机 instance ID；它同时隔离远端对象前缀和本地 `sync.db` scope。`sync.db` 使用 WAL，保存 outbox、cursor、segment cache、lease、deletion marker 和 acknowledgement。OAuth credential 只进入系统安全存储。
 
 同步目录初始化后，启动恢复扫描全部仍存在的 Session，补齐 capture/ownership；新 Session 创建时自动进入固定内部同步 scope。automatic sync 关闭、网络离线或账号暂时退出时，事件继续进入 outbox 并积压。
 
@@ -110,30 +110,33 @@ Enable and sync now | Enable | Keep disabled
 3. 清除本设备 OAuth pending state 和百度 credential；
 4. 保留本地 Session、outbox、cursor 和设备 ID，以便以后重新授权恢复。
 
-## 云端初始化哨兵
+## 云端实例与初始化哨兵
 
-百度账号下使用一个固定 OpenCode Session 同步目录。目录中的 `manifest.json` 是唯一初始化事实：
+百度账号下使用一个固定 OpenCode Session 同步目录，但每次初始化的数据位于独立实例前缀。`control/current-v2.json` 是当前实例的控制事实：
 
 ```text
 /apps/opencode-sync/session-sync/
-  manifest.json
-  devices/<deviceID>.head.json
-  segments/<deviceID>/<generation>.json
-  deletions/<sessionID>/marker.json
-  deletions/<sessionID>/acks/<deviceID>.json
-  chunks/...
+  control/current-v2.json
+  instances/<instanceID>/instance.json
+  instances/<instanceID>/control/v2/log/<generation>.json
+  instances/<instanceID>/devices/...
+  instances/<instanceID>/segments/...
+  instances/<instanceID>/deletions/...
+  instances/<instanceID>/chunks/...
 ```
 
-没有有效 manifest 时，其余对象全部视为未提交的孤儿数据，不能读取、投影或作为“已经初始化”的证据。
+控制文件没有正向指向本机绑定的 instance 时，其余对象全部视为旧实例或未提交孤儿，不能读取、投影或作为“已经初始化”的证据。一次 list/stat 负向结果不足以证明 reset；本机已绑定实例只有在精确读到有效 reset record 或不同 instance ID 后，才确认云端已重置。
 
 手动同步和 automatic sync 每次开始前都检查 manifest：
 
-- manifest 有效：开始同步；
-- manifest 缺失：请求用户选择 `Initialize and sync` 或 `Cancel`；
+- control 有效且 instance ID 匹配：开始同步；
+- control 未初始化或正向指向其他 instance：暂停并请求用户选择 `Initialize and sync` 或 `Cancel`；
 - automatic sync 的初始化请求被取消时，同时关闭 automatic sync；
 - manifest 版本不兼容：停止，不得覆盖，并显示兼容性诊断。
 
-初始化流程先清理 manifest 缺失状态下的孤儿同步对象，再以 absent precondition 发布一个有效的空目录 manifest。manifest 是目录初始化的提交点；本设备 head、既有 Session 回填和首次传输随后通过 durable outbox 完成，即使中途退出也可以继续。manifest 发布前不得上传或读取 Session 数据。
+初始化流程先创建随机 instance 的不可变 descriptor，再发布并精确回读 current control。只有回读仍指向该 instance 的 writer 才能绑定本地 scope；并发 loser 必须停止。current control 是逻辑初始化提交点；本设备 head、既有 Session 回填和首次传输随后通过 durable outbox 完成。绑定本地 scope 与跨数据库的 Session membership/backfill 之间必须有 durable bootstrap marker：任何中断后的启动、automatic worker 或手动同步都先幂等完成 bootstrap，不能留下“已经加入 v2 但本地 Session 永不上云”的半完成状态。旧实例的迟到写只能成为隔离 orphan，不能进入新实例。
+
+历史 `account-v1` 原型不属于公开兼容协议，也不能在后台静默改写为 v2。升级构建必须将它显示为 `upgrade required` 并停止写入；本项目首次部署按已确认的覆盖策略，先分别备份两台设备的本地数据库，再显式 reset/初始化 v2，并让两端依次加入、回填各自仍存在的本地 Session。不得因为一次云端缺失观察自动清理 v1，亦不得把 v1 deletion archive 当作 v2 删除事实。
 
 后台 scheduler 本身不能直接控制 TUI。它通过类型化的 `initialization-required` 状态/事件请求前台决策；没有活动前台时暂停消费队列，不反复上传或静默初始化。
 
@@ -150,36 +153,69 @@ Enable and sync now | Enable | Keep disabled
 - automatic sync 关闭只停止 scheduler，不能清空、跳过或改写 outbox；
 - 恢复联网、手动同步和重新开启 automatic sync 从 checkpoint 继续。
 
-百度 provider 只提供 list/stat/download/atomic upload/delete 等对象操作；Core 不在百度文件上实现易受重试影响的裸整数 `+1/-1`。
+百度 provider 只提供 list、精确 stat/download、不覆盖创建、可变 hint 替换和尽力删除。百度没有通用事务或 version-CAS；Core 不得以 `stat -> rtype=3 create` 或 `stat -> delete` 的检查间隙建立正确性，也不在百度文件上实现易受重试影响的裸整数 `+1/-1`。
+
+每个本地变更的提交顺序固定为：
+
+```text
+local durable event/control outbox
+  -> append and exact-read immutable control fact when applicable
+  -> seal immutable segment
+  -> upload and verify immutable segment
+  -> publish monotonic device head exposing that generation
+  -> publish immutable deletion head-fence and acknowledgement when applicable
+  -> acknowledge the local segment and clear its outbox rows
+```
+
+`seal` 不清除 outbox。segment 已存在时必须下载并验证 canonical payload；head 或 deletion acknowledgement 失败时，本地 segment 继续保持 pending，下一 worker 验证并复用同一路径后重试。只有没有 pending segment 的旧进程可以在发现远端同设备 head 更高时无副作用退出；它不能回退 head 或替自己未发布的删除状态确认。
+
+per-device 可变 head 只能作为发现加速 hint，不是 durable event log 或删除正确性事实。generation 单调递增；同 generation 的 `acknowledged` 按设备取最大 cursor，`revoked` 取集合并集。Session 正文只存在于不可变 segment/attachment。正确性所需的 control entry、head revision 和 deletion acknowledgement 使用固定路径、不覆盖创建并精确校验；ack 引用的 fence 必须携带并验证完整 canonical head checkpoint，不能只信任调用方提供的 digest。checkpoint 与待提交 ack 先在本地同一事务中持久化，进程崩溃后复用同一 revision 与字节；未知提交结果必须通过 canonical path stat/download 验证。
+
+## 百度 provider 一致性边界
+
+百度网盘在本协议中是文件系统式传输层，不是数据库、消息队列、事务对象存储或 changes feed。`rtype=3` 替换 mutable head 后，目录 list、path metadata、dlink 和内容下载可能在短暂窗口内观察到不同代；单次 list 也可能暂时遗漏仍存在的路径。
+
+因此以下负向观察都不具有删除语义：
+
+- 一次 list 没有返回已知 device head；
+- canonical path stat 暂时返回 not found；
+- 已取得 metadata/dlink 后正文暂时返回 HTTP 404；
+- immutable segment 在 head 已更新后暂时不可读。
+
+只有 Session tombstone、device revoke 和 manifest 缺失/失效分别具有 Session、设备和账户同步目录的单调删除语义。缓存只能在观察到对应单调事实后清除；不得根据一次 list/stat/download 缺失执行 metadata retain、删除 Session 或推进 cursor。
+
+mutable head 使用官方 path metadata 查询精确路径的当前 `fs_id`、mtime、size 和 dlink，而不是依赖父目录 list 中的旧 `fs_id`。多个已知设备 head 使用 `filemetas` 的 path 数组批量精确探测，结果按请求 path 映射；缺失只表示本轮没有可读对象。pinned version 不一致返回 conflict；dlink/content 的短暂 404 重新取得整套 path metadata 后做短时有界重试。第一次见到但暂不可读的 head 本轮可以跳过；已有 head 必须保留上次成功快照；两者都不能缓存未成功解码的新版本。immutable segment 缺失不能吞掉：cursor 保持落后，使相同 head 在后续 probe 中继续触发 hydrate。
+
+百度目录 list 只用于发现候选变化，不是完整成员快照或删除日志。权威设备成员与 Session 删除写入按 generation 串行、可回放的不可变 control log；删除条目的 `requiredDevices` 等于它之前一代 control state 的有效设备集合。删除之后加入的设备必须先回放 control log，不能先上传本地旧队列。云端 payload GC 后，各设备仍保留紧凑的本地 remove-wins tombstone。
 
 ## Session 删除与引用回收
 
-Session 删除采用 remove-wins 语义。删除操作本地立即删除 Session projection，并把 durable tombstone 写入原子恢复链路。同步时先吸收远端删除，再允许上传本地旧事件。
+Session 删除采用 remove-wins 语义。删除操作先把稳定 operation ID 和 tombstone 写入 durable control outbox，再立即删除本地 Session projection。若进程在二者之间中断，重启后的 control projection 会幂等完成删除。同步时必须先回放并投影远端 control delete，再允许上传本地旧事件。
 
 逻辑上的“引用”是稳定设备 ID 的集合，不是直接修改的整数：
 
 ```text
-required = 删除发生时已声明持有该 Session 的有效设备集合
-acked    = 已成功应用删除的 required 设备集合
+required = canonical session.delete 前一代 control state 的有效设备集合
+acked    = 已应用删除并发布 immutable head-fence 的 required 设备集合
 references = required - acked - revoked
 referenceCount = size(references)
 ```
 
-`referenceCount` 只用于展示和 GC 判断。ack 使用 `(tombstoneID, deviceID)` 唯一键，重复提交幂等；设备撤销是单调事实，等价于该设备不再阻塞回收。
+`referenceCount` 只用于展示和 GC 判断。最早进入 control log 的 `session.delete` 是该 Session 的 canonical 删除；并发或迟到的其他 tombstone 归并为 alias，不能扩大 required 集合或重新启动一轮 GC。ack 使用 `(canonicalTombstoneID, deviceID)` 唯一键，包含 delete control generation 与 immutable head-fence digest；重复提交幂等。设备撤销是单调 control fact，等价于该设备不再阻塞回收。
 
 删除流程：
 
-1. 删除设备本地彻底删除 Session，并写入 tombstone/outbox；
-2. 首次发布 tombstone 前先拉取最新有效 device heads，冻结 `required` 集合；
+1. 删除设备先写入 control intent，再在本地彻底删除 Session 并写入 tombstone/event outbox；
+2. intent 抢占不可变 control generation 时，以它之前一代的权威 membership 冻结 `required`；并发 join/revoke 抢先时 deletion intent 必须 rebase 并重新计算 fence；
 3. 云端立即将 Session 标记为 deleted，正常索引不再展示它；
-4. 其他设备拉取 tombstone，先持久化本地删除事实，再删除 Session projection 和未发送的旧 outbox；
+4. 其他设备严格按 control generation 回放；验证链后先持久化本地删除事实，再删除 Session projection 和未发送的旧 outbox；control ingest cursor 与 Session projection cursor 分开持久化；
 5. 如果被删除的 Session 正在任一 TUI 中打开，该 TUI 必须显示删除提示；用户确认后返回 QuickStart，不得继续停留在失效会话；
-6. 该设备先原子发布不再包含此 Session 的新 head，成功后才发布幂等 ack；head 提交前进程中断时仍保留引用；
+6. 该设备先发布不再包含此 Session 的 mutable head，再以不覆盖路径发布包含 delete generation、event generation、control generation 和 metadata digest 的 immutable head-fence，最后发布引用该 fence 的幂等 ack；任一步中断时仍保留引用；
 7. `references` 非空时保留仍可能被离线设备读取到的 payload 和 tombstone；
-8. `references` 为空时，删除该 Session 的云端 payload、附件、marker 和 ack 对象；
+8. `references` 为空时，collector 精确读取并校验每个 required device 的 ack 与 fence，再追加不可变 `session.gc` control entry；GC entry 是允许物理回收的提交点；
 9. 回收属于后台优化，不得影响删除的逻辑正确性；回收失败进入可重试诊断。
 
-为使 payload 可按 Session 回收，新协议不得把多个 Session 的不可分割正文永久混合在同一 GC 单元。segment 可以批量传输，但远端索引必须能确定性重写或删除某个 Session 的全部 payload，而不删除其他活动 Session。
+为使 payload 可按 Session 回收，新协议不得把多个 Session 的不可分割正文永久混合在同一 GC 单元。现有混合 segment 在迁移完成前保持不可变，collector 严禁通过 `rtype=3` 原地重写；此阶段 `session.gc` 先完成逻辑回收，紧凑 tombstone/control fact 继续阻止复活。彻底正文回收以 per-Session payload 格式落地为前提；只有 Session 专属 payload、附件、ack 与 fence 可以安全物理删除。
 
 被撤销或退出同步设备不再阻塞新的 GC。设备以后重新登录时必须先 pull、应用当前云端状态，再允许 push；不能用旧本地队列抢先覆盖云端。
 
@@ -204,33 +240,37 @@ referenceCount = size(references)
 
 1. 第一次确认说明所有云端 Session 历史将被删除；
 2. 第二次确认只提供 `Cancel` 与红色 `Clear cloud sync data`；
-3. 执行时先删除或使 manifest 失效；
-4. 再清理该固定同步目录中的 heads、segments、Session payload、attachments、tombstones、acks 和孤儿对象；
+3. 执行时先发布并精确验证 reset control record，使旧 instance 立即逻辑失效；
+4. 再尽力清理旧 instance 中的 heads、segments、Session payload、attachments、tombstones、acks 和孤儿对象；
 5. 最后关闭本设备 automatic sync；
 6. 本地 Session 保留。
 
-云端重置不保留 reset generation/epoch（per-device segment generation 仍是正常 checkpoint 的组成部分）。其他设备发现 manifest 缺失后必须暂停，不得自动重建；前台让用户选择 `Initialize and sync` 或暂时不处理。用户明确重新初始化意味着允许当前设备的本地 Session 建立一套新的云端数据。
+instance ID 是内部 fencing token，不是用户可选择的 sync space 或公开 generation。其他设备精确读到 reset 或不同 instance 后必须暂停，不得自动重建；前台让用户选择 `Initialize and sync` 或暂时不处理。用户明确重新初始化意味着允许当前设备的本地 Session 建立一套新的云端数据。
 
-清理与其他设备在途上传并发时，manifest 缺失仍然具有最高优先级：在途产生的对象是不可见孤儿，下次初始化会先清理它们，不能让它们恢复同步目录。
+清理与其他设备在途上传并发时，旧 writer 仍只写旧 instance 前缀；新初始化永远使用新的随机 instance，因此迟到对象不可见、不可复活。百度无法保证与离线 writer 并发时远端物理字节瞬时归零；逻辑 reset 必须先完成，剩余 orphan 由有宽限期且每批重验 current control 的 maintenance GC 最终清理。
 
 ## 调度和触发
 
 automatic sync 提供 30 秒、1 分钟、5 分钟 maintenance interval，默认 30 秒。该 interval 控制完整的 manifest/health 检查与空闲重试，不是用户可见变更的最长传播时间。启用 automatic sync 时，实现还必须使用轻量 remote-head probe 和本地 outbox 检查，使一台设备提交的 Session 变更在另一台在线设备已经打开的同一 Session 中于 15 秒内可见。
 
-同一设备可能同时运行多个 TUI，甚至打开同一个 Session。它们共享 durable outbox、cursor 和 Session projection，但只有一个进程可以成为 automatic cloud worker；其他进程不得重复调用 provider、排队等待 direction lease，或把正常的 leader 竞争显示为同步失败。leader 退出或失活后必须在 15 秒窗口内由其他进程接管。任一进程完成 remote projection 后，其他进程必须检测共享 cursor 的变化并刷新 Session 列表以及已经加载的 Session 内容，不能要求用户重开面板、Session 或应用。
+每个新进程、新 automatic leader 或错误恢复后的 runtime 在第一次 push 前必须先验证 manifest，回放并投影 control log，再完成一次 remote head 和缺失 segment 的 receive/hydrate。这个启动 barrier 防止离线设备先上传已经被其他设备删除的旧 outbox，也防止云端已被重置后向无 manifest 的目录写入旧状态。barrier 成功后进入低延迟增量路径，不在每次消息提交前重复完整检查。
 
-轻量 probe 只检查 remote device heads；head 没有变化时不得列出或下载完整 segment 历史。本地 outbox 非空时必须优先提交 immutable segment 和本设备 head，不得先等待远端 reconciliation；发现 remote head 变化后才拉取该设备缺失的 segment，并复用 probe 已取得的 head index。普通增量收发只处理本次 segment 内的 tombstone，不得在每条消息的关键路径重放全部历史 deletion marker；完整同步再使用 provider 的递归列举能力修复和回收 deletion archive。百度 provider 对该 archive 使用官方 `multimedia?method=listall&recursion=1` 和服务端返回的 cursor，不能把非递归 `file?method=list` 的行为伪装为递归 object-store list。maintenance interval 只控制 manifest/health 核验，不得阻塞上述快速收发路径。以下动作触发同步尝试：
+同一设备可能同时运行多个 TUI，甚至打开同一个 Session。它们共享 durable outbox、cursor 和 Session projection，但只有一个进程可以成为 automatic cloud worker；其他进程不得重复调用 provider、排队等待 direction lease，或把正常的 leader 竞争显示为同步失败。手动同步以及 device rename/revoke 先写入共享 SQLite 的 durable run request/control outbox，再由同一 leader 执行。每批 request 使用稳定 request ID，并由唯一 run ID、owner 和 claim timestamp 精确认领；只有仍持有设备租约的 owner 可以完成该批，超时 claim 可恢复为 pending。这样 leader 不能把执行过程中刚写入的新 request 错报为成功，也不能在失去租约后报告成功。automatic sync 关闭时，显式手动同步可以临时取得同一设备级 fence 后执行。leader 退出或失活后必须在 15 秒窗口内由其他进程接管。任一进程完成 remote projection 后，其他进程必须检测共享 cursor 的变化并刷新 Session 列表以及已经加载的 Session 内容，不能要求用户重开面板、Session 或应用。
+
+轻量 probe 精确检查下一 control generation，并批量检查权威 membership 中的 remote device heads；没有变化时不得列出或下载完整 segment 历史。空闲 tick 只检查 outbox/head generation/cursor 等小型单调状态，不得每秒重新扫描全部 Session metadata。本地 outbox 非空时先以小批量 drain 提交 control intent，再提交 immutable segment 和本设备 head；发现 remote control/head 变化后只拉取缺失 generation。普通增量路径不递归列举历史 deletion archive；旧 archive 只作为 legacy 兼容数据，不能参与 v2 正确性或触发 Session 删除。maintenance interval 只控制 manifest/health 核验与 GC，不得阻塞上述快速收发路径。以下动作触发同步尝试：
 
 - 用户执行 `Sync now`；
 - scheduler 到期；
 - 网络恢复；
 - 应用启动且 automatic sync 已开启。
 
-相同方向的并发请求合并。provider 失败使用有上限的指数退避和抖动。只有发生有效远端操作时才显示右上角状态栏；传输完成立即消失，失败保留 stage、operation、稳定 kind、retryability 和脱敏原因。
+相同方向的并发请求合并。outbound 优先不等于允许 inbound 饥饿：automatic push 使用有限 segment burst，remote probe 到期后必须让出执行机会；一个方向的可重试失败不能永久阻塞另一方向。receive/hydrate 推进 cursor 后，即使没有本地 Session event，也必须及时发布 acknowledgement-only head。
+
+provider 失败使用有上限的指数退避和抖动。automatic worker 持有一个可续租的设备级跨进程 lease；maintenance 必须在同一 leader、同一 lease 内串行执行，不能另起 detached worker。手动同步、云端初始化/加入/重置和其他 lifecycle 操作同样受该 fence 保护；续租失败必须中止 provider 请求，并在任何可变 head 发布或成功提交前再次核验租约，不能与新 leader 并行继续远端操作。只有发生有效远端操作时才显示右上角状态栏；传输完成立即消失，失败保留 stage、operation、稳定 kind、retryability 和脱敏原因。
 
 ## TUI
 
-`/sync`、command palette 的 `Sync settings` 和 QuickStart 入口打开同一 workflow：
+`/sync`、command palette 的 `Sync settings` 和 QuickStart 入口打开同一 workflow。`/sessions` 只读共享 SQLite 中由唯一 worker 持续刷新的 metadata，不得为了打开面板启动第二个 provider reader；选择 metadata-only Session 后，hydrate 请求仍由同一个 device worker 执行：
 
 ```text
 Baidu Netdisk       Connected / Disconnected
@@ -269,6 +309,9 @@ Log out
 
 参考：
 
+- https://pan.baidu.com/union/doc/基础网盘服务/获取文件信息/查询文件信息/
+- https://pan.baidu.com/union/doc/基础网盘服务/获取文件信息/获取文件列表/
+- https://pan.baidu.com/union/doc/基础网盘服务/上传/预上传/
 - https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html
 - https://docs.couchdb.org/en/stable/replication/intro.html
 - https://docs.couchdb.org/en/stable/cluster/purging.html
@@ -291,3 +334,8 @@ Log out
 13. 所有远端等待进入共享右上角状态栏，失败提供脱敏的阶段和原因；
 14. 不同步 workspace 文件、target/SSH 配置、`.env`、provider credential 或 UI state；
 15. Mac 与 mywindows 使用同一 commit 的 `opencode-rexd` 完成双向真实验收。
+16. 百度一次 list 漏项、path metadata/dlink/content 短暂 404 不删除已知状态；恢复后无需手动同步即可收敛；
+17. segment、head、deletion acknowledgement 与 local outbox 严格遵守提交顺序，任一步失败均可从 durable pending 状态恢复；
+18. 同设备多个 TUI 只有一个 provider worker；leader 退出后 15 秒内接管，旧 worker 续租失败后停止；
+19. 连续 outbound 写入期间的反向更新仍在 15 秒内可见；一方向失败时另一方向仍可取得进展；
+20. 每台设备至少两个真实 TUI 完成交替同 Session、多 Session 并行、冷启动、短暂离线、leader failover 与删除不复活验收，记录每轮最大延迟而不是只记录平均值。

@@ -170,7 +170,7 @@ function Directory(props: { api: TuiPluginApi }) {
           ...(targets()?.targets ?? []).map((target) => ({
             title: target.name,
             description: target.defaultDirectory ?? target.workspaceRoots[0],
-            footer: <TargetHealth state={targetManager.state(target.id)} />,
+            footer: <TargetHealth state={() => targetManager.state(target.id)} />,
             details: [targetManager.detail(target.id)].filter((item): item is string => Boolean(item)),
             value: target as TargetDefinition | "local" | "add" | "manage",
             category: "Targets",

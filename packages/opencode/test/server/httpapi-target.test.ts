@@ -72,7 +72,13 @@ describe("target registry HttpApi", () => {
 
     const probe = await request(`/api/target/${created.target.id}/test`, { method: "POST" })
     expect(probe.status).toBe(200)
-    expect(await probe.json()).toMatchObject({ status: "unavailable", stage: "ssh" })
+    const health = (await probe.json()) as { status: string; checkedAt: number; trustedUntil: number }
+    expect(health).toMatchObject({ status: "unavailable" })
+    expect(health.trustedUntil).toBeGreaterThan(health.checkedAt)
+
+    const refreshed = await request(`/api/target/${created.target.id}/refresh`, { method: "POST" })
+    expect(refreshed.status).toBe(200)
+    expect(await refreshed.json()).toMatchObject({ status: "unavailable", stage: "ssh" })
 
     const restore = await request(`/api/target/${crypto.randomUUID()}/restore`, {
       method: "POST",

@@ -8,6 +8,8 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
+import { SyncRoot } from "@opencode-ai/core/sync/root"
+import { SyncMembership } from "@opencode-ai/core/sync/membership"
 import { testEffect } from "./lib/effect"
 
 let remoteStarted = false
@@ -18,10 +20,10 @@ const active = {
   deviceID: "device",
   deviceName: "Mac",
   account: { id: "account", maskedDisplay: "acc***" },
-  namespaceID: "account-v1",
+  namespaceID: SyncRoot.accountScope("control-test"),
   name: "Space",
   encryption: "none" as const,
-  remoteRoot: "/apps/opencode-sync/session-sync",
+  remoteRoot: SyncRoot.instanceRoot("control-test"),
   enabled: false,
   intervalSeconds: 30 as const,
 }
@@ -39,7 +41,13 @@ const state = {
 }
 const readyCloud = {
   status: "ready" as const,
-  manifest: { version: 1 as const, protocol: { major: 1 as const, minor: 0 }, createdAt: 1 },
+  manifest: {
+    version: 2 as const,
+    state: "ready" as const,
+    protocol: { major: 1 as const, minor: 0 },
+    instanceID: "control-test",
+    createdAt: 1,
+  },
 }
 const realControlIt = testEffect(
   LayerNode.compile(SyncControl.node, [
@@ -153,6 +161,187 @@ const recoveryControlIt = testEffect(
   ]),
 )
 
+let lifecycleStarted = false
+let lifecycleAborted = false
+let lifecycleClearedAfterAbort = false
+const lifecycleStore = store()
+lifecycleStore.values.set(
+  BaiduSyncProvider.credentialAccount(active.deviceID),
+  JSON.stringify({
+    appKey: "app",
+    secretKey: "secret",
+    accessToken: "access",
+    refreshToken: "refresh",
+    expiresAt: Number.MAX_SAFE_INTEGER,
+  }),
+)
+const lifecycleActive = { ...active, enabled: true }
+const lifecycleState = {
+  ...state,
+  enabled: true,
+  activeSpaceID: active.namespaceID,
+  spaces: encryptedState.spaces.map((item) => ({
+    ...item,
+    descriptor: { ...item.descriptor, encryption: "none" as const },
+  })),
+}
+const blockedProvider = (): SyncProvider.Adapter => {
+  const values = new Map<string, { version: string; bytes: Uint8Array }>()
+  let revision = 0
+  const blocked = <A>(signal?: AbortSignal) =>
+    new Promise<A>((_resolve, reject) => {
+      lifecycleStarted = true
+      const abort = () => {
+        lifecycleAborted = true
+        reject(signal?.reason ?? new Error("aborted"))
+      }
+      if (signal?.aborted) return abort()
+      signal?.addEventListener("abort", abort, { once: true })
+    })
+  return {
+    id: "blocked",
+    list: (_prefix, _cursor, signal) => blocked<SyncProvider.ListPage>(signal),
+    listRecursive: (_prefix, _cursor, signal) => blocked<SyncProvider.ListPage>(signal),
+    stat: async (path, signal) => {
+      if (path.startsWith("devices/")) return blocked<SyncProvider.ObjectInfo | undefined>(signal)
+      const value = values.get(path)
+      return value ? { path, version: value.version, size: value.bytes.length } : undefined
+    },
+    download: async (path, version) => {
+      const value = values.get(path)
+      if (!value || (version && value.version !== version)) throw new Error("unexpected download")
+      return { path, version: value.version, size: value.bytes.length, bytes: value.bytes.slice() }
+    },
+    uploadAtomic: async (path, bytes, precondition) => {
+      const current = values.get(path)
+      if (precondition.type === "absent" && current)
+        throw new SyncProvider.ProviderError("blocked", "upload", "conflict", false)
+      const version = String(++revision)
+      values.set(path, { version, bytes: bytes.slice() })
+      return { path, version, size: bytes.length }
+    },
+    deleteBatch: async () => [],
+  }
+}
+const lifecycleControlNode = {
+  ...SyncControl.node,
+  implementation: SyncControl.layerWith({ secureStore: async () => lifecycleStore, provider: blockedProvider }),
+}
+const lifecycleControlIt = testEffect(
+  LayerNode.compile(lifecycleControlNode, [
+    [Database.node, Database.layerFromPath(":memory:")],
+    [SyncDatabase.node, SyncDatabase.layerFromPath(":memory:")],
+    [
+      SyncSetup.node,
+      Layer.mock(SyncSetup.Service, {
+        state: () => Effect.succeed(lifecycleState),
+        config: () => Effect.succeed(lifecycleActive),
+        setEnabled: () => Effect.succeed(lifecycleState),
+        authenticated: () => Effect.succeed(true),
+        cloudStatus: () => Effect.succeed(readyCloud),
+        clearCloud: () =>
+          Effect.sync(() => {
+            lifecycleClearedAfterAbort = lifecycleAborted
+            return { ...lifecycleState, enabled: false, activeSpaceID: undefined }
+          }),
+        applyRemoteDeletion: () => Effect.succeed(false),
+      }),
+    ],
+  ]),
+)
+
+let bootstrapAttempts = 0
+const bootstrapStore = store()
+bootstrapStore.values.set(
+  BaiduSyncProvider.credentialAccount(active.deviceID),
+  JSON.stringify({
+    appKey: "app",
+    secretKey: "secret",
+    accessToken: "access",
+    refreshToken: "refresh",
+    expiresAt: Number.MAX_SAFE_INTEGER,
+  }),
+)
+const bootstrapState = { ...lifecycleState, enabled: false }
+const bootstrapControlNode = {
+  ...SyncControl.node,
+  implementation: SyncControl.layerWith({ secureStore: async () => bootstrapStore, provider: unavailableProvider }),
+}
+const bootstrapControlIt = testEffect(
+  LayerNode.compile(bootstrapControlNode, [
+    [Database.node, Database.layerFromPath(":memory:")],
+    [SyncDatabase.node, SyncDatabase.layerFromPath(":memory:")],
+    [
+      SyncSetup.node,
+      Layer.mock(SyncSetup.Service, {
+        state: () => Effect.succeed(bootstrapState),
+        config: () => Effect.succeed(active),
+        authenticated: () => Effect.succeed(true),
+        cloudStatus: () => Effect.succeed(readyCloud),
+        initializeCloud: () => Effect.succeed(bootstrapState),
+        applyRemoteDeletion: () => Effect.succeed(false),
+      }),
+    ],
+    [
+      SyncMembership.node,
+      Layer.mock(SyncMembership.Service, {
+        stale: () => Effect.succeed([]),
+        assignAll: () =>
+          Effect.suspend(() => {
+            bootstrapAttempts++
+            return bootstrapAttempts === 1 ? Effect.fail(new Error("crash")) : Effect.succeed(["session-local"])
+          }),
+      }),
+    ],
+  ]),
+)
+
+const legacyActive = {
+  ...active,
+  namespaceID: SyncRoot.LEGACY_SCOPE,
+  remoteRoot: SyncRoot.REMOTE_ROOT,
+  enabled: true,
+}
+let migrationConfig: typeof active | typeof legacyActive | undefined = legacyActive
+const migrationControlIt = testEffect(
+  LayerNode.compile(bootstrapControlNode, [
+    [Database.node, Database.layerFromPath(":memory:")],
+    [SyncDatabase.node, SyncDatabase.layerFromPath(":memory:")],
+    [
+      SyncSetup.node,
+      Layer.mock(SyncSetup.Service, {
+        state: () => Effect.succeed(bootstrapState),
+        config: () => Effect.succeed(migrationConfig),
+        setEnabled: () =>
+          Effect.sync(() => {
+            if (migrationConfig) migrationConfig = { ...migrationConfig, enabled: false }
+            return bootstrapState
+          }),
+        authenticated: () => Effect.succeed(true),
+        cloudStatus: () => Effect.succeed(readyCloud),
+        clearCloud: () =>
+          Effect.sync(() => {
+            migrationConfig = undefined
+            return bootstrapState
+          }),
+        initializeCloud: () =>
+          Effect.sync(() => {
+            migrationConfig = active
+            return bootstrapState
+          }),
+        applyRemoteDeletion: () => Effect.succeed(false),
+      }),
+    ],
+    [
+      SyncMembership.node,
+      Layer.mock(SyncMembership.Service, {
+        stale: () => Effect.succeed([]),
+        assignAll: () => Effect.succeed([]),
+      }),
+    ],
+  ]),
+)
+
 describe("SyncControl lifecycle policy", () => {
   test("uses the Rexd target or source device name and preserves foreign ownership", () => {
     expect(
@@ -202,6 +391,52 @@ describe("SyncControl lifecycle policy", () => {
       yield* control.join({ namespaceID: active.namespaceID, recoveryString: "redacted-recovery" })
       expect((yield* control.now().pipe(Effect.exit))._tag).toBe("Failure")
       expect(runtimeConstructions).toBe(2)
+    }),
+  )
+
+  lifecycleControlIt.live(
+    "aborts and drains automatic work before clearing cloud state",
+    () =>
+      Effect.gen(function* () {
+        lifecycleStarted = false
+        lifecycleAborted = false
+        lifecycleClearedAfterAbort = false
+        const control = yield* SyncControl.Service
+
+        while (!lifecycleStarted) yield* Effect.sleep("10 millis")
+        yield* control.clearCloud()
+
+        expect(lifecycleAborted).toBe(true)
+        expect(lifecycleClearedAfterAbort).toBe(true)
+      }),
+    15_000,
+  )
+
+  migrationControlIt.live("fences legacy clear and unbound initialize during a v1 to v2 migration", () =>
+    Effect.gen(function* () {
+      migrationConfig = legacyActive
+      const control = yield* SyncControl.Service
+
+      yield* control.clearCloud()
+      expect(migrationConfig).toBeUndefined()
+      yield* control.initializeCloud()
+      expect(migrationConfig?.namespaceID).toBe(active.namespaceID)
+    }),
+  )
+
+  bootstrapControlIt.live("resumes an interrupted membership bootstrap exactly once", () =>
+    Effect.gen(function* () {
+      bootstrapAttempts = 0
+      const control = yield* SyncControl.Service
+
+      expect((yield* control.initializeCloud().pipe(Effect.exit))._tag).toBe("Failure")
+      expect(bootstrapAttempts).toBe(1)
+
+      // The cloud binding already committed. A normal retry path completes
+      // the durable bootstrap before provider work, then never repeats it.
+      expect((yield* control.now().pipe(Effect.exit))._tag).toBe("Failure")
+      expect((yield* control.now().pipe(Effect.exit))._tag).toBe("Failure")
+      expect(bootstrapAttempts).toBe(2)
     }),
   )
 

@@ -175,63 +175,81 @@ export function adapter(input: {
 
   const stat = async (object: string, signal?: AbortSignal) => {
     const remote = remotePath(root, object)
-    const listed = await call(
-      "stat",
-      (auth) => listDirectory(auth, path.posix.dirname(remote), request, signal),
-      signal,
-    ).catch((cause) => {
-      if (cause instanceof SyncProvider.ProviderError && cause.kind === "not-found") return []
-      throw cause
-    })
-    const found = listed.find((item) => item.remotePath === remote)?.info
-    return found ? { ...found, path: object } : undefined
+    return call("stat", (auth) => fileMetadata("stat", auth, remote, false, request, signal), signal)
+      .then((value) => ({ ...value.info, path: object }))
+      .catch((cause) => {
+        if (cause instanceof SyncProvider.ProviderError && cause.kind === "not-found") return undefined
+        throw cause
+      })
+  }
+
+  const statMany = async (objects: readonly string[], signal?: AbortSignal) => {
+    if (!objects.length) return []
+    const results: (SyncProvider.ObjectInfo | undefined)[] = []
+    for (let offset = 0; offset < objects.length; offset += 100) {
+      const batch = objects.slice(offset, offset + 100)
+      const remotes = batch.map((object) => remotePath(root, object))
+      const values = await call("stat", (auth) => fileMetadataMany(auth, remotes, request, signal), signal).catch(
+        async (cause) => {
+          // Baidu's production path-batch endpoint can reject the entire
+          // request with errno=12 when one of the requested paths does not
+          // exist, despite documenting per-item errno values. Preserve exact
+          // absence semantics by falling back to the single-path meta API.
+          if (!(cause instanceof SyncProvider.ProviderError) || cause.providerCode !== 12) throw cause
+          return Promise.all(
+            remotes.map((remote) =>
+              call("stat", (auth) => fileMetadata("stat", auth, remote, false, request, signal), signal)
+                .then((value) => value.info)
+                .catch((failure) => {
+                  if (failure instanceof SyncProvider.ProviderError && failure.kind === "not-found") return undefined
+                  throw failure
+                }),
+            ),
+          )
+        },
+      )
+      results.push(...values.map((value, index) => (value ? { ...value, path: batch[index]! } : undefined)))
+    }
+    return results
   }
 
   const download = async (object: string, version?: string, signal?: AbortSignal) => {
     const remote = remotePath(root, object)
     const pinned = version ? objectInfoFromVersion(object, version) : undefined
-    const before = pinned ?? (await stat(object, signal))
-    if (!before) throw error("download", "not-found", false)
-    if (version && before.version !== version) throw error("download", "conflict", false)
-    const fsID = Number(before.version.split(":", 1)[0])
-    const bytes = await call(
+    return call(
       "download",
       async (auth) => {
-        const url = endpoint(MEDIA_API, {
-          method: "filemetas",
-          access_token: auth.accessToken,
-          fsids: JSON.stringify([fsID]),
-          dlink: "1",
-        })
-        const body = await json(
-          await request(url, { signal, headers: { "User-Agent": "pan.baidu.com" } }),
-          "download",
-          "file-metadata",
-        )
-        const first = Array.isArray(body.list) ? body.list[0] : undefined
-        const item = first ? record(first, "download", "file-metadata") : undefined
-        if (!item || typeof item.dlink !== "string") {
-          // Baidu's directory listing can briefly retain the fs_id of a file
-          // replaced with rtype=3. Repeating filemetas for that stale ID only
-          // delays the inevitable; refresh the path version so callers can
-          // retry the current object immediately.
-          const latest = await stat(object, signal)
-          if (!latest || latest.version !== before.version) throw error("download", "conflict", false)
-          throw invalidResponse("download", "file-metadata", body, true)
-        }
-        const link = endpoint(item.dlink, { access_token: auth.accessToken })
+        // rtype=3 replacement can invalidate a previously listed fs_id before
+        // the parent directory converges. Resolve the canonical path directly
+        // so the version check and dlink refer to the same file generation.
+        const current = await fileMetadata("download", auth, remote, true, request, signal)
+        if (pinned && current.info.version !== pinned.version) throw error("download", "conflict", false)
+        const link = endpoint(current.dlink!, { access_token: auth.accessToken })
         const response = await request(link, { signal, redirect: "follow", headers: { "User-Agent": "pan.baidu.com" } })
-        if (!response.ok) throw responseFailure("download", response)
-        return new Uint8Array(await response.arrayBuffer())
+        if (!response.ok) {
+          const failure = responseFailure("download", response, undefined, "content-download")
+          if (failure.kind !== "not-found") throw failure
+          // The metadata edge can lead the content edge for a short window.
+          // Retrying the whole path lookup obtains a fresh dlink and version.
+          throw new SyncProvider.ProviderError(
+            failure.providerID,
+            failure.operation,
+            failure.kind,
+            true,
+            failure.outcome,
+            failure.retryAfter,
+            failure.providerCode,
+            failure.requestID,
+            failure.providerPhase,
+            failure.httpStatus,
+          )
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        return { ...current.info, path: object, bytes }
       },
       signal,
-      8,
+      4,
     )
-    if (!pinned) {
-      const after = await stat(object, signal)
-      if (!after || after.version !== before.version) throw error("download", "conflict", false)
-    }
-    return { ...before, bytes }
   }
 
   const ensureDirectory = (directory: string, signal?: AbortSignal) => {
@@ -286,6 +304,10 @@ export function adapter(input: {
   ) => {
     await ensureParents(object, signal)
     const remote = remotePath(root, object)
+    // Baidu does not expose a general version-CAS primitive. Correctness
+    // records use rtype=0 so an occupied path can never be replaced; mutable
+    // hints use rtype=3 and their precondition remains best-effort only.
+    const replacementType = precondition.type === "absent" ? "0" : "3"
     const blocks = split(bytes).map((part) => ({ part, md5: createHash("md5").update(part).digest("hex") }))
     let expectedUploadID: string | undefined
     try {
@@ -299,7 +321,7 @@ export function adapter(input: {
               size: String(bytes.byteLength),
               isdir: "0",
               autoinit: "1",
-              rtype: "3",
+              rtype: replacementType,
               block_list: JSON.stringify(blocks.map((block) => block.md5)),
             },
             request,
@@ -335,18 +357,20 @@ export function adapter(input: {
                 throw invalidResponse("upload", "part-upload", uploaded)
             }),
           )
-          // Validate immediately before the committing create request. An
-          // earlier duplicate stat only made the common small-object path pay
-          // another full Baidu directory listing without strengthening the
-          // best-effort compare-and-swap boundary.
-          checkPrecondition(await stat(object, signal), precondition, "upload")
+          // rtype=0 makes the committing create itself fail when an immutable
+          // object already exists. Rechecking an `absent` precondition here
+          // adds one full Baidu metadata round trip without strengthening the
+          // commit boundary. Mutable replacement still needs the best-effort
+          // version check because rtype=3 does not expose version CAS.
+          if (precondition.type === "version")
+            checkPrecondition(await stat(object, signal), precondition, "upload")
           const created = await form(
             endpoint(FILE_API, { method: "create", access_token: auth.accessToken }),
             {
               path: remote,
               size: String(bytes.byteLength),
               isdir: "0",
-              rtype: "3",
+              rtype: replacementType,
               uploadid: expectedUploadID,
               block_list: JSON.stringify(blocks.map((block) => block.md5)),
             },
@@ -375,9 +399,10 @@ export function adapter(input: {
       )
     } catch (cause) {
       const failure = classify("upload", cause)
-      if (failure.kind === "conflict" || failure.kind === "unauthenticated" || !expectedUploadID) throw failure
+      if (failure.kind === "unauthenticated") throw failure
       const verified = await verifyUpload(stat, download, object, bytes, signal).catch(() => undefined)
       if (verified) return verified
+      if (failure.kind === "conflict" || !expectedUploadID) throw failure
       throw new SyncProvider.ProviderError(
         "baidu",
         "upload",
@@ -455,6 +480,7 @@ export function adapter(input: {
       }
     },
     stat,
+    statMany,
     download,
     uploadAtomic,
     deleteBatch,
@@ -555,14 +581,81 @@ async function listRecursivePage(
   }
 }
 
-async function listDirectory(auth: Credential, directory: string, request: Request, signal?: AbortSignal) {
-  const output = []
-  for (let start = 0; ; ) {
-    const page = await listPage("stat", auth, directory, start, request, signal)
-    output.push(...page.items)
-    if (page.next === undefined) return output
-    start = page.next
+async function fileMetadata(
+  operation: "stat" | "download",
+  auth: Credential,
+  remote: string,
+  includeDownload: boolean,
+  request: Request,
+  signal?: AbortSignal,
+) {
+  const body = await form(
+    endpoint(FILE_API, { method: "filemetas", access_token: auth.accessToken }),
+    {
+      target: JSON.stringify([remote]),
+      dlink: includeDownload ? "1" : "0",
+      blocks: "0",
+      media: "0",
+    },
+    request,
+    operation,
+    signal,
+    "path-metadata",
+  ).catch((cause) => {
+    // The production path-batch endpoint returns a top-level errno=12 for a
+    // singleton target that does not exist. That code is documented for an
+    // unrelated transfer API, but is the stable observed absence response for
+    // this endpoint and account permission tier.
+    if (cause instanceof SyncProvider.ProviderError && cause.providerCode === 12)
+      throw error(
+        operation,
+        "not-found",
+        false,
+        undefined,
+        cause.providerCode,
+        cause.requestID,
+        cause.providerPhase,
+        cause.httpStatus,
+      )
+    throw cause
+  })
+  if (!Array.isArray(body.info)) throw invalidResponse(operation, "path-metadata", body)
+  const value = body.info[0]
+  if (!value)
+    throw error(operation, "not-found", false, undefined, undefined, safeRequestID(body.request_id), "path-metadata")
+  const item = record(value, operation, "path-metadata")
+  const code = Number(item.errno ?? 0)
+  if (code !== 0) throw itemFailure(operation, code, body, "path-metadata")
+  const info = listedObjectInfo(remote, item, operation, "path-metadata")
+  if (!includeDownload) return { info }
+  if (typeof item.dlink !== "string" || !item.dlink) throw invalidResponse(operation, "path-metadata", body, true)
+  return { info, dlink: item.dlink }
+}
+
+async function fileMetadataMany(auth: Credential, remotes: readonly string[], request: Request, signal?: AbortSignal) {
+  const body = await form(
+    endpoint(FILE_API, { method: "filemetas", access_token: auth.accessToken }),
+    { target: JSON.stringify(remotes), dlink: "0", blocks: "0", media: "0" },
+    request,
+    "stat",
+    signal,
+    "path-metadata-batch",
+  )
+  if (!Array.isArray(body.info)) throw invalidResponse("stat", "path-metadata-batch", body)
+  const found = new Map<string, SyncProvider.ObjectInfo>()
+  for (const value of body.info) {
+    const item = record(value, "stat", "path-metadata-batch")
+    const remote = typeof item.path === "string" ? item.path : undefined
+    const code = Number(item.errno ?? 0)
+    if (code !== 0) {
+      const failure = itemFailure("stat", code, body, "path-metadata-batch")
+      if (failure.kind === "not-found") continue
+      throw failure
+    }
+    if (!remote || !remotes.includes(remote)) throw invalidResponse("stat", "path-metadata-batch", body)
+    found.set(remote, listedObjectInfo(remote, item, "stat", "path-metadata-batch"))
   }
+  return remotes.map((remote) => found.get(remote))
 }
 
 async function directoryExists(auth: Credential, directory: string, request: Request, signal?: AbortSignal) {
@@ -600,12 +693,13 @@ function listed(value: Record<string, unknown>, operation: "list" | "stat") {
 function listedObjectInfo(
   object: string,
   value: Record<string, unknown>,
-  operation: "list" | "stat",
+  operation: SyncProvider.ProviderError["operation"],
+  providerPhase = "file-list",
 ): SyncProvider.ObjectInfo {
   // Baidu's list endpoint names this server_mtime; the create endpoint below returns mtime instead.
-  const fsID = number(value.fs_id, operation, "file-list", value)
-  const size = number(value.size, operation, "file-list", value)
-  const modifiedAt = number(value.server_mtime, operation, "file-list", value) * 1_000
+  const fsID = number(value.fs_id, operation, providerPhase, value)
+  const size = number(value.size, operation, providerPhase, value)
+  const modifiedAt = number(value.server_mtime, operation, providerPhase, value) * 1_000
   return { path: object, version: `${fsID}:${modifiedAt}:${size}`, size, modifiedAt }
 }
 
@@ -727,7 +821,7 @@ function responseFailure(
     return error(operation, "permission", false, undefined, providerCode, requestID, providerPhase, response.status)
   if (response.status === 404 || code === -9 || code === 31066)
     return error(operation, "not-found", false, undefined, providerCode, requestID, providerPhase, response.status)
-  if (response.status === 409)
+  if (response.status === 409 || code === -8)
     return error(operation, "conflict", false, undefined, providerCode, requestID, providerPhase, response.status)
   if (response.status === 429 || code === 31034 || code === 31045)
     return error(operation, "rate-limit", true, retryAfter, providerCode, requestID, providerPhase, response.status)
@@ -741,6 +835,25 @@ function responseFailure(
     providerPhase,
     response.status,
   )
+}
+
+function itemFailure(
+  operation: SyncProvider.ProviderError["operation"],
+  code: number,
+  body: Record<string, unknown>,
+  providerPhase: string,
+) {
+  const requestID = safeRequestID(body.request_id)
+  if (code === -6 || code === 111)
+    return error(operation, "unauthenticated", false, undefined, code, requestID, providerPhase)
+  if (code === -7) return error(operation, "permission", false, undefined, code, requestID, providerPhase)
+  if (code === -8) return error(operation, "conflict", false, undefined, code, requestID, providerPhase)
+  if (code === -9 || code === 31066)
+    return error(operation, "not-found", false, undefined, code, requestID, providerPhase)
+  if (code === 31034 || code === 31045)
+    return error(operation, "rate-limit", true, undefined, code, requestID, providerPhase)
+  if (code === 42214) return error(operation, "provider", true, undefined, code, requestID, providerPhase)
+  return error(operation, "provider", false, undefined, code, requestID, providerPhase)
 }
 
 function classify(operation: SyncProvider.ProviderError["operation"], cause: unknown) {

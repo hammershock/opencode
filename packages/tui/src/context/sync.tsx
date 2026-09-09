@@ -719,8 +719,7 @@ export const {
           return sessionListQuery()
         },
         async refresh() {
-          const list = await listSessions()
-          setStore("session", reconcile(list))
+          return refreshProjectedSessions()
         },
         status(sessionID: string) {
           const session = result.session.get(sessionID)

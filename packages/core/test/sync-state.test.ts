@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { SyncState } from "@opencode-ai/core/sync/state"
+import { SyncRoot } from "@opencode-ai/core/sync/root"
 import { tmpdir } from "./fixture/tmpdir"
 
 const descriptor = {
@@ -43,5 +44,32 @@ describe("SyncState", () => {
     await expect(store.write({ ...second, enabled: true }, first.revision)).rejects.toBeInstanceOf(
       SyncState.ConflictError,
     )
+  })
+
+  test("keeps the local account scope bound to the matching remote instance", () => {
+    const state = {
+      ...SyncState.empty("Mac", "device"),
+      account: { id: "account", maskedDisplay: "account" },
+    }
+    const instanceDescriptor = { ...descriptor, namespaceID: SyncRoot.accountScope("instance-a") }
+    const joined = SyncState.bind(state, {
+      accountID: "account",
+      descriptor: instanceDescriptor,
+      remoteRoot: SyncRoot.instanceRoot("instance-a"),
+      joinedAt: 2,
+    })
+
+    expect(SyncState.active(SyncState.activate(joined, instanceDescriptor.namespaceID))).toMatchObject({
+      namespaceID: "account-v2:instance-a",
+      remoteRoot: `${SyncRoot.REMOTE_ROOT}/instances/instance-a`,
+    })
+    expect(() =>
+      SyncState.bind(state, {
+        accountID: "account",
+        descriptor: instanceDescriptor,
+        remoteRoot: SyncRoot.instanceRoot("instance-b"),
+        joinedAt: 2,
+      }),
+    ).toThrow(SyncState.ConflictError)
   })
 })

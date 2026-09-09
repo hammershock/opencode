@@ -112,6 +112,53 @@ describe("SessionSync", () => {
     )
   })
 
+  test("includes foreign durable history only when rebuilding a new cloud root", async () => {
+    await using tmp = await tmpdir()
+    const layer = LayerNode.compile(LayerNode.group([Database.node, SyncEventStore.node, SyncOwnership.node]), [
+      [Database.node, Database.layerFromPath(path.join(tmp.path, "session.db"))],
+      [SyncDatabase.node, SyncDatabase.layerFromPath(path.join(tmp.path, "sync.db"))],
+    ])
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const store = yield* SyncEventStore.Service
+        const sessionID = Session.ID.make("ses_foreign_rebuild")
+        yield* database
+          .insert(EventSequenceTable)
+          .values({ aggregate_id: sessionID, seq: 0, owner_id: "device-remote" })
+          .run()
+        yield* database
+          .insert(EventTable)
+          .values({
+            id: EventV2.ID.create(),
+            aggregate_id: sessionID,
+            seq: 0,
+            type: "session.created.1",
+            data: {
+              sessionID,
+              info: {
+                id: sessionID,
+                slug: "foreign",
+                projectID: "global",
+                directory: "/project",
+                title: "Foreign Session",
+                version: "test",
+                time: { created: 0, updated: 0 },
+              },
+            },
+          })
+          .run()
+
+        yield* SessionSync.backfill(database, store, sessionID, "joined-cloud")
+        expect(yield* store.scope("joined-cloud").pending(10)).toEqual([])
+
+        yield* SessionSync.backfill(database, store, sessionID, "new-cloud", { includeForeignHistory: true })
+        expect((yield* store.scope("new-cloud").pending(10)).map((event) => event.type)).toEqual(["session.created.1"])
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    )
+  })
+
   test("keeps the application available when startup recovery fails", async () => {
     const layer = SessionSync.captureLayer.pipe(
       Layer.provide([
@@ -245,7 +292,7 @@ describe("SessionSync", () => {
   })
 
   test("captures ordinary durable events and maps deletion to a permanent tombstone", async () => {
-    const calls: unknown[] = []
+    const calls: any[] = []
     const store = {
       enqueue: (event: unknown) => Effect.sync(() => void calls.push(["event", event])),
       delete: (event: unknown) => Effect.sync(() => void calls.push(["delete", event])),
@@ -281,6 +328,40 @@ describe("SessionSync", () => {
     expect(calls[1]).toMatchObject(["delete", { id: "e2", sessionID: "s1", deletedAt: 11 }])
   })
 
+  test("normalizes durable Session timestamps on capture and historical replay", async () => {
+    const captured: any[] = []
+    const store = {
+      enqueue: (event: unknown) => Effect.sync(() => void captured.push(event)),
+      delete: () => Effect.void,
+    } as any
+    const instant = new Date("2026-09-09T18:18:26.247Z")
+    await Effect.runPromise(
+      SessionSync.capture(store, {
+        id: "timestamp-capture",
+        type: "session.next.prompt.admitted",
+        durable: { aggregateID: "s1", seq: 1, version: 1 },
+        data: { sessionID: "s1", timestamp: instant },
+      }),
+    )
+    expect(captured[0].data.timestamp).toBe(instant.getTime())
+
+    const replayed: any[] = []
+    const projector = SessionSync.projector({
+      replay: (event: unknown) => Effect.sync(() => void replayed.push(event)),
+      remove: () => Effect.void,
+    } as any)
+    await Effect.runPromise(
+      projector.project({
+        id: EventV2.ID.create(),
+        aggregateID: "s1",
+        seq: 1,
+        type: "session.next.prompt.admitted.1",
+        data: { sessionID: "s1", timestamp: instant.toISOString() },
+      }),
+    )
+    expect(replayed[0].data.timestamp).toBe(instant.getTime())
+  })
+
   test("hydrates through EventV2 replay and removes deleted aggregates", async () => {
     const calls: unknown[] = []
     const events = {
@@ -304,6 +385,38 @@ describe("SessionSync", () => {
       { publish: true },
     ])
     expect(calls[1]).toEqual(["remove", "s1"])
+  })
+
+  test("records remote Location rebind sequence without changing this device Location", async () => {
+    const calls: any[] = []
+    const events = {
+      replay: (event: unknown, options: unknown) => Effect.sync(() => void calls.push([event, options])),
+      remove: () => Effect.void,
+    } as any
+    const projector = SessionSync.projector(events, SyncEvent.DeviceID.make("remote"))
+
+    await Effect.runPromise(
+      projector.project({
+        id: EventV2.ID.create(),
+        aggregateID: "ses_device_local_location",
+        seq: 4,
+        type: "session.next.location.rebound.1",
+        data: {
+          sessionID: "ses_device_local_location",
+          timestamp: 1,
+          previous: { target: { type: "local" }, directory: "/remote/old" },
+          location: { target: { type: "local" }, directory: "/remote/new" },
+          revision: 1,
+        },
+      }),
+    )
+
+    expect(calls[0]?.[1]).toMatchObject({
+      ownerID: "remote",
+      allowForeignAppend: true,
+      publish: false,
+      project: false,
+    })
   })
 
   test("persists real versioned Created ownership across restart reconciliation", async () => {

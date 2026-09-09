@@ -73,7 +73,7 @@ describe("SyncEventStore", () => {
         return yield* db.get<{ version: number }>(sql`SELECT MAX(version) AS version FROM sync_schema`)
       }).pipe(Effect.scoped, Effect.provide(database)),
     )
-    expect(version).toEqual({ version: 7 })
+    expect(version).toEqual({ version: 8 })
   })
 
   test("preserves v5 rows while rebuilding space-composite keys and the immutable trigger", async () => {
@@ -112,7 +112,7 @@ describe("SyncEventStore", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = (yield* SyncDatabase.Service).db
-        expect(yield* db.get(sql`SELECT MAX(version) AS version FROM sync_schema`)).toEqual({ version: 7 })
+        expect(yield* db.get(sql`SELECT MAX(version) AS version FROM sync_schema`)).toEqual({ version: 8 })
         for (const table of [
           "sync_event_outbox",
           "sync_event_segment",
@@ -168,6 +168,15 @@ describe("SyncEventStore", () => {
         expect(yield* store.head(device)).toBe(1)
         expect(yield* store.pending(10)).toEqual([])
         expect(yield* store.seal(device, 10)).toBeUndefined()
+
+        // Startup recovery may replay the complete durable aggregate. An
+        // operation already committed to a local segment must stay a no-op
+        // even though its transient outbox row was acknowledged and removed.
+        yield* store.enqueue(event("first", 0), 50)
+        yield* store.enqueue(event("later", 1), 51)
+        expect(yield* store.pending(10)).toEqual([])
+        expect(yield* store.seal(device, 10)).toBeUndefined()
+        expect(yield* store.head(device)).toBe(1)
       }),
     )
   })

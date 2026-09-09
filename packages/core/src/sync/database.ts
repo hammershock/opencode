@@ -18,7 +18,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncDatabase") {}
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 const layer = Layer.effect(
   Service,
@@ -62,6 +62,10 @@ const layer = Layer.effect(
             yield* Effect.forEach(schemaV7, (statement) => tx.run(statement), { discard: true })
             yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (7)`)
           }
+          if ((current?.version ?? 1) < 8) {
+            yield* Effect.forEach(schemaV8, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (8)`)
+          }
         }),
       { behavior: "immediate" },
     )
@@ -93,6 +97,7 @@ export function purgeSpace(db: Interface["db"], spaceID: string) {
         sql`DELETE FROM sync_session_metadata WHERE space_id = ${spaceID}`,
         sql`DELETE FROM sync_session_space WHERE space_id = ${spaceID}`,
         sql`DELETE FROM sync_segment_aggregate WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_local_operation WHERE space_id = ${spaceID}`,
       ],
       (statement) => tx.run(statement),
       { discard: true },
@@ -311,4 +316,27 @@ const schemaV7 = [
         ELSE '$.event.aggregateID'
       END
     ) IS NOT NULL`,
+]
+
+// Acknowledged outbox rows are removed, so event identity must be retained
+// separately. Otherwise startup backfill republishes the complete Session
+// history on every process launch.
+const schemaV8 = [
+  sql`CREATE TABLE sync_local_operation (
+    space_id TEXT NOT NULL, event_id TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
+    PRIMARY KEY(space_id, event_id)
+  )`,
+  sql`INSERT OR IGNORE INTO sync_local_operation (space_id, event_id, kind, payload)
+    SELECT source.space_id,
+      CASE json_extract(operation.value, '$.kind')
+        WHEN 'tombstone' THEN json_extract(operation.value, '$.tombstone.id')
+        ELSE json_extract(operation.value, '$.event.id')
+      END,
+      json_extract(operation.value, '$.kind'),
+      CASE json_extract(operation.value, '$.kind')
+        WHEN 'tombstone' THEN json_extract(operation.value, '$.tombstone')
+        ELSE json_extract(operation.value, '$.event')
+      END
+    FROM sync_event_segment AS source, json_each(source.payload, '$.operations') AS operation
+    WHERE json_extract(operation.value, '$.kind') IN ('event', 'tombstone')`,
 ]

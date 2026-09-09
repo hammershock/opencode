@@ -87,11 +87,20 @@ export const layer = Layer.effect(
         yield* db.transaction(
           (tx) =>
             Effect.gen(function* () {
+              const recorded = yield* tx.get<OperationRow>(sql`
+                SELECT payload, kind FROM sync_local_operation
+                WHERE event_id = ${event.id} AND space_id = ${spaceID}
+              `)
+              const payload = encodeEvent(event)
+              if (recorded) {
+                if (recorded.kind !== "event" || recorded.payload !== payload)
+                  return yield* Effect.die(new Error(`Sync event ${event.id} has divergent recorded payload`))
+                return
+              }
               const deleted = yield* tx.get(sql`
               SELECT 1 FROM sync_deletion_set WHERE session_id = ${event.aggregateID} AND space_id = ${spaceID}
             `)
               if (deleted) return
-              const payload = encodeEvent(event)
               yield* tx.run(sql`
               INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind, space_id)
               VALUES (${event.id}, ${event.aggregateID}, ${event.seq}, ${payload}, ${createdAt}, 'event', ${spaceID})
@@ -115,6 +124,15 @@ export const layer = Layer.effect(
           (tx) =>
             Effect.gen(function* () {
               const payload = canonical(tombstone)
+              const recorded = yield* tx.get<OperationRow>(sql`
+                SELECT payload, kind FROM sync_local_operation
+                WHERE event_id = ${tombstone.id} AND space_id = ${spaceID}
+              `)
+              if (recorded) {
+                if (recorded.kind !== "tombstone")
+                  return yield* Effect.die(new Error(`Sync tombstone ${tombstone.id} has divergent recorded kind`))
+                return
+              }
               yield* tx.run(sql`
               DELETE FROM sync_event_outbox
               WHERE aggregate_id = ${tombstone.sessionID} AND segment_id IS NULL AND space_id = ${spaceID}
@@ -199,6 +217,12 @@ export const layer = Layer.effect(
               yield* tx.run(sql`
               INSERT INTO sync_event_segment (id, device_id, generation, payload, created_at, space_id)
               VALUES (${segment.id}, ${deviceID}, ${next}, ${payload}, ${createdAt}, ${spaceID})
+            `)
+              yield* tx.run(sql`
+              INSERT OR IGNORE INTO sync_local_operation (space_id, event_id, kind, payload)
+              SELECT space_id, event_id, kind, payload FROM sync_event_outbox
+              WHERE event_id IN (SELECT value FROM json_each(${JSON.stringify(segment.operations.map(operationID))}))
+                AND space_id = ${spaceID}
             `)
               yield* indexSegment(tx, segment)
               yield* tx.run(sql`

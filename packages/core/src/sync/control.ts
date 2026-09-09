@@ -676,12 +676,17 @@ const make = (input: LayerOptions) =>
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
       const metadata = metadataStore.scope(config.namespaceID)
-      const known = (yield* metadata.list().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))).some(
-        (item) => item.sessionID === input.sessionID,
+      const store = eventStore.scope(config.namespaceID)
+      const known = yield* Effect.all([metadata.list(), store.deletions()]).pipe(
+        Effect.map(([items, deletions]) =>
+          items.some((item) => item.sessionID === input.sessionID) ||
+          deletions.some((item) => item.sessionID === input.sessionID),
+        ),
+        Effect.mapError(() => new ControlError({ kind: "storage" })),
       )
       if (!known) return yield* new ControlError({ kind: "invalid" })
       const runtime = yield* load()
-      yield* eventStore.scope(config.namespaceID).delete(
+      yield* store.delete(
         SyncEvent.Tombstone.make({
           id: `sync-delete:${config.deviceID}:${crypto.randomUUID()}`,
           sessionID: input.sessionID,

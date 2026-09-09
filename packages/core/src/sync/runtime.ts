@@ -118,11 +118,14 @@ export function make(input: {
   let uploadFlight: Promise<void> | undefined
   let pullFlight: Promise<void> | undefined
   let hydrateFlight: Promise<void> | undefined
+  let probeFlight: Promise<boolean> | undefined
   let indexedHeads: readonly Head[] = []
   let indexedSegments = new Map<string, SyncProvider.ObjectInfo>()
+  let probedDevices: readonly SyncProvider.ObjectInfo[] | undefined
   const cachedHeads = new Map<string, { readonly version: string; readonly head: Head }>()
   let revokedDevices = new Set<SyncEvent.DeviceID>()
   let localHead: Head | undefined
+  let localHeadObject: SyncProvider.ObjectInfo | undefined
   const projectors = new Map<SyncEvent.DeviceID, SyncEvent.DurableProjector>()
   const acquireLease = async (kind: "upload" | "pull" | "hydrate", signal?: AbortSignal) => {
     const deadline = Date.now() + 65_000
@@ -158,11 +161,12 @@ export function make(input: {
     return created
   }
 
-  const uploadOnce = async (signal?: AbortSignal) => {
+  const uploadOnce = async (reconcileDeletions: boolean, signal?: AbortSignal) => {
     if (!status.enabled) return
     await acquireLease("upload", signal)
     status = { ...status, running: "upload" }
     let stage: Diagnostic["stage"] = "segment"
+    const changedTombstones = new Map<string, SyncEvent.Tombstone>()
     try {
       while (true) {
         signal?.throwIfAborted()
@@ -170,6 +174,8 @@ export function make(input: {
         if (!renewed) throw new Error("Sync upload lease expired while draining queued segments")
         const segment = await Effect.runPromise(input.store.seal(input.config.deviceID, 256, now()))
         if (!segment) break
+        for (const operation of segment.operations)
+          if (operation.kind === "tombstone") changedTombstones.set(operation.tombstone.sessionID, operation.tombstone)
         stage = "attachment"
         const wire = input.attachment ? await externalizeSegment(segment, input.attachment) : segment
         stage = "segment"
@@ -198,7 +204,10 @@ export function make(input: {
       const generation = await Effect.runPromise(input.store.head(input.config.deviceID))
       const metadata = await Effect.runPromise(input.metadata())
       const pendingDeletions: SyncDeletion.Marker[] = []
-      for (const tombstone of await Effect.runPromise(input.store.deletions())) {
+      const tombstones = reconcileDeletions
+        ? await Effect.runPromise(input.store.deletions())
+        : [...changedTombstones.values()]
+      for (const tombstone of tombstones) {
         const marker = await deletions.ensure(
           tombstone,
           indexedHeads
@@ -221,12 +230,24 @@ export function make(input: {
       stage = "head"
       const path = headPath(input.config.deviceID, codec.suffix)
       const changed = !localHead || JSON.stringify(localHead) !== JSON.stringify(head)
-      const published = changed ? await publishHeadMonotonic(input.provider, codec, head, path, signal) : true
-      localHead = head
+      const result = changed
+        ? await publishHeadMonotonic(
+            input.provider,
+            codec,
+            head,
+            path,
+            localHead && localHeadObject ? { head: localHead, object: localHeadObject } : undefined,
+            signal,
+          )
+        : { published: true, object: localHeadObject }
+      if (result.published) {
+        localHead = head
+        localHeadObject = result.object
+      }
       // A device releases its cloud reference only after its replacement head,
       // which no longer advertises the Session, is durably visible. An ack
       // written before the head would let a crash resurrect stale metadata.
-      if (published) {
+      if (result.published) {
         for (const marker of pendingDeletions) {
           await deletions.acknowledge(marker, input.config.deviceID, signal)
         }
@@ -247,17 +268,17 @@ export function make(input: {
     }
   }
 
-  const pullOnce = async (signal?: AbortSignal) => {
+  const pullOnce = async (reconcileDeletions: boolean, signal?: AbortSignal) => {
     if (!status.enabled) return
     await acquireLease("pull", signal)
     status = { ...status, running: "pull" }
     try {
-      const [objects, segments, markers] = await Promise.all([
-        SyncProvider.listAll(input.provider, "devices", signal),
-        SyncProvider.listAll(input.provider, "segments", signal),
-        deletions.list(signal),
+      const indexed = probedDevices
+      probedDevices = undefined
+      const [objects, markers] = await Promise.all([
+        indexed ? Promise.resolve(indexed) : SyncProvider.listAll(input.provider, "devices", signal),
+        reconcileDeletions ? deletions.list(signal) : Promise.resolve([]),
       ])
-      indexedSegments = new Map(segments.map((item) => [item.path, item]))
       const remoteHeads = objects.flatMap((object) => {
         if (!object.path.endsWith(`.head${codec.suffix}`)) return []
         const deviceID = deviceFromHeadPath(object.path, codec.suffix)
@@ -284,10 +305,16 @@ export function make(input: {
       indexedHeads = heads
         .filter((head) => !revoked.has(head.deviceID))
         .sort((a, b) => String(a.deviceID).localeCompare(String(b.deviceID)))
+      const behind: Head[] = []
       for (const head of indexedHeads) {
         if (revoked.has(head.deviceID)) continue
         if (input.deviceProjector) await Effect.runPromise(input.deviceProjector(head))
+        if ((await Effect.runPromise(input.store.cursor(head.deviceID))) < head.generation) behind.push(head)
       }
+      const segments = await mapConcurrent(behind, 8, (head) =>
+        SyncProvider.listAll(input.provider, `segments/${head.deviceID}`, signal),
+      )
+      indexedSegments = new Map(segments.flat().map((item) => [item.path, item]))
       await Effect.runPromise(
         input.store.absorbDeletions(
           markers.map((item) => item.tombstone),
@@ -319,11 +346,35 @@ export function make(input: {
     }
   }
 
+  const probeOnce = async (signal?: AbortSignal) => {
+    if (!status.enabled) return false
+    try {
+      const objects = await SyncProvider.listAll(input.provider, "devices", signal)
+      const remote = new Map(
+        objects.flatMap((object) => {
+          if (!object.path.endsWith(`.head${codec.suffix}`)) return []
+          const deviceID = deviceFromHeadPath(object.path, codec.suffix)
+          return deviceID === input.config.deviceID ? [] : [[String(deviceID), object.version] as const]
+        }),
+      )
+      const changed =
+        remote.size !== cachedHeads.size ||
+        [...remote].some(([deviceID, version]) => cachedHeads.get(deviceID)?.version !== version)
+      // A following pull consumes this exact listing instead of paying for the
+      // same metadata request twice on Baidu Netdisk.
+      if (changed) probedDevices = objects
+      return changed
+    } catch (cause) {
+      status = { ...status, lastError: diagnostic("pull", cause) }
+      throw cause
+    }
+  }
+
   const hydrateOnce = async (signal?: AbortSignal) => {
     if (!status.enabled) return
     // Metadata indexing is intentionally a separate committed phase. Opening a
     // metadata-only Session calls hydrate(); idle background work may do so too.
-    if (!indexedHeads.length) await coalesce("pull", signal)
+    if (!indexedHeads.length) await coalescePull(true, signal)
     await acquireLease("hydrate", signal)
     try {
       for (const head of indexedHeads) {
@@ -444,9 +495,7 @@ export function make(input: {
 
   const collectDeletions = async (signal?: AbortSignal) => {
     const eligible = (await deletions.scan(signal)).filter((item) =>
-      item.marker.requiredDevices.every(
-        (deviceID) => item.acknowledged.has(deviceID) || revokedDevices.has(deviceID),
-      ),
+      item.marker.requiredDevices.every((deviceID) => item.acknowledged.has(deviceID) || revokedDevices.has(deviceID)),
     )
     if (!eligible.length) return []
     const deleted = new Set(eligible.map((item) => item.marker.tombstone.sessionID))
@@ -490,9 +539,15 @@ export function make(input: {
           ? !deleted.has(operation.tombstone.sessionID)
           : !deleted.has(operation.event.aggregateID),
       )
-      const purged = operations.length === segment.operations.length ? segment : SyncEvent.Segment.make({ ...segment, operations })
+      const purged =
+        operations.length === segment.operations.length ? segment : SyncEvent.Segment.make({ ...segment, operations })
       if (purged === segment) continue
-      const bytes = await encode(codec, "event", segmentContext(location.deviceID, location.generation, object.path), purged)
+      const bytes = await encode(
+        codec,
+        "event",
+        segmentContext(location.deviceID, location.generation, object.path),
+        purged,
+      )
       await input.provider.uploadAtomic(object.path, bytes, { type: "version", version: object.version }, signal)
     }
     if (deletedHadAttachments) await collectAttachments(signal)
@@ -502,9 +557,35 @@ export function make(input: {
     return collected
   }
 
-  const coalesce = (direction: "upload" | "pull", signal?: AbortSignal) => {
-    if (direction === "upload") return (uploadFlight ??= uploadOnce(signal).finally(() => (uploadFlight = undefined)))
-    return (pullFlight ??= pullOnce(signal).finally(() => (pullFlight = undefined)))
+  let uploadReconcilesDeletions = false
+  const coalesceUpload = (reconcileDeletions: boolean, signal?: AbortSignal): Promise<void> => {
+    if (uploadFlight) {
+      const satisfies = uploadReconcilesDeletions || !reconcileDeletions
+      return satisfies ? uploadFlight : uploadFlight.then(() => coalesceUpload(true, signal))
+    }
+    uploadReconcilesDeletions = reconcileDeletions
+    const flight = uploadOnce(reconcileDeletions, signal).finally(() => {
+      if (uploadFlight !== flight) return
+      uploadFlight = undefined
+      uploadReconcilesDeletions = false
+    })
+    uploadFlight = flight
+    return flight
+  }
+  let pullReconcilesDeletions = false
+  const coalescePull = (reconcileDeletions: boolean, signal?: AbortSignal): Promise<void> => {
+    if (pullFlight) {
+      const satisfies = pullReconcilesDeletions || !reconcileDeletions
+      return satisfies ? pullFlight : pullFlight.then(() => coalescePull(true, signal))
+    }
+    pullReconcilesDeletions = reconcileDeletions
+    const flight = pullOnce(reconcileDeletions, signal).finally(() => {
+      if (pullFlight !== flight) return
+      pullFlight = undefined
+      pullReconcilesDeletions = false
+    })
+    pullFlight = flight
+    return flight
   }
   const settle = (run: () => Promise<void>) => run().finally(() => input.transfer?.finish())
 
@@ -514,12 +595,22 @@ export function make(input: {
     upload: (signal?: AbortSignal) =>
       Effect.tryPromise(() =>
         settle(async () => {
-          await coalesce("pull", signal)
+          await coalescePull(true, signal)
           await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
-          await coalesce("upload", signal)
+          await coalesceUpload(true, signal)
         }),
       ),
-    pull: (signal?: AbortSignal) => Effect.tryPromise(() => settle(() => coalesce("pull", signal))),
+    /** Pushes already-captured local operations without paying for a remote
+     * reconciliation first. The immutable segment is committed before the
+     * mutable device head, so receivers never observe an incomplete update. */
+    push: (signal?: AbortSignal) => Effect.tryPromise(() => settle(() => coalesceUpload(false, signal))),
+    pull: (signal?: AbortSignal) => Effect.tryPromise(() => settle(() => coalescePull(true, signal))),
+    /** Receives active device deltas without scanning the durable deletion
+     * archive. Tombstones still arrive in their originating event segments;
+     * the archive is reconciled by explicit/full sync. */
+    receive: (signal?: AbortSignal) => Effect.tryPromise(() => settle(() => coalescePull(false, signal))),
+    probe: (signal?: AbortSignal) =>
+      Effect.tryPromise(() => (probeFlight ??= probeOnce(signal).finally(() => (probeFlight = undefined)))),
     hydrate: (signal?: AbortSignal) =>
       Effect.tryPromise(() =>
         settle(() => (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))),
@@ -527,9 +618,9 @@ export function make(input: {
     now: (signal?: AbortSignal) =>
       Effect.tryPromise(() =>
         settle(async () => {
-          await coalesce("pull", signal)
+          await coalescePull(true, signal)
           await (hydrateFlight ??= hydrateOnce(signal).finally(() => (hydrateFlight = undefined)))
-          await coalesce("upload", signal)
+          await coalesceUpload(true, signal)
         }),
       ),
   }
@@ -617,32 +708,54 @@ async function publishHeadMonotonic(
   codec: SyncCodec.Interface,
   head: Head,
   path: string,
+  cached?: { readonly head: Head; readonly object: SyncProvider.ObjectInfo },
   signal?: AbortSignal,
 ) {
   const context = headContext(head.deviceID, path)
   const bytes = await encode(codec, "metadata", context, head)
   for (let attempt = 0; attempt < 3; attempt++) {
     signal?.throwIfAborted()
+    if (cached) {
+      if (JSON.stringify(cached.head) === JSON.stringify(head)) return { published: true, object: cached.object }
+      try {
+        const object = await provider.uploadAtomic(
+          path,
+          bytes,
+          { type: "version", version: cached.object.version },
+          signal,
+        )
+        return { published: true, object }
+      } catch (cause) {
+        if (!(cause instanceof SyncProvider.ProviderError) || cause.kind !== "conflict") throw cause
+        cached = undefined
+      }
+    }
     const existing = await provider.stat(path, signal)
     if (existing) {
       try {
         const downloaded = await provider.download(path, existing.version, signal)
-        const remote = await decode((value) => Schema.decodeUnknownSync(Head)(value), codec, "metadata", context, downloaded.bytes)
-        if (remote.generation > head.generation) return false
-        if (JSON.stringify(remote) === JSON.stringify(head)) return true
+        const remote = await decode(
+          (value) => Schema.decodeUnknownSync(Head)(value),
+          codec,
+          "metadata",
+          context,
+          downloaded.bytes,
+        )
+        if (remote.generation > head.generation) return { published: false, object: existing }
+        if (JSON.stringify(remote) === JSON.stringify(head)) return { published: true, object: existing }
       } catch (cause) {
         if (cause instanceof SyncProvider.ProviderError && cause.kind === "conflict") continue
         throw cause
       }
     }
     try {
-      await provider.uploadAtomic(
+      const object = await provider.uploadAtomic(
         path,
         bytes,
         existing ? { type: "version", version: existing.version } : { type: "absent" },
         signal,
       )
-      return true
+      return { published: true, object }
     } catch (cause) {
       if (cause instanceof SyncProvider.ProviderError && cause.kind === "conflict") continue
       throw cause

@@ -23,7 +23,7 @@ export function make(input: {
     if (timer) clearTimer(timer)
     timer = setTimer(() => {
       timer = undefined
-      void trigger()
+      void trigger().catch(() => undefined)
     }, delay)
   }
   const nextDelay = () => {

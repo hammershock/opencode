@@ -21,4 +21,9 @@ export const Updated = Event.define({
   schema: { progress: Progress },
 })
 
-export const Definitions = Event.inventory(Updated)
+export const ProjectionUpdated = Event.define({
+  type: "sync.projection.updated",
+  schema: { revision: NonNegativeInt },
+})
+
+export const Definitions = Event.inventory(Updated, ProjectionUpdated)

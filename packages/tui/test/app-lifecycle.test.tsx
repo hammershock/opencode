@@ -205,3 +205,74 @@ test.each([
     mock.restore()
   }
 })
+
+test("an open session waits for confirmation before returning home after deletion", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const session = {
+    id: "dummy",
+    title: "Deleted elsewhere",
+    slug: "dummy",
+    projectID: "project",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/target")
+      return json({ path: "/tmp/opencode/targets.jsonc", revision: "test", targets: [], diagnostics: [], valid: true })
+    if (url.pathname === "/session/dummy") return json(session)
+    if (url.pathname === "/api/session/dummy/target-resolution")
+      return json({ status: "resolved", location: { directory } })
+    if (url.pathname === "/session") return json([session])
+  })
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { continue: true },
+        pluginHost: {
+          async start() {
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    await setup.waitForVisualIdle()
+    events.emit({
+      directory,
+      project: "proj_test",
+      payload: { id: "evt_deleted", type: "session.deleted", properties: { sessionID: session.id, info: session } },
+    })
+    await setup.waitForVisualIdle()
+
+    expect(setup.captureCharFrame()).toContain("Session deleted")
+    expect(setup.captureCharFrame()).toContain("This session is no longer available.")
+
+    setup.mockInput.pressEnter()
+    await setup.waitForVisualIdle()
+    expect(setup.captureCharFrame()).not.toContain("Session deleted")
+    expect(setup.captureCharFrame()).toContain("Sync")
+
+    process.emit("SIGHUP")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})

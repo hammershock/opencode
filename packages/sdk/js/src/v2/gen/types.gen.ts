@@ -71,6 +71,7 @@ export type Event =
   | EventQuestionV2Rejected
   | EventTodoUpdated
   | EventSyncTransferUpdated
+  | EventSyncProjectionUpdated
   | EventSyncInitializationRequired
   | EventLspUpdated
   | EventPermissionAsked
@@ -1414,6 +1415,13 @@ export type GlobalEvent = {
                 items?: number
                 bytes?: number
               }
+        }
+      }
+    | {
+        id: string
+        type: "sync.projection.updated"
+        properties: {
+          revision: number
         }
       }
     | {
@@ -3109,6 +3117,7 @@ export type V2Event =
   | QuestionV2Rejected
   | TodoUpdated
   | SyncTransferUpdated
+  | SyncProjectionUpdated
   | SyncInitializationRequired
   | LspUpdated
   | PermissionAsked
@@ -6003,6 +6012,23 @@ export type SyncTransferUpdated = {
   }
 }
 
+export type SyncProjectionUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "sync.projection.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    revision: number
+  }
+}
+
 export type SyncInitializationRequired = {
   id: string
   metadata?: {
@@ -7398,6 +7424,14 @@ export type EventSyncTransferUpdated = {
           items?: number
           bytes?: number
         }
+  }
+}
+
+export type EventSyncProjectionUpdated = {
+  id: string
+  type: "sync.projection.updated"
+  properties: {
+    revision: number
   }
 }
 

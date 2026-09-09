@@ -24,9 +24,9 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const db = yield* makeDatabase
+    yield* db.run("PRAGMA busy_timeout = 5000")
     yield* db.run("PRAGMA journal_mode = WAL")
     yield* db.run("PRAGMA synchronous = NORMAL")
-    yield* db.run("PRAGMA busy_timeout = 5000")
     yield* db.transaction(
       (tx) =>
         Effect.gen(function* () {

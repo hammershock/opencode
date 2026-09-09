@@ -252,7 +252,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       return result.state
     }
 
-    const checkCloud = async (notify = false) => {
+    const checkCloud = async (notify = false, details = true) => {
       const state = await refreshLocal(notify)
       if (!state?.account) return
       remoteAbort?.abort()
@@ -275,6 +275,10 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         }
         if (!localConfigured) {
           setModel((current) => ({ ...current, cloud: "ready", devices: [], bindings: [] }))
+          return
+        }
+        if (!details) {
+          setModel((current) => ({ ...current, cloud: "ready" }))
           return
         }
         const [status, deviceResult, activeSessions, bindingResult] = await Promise.all([
@@ -334,7 +338,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     }
 
     const ensureCloud = async (automatic: boolean) => {
-      await checkCloud(true)
+      await checkCloud(true, false)
       if (model().cloud === "ready") {
         if (!localConfigured) {
           await sdk.client.global.syncCloudInitialize({ throwOnError: true })
@@ -383,7 +387,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       if (!(await ensureCloud(false))) return
       setModel((current) => ({ ...current, state: "syncing" }))
       await sdk.client.global.syncNow({ throwOnError: true })
-      await checkCloud(true)
+      await refreshLocal(true)
     }
 
     const applyPostLoginChoice = async () => {

@@ -13,10 +13,12 @@ import type { SyncTransferEvent } from "@opencode-ai/schema/sync-transfer-event"
 function provider() {
   const files = new Map<string, { bytes: Uint8Array; version: number }>()
   const counts = { list: 0, stat: 0, download: 0, upload: 0, delete: 0 }
+  const prefixes: string[] = []
   const adapter: SyncProvider.Adapter = {
     id: "memory",
     list: async (prefix) => {
       counts.list++
+      prefixes.push(prefix)
       return {
         objects: [...files]
           .filter(([path]) => path.startsWith(prefix))
@@ -57,7 +59,7 @@ function provider() {
       })
     },
   }
-  return { adapter, files, counts }
+  return { adapter, files, counts, prefixes }
 }
 
 function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operations?: readonly SyncEvent.Operation[]) {
@@ -144,6 +146,91 @@ function store(deviceID: SyncEvent.DeviceID, event?: SyncEvent.Envelope, operati
 }
 
 describe("SyncRuntime", () => {
+  test("push publishes a local delta without reconciling remote history first", async () => {
+    const remote = provider()
+    const id = SyncEvent.DeviceID.make("fast-push")
+    const local = store(id, {
+      id: "evt_fast_push" as any,
+      aggregateID: "session-fast-push",
+      seq: 0,
+      type: "session.created",
+      data: { title: "fast" },
+    })
+    local.service.deletions = () =>
+      Effect.succeed([
+        SyncEvent.Tombstone.make({
+          id: "sync-delete:old" as any,
+          sessionID: "session-old",
+          deletedAt: 1,
+        }),
+      ])
+    const runtime = SyncRuntime.make({
+      config: { deviceID: id, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: local.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+
+    await Effect.runPromise(runtime.push())
+
+    expect(remote.counts.list).toBe(0)
+    expect([...remote.files.keys()].some((path) => path.includes("segments/fast-push/1-1"))).toBeTrue()
+    expect(remote.files.has("devices/fast-push.head.json")).toBeTrue()
+    expect([...remote.files.keys()].some((path) => path.startsWith("deletions/"))).toBeFalse()
+  })
+
+  test("receives live deltas without traversing the deletion archive", async () => {
+    const remote = provider()
+    const sourceID = SyncEvent.DeviceID.make("source")
+    const targetID = SyncEvent.DeviceID.make("target")
+    const source = store(sourceID, {
+      id: "evt_receive_fast" as any,
+      aggregateID: "session-receive-fast",
+      seq: 0,
+      type: "session.created",
+      data: { title: "fast" },
+    })
+    const uploader = SyncRuntime.make({
+      config: { deviceID: sourceID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: source.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    await Effect.runPromise(uploader.push())
+
+    let recursive = 0
+    const target = store(targetID)
+    const downloader = SyncRuntime.make({
+      config: { deviceID: targetID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: {
+        ...remote.adapter,
+        listRecursive: (...args) => {
+          recursive++
+          return remote.adapter.list(...args)
+        },
+      },
+      store: target.service,
+      projector: { project: (event) => Effect.sync(() => target.applied.push(event)), delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+
+    await Effect.runPromise(downloader.receive())
+    await Effect.runPromise(downloader.hydrate())
+    expect(target.applied.map((item) => item.id)).toContain("evt_receive_fast")
+    expect(recursive).toBe(0)
+
+    await Effect.runPromise(downloader.pull())
+    expect(recursive).toBe(1)
+  })
+
   test("waits for a cross-process upload lease and then drains pending work", async () => {
     const remote = provider()
     const id = SyncEvent.DeviceID.make("lease-wait")
@@ -408,6 +495,55 @@ describe("SyncRuntime", () => {
     const beforeRefresh = remote.counts.download
     await Effect.runPromise(downloader.pull())
     expect(remote.counts.download).toBe(beforeRefresh + 1)
+  })
+
+  test("probes only device heads and lists segments only for devices whose cursor is behind", async () => {
+    const remote = provider()
+    const macID = SyncEvent.DeviceID.make("probe-mac")
+    const windowsID = SyncEvent.DeviceID.make("probe-windows")
+    const event = SyncEvent.Envelope.make({
+      id: "probe-event",
+      aggregateID: "probe-session",
+      seq: 0,
+      type: "session.created",
+      data: { title: "probe" },
+    })
+    const uploader = SyncRuntime.make({
+      config: { deviceID: macID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: store(macID, event).service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+    const receiver = store(windowsID)
+    const downloader = SyncRuntime.make({
+      config: { deviceID: windowsID, enabled: true },
+      codec: SyncCodec.plaintext(),
+      provider: remote.adapter,
+      store: receiver.service,
+      projector: { project: () => Effect.void, delete: () => Effect.void },
+      metadata: () => Effect.succeed([]),
+      metadataProjector: { apply: () => Effect.void },
+    })
+
+    await Effect.runPromise(uploader.upload())
+    remote.prefixes.length = 0
+    expect(await Effect.runPromise(downloader.probe())).toBe(true)
+    expect(remote.prefixes).toEqual(["devices"])
+
+    await Effect.runPromise(downloader.now())
+    expect(remote.prefixes.filter((prefix) => prefix === "devices")).toHaveLength(1)
+    expect(remote.prefixes).toContain(`segments/${macID}`)
+    expect(remote.prefixes).not.toContain("segments")
+    expect(receiver.applied).toEqual([event])
+
+    remote.prefixes.length = 0
+    const downloads = remote.counts.download
+    expect(await Effect.runPromise(downloader.probe())).toBe(false)
+    expect(remote.prefixes).toEqual(["devices"])
+    expect(remote.counts.download).toBe(downloads)
   })
 
   test("retries a mutable device head that changes between list and download", async () => {

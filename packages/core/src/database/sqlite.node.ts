@@ -150,7 +150,7 @@ const nativeLayer = (config: Config) =>
     Effect.gen(function* () {
       const native = new DatabaseSync(config.filename, {
         readOnly: config.readonly,
-        timeout: config.timeout,
+        timeout: config.timeout ?? 5_000,
         allowExtension: config.allowExtension,
         enableForeignKeyConstraints: true,
         open: true,

@@ -207,6 +207,7 @@ test("opens from local state while a remote refresh is slow", async () => {
     await waitFrame("ready")
     expect(app.captureCharFrame()).toContain("lo***@example.com")
 
+    const sessionCatalogCalls = calls.filter((call) => call.path === "/global/sync/sessions").length
     app.mockInput.pressArrow("down")
     app.mockInput.pressEnter()
     await wait("sync request", () => calls.some((call) => call.path === "/global/sync/now"))
@@ -214,7 +215,9 @@ test("opens from local state while a remote refresh is slow", async () => {
     await app.renderOnce()
     expect(app.captureCharFrame()).not.toContain("Sync settings")
     releaseSync()
-    await wait("sync refresh", () => cloudCalls >= 3 && settings.model().state === "off")
+    await wait("sync refresh", () => settings.model().state === "off")
+    expect(cloudCalls).toBe(2)
+    expect(calls.filter((call) => call.path === "/global/sync/sessions")).toHaveLength(sessionCatalogCalls)
     await app.renderOnce()
     expect(app.captureCharFrame()).not.toContain("Sync settings")
     await settings.open()

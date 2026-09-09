@@ -10,6 +10,7 @@ import { PermissionProvider } from "../../../../src/context/permission"
 import { ExitProvider } from "../../../../src/context/exit"
 import { createEventSource, createFetch, type FetchHandler, directory } from "../../../fixture/tui-sdk"
 import { TestTuiContexts } from "../../../fixture/tui-environment"
+import { RemoteStatusProvider } from "../../../../src/context/remote-status"
 export { createEventSource, createFetch, directory, eventSource, json, worktree } from "../../../fixture/tui-sdk"
 
 export async function wait(fn: () => boolean, timeout = 2000) {
@@ -48,17 +49,19 @@ export async function mount(override?: FetchHandler, state?: string) {
     <TestTuiContexts paths={state ? { state } : undefined}>
       <ArgsProvider>
         <KVProvider>
-          <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
-            <PermissionProvider>
-              <ProjectProvider>
-                <ExitProvider exit={() => {}}>
-                  <SyncProvider>
-                    <Probe />
-                  </SyncProvider>
-                </ExitProvider>
-              </ProjectProvider>
-            </PermissionProvider>
-          </SDKProvider>
+          <RemoteStatusProvider>
+            <SDKProvider url="http://test" directory={directory} fetch={calls.fetch} events={events.source}>
+              <PermissionProvider>
+                <ProjectProvider>
+                  <ExitProvider exit={() => {}}>
+                    <SyncProvider>
+                      <Probe />
+                    </SyncProvider>
+                  </ExitProvider>
+                </ProjectProvider>
+              </PermissionProvider>
+            </SDKProvider>
+          </RemoteStatusProvider>
         </KVProvider>
       </ArgsProvider>
     </TestTuiContexts>

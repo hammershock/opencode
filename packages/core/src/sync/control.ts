@@ -1,7 +1,7 @@
 export * as SyncControl from "./control"
 
 import path from "node:path"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schedule, Schema } from "effect"
 import { eq, sql } from "drizzle-orm"
 import { makeGlobalNode } from "../effect/app-node"
 import { Global } from "../global"
@@ -164,6 +164,11 @@ const make = (input: LayerOptions) =>
     let engine: ReturnType<typeof SyncRuntime.make> | undefined
     let engineIdentity: string | undefined
     let scheduler: ReturnType<typeof SyncScheduler.make> | undefined
+    const automaticOwner = `automatic:${process.pid}:${crypto.randomUUID()}`
+    let automaticSpaceID: string | undefined
+    let lastMaintenanceAt = 0
+    let lastRemoteProbeAt = 0
+    let maintenanceFlight: Promise<void> | undefined
 
     const clearSpace = (namespaceID: string) =>
       SyncDatabase.purgeSpace(syncDB, namespaceID).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
@@ -368,32 +373,114 @@ const make = (input: LayerOptions) =>
       if (cloud.status === "uninitialized") return yield* new ControlError({ kind: "remote-uninitialized" })
       if (cloud.status === "incompatible") return yield* new ControlError({ kind: "incompatible-remote" })
     })
+    const synchronize = Effect.fn("SyncControl.synchronize")(function* (input: {
+      readonly active: SyncState.Active
+      readonly runtime: ReturnType<typeof SyncRuntime.make>
+    }) {
+      yield* input.runtime.now().pipe(
+        Effect.mapError(() => {
+          lastDiagnostic = input.runtime.status().lastError
+          return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
+        }),
+      )
+      yield* projectPortableTargets(input.active)
+      lastSuccessAt = Date.now()
+      lastDiagnostic = undefined
+    })
     const now = Effect.fn("SyncControl.now")(function* () {
       const active = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!active || active.namespaceID !== SyncRoot.INTERNAL_SCOPE)
         return yield* new ControlError({ kind: "unconfigured" })
       yield* requireCloudReady()
       const runtime = yield* load()
-      yield* runtime.now().pipe(
-        Effect.mapError(() => {
-          lastDiagnostic = runtime.status().lastError
-          return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
-        }),
+      yield* synchronize({ active, runtime })
+    })
+    const automatic = Effect.fn("SyncControl.automatic")(function* (config: SyncState.Active) {
+      const store = eventStore.scope(config.namespaceID)
+      // Every TUI owns a server process, but provider work is device-scoped.
+      // Keep one renewable leader so sibling processes only observe shared DB state.
+      const claimed = yield* store
+        .acquire("automatic", automaticOwner, AUTOMATIC_LEASE_TTL)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      if (!claimed) return
+      automaticSpaceID = config.namespaceID
+      yield* store
+        .renew("automatic", automaticOwner, AUTOMATIC_LEASE_TTL)
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      const heartbeat = globalThis.setInterval(
+        () =>
+          void Effect.runPromise(store.renew("automatic", automaticOwner, AUTOMATIC_LEASE_TTL)).catch(() => undefined),
+        AUTOMATIC_LEASE_HEARTBEAT,
       )
-      yield* projectPortableTargets(active)
-      lastSuccessAt = Date.now()
-      lastDiagnostic = undefined
+      yield* Effect.gen(function* () {
+        const current = Date.now()
+        const maintenance = current - lastMaintenanceAt >= schedulerInterval(config.intervalSeconds)
+        const dirty = yield* store
+          .dirty(SyncEvent.DeviceID.make(config.deviceID))
+          .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+        // Outbound edits are latency-sensitive. Their immutable segment and
+        // head can be published safely before the slower remote reconciliation.
+        if (dirty) {
+          const runtime = yield* load()
+          yield* runtime.push().pipe(
+            Effect.mapError(() => {
+              lastDiagnostic = runtime.status().lastError
+              return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
+            }),
+          )
+          yield* projectPortableTargets(config)
+          lastSuccessAt = Date.now()
+          lastDiagnostic = undefined
+          return
+        }
+        if (current - lastRemoteProbeAt < REMOTE_PROBE_INTERVAL) return
+        const runtime = yield* load()
+        lastRemoteProbeAt = current
+        const changed = yield* runtime.probe().pipe(
+          Effect.mapError(() => {
+            lastDiagnostic = runtime.status().lastError
+            return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
+          }),
+        )
+        if (changed) {
+          yield* runtime.receive().pipe(
+            Effect.andThen(runtime.hydrate()),
+            Effect.mapError(() => {
+              lastDiagnostic = runtime.status().lastError
+              return new ControlError({ kind: "provider", diagnostic: lastDiagnostic })
+            }),
+          )
+          yield* projectPortableTargets(config)
+        } else if (maintenance && !maintenanceFlight) {
+          // Health maintenance is deliberately detached from the scheduler's
+          // latency-sensitive loop and begins only after an idle probe.
+          lastMaintenanceAt = current
+          maintenanceFlight = Effect.runPromise(
+            requireCloudReady().pipe(
+              Effect.tapError((error) =>
+                error.kind === "remote-uninitialized"
+                  ? events.publish(SyncInitializationEvent.Required, { trigger: "automatic" })
+                  : Effect.void,
+              ),
+            ),
+          )
+            .catch(() => undefined)
+            .finally(() => (maintenanceFlight = undefined))
+        }
+        lastSuccessAt = Date.now()
+        lastDiagnostic = undefined
+      }).pipe(Effect.ensuring(Effect.sync(() => globalThis.clearInterval(heartbeat))))
     })
     const restartScheduler = (config?: SyncState.Active) => {
       scheduler?.stop()
       scheduler = undefined
       if (!config?.enabled || config.namespaceID !== SyncRoot.INTERNAL_SCOPE) return
       scheduler = SyncScheduler.make({
-        intervalMs: schedulerInterval(config.intervalSeconds),
+        intervalMs: AUTOMATIC_TICK_INTERVAL,
         run: () =>
           Effect.runPromise(
-            now().pipe(
-              Effect.catch((error) =>
+            automatic(config).pipe(
+              Effect.tapError((error) =>
                 Effect.gen(function* () {
                   if (error.kind === "remote-uninitialized") {
                     yield* events.publish(SyncInitializationEvent.Required, { trigger: "automatic" })
@@ -408,7 +495,50 @@ const make = (input: LayerOptions) =>
     }
     const configured = yield* setup.config().pipe(Effect.catch(() => Effect.succeed(undefined)))
     restartScheduler(configured)
-    yield* Effect.addFinalizer(() => Effect.sync(() => scheduler?.stop()))
+    const initialProjectionRevision =
+      (yield* syncDB
+        .get<{ value: number }>(
+          sql`
+            SELECT
+              COALESCE((SELECT SUM(cursor) FROM sync_event_cursor), 0) +
+              COALESCE((SELECT SUM(generation) FROM sync_event_head), 0) +
+              (SELECT COUNT(*) FROM sync_local_operation) AS value
+          `,
+        )
+        .pipe(Effect.orDie))?.value ?? 0
+    let projectionRevision = initialProjectionRevision
+    // Remote projection and same-device capture may commit in a sibling process.
+    // A cheap shared-DB revision turns those commits back into this process's event stream.
+    yield* syncDB
+      .get<{ value: number }>(
+        sql`
+          SELECT
+            COALESCE((SELECT SUM(cursor) FROM sync_event_cursor), 0) +
+            COALESCE((SELECT SUM(generation) FROM sync_event_head), 0) +
+            (SELECT COUNT(*) FROM sync_local_operation) AS value
+        `,
+      )
+      .pipe(
+        Effect.map((row) => row?.value ?? 0),
+        Effect.flatMap((revision) => {
+          if (revision === projectionRevision) return Effect.void
+          projectionRevision = revision
+          return events.publish(SyncTransferEvent.ProjectionUpdated, { revision })
+        }),
+        Effect.catch(() => Effect.void),
+        Effect.repeat(Schedule.spaced(PROJECTION_POLL_INTERVAL)),
+        Effect.forkScoped,
+      )
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        scheduler?.stop()
+        if (automaticSpaceID)
+          yield* eventStore
+            .scope(automaticSpaceID)
+            .release("automatic", automaticOwner)
+            .pipe(Effect.catch(() => Effect.void))
+      }),
+    )
     const enable = Effect.fn("SyncControl.enable")(function* (enabled: boolean) {
       yield* setup.setEnabled(enabled).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       engine = undefined
@@ -678,21 +808,24 @@ const make = (input: LayerOptions) =>
       const metadata = metadataStore.scope(config.namespaceID)
       const store = eventStore.scope(config.namespaceID)
       const known = yield* Effect.all([metadata.list(), store.deletions()]).pipe(
-        Effect.map(([items, deletions]) =>
-          items.some((item) => item.sessionID === input.sessionID) ||
-          deletions.some((item) => item.sessionID === input.sessionID),
+        Effect.map(
+          ([items, deletions]) =>
+            items.some((item) => item.sessionID === input.sessionID) ||
+            deletions.some((item) => item.sessionID === input.sessionID),
         ),
         Effect.mapError(() => new ControlError({ kind: "storage" })),
       )
       if (!known) return yield* new ControlError({ kind: "invalid" })
       const runtime = yield* load()
-      yield* store.delete(
-        SyncEvent.Tombstone.make({
-          id: `sync-delete:${config.deviceID}:${crypto.randomUUID()}`,
-          sessionID: input.sessionID,
-          deletedAt: Date.now(),
-        }),
-      ).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
+      yield* store
+        .delete(
+          SyncEvent.Tombstone.make({
+            id: `sync-delete:${config.deviceID}:${crypto.randomUUID()}`,
+            sessionID: input.sessionID,
+            deletedAt: Date.now(),
+          }),
+        )
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       yield* metadata.remove(input.sessionID).pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       yield* runtime.upload().pipe(
         Effect.mapError(() => {
@@ -802,3 +935,9 @@ export function assertCanRevoke(currentDeviceID: string, deviceID: string) {
 export function schedulerInterval(seconds: SyncState.IntervalSeconds) {
   return seconds * 1_000
 }
+
+const AUTOMATIC_TICK_INTERVAL = 1_000
+const REMOTE_PROBE_INTERVAL = 4_000
+const AUTOMATIC_LEASE_TTL = 12_000
+const AUTOMATIC_LEASE_HEARTBEAT = 4_000
+const PROJECTION_POLL_INTERVAL = 500

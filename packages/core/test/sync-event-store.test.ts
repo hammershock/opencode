@@ -262,13 +262,20 @@ describe("SyncEventStore", () => {
     await run(
       Effect.gen(function* () {
         const store = yield* SyncEventStore.Service
+        expect(yield* store.dirty(device)).toBe(false)
         yield* store.enqueue(event("before-reset", 0), 10)
+        expect(yield* store.dirty(device)).toBe(true)
         const sealed = yield* store.seal(device, 10, 20)
+        expect(yield* store.dirty(device)).toBe(true)
         yield* store.acknowledge(sealed!.id)
+        expect(yield* store.dirty(device)).toBe(false)
         expect(yield* store.seal(device, 10, 30)).toBeUndefined()
 
         yield* store.requeueAcknowledgedBefore(device, Date.now() + 1_000)
+        expect(yield* store.dirty(device)).toBe(true)
         expect(yield* store.seal(device, 10, 40)).toEqual(sealed)
+        yield* store.acknowledge(sealed!.id)
+        expect(yield* store.dirty(device)).toBe(false)
       }),
     )
   })

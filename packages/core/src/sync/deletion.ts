@@ -35,7 +35,7 @@ export function make(input: { readonly provider: SyncProvider.Adapter; readonly 
   const acknowledgementCache = new Map<string, { version: string; value: Acknowledgement }>()
 
   const scan = async (signal?: AbortSignal): Promise<readonly Snapshot[]> => {
-    const objects = await SyncProvider.listAll(input.provider, "deletions", signal)
+    const objects = await SyncProvider.listAllRecursive(input.provider, "deletions", signal)
     const markers = objects.filter((item) => /^deletions\/[^/]+\/marker\.json$/.test(item.path))
     const acknowledgements = objects.filter((item) => /^deletions\/[^/]+\/acks\/[^/]+\.json$/.test(item.path))
     const decodedMarkers = await Promise.all(

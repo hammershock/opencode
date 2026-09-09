@@ -206,6 +206,66 @@ describe("BaiduSyncProvider", () => {
     expect(object.version).toBe("1:10000:3")
   })
 
+  test("uses Baidu listall cursors for recursive deletion traversal", async () => {
+    const starts: string[] = []
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        expect(url.pathname).toBe("/rest/2.0/xpan/multimedia")
+        expect(url.searchParams.get("method")).toBe("listall")
+        expect(url.searchParams.get("path")).toBe("/apps/opencode-sync/space/deletions")
+        expect(url.searchParams.get("recursion")).toBe("1")
+        starts.push(url.searchParams.get("start")!)
+        return starts.length === 1
+          ? Response.json({
+              errno: 0,
+              has_more: 1,
+              cursor: 7,
+              list: [listed("/apps/opencode-sync/space/deletions/session-a/marker.json", 1, 3)],
+            })
+          : Response.json({
+              errno: 0,
+              has_more: 0,
+              list: [listed("/apps/opencode-sync/space/deletions/session-a/acks/device.json", 2, 3)],
+            })
+      },
+    })
+
+    const objects = await SyncProvider.listAllRecursive(provider, "deletions")
+    expect(objects.map((item) => item.path)).toEqual([
+      "deletions/session-a/marker.json",
+      "deletions/session-a/acks/device.json",
+    ])
+    expect(starts).toEqual(["0", "7"])
+  })
+
+  test("advances flat-list pages by directories as well as returned files", async () => {
+    const starts: string[] = []
+    const provider = BaiduSyncProvider.adapter({
+      store: memoryStore(credential),
+      deviceID: "device",
+      root: "/apps/opencode-sync/space",
+      request: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input)
+        starts.push(url.searchParams.get("start")!)
+        return starts.length === 1
+          ? Response.json({
+              errno: 0,
+              has_more: 1,
+              list: [listedDirectory("/apps/opencode-sync/space/objects/subdir")],
+            })
+          : Response.json({ errno: 0, has_more: 0, list: [] })
+      },
+    })
+
+    expect((await provider.list("objects")).cursor).toBe("1")
+    expect((await provider.list("objects", "1")).cursor).toBeUndefined()
+    expect(starts).toEqual(["0", "1"])
+  })
+
   test("retries when a newly visible file temporarily has no download link", async () => {
     let metadata = 0
     const provider = BaiduSyncProvider.adapter({

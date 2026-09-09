@@ -173,10 +173,11 @@ referenceCount = size(references)
 2. 首次发布 tombstone 前先拉取最新有效 device heads，冻结 `required` 集合；
 3. 云端立即将 Session 标记为 deleted，正常索引不再展示它；
 4. 其他设备拉取 tombstone，先持久化本地删除事实，再删除 Session projection 和未发送的旧 outbox；
-5. 该设备先原子发布不再包含此 Session 的新 head，成功后才发布幂等 ack；head 提交前进程中断时仍保留引用；
-6. `references` 非空时保留仍可能被离线设备读取到的 payload 和 tombstone；
-7. `references` 为空时，删除该 Session 的云端 payload、附件、marker 和 ack 对象；
-8. 回收属于后台优化，不得影响删除的逻辑正确性；回收失败进入可重试诊断。
+5. 如果被删除的 Session 正在任一 TUI 中打开，该 TUI 必须显示删除提示；用户确认后返回 QuickStart，不得继续停留在失效会话；
+6. 该设备先原子发布不再包含此 Session 的新 head，成功后才发布幂等 ack；head 提交前进程中断时仍保留引用；
+7. `references` 非空时保留仍可能被离线设备读取到的 payload 和 tombstone；
+8. `references` 为空时，删除该 Session 的云端 payload、附件、marker 和 ack 对象；
+9. 回收属于后台优化，不得影响删除的逻辑正确性；回收失败进入可重试诊断。
 
 为使 payload 可按 Session 回收，新协议不得把多个 Session 的不可分割正文永久混合在同一 GC 单元。segment 可以批量传输，但远端索引必须能确定性重写或删除某个 Session 的全部 payload，而不删除其他活动 Session。
 
@@ -214,7 +215,11 @@ referenceCount = size(references)
 
 ## 调度和触发
 
-automatic sync 提供 30 秒、1 分钟、5 分钟 interval，默认 30 秒。以下动作触发同步尝试：
+automatic sync 提供 30 秒、1 分钟、5 分钟 maintenance interval，默认 30 秒。该 interval 控制完整的 manifest/health 检查与空闲重试，不是用户可见变更的最长传播时间。启用 automatic sync 时，实现还必须使用轻量 remote-head probe 和本地 outbox 检查，使一台设备提交的 Session 变更在另一台在线设备已经打开的同一 Session 中于 15 秒内可见。
+
+同一设备可能同时运行多个 TUI，甚至打开同一个 Session。它们共享 durable outbox、cursor 和 Session projection，但只有一个进程可以成为 automatic cloud worker；其他进程不得重复调用 provider、排队等待 direction lease，或把正常的 leader 竞争显示为同步失败。leader 退出或失活后必须在 15 秒窗口内由其他进程接管。任一进程完成 remote projection 后，其他进程必须检测共享 cursor 的变化并刷新 Session 列表以及已经加载的 Session 内容，不能要求用户重开面板、Session 或应用。
+
+轻量 probe 只检查 remote device heads；head 没有变化时不得列出或下载完整 segment 历史。本地 outbox 非空时必须优先提交 immutable segment 和本设备 head，不得先等待远端 reconciliation；发现 remote head 变化后才拉取该设备缺失的 segment，并复用 probe 已取得的 head index。普通增量收发只处理本次 segment 内的 tombstone，不得在每条消息的关键路径重放全部历史 deletion marker；完整同步再使用 provider 的递归列举能力修复和回收 deletion archive。百度 provider 对该 archive 使用官方 `multimedia?method=listall&recursion=1` 和服务端返回的 cursor，不能把非递归 `file?method=list` 的行为伪装为递归 object-store list。maintenance interval 只控制 manifest/health 核验，不得阻塞上述快速收发路径。以下动作触发同步尝试：
 
 - 用户执行 `Sync now`；
 - scheduler 到期；

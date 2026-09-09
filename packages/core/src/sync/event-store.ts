@@ -31,6 +31,7 @@ export interface Interface {
   ) => Effect.Effect<SyncEvent.Segment | undefined, unknown>
   readonly acknowledge: (segmentID: SyncEvent.SegmentID) => Effect.Effect<void, unknown>
   readonly requeueAcknowledgedBefore: (deviceID: SyncEvent.DeviceID, cutoff: number) => Effect.Effect<void, unknown>
+  readonly dirty: (deviceID: SyncEvent.DeviceID) => Effect.Effect<boolean, unknown>
   readonly head: (deviceID: SyncEvent.DeviceID) => Effect.Effect<number, unknown>
   readonly cursor: (deviceID: SyncEvent.DeviceID) => Effect.Effect<number, unknown>
   readonly apply: (
@@ -264,6 +265,18 @@ export const layer = Layer.effect(
             AND acknowledged_at IS NOT NULL
             AND acknowledged_at < ${cutoff}
         `)
+      })
+
+      const dirty = Effect.fn("SyncEventStore.dirty")(function* (deviceID: SyncEvent.DeviceID) {
+        return Boolean(
+          yield* db.get(sql`
+            SELECT 1 FROM sync_event_outbox WHERE space_id = ${spaceID}
+            UNION ALL
+            SELECT 1 FROM sync_event_segment
+            WHERE space_id = ${spaceID} AND device_id = ${deviceID} AND acknowledged_at IS NULL
+            LIMIT 1
+          `),
+        )
       })
 
       const head = Effect.fn("SyncEventStore.head")(function* (deviceID: SyncEvent.DeviceID) {
@@ -592,6 +605,7 @@ export const layer = Layer.effect(
         seal,
         acknowledge,
         requeueAcknowledgedBefore,
+        dirty,
         head,
         cursor,
         apply,

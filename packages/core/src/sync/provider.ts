@@ -26,6 +26,9 @@ export type Precondition =
 export interface Adapter {
   readonly id: string
   readonly list: (prefix: string, cursor?: Cursor, signal?: AbortSignal) => Promise<ListPage>
+  /** Native recursive traversal when supported by the provider. Flat object
+   * stores can omit it because their normal list already returns descendants. */
+  readonly listRecursive?: (prefix: string, cursor?: Cursor, signal?: AbortSignal) => Promise<ListPage>
   readonly stat: (path: string, signal?: AbortSignal) => Promise<ObjectInfo | undefined>
   readonly download: (path: string, version?: string, signal?: AbortSignal) => Promise<Download>
   readonly uploadAtomic: (
@@ -87,13 +90,26 @@ export function objectPath(value: string) {
 }
 
 export async function listAll(adapter: Adapter, prefix: string, signal?: AbortSignal) {
+  return collect(adapter, adapter.list, prefix, signal)
+}
+
+export async function listAllRecursive(adapter: Adapter, prefix: string, signal?: AbortSignal) {
+  return collect(adapter, adapter.listRecursive ?? adapter.list, prefix, signal)
+}
+
+async function collect(
+  adapter: Adapter,
+  list: Adapter["list"],
+  prefix: string,
+  signal?: AbortSignal,
+) {
   objectPath(prefix)
   const objects: ObjectInfo[] = []
   const cursors = new Set<string>()
   let cursor: string | undefined
   do {
     signal?.throwIfAborted()
-    const page = await adapter.list(prefix, cursor, signal)
+    const page = await list(prefix, cursor, signal)
     for (const item of page.objects) {
       objectPath(item.path)
       if (!item.path.startsWith(prefix)) throw new ProviderError(adapter.id, "list", "invalid-response", false)

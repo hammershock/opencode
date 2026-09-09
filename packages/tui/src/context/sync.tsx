@@ -175,8 +175,107 @@ export const {
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
+    async function syncSession(sessionID: string) {
+      if (fullSyncedSessions.has(sessionID)) return
+      const syncing = syncingSessions.get(sessionID)
+      if (syncing) return syncing
+      const tracker = { messages: new Set<string>(), parts: new Set<string>() }
+      hydratingSessions.set(sessionID, tracker)
+      const task = (async () => {
+        const [session, messages, todo, diff] = await Promise.all([
+          sdk.client.session.get({ sessionID }, { throwOnError: true }),
+          sdk.client.session.messages({ sessionID, limit: 100 }),
+          sdk.client.session.todo({ sessionID }),
+          sdk.client.session.diff({ sessionID }),
+        ])
+        setStore(
+          produce((draft) => {
+            const match = search(draft.session, sessionID, (s) => s.id)
+            if (match.found) draft.session[match.index] = session.data!
+            if (!match.found) draft.session.splice(match.index, 0, session.data!)
+            draft.todo[sessionID] = todo.data ?? []
+            const currentMessages = draft.message[sessionID] ?? []
+            const infos = (messages.data ?? []).flatMap((message) => {
+              if (!tracker.messages.has(message.info.id)) return [message.info]
+              const current = currentMessages.find((item) => item.id === message.info.id)
+              return current ? [current] : []
+            })
+            infos.push(
+              ...currentMessages.filter(
+                (message) => tracker.messages.has(message.id) && !infos.some((item) => item.id === message.id),
+              ),
+            )
+            infos.sort(compareMessage)
+            const removed = infos.slice(0, -100)
+            const visible = infos.slice(-100)
+            const visibleIDs = new Set(visible.map((message) => message.id))
+            for (const message of messages.data ?? []) {
+              if (!visibleIDs.has(message.info.id)) {
+                delete draft.part[message.info.id]
+                continue
+              }
+              const currentParts = draft.part[message.info.id] ?? []
+              const parts = message.parts.flatMap((part) => {
+                const current = currentParts.find((item) => item.id === part.id)
+                if (tracker.parts.has(part.id)) return current ? [current] : []
+                if (
+                  current &&
+                  (part.type === "text" || part.type === "reasoning") &&
+                  (current.type === "text" || current.type === "reasoning") &&
+                  part.text.length === 0 &&
+                  current.text.length > 0
+                )
+                  return [current]
+                return [part]
+              })
+              parts.push(
+                ...currentParts.filter(
+                  (part) => tracker.parts.has(part.id) && !parts.some((item) => item.id === part.id),
+                ),
+              )
+              draft.part[message.info.id] = parts
+            }
+            for (const message of removed) delete draft.part[message.id]
+            draft.message[sessionID] = visible
+            draft.session_diff[sessionID] = diff.data ?? []
+          }),
+        )
+        fullSyncedSessions.add(sessionID)
+      })().finally(() => {
+        syncingSessions.delete(sessionID)
+        hydratingSessions.delete(sessionID)
+      })
+      syncingSessions.set(sessionID, task)
+      return task
+    }
+
+    let projectionRefreshRequested = false
+    let projectionRefreshFlight: Promise<void> | undefined
+    function refreshProjectedSessions() {
+      projectionRefreshRequested = true
+      if (projectionRefreshFlight) return projectionRefreshFlight
+      projectionRefreshFlight = (async () => {
+        while (projectionRefreshRequested) {
+          projectionRefreshRequested = false
+          const hydrated = [...fullSyncedSessions]
+          const sessions = await listSessions()
+          setStore("session", reconcile(sessions))
+          const visible = new Set(sessions.map((session) => session.id))
+          fullSyncedSessions.clear()
+          await Promise.all(hydrated.filter((sessionID) => visible.has(sessionID)).map(syncSession))
+        }
+      })().finally(() => {
+        projectionRefreshFlight = undefined
+        if (projectionRefreshRequested) void refreshProjectedSessions().catch(() => undefined)
+      })
+      return projectionRefreshFlight
+    }
+
     event.subscribe((event, { directory, workspace }) => {
       switch (event.type) {
+        case "sync.projection.updated":
+          void refreshProjectedSessions().catch(() => undefined)
+          break
         case "server.instance.disposed":
           void bootstrap()
           break
@@ -634,78 +733,7 @@ export const {
           return last.time.completed ? "idle" : "working"
         },
         async sync(sessionID: string) {
-          if (fullSyncedSessions.has(sessionID)) return
-          const syncing = syncingSessions.get(sessionID)
-          if (syncing) return syncing
-          const tracker = { messages: new Set<string>(), parts: new Set<string>() }
-          hydratingSessions.set(sessionID, tracker)
-          const task = (async () => {
-            const [session, messages, todo, diff] = await Promise.all([
-              sdk.client.session.get({ sessionID }, { throwOnError: true }),
-              sdk.client.session.messages({ sessionID, limit: 100 }),
-              sdk.client.session.todo({ sessionID }),
-              sdk.client.session.diff({ sessionID }),
-            ])
-            setStore(
-              produce((draft) => {
-                const match = search(draft.session, sessionID, (s) => s.id)
-                if (match.found) draft.session[match.index] = session.data!
-                if (!match.found) draft.session.splice(match.index, 0, session.data!)
-                draft.todo[sessionID] = todo.data ?? []
-                const currentMessages = draft.message[sessionID] ?? []
-                const infos = (messages.data ?? []).flatMap((message) => {
-                  if (!tracker.messages.has(message.info.id)) return [message.info]
-                  const current = currentMessages.find((item) => item.id === message.info.id)
-                  return current ? [current] : []
-                })
-                infos.push(
-                  ...currentMessages.filter(
-                    (message) => tracker.messages.has(message.id) && !infos.some((item) => item.id === message.id),
-                  ),
-                )
-                infos.sort(compareMessage)
-                const removed = infos.slice(0, -100)
-                const visible = infos.slice(-100)
-                const visibleIDs = new Set(visible.map((message) => message.id))
-                for (const message of messages.data ?? []) {
-                  if (!visibleIDs.has(message.info.id)) {
-                    delete draft.part[message.info.id]
-                    continue
-                  }
-                  const currentParts = draft.part[message.info.id] ?? []
-                  const parts = message.parts.flatMap((part) => {
-                    const current = currentParts.find((item) => item.id === part.id)
-                    if (tracker.parts.has(part.id)) return current ? [current] : []
-                    if (
-                      current &&
-                      (part.type === "text" || part.type === "reasoning") &&
-                      (current.type === "text" || current.type === "reasoning") &&
-                      part.text.length === 0 &&
-                      current.text.length > 0
-                    ) {
-                      return [current]
-                    }
-                    return [part]
-                  })
-                  parts.push(
-                    ...currentParts.filter(
-                      (part) => tracker.parts.has(part.id) && !parts.some((item) => item.id === part.id),
-                    ),
-                  )
-                  draft.part[message.info.id] = parts
-                }
-                for (const message of removed) delete draft.part[message.id]
-                draft.message[sessionID] = visible
-                draft.session_diff[sessionID] = diff.data ?? []
-              }),
-            )
-            fullSyncedSessions.add(sessionID)
-          })().finally(() => {
-            syncingSessions.delete(sessionID)
-            hydratingSessions.delete(sessionID)
-          })
-          syncingSessions.set(sessionID, task)
-          return task
+          return syncSession(sessionID)
         },
       },
       message: {

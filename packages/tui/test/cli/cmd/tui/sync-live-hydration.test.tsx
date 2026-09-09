@@ -108,6 +108,37 @@ test("stale session hydration does not overwrite live message parts", async () =
   }
 })
 
+test("a projection committed by another process refreshes an already loaded session", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+
+  let text = "before sync"
+  let messageRequests = 0
+  const { app, emit, sync } = await mount((url) => {
+    if (url.pathname === "/session") return json([session])
+    if (url.pathname === `/session/${sessionID}`) return json(session)
+    if (url.pathname === `/session/${sessionID}/message`) {
+      messageRequests++
+      return json([{ info: assistant, parts: [{ id: partID, sessionID, messageID, type: "text", text }] }])
+    }
+    if (url.pathname === `/session/${sessionID}/todo` || url.pathname === `/session/${sessionID}/diff`) return json([])
+    return undefined
+  }, tmp.path)
+
+  try {
+    await sync.session.sync(sessionID)
+    expect(sync.data.part[messageID][0]).toMatchObject({ text: "before sync" })
+    text = "after sync"
+    emit(global({ id: "evt_projection", type: "sync.projection.updated", properties: { revision: 1 } }))
+    await wait(
+      () => sync.data.part[messageID]?.[0]?.type === "text" && sync.data.part[messageID][0].text === "after sync",
+    )
+    expect(messageRequests).toBe(2)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("orphan live deltas do not suppress hydrated parts", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")

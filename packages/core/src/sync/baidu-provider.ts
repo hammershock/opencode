@@ -284,8 +284,6 @@ export function adapter(input: {
     precondition: SyncProvider.Precondition,
     signal?: AbortSignal,
   ) => {
-    const current = await stat(object, signal)
-    checkPrecondition(current, precondition, "upload")
     await ensureParents(object, signal)
     const remote = remotePath(root, object)
     const blocks = split(bytes).map((part) => ({ part, md5: createHash("md5").update(part).digest("hex") }))
@@ -337,6 +335,10 @@ export function adapter(input: {
                 throw invalidResponse("upload", "part-upload", uploaded)
             }),
           )
+          // Validate immediately before the committing create request. An
+          // earlier duplicate stat only made the common small-object path pay
+          // another full Baidu directory listing without strengthening the
+          // best-effort compare-and-swap boundary.
           checkPrecondition(await stat(object, signal), precondition, "upload")
           const created = await form(
             endpoint(FILE_API, { method: "create", access_token: auth.accessToken }),
@@ -426,13 +428,30 @@ export function adapter(input: {
       const result = await call("list", (auth) => listPage("list", auth, remote, start, request, signal), signal).catch(
         (cause) => {
           if (cause instanceof SyncProvider.ProviderError && cause.kind === "not-found")
-            return { items: [], more: false }
+            return { items: [], next: undefined }
           throw cause
         },
       )
       return {
         objects: result.items.map((item) => ({ ...item.info, path: item.remotePath.slice(root.length + 1) })),
-        ...(result.more ? { cursor: String(start + result.items.length) } : {}),
+        ...(result.next === undefined ? {} : { cursor: String(result.next) }),
+      }
+    },
+    listRecursive: async (prefix, cursor, signal) => {
+      const remote = remotePath(root, prefix)
+      const start = cursor ? requireCursor(cursor) : 0
+      const result = await call(
+        "list",
+        (auth) => listRecursivePage(auth, remote, start, request, signal),
+        signal,
+      ).catch((cause) => {
+        if (cause instanceof SyncProvider.ProviderError && cause.kind === "not-found")
+          return { items: [], next: undefined }
+        throw cause
+      })
+      return {
+        objects: result.items.map((item) => ({ ...item.info, path: item.remotePath.slice(root.length + 1) })),
+        ...(result.next === undefined ? {} : { cursor: String(result.next) }),
       }
     },
     stat,
@@ -497,7 +516,42 @@ async function listPage(
     items: body.list
       .filter((item) => record(item, operation, "file-list").isdir !== 1)
       .map((item) => listed(record(item, operation, "file-list"), operation)),
-    more: body.has_more === 1,
+    next: body.has_more === 1 ? start + body.list.length : undefined,
+  }
+}
+
+async function listRecursivePage(
+  auth: Credential,
+  directory: string,
+  start: number,
+  request: Request,
+  signal?: AbortSignal,
+) {
+  const body = await json(
+    await request(
+      endpoint(MEDIA_API, {
+        method: "listall",
+        access_token: auth.accessToken,
+        path: directory,
+        recursion: "1",
+        start: String(start),
+        limit: "1000",
+        order: "name",
+      }),
+      { signal, headers: { "User-Agent": "pan.baidu.com" } },
+    ),
+    "list",
+    "recursive-file-list",
+  )
+  if (!Array.isArray(body.list)) throw invalidResponse("list", "recursive-file-list", body)
+  const next = body.has_more === 1 ? number(body.cursor, "list", "recursive-file-list", body) : undefined
+  if (next !== undefined && (!Number.isSafeInteger(next) || next <= start))
+    throw invalidResponse("list", "recursive-file-list", body)
+  return {
+    items: body.list
+      .filter((item) => record(item, "list", "recursive-file-list").isdir !== 1)
+      .map((item) => listed(record(item, "list", "recursive-file-list"), "list")),
+    next,
   }
 }
 
@@ -506,9 +560,8 @@ async function listDirectory(auth: Credential, directory: string, request: Reque
   for (let start = 0; ; ) {
     const page = await listPage("stat", auth, directory, start, request, signal)
     output.push(...page.items)
-    if (!page.more) return output
-    start += page.items.length
-    if (!page.items.length) throw invalidResponse("stat", "file-list")
+    if (page.next === undefined) return output
+    start = page.next
   }
 }
 

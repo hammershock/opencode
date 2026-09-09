@@ -119,6 +119,13 @@ export const layer = Layer.effect(
               DELETE FROM sync_event_outbox
               WHERE aggregate_id = ${tombstone.sessionID} AND segment_id IS NULL AND space_id = ${spaceID}
             `)
+              const deleted = yield* tx.get(sql`
+              SELECT 1 FROM sync_deletion_set WHERE session_id = ${tombstone.sessionID} AND space_id = ${spaceID}
+            `)
+              // Recovery replays Session history without a durable commit
+              // timestamp. Once a deletion is recorded, its original marker
+              // is canonical and must not be regenerated with Date.now().
+              if (deleted) return
               yield* tx.run(sql`
               INSERT INTO sync_event_outbox (event_id, aggregate_id, seq, payload, created_at, kind, space_id)
               VALUES (${tombstone.id}, ${tombstone.sessionID}, 0, ${payload}, ${createdAt}, 'tombstone', ${spaceID})

@@ -362,8 +362,9 @@ describe("SyncEventStore", () => {
         yield* store.delete(tombstone, 30)
         yield* store.enqueue(event("stale-local", 2), 30)
         expect(yield* store.pending(10)).toEqual([])
-        const local = yield* store.seal(device, 10, 31)
-        expect(local?.operations).toEqual([{ kind: "tombstone", tombstone }])
+        // The already-absorbed remote tombstone is canonical. Replaying the
+        // same deletion locally must not create another cloud generation.
+        expect(yield* store.seal(device, 10, 31)).toBeUndefined()
       }),
     )
   })
@@ -394,6 +395,23 @@ describe("SyncEventStore", () => {
 
         expect(yield* store.cursor(remote)).toBe(2)
         expect(deleted).toEqual(["session-a", "session-a"])
+      }),
+    )
+  })
+
+  test("does not regenerate an acknowledged tombstone during recovery", async () => {
+    await run(
+      Effect.gen(function* () {
+        const store = yield* SyncEventStore.Service
+        const first = SyncEvent.Tombstone.make({ id: "delete-a", sessionID: "session-a", deletedAt: 20 })
+        yield* store.delete(first, 20)
+        const sealed = yield* store.seal(device, 10, 21)
+        expect(sealed?.operations).toEqual([{ kind: "tombstone", tombstone: first }])
+        yield* store.acknowledge(sealed!.id)
+
+        yield* store.delete(SyncEvent.Tombstone.make({ ...first, deletedAt: 30 }), 30)
+        expect(yield* store.seal(device, 10, 31)).toBeUndefined()
+        expect(yield* store.deletions()).toEqual([first])
       }),
     )
   })

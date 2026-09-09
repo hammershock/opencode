@@ -36,8 +36,8 @@ export async function detectRemotePlatform(
   if (fields.length !== 6 || fields.some((field) => !field)) {
     throw new RexdError("detect", "Remote environment probe returned invalid data", false)
   }
-  if (fields[0] !== "Linux")
-    throw new RexdError("unsupported-platform", `Managed Rexd does not support ${fields[0]}`, false)
+  const system = fields[0] === "Linux" ? "linux" : fields[0] === "Darwin" ? "darwin" : undefined
+  if (!system) throw new RexdError("unsupported-platform", `Managed Rexd does not support ${fields[0]}`, false)
   const architecture =
     fields[1] === "x86_64" || fields[1] === "amd64"
       ? "amd64"
@@ -45,10 +45,10 @@ export async function detectRemotePlatform(
         ? "arm64"
         : undefined
   if (!architecture)
-    throw new RexdError("unsupported-platform", `Managed Rexd does not support Linux ${fields[1]}`, false)
+    throw new RexdError("unsupported-platform", `Managed Rexd does not support ${fields[0]} ${fields[1]}`, false)
   if (!fields[2]!.startsWith("/")) throw new RexdError("detect", "Remote HOME is not an absolute path", false)
   return {
-    platform: `linux-${architecture}`,
+    platform: `${system}-${architecture}`,
     home: fields[2]!,
     dataHome: fields[3]!,
     configHome: fields[4]!,
@@ -139,10 +139,12 @@ function installScript(input: {
 if [ ! -x "$binary" ] || [ ! -f "$marker" ] || [ "$(cat "$marker")" != ${shellQuote(input.checksum)} ]; then
   command -v curl >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=download curl unavailable" >&2; exit 72; }
   command -v tar >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install tar unavailable" >&2; exit 73; }
-  command -v sha256sum >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=checksum sha256sum unavailable" >&2; exit 74; }
+  if command -v sha256sum >/dev/null 2>&1; then checksum() { sha256sum "$1" | cut -d' ' -f1; }
+  elif command -v shasum >/dev/null 2>&1; then checksum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+  else echo "OPENCODE_REXD_PHASE=checksum SHA-256 utility unavailable" >&2; exit 74; fi
   temporary="$(mktemp -d)"
   curl -fsSL --connect-timeout 5 --max-time 30 --proto '=https' --tlsv1.2 ${shellQuote(input.url)} -o "$temporary/${input.artifact}" || { echo "OPENCODE_REXD_PHASE=download failed" >&2; exit 75; }
-  actual="$(sha256sum "$temporary/${input.artifact}" | cut -d' ' -f1)"
+  actual="$(checksum "$temporary/${input.artifact}")"
   [ "$actual" = ${shellQuote(input.checksum)} ] || { echo "OPENCODE_REXD_PHASE=checksum mismatch" >&2; exit 76; }
   tar -xzf "$temporary/${input.artifact}" -C "$temporary" || { echo "OPENCODE_REXD_PHASE=install extract failed" >&2; exit 77; }
   install -m 0755 "$temporary/${input.artifact.slice(0, -".tar.gz".length)}" "$binary_next" || { echo "OPENCODE_REXD_PHASE=install binary staging failed" >&2; exit 77; }
@@ -170,8 +172,10 @@ function uploadScript(input: {
     `temporary="$(mktemp -d)"
 cat >"$temporary/${input.artifact}"
 command -v tar >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=install tar unavailable" >&2; exit 73; }
-command -v sha256sum >/dev/null 2>&1 || { echo "OPENCODE_REXD_PHASE=checksum sha256sum unavailable" >&2; exit 74; }
-actual="$(sha256sum "$temporary/${input.artifact}" | cut -d' ' -f1)"
+if command -v sha256sum >/dev/null 2>&1; then checksum() { sha256sum "$1" | cut -d' ' -f1; }
+elif command -v shasum >/dev/null 2>&1; then checksum() { shasum -a 256 "$1" | cut -d' ' -f1; }
+else echo "OPENCODE_REXD_PHASE=checksum SHA-256 utility unavailable" >&2; exit 74; fi
+actual="$(checksum "$temporary/${input.artifact}")"
 [ "$actual" = ${shellQuote(input.checksum)} ] || { echo "OPENCODE_REXD_PHASE=checksum mismatch" >&2; exit 76; }
 tar -xzf "$temporary/${input.artifact}" -C "$temporary" || { echo "OPENCODE_REXD_PHASE=install extract failed" >&2; exit 77; }
 install -m 0755 "$temporary/${input.artifact.slice(0, -".tar.gz".length)}" "$binary_next" || { echo "OPENCODE_REXD_PHASE=install binary staging failed" >&2; exit 77; }

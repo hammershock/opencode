@@ -29,6 +29,8 @@ import type {
   SessionsCommitOutput,
   SessionsContextInput,
   SessionsContextOutput,
+  SessionsModelContextInput,
+  SessionsModelContextOutput,
   SessionsHistoryInput,
   SessionsHistoryOutput,
   SessionsEventsInput,
@@ -486,6 +488,17 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/context`,
+            successStatus: 200,
+            declaredStatuses: [404, 500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      modelContext: (input: SessionsModelContextInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsModelContextOutput }>(
+          {
+            method: "GET",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/model-context`,
             successStatus: 200,
             declaredStatuses: [404, 500, 401, 400],
             empty: false,

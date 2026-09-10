@@ -767,6 +767,48 @@ export type SessionsContextOutput = {
   >
 }["data"]
 
+export type SessionsModelContextInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsModelContextOutput = {
+  readonly data: {
+    readonly version: 1
+    readonly generation: number
+    readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
+    readonly locationRevision: number
+    readonly environment: {
+      readonly harness: "OpenCode REXD"
+      readonly entrypoint: "opencode-rexd"
+      readonly targetKind: "local" | "rexd"
+      readonly targetName: string
+      readonly directory: string
+      readonly projectRoot: string
+      readonly vcs?: string
+      readonly platform: string
+    }
+    readonly instructions: ReadonlyArray<{
+      readonly id: string
+      readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
+      readonly scope: "global" | "project" | "nested"
+      readonly source: string
+      readonly declaredBy?: string
+      readonly status: "loaded" | "ignored"
+      readonly failureStage?: "discovery" | "read" | "fetch"
+      readonly content?: string
+      readonly digest?: string
+    }>
+    readonly digest: string
+    readonly baseline: string
+    readonly sources: {
+      readonly [x: string]: {
+        readonly value: JsonValue
+        readonly baseline?: string
+        readonly removed?: string
+        readonly refresh?: "generation"
+      }
+    }
+  } | null
+}["data"]
+
 export type SessionsHistoryInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly limit?: { readonly limit?: number | undefined; readonly after?: number | undefined }["limit"]
@@ -861,6 +903,43 @@ export type SessionsHistoryOutput = {
             readonly lastKnownTargetName?: string
           }
           readonly revision: number
+          readonly context?: {
+            readonly version: 1
+            readonly generation: number
+            readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
+            readonly locationRevision: number
+            readonly environment: {
+              readonly harness: "OpenCode REXD"
+              readonly entrypoint: "opencode-rexd"
+              readonly targetKind: "local" | "rexd"
+              readonly targetName: string
+              readonly directory: string
+              readonly projectRoot: string
+              readonly vcs?: string
+              readonly platform: string
+            }
+            readonly instructions: ReadonlyArray<{
+              readonly id: string
+              readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
+              readonly scope: "global" | "project" | "nested"
+              readonly source: string
+              readonly declaredBy?: string
+              readonly status: "loaded" | "ignored"
+              readonly failureStage?: "discovery" | "read" | "fetch"
+              readonly content?: string
+              readonly digest?: string
+            }>
+            readonly digest: string
+            readonly baseline: string
+            readonly sources: {
+              readonly [x: string]: {
+                readonly value: JsonValue
+                readonly baseline?: string
+                readonly removed?: string
+                readonly refresh?: "generation"
+              }
+            }
+          }
         }
       }
     | {
@@ -961,6 +1040,87 @@ export type SessionsHistoryOutput = {
           readonly sessionID: string
           readonly messageID: string
           readonly text: string
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.context.generation.established"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly context: {
+            readonly version: 1
+            readonly generation: number
+            readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
+            readonly locationRevision: number
+            readonly environment: {
+              readonly harness: "OpenCode REXD"
+              readonly entrypoint: "opencode-rexd"
+              readonly targetKind: "local" | "rexd"
+              readonly targetName: string
+              readonly directory: string
+              readonly projectRoot: string
+              readonly vcs?: string
+              readonly platform: string
+            }
+            readonly instructions: ReadonlyArray<{
+              readonly id: string
+              readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
+              readonly scope: "global" | "project" | "nested"
+              readonly source: string
+              readonly declaredBy?: string
+              readonly status: "loaded" | "ignored"
+              readonly failureStage?: "discovery" | "read" | "fetch"
+              readonly content?: string
+              readonly digest?: string
+            }>
+            readonly digest: string
+            readonly baseline: string
+            readonly sources: {
+              readonly [x: string]: {
+                readonly value: JsonValue
+                readonly baseline?: string
+                readonly removed?: string
+                readonly refresh?: "generation"
+              }
+            }
+          }
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.context.advanced"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: {
+          readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+          readonly directory: string
+          readonly workspaceID?: string
+          readonly lastKnownTargetName?: string
+        }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly messageID: string
+          readonly cause: "dynamic" | "nested-instructions"
+          readonly text: string
+          readonly sources: {
+            readonly [x: string]: {
+              readonly value: JsonValue
+              readonly baseline?: string
+              readonly removed?: string
+              readonly refresh?: "generation"
+            }
+          }
+          readonly digest: string
         }
       }
     | {
@@ -1511,6 +1671,43 @@ export type SessionsEventsOutput =
           readonly lastKnownTargetName?: string
         }
         readonly revision: number
+        readonly context?: {
+          readonly version: 1
+          readonly generation: number
+          readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
+          readonly locationRevision: number
+          readonly environment: {
+            readonly harness: "OpenCode REXD"
+            readonly entrypoint: "opencode-rexd"
+            readonly targetKind: "local" | "rexd"
+            readonly targetName: string
+            readonly directory: string
+            readonly projectRoot: string
+            readonly vcs?: string
+            readonly platform: string
+          }
+          readonly instructions: ReadonlyArray<{
+            readonly id: string
+            readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
+            readonly scope: "global" | "project" | "nested"
+            readonly source: string
+            readonly declaredBy?: string
+            readonly status: "loaded" | "ignored"
+            readonly failureStage?: "discovery" | "read" | "fetch"
+            readonly content?: string
+            readonly digest?: string
+          }>
+          readonly digest: string
+          readonly baseline: string
+          readonly sources: {
+            readonly [x: string]: {
+              readonly value: JsonValue
+              readonly baseline?: string
+              readonly removed?: string
+              readonly refresh?: "generation"
+            }
+          }
+        }
       }
     }
   | {
@@ -1611,6 +1808,87 @@ export type SessionsEventsOutput =
         readonly sessionID: string
         readonly messageID: string
         readonly text: string
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.context.generation.established"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly context: {
+          readonly version: 1
+          readonly generation: number
+          readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
+          readonly locationRevision: number
+          readonly environment: {
+            readonly harness: "OpenCode REXD"
+            readonly entrypoint: "opencode-rexd"
+            readonly targetKind: "local" | "rexd"
+            readonly targetName: string
+            readonly directory: string
+            readonly projectRoot: string
+            readonly vcs?: string
+            readonly platform: string
+          }
+          readonly instructions: ReadonlyArray<{
+            readonly id: string
+            readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
+            readonly scope: "global" | "project" | "nested"
+            readonly source: string
+            readonly declaredBy?: string
+            readonly status: "loaded" | "ignored"
+            readonly failureStage?: "discovery" | "read" | "fetch"
+            readonly content?: string
+            readonly digest?: string
+          }>
+          readonly digest: string
+          readonly baseline: string
+          readonly sources: {
+            readonly [x: string]: {
+              readonly value: JsonValue
+              readonly baseline?: string
+              readonly removed?: string
+              readonly refresh?: "generation"
+            }
+          }
+        }
+      }
+    }
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.context.advanced"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: {
+        readonly target?: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+        readonly directory: string
+        readonly workspaceID?: string
+        readonly lastKnownTargetName?: string
+      }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly messageID: string
+        readonly cause: "dynamic" | "nested-instructions"
+        readonly text: string
+        readonly sources: {
+          readonly [x: string]: {
+            readonly value: JsonValue
+            readonly baseline?: string
+            readonly removed?: string
+            readonly refresh?: "generation"
+          }
+        }
+        readonly digest: string
       }
     }
   | {

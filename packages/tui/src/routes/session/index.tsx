@@ -107,6 +107,12 @@ import {
   type SessionLocationNotice,
 } from "../../util/session-location-notice"
 import { locationQuery } from "../../util/location-query"
+import {
+  modelContextCommand,
+  type ModelContextCommandContext,
+  type ModelContextGeneration,
+} from "../../command-toolkit/model-context"
+import { showModelContext } from "../../component/dialog-model-context"
 
 addDefaultParsers(parsers.parsers)
 
@@ -518,7 +524,8 @@ export function Session() {
         TargetCommandContext &
         SessionControlCommandContext &
         SyncCommandContext &
-        ApprovalModeCommandContext
+        ApprovalModeCommandContext &
+        ModelContextCommandContext
     >({
       register: (registry) => {
         environmentCommands.forEach((command) => registry.register(command))
@@ -526,6 +533,7 @@ export function Session() {
         sessionControlCommands.forEach((command) => registry.register(command))
         registry.register(approvalModeCommand)
         syncCommands.forEach((command) => registry.register(command))
+        registry.register(modelContextCommand)
       },
       context: (source) => {
         const current = location()
@@ -615,6 +623,14 @@ export function Session() {
             },
           },
           presentEnvironment: (snapshot, reveal) => showEnvironment(dialog, snapshot, reveal, toast.error),
+          modelContext: {
+            inspect: async () => {
+              const response = await sdk.request(`/api/session/${encodeURIComponent(route.sessionID)}/model-context`)
+              if (!response.ok) throw new Error(`Failed to inspect model context (HTTP ${response.status})`)
+              return ((await response.json()) as { data: ModelContextGeneration | null }).data
+            },
+          },
+          presentModelContext: (generation) => showModelContext(dialog, generation),
           openSyncSettings: syncSettings.open,
         }
       },

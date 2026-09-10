@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  autocompleteEnterEnabled,
   autocompleteTabAction,
   createShellCompletionGeneration,
   invalidateShellCompletion,
@@ -57,6 +58,11 @@ test("Tab cycles focus without applying a row in an open Shell completion menu",
   expect(autocompleteTabAction("shell", { isDirectory: true })).toBe("move-next")
   expect(autocompleteTabAction("@", { isDirectory: true })).toBe("expand-directory")
   expect(autocompleteTabAction("/", { isDirectory: false })).toBe("select")
+})
+
+test("Enter yields to prompt submission when autocomplete has no matching row", () => {
+  expect(autocompleteEnterEnabled(undefined)).toBe(false)
+  expect(autocompleteEnterEnabled({ display: "/models" })).toBe(true)
 })
 
 test("opening a multi-candidate shell popup does not invalidate its own generation", async () => {

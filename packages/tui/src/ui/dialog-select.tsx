@@ -66,6 +66,8 @@ export interface DialogSelectOption<T = any> {
   titleWidth?: number
   truncateTitle?: boolean | "left"
   inspectTitle?: boolean
+  inspectionTitle?: string
+  inspectionView?: (offset: number, width: number) => JSX.Element
   inspectFooter?: boolean
   category?: string
   categoryView?: JSX.Element
@@ -697,6 +699,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                               titleWidth={option.titleWidth}
                               truncateTitle={option.truncateTitle}
                               inspectTitle={option.inspectTitle}
+                              inspectionTitle={option.inspectionTitle}
+                              inspectionView={option.inspectionView}
                               inspectFooter={option.inspectFooter}
                               description={option.description !== category ? option.description : undefined}
                               active={active()}
@@ -751,6 +755,8 @@ function Option(props: {
   titleWidth?: number
   truncateTitle?: boolean | "left"
   inspectTitle?: boolean
+  inspectionTitle?: string
+  inspectionView?: (offset: number, width: number) => JSX.Element
   inspectFooter?: boolean
   gutter?: () => JSX.Element
   onMouseOver?: () => void
@@ -759,7 +765,7 @@ function Option(props: {
   const fg = selectedForeground(theme)
   const [inspectionOffset, setInspectionOffset] = createSignal(0)
   createEffect(() => {
-    const title = props.inspectTitle && !props.titleView && Bun.stringWidth(props.title) > (props.titleWidth ?? 61)
+    const title = props.inspectTitle && Bun.stringWidth(props.inspectionTitle ?? props.title) > (props.titleWidth ?? 61)
     const footer =
       props.inspectFooter &&
       typeof props.footer === "string" &&
@@ -798,16 +804,17 @@ function Option(props: {
         wrapMode="none"
         paddingLeft={3}
       >
-        {props.titleView ??
-          (props.inspectTitle && props.active
-            ? inspectionFrame(props.title, props.titleWidth ?? 61, inspectionOffset())
-            : props.inspectTitle
-              ? displayTruncate(props.title, props.titleWidth ?? 61)
+        {props.inspectTitle && props.active
+          ? (props.inspectionView?.(inspectionOffset(), props.titleWidth ?? 61) ??
+            inspectionFrame(props.inspectionTitle ?? props.title, props.titleWidth ?? 61, inspectionOffset()))
+          : (props.titleView ??
+            (props.inspectTitle
+              ? displayTruncate(props.inspectionTitle ?? props.title, props.titleWidth ?? 61)
               : props.truncateTitle === false
                 ? props.title
                 : props.truncateTitle === "left"
                   ? Locale.truncateLeft(props.title, props.titleWidth ?? 61)
-                  : Locale.truncate(props.title, props.titleWidth ?? 61))}
+                  : Locale.truncate(props.title, props.titleWidth ?? 61)))}
         <Show when={props.description}>
           <span style={{ fg: props.active && !props.muted ? fg : theme.textMuted }}> {props.description}</span>
         </Show>

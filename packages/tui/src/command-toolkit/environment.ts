@@ -91,18 +91,3 @@ export const environmentCommands = [
     },
   }),
 ] as const
-
-export async function revealEnvironment(input: {
-  confirm: () => Promise<boolean>
-  reveal: () => Promise<EnvironmentValues>
-  present: (values: EnvironmentValues) => Promise<void>
-}) {
-  if (!(await input.confirm())) return false
-  const revealed = await input.reveal()
-  try {
-    await input.present(revealed)
-  } finally {
-    Object.keys(revealed.values).forEach((name) => delete revealed.values[name])
-  }
-  return true
-}

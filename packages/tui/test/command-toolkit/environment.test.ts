@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { CommandRegistry } from "@opencode-ai/command-kit"
-import {
-  environmentCommands,
-  revealEnvironment,
-  type EnvironmentCommandContext,
-} from "../../src/command-toolkit/environment"
+import { environmentCommands, type EnvironmentCommandContext } from "../../src/command-toolkit/environment"
 
 const raw = { source: "/env init", value: "", range: { start: 9, end: 9 } }
 
@@ -70,30 +66,5 @@ describe("environment command toolkit", () => {
     )
     expect(result).toEqual({ status: "completed", message: "Created .env and loaded generation 3" })
     expect(calls).toBe(2)
-  })
-
-  test("reveal requires confirmation and clears values after presentation", async () => {
-    let requests = 0
-    const denied = await revealEnvironment({
-      confirm: async () => false,
-      reveal: async () => {
-        requests++
-        return { generation: 1, values: { SECRET: "hidden" } }
-      },
-      present: async () => {},
-    })
-    expect(denied).toBeFalse()
-    expect(requests).toBe(0)
-
-    const snapshot: { generation: number; values: Record<string, string> } = {
-      generation: 1,
-      values: { SECRET: "hidden" },
-    }
-    await revealEnvironment({
-      confirm: async () => true,
-      reveal: async () => snapshot,
-      present: async (current) => expect(current.values.SECRET).toBe("hidden"),
-    })
-    expect(snapshot.values).toEqual({})
   })
 })

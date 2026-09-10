@@ -219,6 +219,7 @@ export const Definitions = {
   "dialog.mcp.toggle": keybind("space", "Toggle MCP in MCP dialog"),
   "dialog.experimental.toggle": keybind("space", "Toggle experimental command override"),
   "dialog.environment.reveal": keybind("r", "Reveal environment values"),
+  "dialog.environment.copy": keybind("c", "Copy environment entry"),
   "dialog.move_session.new": keybind("ctrl+m", "New project copy"),
   "dialog.move_session.delete": keybind("ctrl+d", "Delete project copy"),
   "dialog.move_session.refresh": keybind("ctrl+r", "Refresh project copies"),

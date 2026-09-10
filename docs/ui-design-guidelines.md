@@ -19,7 +19,7 @@ This document defines the normative interaction and presentation rules for fork-
 - Prefer a symbol plus a stable text label over prose-only status or icon-only meaning. Symbols aid scanning; labels remain the accessible contract.
 - Preserve panel geometry while asynchronous state changes. Loading must not reorder rows or replace the user's selection.
 - Give every single-line row an explicit width budget and test it at the supported narrow, default and wide terminal widths. Reserve gutters and fixed right-side status before allocating identity text.
-- Unfocused rows never auto-scroll. Truncate their variable text deterministically; when a user-visible identity is genuinely longer than its budget, the selected or mouse-focused row may cycle horizontally so the complete value remains inspectable.
+- Unfocused rows never auto-scroll. Truncate their variable text deterministically; when user-visible single-line content is genuinely longer than its budget, only the selected or mouse-focused row may cycle horizontally so the complete content remains inspectable. Keep the panel, every other row, and fixed metadata/status columns stationary; do not horizontally scroll the whole list.
 - Use two rows only when the controls represent independent dimensions. For `/sessions`, the required controls are exactly:
 
   ```text
@@ -67,6 +67,7 @@ This document defines the normative interaction and presentation rules for fork-
 - Confirmation copy names the affected object and scope. A global action says global or all devices explicitly.
 - The same domain action uses the same confirmation title, scope and consequences from every entry point. A deep link may choose the initial subview, but it must not bypass or invent a confirmation.
 - Disabled actions explain the unmet condition in focused detail; do not hide an object merely because it is unavailable or unresolved.
+- Sensitive collections must never offer implicit or bulk clipboard export. After the user has crossed the owning reveal/confirmation boundary, an explicit focused-row action may copy exactly one raw entry. Its success or failure feedback and logs name the action but never repeat the sensitive value.
 
 ## Review checklist
 

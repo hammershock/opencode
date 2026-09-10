@@ -5,7 +5,7 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-10
 implemented-by:
   - https://github.com/hammershock/opencode/pull/86
 depends-on:
@@ -264,7 +264,7 @@ v1 采用以下固定算法：
 3. registry 在 path 和 aliases 中进行 longest-match。
 4. 匹配完成后，将原输入中未消费的部分作为 `RawArguments`，保留内部空格、Unicode 和后续行；只移除 path 后作为分隔符的一段空白。
 5. 叶子的 `parse` 决定引号、flags、枚举、路径或多行内容的具体语义。
-6. 未匹配时返回 `not-found`，不得把输入吞掉；host 随后继续原 upstream 提交流程。
+6. 未匹配时 resolver 返回 `not-found`，不得在底层伪造命令；TUI host 对首字符为 `/` 的未匹配输入显示 `Slash command does not exist` 并终止提交，不得创建 Session message、写入 prompt history 或进入模型上下文。非顶格 `/` 的普通文本保持 prompt 语义。
 
 这允许 `/env init` 与 `/env reload` 共存，也允许 `/rename <title>` 保留完整标题，而不要求 toolkit 实现一门 Shell 参数语言。
 
@@ -305,7 +305,8 @@ completed | cancelled | failed | unknown
 upstream host resolver
   -> 构建期已验证的 accepted upstream override decorator
   -> fork Core registry longest-match
-  -> normal prompt submission
+  -> unresolved leading slash rejection
+  -> normal prompt submission for non-slash input
 ```
 
 因此，按照当前 upstream 规则已经生效的用户 command、MCP、Skill 或插件 command 继续优先，不会因为 fork 新增同名 Core path 而改变行为。如果它遮蔽了 fork Core command，诊断接口必须同时显示 winner 和 shadowed candidate。
@@ -526,7 +527,7 @@ completed | cancelled | failed | unknown
 
 - 建立私有 `packages/command-kit`，只实现 definition、registry、解析、completion contract、outcome 和诊断。
 - 用纯单元测试覆盖 longest-match、alias、raw arguments、多行输入、duplicate rejection、取消和失败。
-- 建立 synthetic upstream resolver fixture，验证 upstream-first、not-found passthrough 和 shadowing 诊断。
+- 建立 synthetic upstream resolver fixture，验证 upstream-first、resolver not-found 和 shadowing 诊断；TUI host fixture 另行验证顶格未知 slash 被拒绝且非顶格 `/` 仍可 passthrough。
 - 建立 synthetic override fixture 和静态 manifest verifier，验证 identity/fingerprint、实验开关、原子安装、运行时 warning fallback，以及 drift 导致 typecheck/build 失败。
 
 原型不得先加入真实 `/env`、`/target` 或同步业务。它的目标是验证 toolkit contract，而不是借原型提交未接受的功能实现。

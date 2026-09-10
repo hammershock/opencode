@@ -1159,6 +1159,7 @@ export function Prompt(props: PromptProps) {
       store.mode !== "shell"
         ? await activeCommandHost()(inputText, "slash")
         : ({ status: "passthrough", input: inputText, diagnostics: [] } as const)
+    if (slashDispatch.status === "invalid") return false
     if (slashDispatch.status === "handled") {
       history.append({ ...store.prompt, mode: store.mode })
       input.extmarks.clear()

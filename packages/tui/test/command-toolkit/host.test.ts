@@ -112,6 +112,34 @@ describe("TUI command toolkit host", () => {
     expect(outcomes).toEqual(["failed:service unavailable"])
   })
 
+  test("rejects an unknown leading slash command without echoing its input", async () => {
+    const invalid: string[] = []
+    const host = createCommandHost({
+      register: () => undefined,
+      context: (source) => ({ ...context, source }),
+      upstream: () => undefined,
+      invalid: (message) => invalid.push(message),
+      outcome: () => undefined,
+    })
+
+    expect(await host("/MISSING --token synthetic-secret")).toEqual({
+      status: "invalid",
+      message: "Slash command does not exist",
+      diagnostics: [],
+    })
+    expect(await host(" /MISSING --token synthetic-secret")).toEqual({
+      status: "passthrough",
+      input: " /MISSING --token synthetic-secret",
+      diagnostics: [],
+    })
+    expect(await host("explain /MISSING")).toEqual({
+      status: "passthrough",
+      input: "explain /MISSING",
+      diagnostics: [],
+    })
+    expect(invalid).toEqual(["Slash command does not exist"])
+  })
+
   test("rejects a restricted capability before command side effects", async () => {
     let ran = false
     const outcomes: string[] = []

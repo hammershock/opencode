@@ -3489,6 +3489,240 @@ export type SkillsListOutput = {
   }>
 }
 
+export type SkillsCatalogInput = {
+  readonly location?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+    readonly forceReload?: "true" | "false" | undefined
+  }["location"]
+  readonly forceReload?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+    readonly forceReload?: "true" | "false" | undefined
+  }["forceReload"]
+}
+
+export type SkillsCatalogOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly revision: string
+    readonly skills: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly description?: string
+      readonly sourceLabel: string
+      readonly digest: string
+    }>
+    readonly diagnostics: ReadonlyArray<{
+      readonly kind:
+        | "root-unavailable"
+        | "scan-failed"
+        | "path-escape"
+        | "read-failed"
+        | "invalid-frontmatter"
+        | "invalid-name"
+        | "name-mismatch"
+        | "duplicate-name"
+        | "invalid-settings"
+        | "missing-target"
+        | "project-target-scope-ignored"
+      readonly severity: "error" | "warning"
+      readonly sourceLabel: string
+      readonly message: string
+      readonly path?: string
+      readonly skillID?: string
+    }>
+    readonly digest: string
+  }
+}
+
+export type SkillsReloadInput = {
+  readonly location?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+  }["location"]
+}
+
+export type SkillsReloadOutput = {
+  readonly location: {
+    readonly target: { readonly type: "local" } | { readonly type: "rexd"; readonly targetID: string }
+    readonly directory: string
+    readonly workspaceID?: string
+    readonly lastKnownTargetName?: string
+    readonly project: { readonly id: string; readonly directory: string }
+  }
+  readonly data: {
+    readonly revision: string
+    readonly skills: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly description?: string
+      readonly sourceLabel: string
+      readonly digest: string
+    }>
+    readonly diagnostics: ReadonlyArray<{
+      readonly kind:
+        | "root-unavailable"
+        | "scan-failed"
+        | "path-escape"
+        | "read-failed"
+        | "invalid-frontmatter"
+        | "invalid-name"
+        | "name-mismatch"
+        | "duplicate-name"
+        | "invalid-settings"
+        | "missing-target"
+        | "project-target-scope-ignored"
+      readonly severity: "error" | "warning"
+      readonly sourceLabel: string
+      readonly message: string
+      readonly path?: string
+      readonly skillID?: string
+    }>
+    readonly digest: string
+  }
+}
+
+export type SkillsSettingsOutput = {
+  readonly path: string
+  readonly revision: string
+  readonly roots: ReadonlyArray<{
+    readonly kind: "opencode-global" | "imported" | "url"
+    readonly value: string
+    readonly resolved?: string
+    readonly default: boolean
+    readonly status: "ready" | "unavailable" | "configured"
+  }>
+  readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
+  readonly diagnostics: ReadonlyArray<{
+    readonly kind: "invalid-config" | "invalid-path" | "invalid-url" | "duplicate-root" | "missing-target"
+    readonly severity: "error" | "warning"
+    readonly field: string
+    readonly message: string
+    readonly skillID?: string
+    readonly targetID?: string
+  }>
+  readonly valid: boolean
+}
+
+export type SkillsDiscoveryUpdateInput = {
+  readonly paths: {
+    readonly paths: ReadonlyArray<string>
+    readonly urls: ReadonlyArray<string>
+    readonly expectedRevision: string
+  }["paths"]
+  readonly urls: {
+    readonly paths: ReadonlyArray<string>
+    readonly urls: ReadonlyArray<string>
+    readonly expectedRevision: string
+  }["urls"]
+  readonly expectedRevision: {
+    readonly paths: ReadonlyArray<string>
+    readonly urls: ReadonlyArray<string>
+    readonly expectedRevision: string
+  }["expectedRevision"]
+}
+
+export type SkillsDiscoveryUpdateOutput = {
+  readonly path: string
+  readonly revision: string
+  readonly roots: ReadonlyArray<{
+    readonly kind: "opencode-global" | "imported" | "url"
+    readonly value: string
+    readonly resolved?: string
+    readonly default: boolean
+    readonly status: "ready" | "unavailable" | "configured"
+  }>
+  readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
+  readonly diagnostics: ReadonlyArray<{
+    readonly kind: "invalid-config" | "invalid-path" | "invalid-url" | "duplicate-root" | "missing-target"
+    readonly severity: "error" | "warning"
+    readonly field: string
+    readonly message: string
+    readonly skillID?: string
+    readonly targetID?: string
+  }>
+  readonly valid: boolean
+}
+
+export type SkillsDiscoveryResetInput = {
+  readonly expectedRevision: { readonly expectedRevision: string }["expectedRevision"]
+}
+
+export type SkillsDiscoveryResetOutput = {
+  readonly path: string
+  readonly revision: string
+  readonly roots: ReadonlyArray<{
+    readonly kind: "opencode-global" | "imported" | "url"
+    readonly value: string
+    readonly resolved?: string
+    readonly default: boolean
+    readonly status: "ready" | "unavailable" | "configured"
+  }>
+  readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
+  readonly diagnostics: ReadonlyArray<{
+    readonly kind: "invalid-config" | "invalid-path" | "invalid-url" | "duplicate-root" | "missing-target"
+    readonly severity: "error" | "warning"
+    readonly field: string
+    readonly message: string
+    readonly skillID?: string
+    readonly targetID?: string
+  }>
+  readonly valid: boolean
+}
+
+export type SkillsTargetScopeUpdateInput = {
+  readonly skillID: { readonly skillID: string }["skillID"]
+  readonly scope: { readonly scope: "*" | ReadonlyArray<"local" | string>; readonly expectedRevision: string }["scope"]
+  readonly expectedRevision: {
+    readonly scope: "*" | ReadonlyArray<"local" | string>
+    readonly expectedRevision: string
+  }["expectedRevision"]
+}
+
+export type SkillsTargetScopeUpdateOutput = {
+  readonly path: string
+  readonly revision: string
+  readonly roots: ReadonlyArray<{
+    readonly kind: "opencode-global" | "imported" | "url"
+    readonly value: string
+    readonly resolved?: string
+    readonly default: boolean
+    readonly status: "ready" | "unavailable" | "configured"
+  }>
+  readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
+  readonly diagnostics: ReadonlyArray<{
+    readonly kind: "invalid-config" | "invalid-path" | "invalid-url" | "duplicate-root" | "missing-target"
+    readonly severity: "error" | "warning"
+    readonly field: string
+    readonly message: string
+    readonly skillID?: string
+    readonly targetID?: string
+  }>
+  readonly valid: boolean
+}
+
 export type EventsSubscribeOutput = OpenCodeEventEncoded
 
 export type PtysListInput = {

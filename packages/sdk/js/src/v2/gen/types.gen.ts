@@ -24,6 +24,8 @@ export type Event =
   | EventSessionNextPromptAdmitted
   | EventSessionNextTurnSettled
   | EventSessionNextContextUpdated
+  | EventSessionNextContextGenerationEstablished
+  | EventSessionNextContextAdvanced
   | EventSessionNextSynthetic
   | EventSessionNextShellStarted
   | EventSessionNextShellEnded
@@ -73,6 +75,7 @@ export type Event =
   | EventSyncTransferUpdated
   | EventSyncProjectionUpdated
   | EventSyncInitializationRequired
+  | EventModelContextOperationUpdated
   | EventLspUpdated
   | EventPermissionAsked
   | EventPermissionReplied
@@ -871,6 +874,7 @@ export type GlobalEvent = {
           previous: LocationRef
           location: LocationRef
           revision: number
+          context?: ModelContextGeneration
         }
       }
     | {
@@ -913,6 +917,28 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           text: string
+        }
+      }
+    | {
+        id: string
+        type: "session.next.context.generation.established"
+        properties: {
+          timestamp: number
+          sessionID: string
+          context: ModelContextGeneration
+        }
+      }
+    | {
+        id: string
+        type: "session.next.context.advanced"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
+          cause: "dynamic" | "nested-instructions"
+          text: string
+          sources: ModelContextSourceState
+          digest: string
         }
       }
     | {
@@ -1434,6 +1460,20 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "model-context.operation.updated"
+        properties: {
+          progress: {
+            id: string
+            target: string
+            state: "active" | "idle" | "failed"
+            phase: string
+            source?: string
+            detail?: string
+          }
+        }
+      }
+    | {
+        id: string
         type: "lsp.updated"
         properties: {
           [key: string]: unknown
@@ -1682,6 +1722,8 @@ export type GlobalEvent = {
     | SyncEventSessionNextPromptAdmitted
     | SyncEventSessionNextTurnSettled
     | SyncEventSessionNextContextUpdated
+    | SyncEventSessionNextContextGenerationEstablished
+    | SyncEventSessionNextContextAdvanced
     | SyncEventSessionNextSynthetic
     | SyncEventSessionNextShellStarted
     | SyncEventSessionNextShellEnded
@@ -2943,6 +2985,8 @@ export type SessionDurableEvent =
   | SessionNextPromptAdmitted
   | SessionNextTurnSettled
   | SessionNextContextUpdated
+  | SessionNextContextGenerationEstablished
+  | SessionNextContextAdvanced
   | SessionNextSynthetic
   | SessionNextShellStarted
   | SessionNextShellEnded
@@ -3072,6 +3116,8 @@ export type V2Event =
   | SessionNextPromptAdmitted
   | SessionNextTurnSettled
   | SessionNextContextUpdated
+  | SessionNextContextGenerationEstablished
+  | SessionNextContextAdvanced
   | SessionNextSynthetic
   | SessionNextShellStarted
   | SessionNextShellEnded
@@ -3121,6 +3167,7 @@ export type V2Event =
   | SyncTransferUpdated
   | SyncProjectionUpdated
   | SyncInitializationRequired
+  | ModelContextOperationUpdated
   | LspUpdated
   | PermissionAsked
   | PermissionReplied
@@ -3268,6 +3315,54 @@ export type LocationRef = {
   directory: string
   workspaceID?: string
   lastKnownTargetName?: string
+}
+
+export type ModelContextEnvironment = {
+  harness: "OpenCode REXD"
+  entrypoint: "opencode-rexd"
+  targetKind: "local" | "rexd"
+  targetName: string
+  directory: string
+  projectRoot: string
+  vcs?: string
+  platform: string
+}
+
+export type ModelContextInstruction = {
+  id: string
+  origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
+  scope: "global" | "project" | "nested"
+  source: string
+  declaredBy?: string
+  status: "loaded" | "ignored"
+  failureStage?: "discovery" | "read" | "fetch"
+  content?: string
+  digest?: string
+}
+
+export type ModelContextInstructions = Array<ModelContextInstruction>
+
+export type ModelContextSourceSnapshot = {
+  value: unknown
+  baseline?: string
+  removed?: string
+  refresh?: "generation"
+}
+
+export type ModelContextSourceState = {
+  [key: string]: unknown | ModelContextSourceSnapshot
+}
+
+export type ModelContextGeneration = {
+  version: 1
+  generation: number
+  reason: "created" | "legacy-backfill" | "location-rebound" | "init"
+  locationRevision: number
+  environment: ModelContextEnvironment
+  instructions: ModelContextInstructions
+  digest: string
+  baseline: string
+  sources: ModelContextSourceState
 }
 
 export type PromptSource = {
@@ -3587,6 +3682,7 @@ export type SyncEventSessionNextLocationRebound = {
       previous: LocationRef
       location: LocationRef
       revision: number
+      context?: ModelContextGeneration
     }
   }
 }
@@ -3657,6 +3753,42 @@ export type SyncEventSessionNextContextUpdated = {
       sessionID: string
       messageID: string
       text: string
+    }
+  }
+}
+
+export type SyncEventSessionNextContextGenerationEstablished = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.context.generation.established.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      context: ModelContextGeneration
+    }
+  }
+}
+
+export type SyncEventSessionNextContextAdvanced = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.context.advanced.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
+      cause: "dynamic" | "nested-instructions"
+      text: string
+      sources: ModelContextSourceState
+      digest: string
     }
   }
 }
@@ -4505,6 +4637,7 @@ export type SessionNextLocationRebound = {
     previous: LocationRef
     location: LocationRef
     revision: number
+    context?: ModelContextGeneration
   }
 }
 
@@ -4587,6 +4720,48 @@ export type SessionNextContextUpdated = {
     sessionID: string
     messageID: string
     text: string
+  }
+}
+
+export type SessionNextContextGenerationEstablished = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.context.generation.established"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    context: ModelContextGeneration
+  }
+}
+
+export type SessionNextContextAdvanced = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.context.advanced"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    cause: "dynamic" | "nested-instructions"
+    text: string
+    sources: ModelContextSourceState
+    digest: string
   }
 }
 
@@ -6048,6 +6223,30 @@ export type SyncInitializationRequired = {
   }
 }
 
+export type ModelContextOperationUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "model-context.operation.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    progress: {
+      id: string
+      target: string
+      state: "active" | "idle" | "failed"
+      phase: string
+      source?: string
+      detail?: string
+    }
+  }
+}
+
 export type LspUpdated = {
   id: string
   metadata?: {
@@ -6886,6 +7085,7 @@ export type EventSessionNextLocationRebound = {
     previous: LocationRef
     location: LocationRef
     revision: number
+    context?: ModelContextGeneration
   }
 }
 
@@ -6932,6 +7132,30 @@ export type EventSessionNextContextUpdated = {
     sessionID: string
     messageID: string
     text: string
+  }
+}
+
+export type EventSessionNextContextGenerationEstablished = {
+  id: string
+  type: "session.next.context.generation.established"
+  properties: {
+    timestamp: number
+    sessionID: string
+    context: ModelContextGeneration
+  }
+}
+
+export type EventSessionNextContextAdvanced = {
+  id: string
+  type: "session.next.context.advanced"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    cause: "dynamic" | "nested-instructions"
+    text: string
+    sources: ModelContextSourceState
+    digest: string
   }
 }
 
@@ -7498,6 +7722,21 @@ export type EventSyncInitializationRequired = {
   type: "sync.initialization.required"
   properties: {
     trigger: "automatic"
+  }
+}
+
+export type EventModelContextOperationUpdated = {
+  id: string
+  type: "model-context.operation.updated"
+  properties: {
+    progress: {
+      id: string
+      target: string
+      state: "active" | "idle" | "failed"
+      phase: string
+      source?: string
+      detail?: string
+    }
   }
 }
 
@@ -14044,6 +14283,47 @@ export type V2SessionContextResponses = {
 }
 
 export type V2SessionContextResponse = V2SessionContextResponses[keyof V2SessionContextResponses]
+
+export type V2SessionModelContextData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/model-context"
+}
+
+export type V2SessionModelContextErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SessionModelContextError = V2SessionModelContextErrors[keyof V2SessionModelContextErrors]
+
+export type V2SessionModelContextResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: ModelContextGeneration
+  }
+}
+
+export type V2SessionModelContextResponse = V2SessionModelContextResponses[keyof V2SessionModelContextResponses]
 
 export type V2SessionHistoryData = {
   body?: never

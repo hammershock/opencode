@@ -21,6 +21,7 @@ import { Model } from "@opencode-ai/schema/model"
 import { Location } from "@opencode-ai/schema/location"
 import { Revert } from "@opencode-ai/schema/revert"
 import { SessionEvent } from "@opencode-ai/schema/session-event"
+import { ModelContext } from "@opencode-ai/schema/model-context"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -297,6 +298,20 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           identifier: "v2.session.context",
           summary: "Get session context",
           description: "Retrieve the active context messages for a session (all messages after the last compaction).",
+        }),
+      ),
+    )
+    .add(
+      HttpApiEndpoint.get("session.modelContext", "/api/session/:sessionID/model-context", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Schema.NullOr(ModelContext.Generation) }),
+        error: [SessionNotFoundError, UnknownError],
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.session.modelContext",
+          summary: "Inspect session model context",
+          description:
+            "Return the frozen canonical model-context generation without connecting to or reading from the Session target.",
         }),
       ),
     )

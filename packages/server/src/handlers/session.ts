@@ -108,6 +108,29 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         }),
       )
       .handle(
+        "session.modelContext",
+        Effect.fn(function* (ctx) {
+          return {
+            data:
+              (yield* session.modelContext(ctx.params.sessionID).pipe(
+                Effect.catchTag("Session.NotFoundError", (error) =>
+                  Effect.fail(
+                    new SessionNotFoundError({
+                      sessionID: error.sessionID,
+                      message: `Session not found: ${error.sessionID}`,
+                    }),
+                  ),
+                ),
+                Effect.catchTag("Session.ContextSnapshotDecodeError", (error) =>
+                  Effect.fail(
+                    new UnknownError({ message: "Session model context is unreadable", ref: error.sessionID }),
+                  ),
+                ),
+              )) ?? null,
+          }
+        }),
+      )
+      .handle(
         "session.switchAgent",
         Effect.fn(function* (ctx) {
           yield* session.switchAgent({ sessionID: ctx.params.sessionID, agent: ctx.payload.agent }).pipe(

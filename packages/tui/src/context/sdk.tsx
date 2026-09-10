@@ -76,6 +76,13 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
 
     let sdk = createSDK()
 
+    const request = (pathname: string, init?: RequestInit) => {
+      const url = new URL(pathname, props.url)
+      const headers = new Headers(props.headers)
+      new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+      return trackedFetch(url, { ...init, headers, signal: init?.signal ?? abort.signal })
+    }
+
     const handlers = new Set<(event: GlobalEvent) => void>()
     const emitter = {
       emit(_type: "event", event: GlobalEvent) {
@@ -110,6 +117,19 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
     }
 
     const handleEvent = (event: GlobalEvent) => {
+      if (event.payload.type === "model-context.operation.updated") {
+        const progress = event.payload.properties.progress
+        const id = `model-context:${progress.id}`
+        if (progress.state === "idle") remoteStatus.clear(id)
+        else
+          remoteStatus.set(id, {
+            area: "Target",
+            operation: `${progress.target} model context`,
+            phase: progress.source ? `${progress.phase} · ${progress.source}` : progress.phase,
+            state: progress.state === "active" ? "running" : "failed",
+            detail: progress.detail ? remoteFailureDetail(progress.detail) : undefined,
+          })
+      }
       queue.push(event)
       const elapsed = Date.now() - last
 
@@ -189,6 +209,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
       directory: props.directory,
       event: emitter,
       fetch: trackedFetch,
+      request,
       url: props.url,
     }
   },

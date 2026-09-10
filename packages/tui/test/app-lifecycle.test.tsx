@@ -15,7 +15,7 @@ async function waitForFrame(setup: Awaited<ReturnType<typeof createTestRenderer>
     if (setup.captureCharFrame().includes(text)) return
     await Bun.sleep(10)
   }
-  throw new Error(`Timed out waiting for ${text}`)
+  throw new Error(`Timed out waiting for ${text}\n${setup.captureCharFrame()}`)
 }
 
 async function waitForEditor(setup: Awaited<ReturnType<typeof createTestRenderer>>, timeout = 2_000) {
@@ -246,7 +246,10 @@ test("QuickStart accepts and renders keyboard input without starving the keymap"
   const ready = new Promise<void>((resolve) => {
     started = resolve
   })
+  const keymapErrors: string[] = []
+  let api: TuiPluginApi | undefined
   let disposeSlots = () => {}
+  let disposeErrors = () => {}
 
   try {
     const { run } = await import("../src/app")
@@ -260,10 +263,13 @@ test("QuickStart accepts and renders keyboard input without starving the keymap"
         args: {},
         pluginHost: {
           async start(input) {
+            api = input.api
             disposeSlots = input.runtime.setupSlots(input.api).dispose
+            disposeErrors = input.api.keymap.on("error", (event) => keymapErrors.push(event.code))
             started()
           },
           async dispose() {
+            disposeErrors()
             disposeSlots()
           },
         },
@@ -279,8 +285,22 @@ test("QuickStart accepts and renders keyboard input without starving the keymap"
 
     expect(editor.plainText).toBe(input)
 
+    api?.keymap.dispatchCommand("prompt.clear")
+    await waitForFrame(setup, "Ask anything", 2_000)
+    expect(editor.plainText).toBe("")
+    const unknown = "/definitely-unknown"
+    unknown.split("").forEach((key) => setup.mockInput.pressKey(key))
+    await waitForFrame(setup, unknown, 2_000)
+    const sessionRequests = calls.session.length
+    setup.mockInput.pressEnter()
+    await waitForFrame(setup, "Slash command does not exist", 2_000)
+    expect(editor.plainText).toBe(unknown)
+    expect(calls.session.length).toBe(sessionRequests)
+
     setup.mockInput.pressKey("p", { ctrl: true })
     await waitForFrame(setup, "Commands", 2_000)
+
+    expect(keymapErrors).not.toContain("state-change-feedback-loop")
 
     process.emit("SIGHUP")
     await task

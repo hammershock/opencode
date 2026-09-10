@@ -2,7 +2,7 @@ import type { DialogContext } from "../ui/dialog"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogSelect } from "../ui/dialog-select"
 import { useTheme } from "../context/theme"
-import { createMemo, createSignal, onCleanup } from "solid-js"
+import { createMemo, createSignal, For, onCleanup } from "solid-js"
 import type { EnvironmentMetadata, EnvironmentValues } from "../command-toolkit/environment"
 
 export function createEnvironmentRevealAuthorization() {
@@ -40,6 +40,30 @@ export function displayEnvironmentValue(value: string) {
   return value.replaceAll("\r", "\\r").replaceAll("\n", "\\n").replaceAll("\t", "\\t")
 }
 
+export function environmentInspectionFrame(name: string, value: string, width: number, offset: number) {
+  const characters = [
+    ...[...name].map((text) => ({ text, revealed: false })),
+    ...[...`=${displayEnvironmentValue(value)}`].map((text) => ({ text, revealed: true })),
+    ...[..."   "].map((text) => ({ text, revealed: false })),
+  ]
+  const start = ((offset % characters.length) + characters.length) % characters.length
+  return [...characters.slice(start), ...characters.slice(0, start)].reduce(
+    (result, character) => {
+      if (result.done) return result
+      const nextWidth = result.width + Bun.stringWidth(character.text)
+      if (nextWidth > width) return { ...result, done: true }
+      const previous = result.segments.at(-1)
+      if (previous?.revealed === character.revealed) {
+        previous.text += character.text
+        return { ...result, width: nextWidth }
+      }
+      result.segments.push({ ...character })
+      return { ...result, width: nextWidth }
+    },
+    { segments: [] as { text: string; revealed: boolean }[], width: 0, done: false },
+  ).segments
+}
+
 export function showEnvironment(
   dialog: DialogContext,
   snapshot: EnvironmentMetadata,
@@ -71,12 +95,22 @@ function EnvironmentDialog(props: {
     props.snapshot.variables.map((variable) => {
       const option = environmentVariableOption(variable, revealed()?.values)
       if (!("revealed" in option) || option.revealed === undefined) return option
+      const value = option.revealed
       return {
         ...option,
+        inspectTitle: true,
+        inspectionTitle: `${option.title}=${displayEnvironmentValue(value)}`,
+        inspectionView: (offset: number, width: number) => (
+          <>
+            <For each={environmentInspectionFrame(option.title, value, width, offset)}>
+              {(segment) => <span style={{ fg: segment.revealed ? theme.accent : undefined }}>{segment.text}</span>}
+            </For>
+          </>
+        ),
         titleView: (
           <>
             {option.title}
-            <span style={{ fg: theme.accent }}>={displayEnvironmentValue(option.revealed)}</span>
+            <span style={{ fg: theme.accent }}>={displayEnvironmentValue(value)}</span>
           </>
         ),
       }

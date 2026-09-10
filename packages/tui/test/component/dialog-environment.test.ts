@@ -3,6 +3,7 @@ import {
   clearEnvironmentValues,
   createEnvironmentRevealAuthorization,
   displayEnvironmentValue,
+  environmentInspectionFrame,
   environmentVariableOption,
 } from "../../src/component/dialog-environment"
 
@@ -83,5 +84,23 @@ describe("environment variable metadata", () => {
     expect(displayEnvironmentValue("first\r\nsecond\tcolumn")).toBe("first\\r\\nsecond\\tcolumn")
     clearEnvironmentValues(revealed)
     expect(revealed.values).toEqual({})
+  })
+
+  test("cycles only the selected row while retaining value styling", () => {
+    const frames = Array.from({ length: "TOKEN=synthetic-value   ".length }, (_, offset) =>
+      environmentInspectionFrame("TOKEN", "synthetic-value", 10, offset),
+    )
+
+    expect(frames.every((frame) => Bun.stringWidth(frame.map((segment) => segment.text).join("")) <= 10)).toBeTrue()
+    expect(
+      frames
+        .flat()
+        .filter((segment) => segment.revealed)
+        .map((segment) => segment.text)
+        .join(" "),
+    ).toContain("synthetic")
+    expect(
+      frames.some((frame) => frame.some((segment) => segment.revealed) && frame.some((segment) => !segment.revealed)),
+    ).toBeTrue()
   })
 })

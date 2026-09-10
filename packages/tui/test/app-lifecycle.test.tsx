@@ -310,6 +310,106 @@ test("QuickStart accepts and renders keyboard input without starving the keymap"
   }
 }, 10_000)
 
+test("a read-only Session keeps its draft while blocking Agent submission and allowing exit", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const session = {
+    id: "dummy",
+    title: "Read-only prompt",
+    slug: "dummy",
+    projectID: "project",
+    directory,
+    version: "0.0.0-test",
+    target: { type: "rexd", targetID: "missing-target" },
+    time: { created: 0, updated: 0 },
+  }
+  const paths: string[] = []
+  const calls = createFetch((url) => {
+    paths.push(url.pathname)
+    if (url.pathname === "/api/target")
+      return json({ path: "/tmp/opencode/targets.jsonc", revision: "test", targets: [], diagnostics: [], valid: true })
+    if (url.pathname === "/session/dummy") return json(session)
+    if (url.pathname === "/api/session/dummy/target-resolution")
+      return json({
+        status: "missing_local_target",
+        missingTargetID: "missing-target",
+        lastKnownTargetName: "offline",
+        referencedSessionIDs: ["dummy"],
+        location: { directory, target: session.target },
+      })
+    if (url.pathname === "/session") return json([session])
+  })
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  let disposeSlots = () => {}
+  let task: Promise<unknown> | undefined
+
+  try {
+    const { run } = await import("../src/app")
+    task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { continue: true },
+        pluginHost: {
+          async start(input) {
+            disposeSlots = input.runtime.setupSlots(input.api).dispose
+            started()
+          },
+          async dispose() {
+            disposeSlots()
+          },
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    await waitForFrame(setup, "Open read-only")
+    setup.mockInput.pressEnter()
+    await waitForFrame(setup, "Draft editing is")
+    const editor = await waitForEditor(setup)
+
+    const draft = "keep this draft"
+    editor.setText(draft)
+    editor.focus()
+    await waitForFrame(setup, draft)
+    const promptRequests = paths.filter((item) => item.includes("/session/dummy/message")).length
+    setup.mockInput.pressEnter()
+    await waitForFrame(setup, "Current Session is read-only")
+
+    expect(editor.plainText).toBe(draft)
+    expect(paths.filter((item) => item.includes("/session/dummy/message"))).toHaveLength(promptRequests)
+
+    editor.setText("@file")
+    await setup.renderOnce()
+    await Bun.sleep(20)
+    expect(paths.some((item) => item.includes("/api/fs"))).toBe(false)
+
+    editor.setText("")
+    editor.focus()
+    setup.mockInput.pressKey("/")
+    await waitForFrame(setup, "/agents")
+    "quit".split("").forEach((key) => setup.mockInput.pressKey(key))
+    await waitForFrame(setup, "/quit")
+    setup.mockInput.pressEnter()
+    await task
+    expect(setup.renderer.isDestroyed).toBe(true)
+  } finally {
+    if (!setup.renderer.isDestroyed) {
+      process.emit("SIGHUP")
+      await task
+    }
+    mock.restore()
+  }
+}, 10_000)
+
 test("an open session waits for confirmation before returning home after deletion", async () => {
   const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
   const core = await import("@opentui/core")

@@ -247,6 +247,7 @@ export function createTuiApiAdapters(input: Input): Omit<TuiPluginApi, "lifecycl
             sessionID={props.sessionID}
             visible={props.visible}
             disabled={props.disabled}
+            readOnly={props.readOnly}
             onSubmit={props.onSubmit}
             ref={props.ref}
             hint={props.hint}

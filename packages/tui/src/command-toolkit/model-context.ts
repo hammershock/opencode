@@ -56,6 +56,7 @@ export const modelContextCommand = defineCommand<void, ModelContextCommandContex
   category: "Session",
   provenance: { type: "core", feature: "location-model-context" },
   requires: { session: true },
+  readOnly: true,
   capabilities: ["session.context.read"],
   parse: empty,
   execute: async (ctx) => {

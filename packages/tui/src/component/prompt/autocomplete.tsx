@@ -171,6 +171,7 @@ export function Autocomplete(props: {
   value: string
   shell: () => boolean
   sessionID?: string
+  readOnly?: boolean
   setPrompt: (input: (prompt: PromptInfo) => void) => void
   setExtmark: (partIndex: number, extmarkId: number) => void
   anchor: () => BoxRenderable
@@ -426,6 +427,7 @@ export function Autocomplete(props: {
   const [files] = createResource(
     () => ({ query: search(), location: location() }),
     async (input) => {
+      if (props.readOnly) return []
       if (!store.visible || store.visible === "/") return []
       if (referenceMatch()) return []
       const { lineRange, baseQuery } = extractLineRange(input.query ?? "")
@@ -777,6 +779,7 @@ export function Autocomplete(props: {
 
   onMount(() => {
     const unsubscribeMention = editor.onMention((mention) => {
+      if (props.readOnly) return
       insertFileMention(mention)
     })
 
@@ -789,6 +792,7 @@ export function Autocomplete(props: {
         return store.visible
       },
       async completeShell() {
+        if (props.readOnly) return
         // OpenTUI reports the Tab key through the editor callbacks after the keymap
         // handler. Let that no-op notification settle before starting a generation.
         await settleShellCompletionKeyEvent()
@@ -901,7 +905,7 @@ export function Autocomplete(props: {
 
         // Check for "@" trigger - find the nearest "@" before cursor with no whitespace between
         const idx = mentionTriggerIndex(value, offset)
-        if (idx !== undefined) {
+        if (!props.readOnly && idx !== undefined) {
           show("@")
           setStore("index", idx)
         }

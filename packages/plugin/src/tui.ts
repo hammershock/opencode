@@ -99,6 +99,7 @@ export type TuiCommand = {
   suggested?: boolean
   hidden?: boolean
   enabled?: boolean
+  readOnly?: boolean
   slash?: {
     name: string
     aliases?: string[]
@@ -214,6 +215,7 @@ export type TuiPromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
+  readOnly?: boolean
   onSubmit?: () => void
   ref?: (ref: TuiPromptRef | undefined) => void
   hint?: JSX.Element
@@ -466,6 +468,7 @@ export type TuiHostSlotMap = {
     session_id: string
     visible?: boolean
     disabled?: boolean
+    read_only?: boolean
     on_submit?: () => void
     ref?: (ref: TuiPromptRef | undefined) => void
   }

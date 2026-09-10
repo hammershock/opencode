@@ -45,6 +45,7 @@ export class CommandRegistry<Context extends InvocationContext = InvocationConte
       category: definition.category,
       provenance: definition.provenance,
       requires: definition.requires,
+      readOnly: definition.readOnly,
       capabilities: definition.capabilities,
       complete: complete ? (input, context) => complete(input, context) : undefined,
       available: available ? (context) => available(context) : undefined,

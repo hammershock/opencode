@@ -598,6 +598,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         suggested: sync.data.session.length > 0,
         slashName: "sessions",
         slashAliases: ["resume", "continue"],
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogSessionList />)
         },
@@ -610,6 +611,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Session",
         slashName: "new",
         slashAliases: ["clear"],
+        readOnly: true,
         run: () => {
           route.navigate({
             type: "home",
@@ -797,6 +799,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "View status",
         desc: "Inspect providers, MCP servers, and system state",
         slashName: "status",
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogStatus />)
         },
@@ -807,6 +810,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "View debug info",
         desc: "Inspect diagnostic paths and runtime details",
         slashName: "debug",
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogDebug />)
         },
@@ -825,6 +829,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Switch theme",
         desc: "Choose the TUI color theme",
         slashName: "themes",
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogThemeList />)
         },
@@ -854,6 +859,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Help",
         desc: "View shortcuts and help",
         slashName: "help",
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogHelp />)
         },
@@ -874,6 +880,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         desc: appExitMetadata.description,
         slashName: appExitMetadata.slash.aliases[0],
         slashAliases: appExitMetadata.slash.aliases.slice(1),
+        readOnly: true,
         run: () => exit(),
         category: appExitMetadata.category,
       },
@@ -885,6 +892,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             : appExitMetadata.title,
         desc: "Return to QuickStart or exit OpenCode",
         slashName: appExitMetadata.slash.name,
+        readOnly: true,
         run: () => {
           const current = route.data.type === "session" ? "session" : route.data.type === "home" ? "home" : "other"
           void exitOverride()

@@ -27,6 +27,7 @@ describe("Home and Session command host integration", () => {
             title: "Sync settings",
             description: "Manage Session sync",
             provenance: { type: "core", feature: "cloud-sync" },
+            readOnly: false,
             capabilities: ["sync.configure"],
             parse: (raw) => ({ status: "parsed", input: raw.value }),
             execute: async (_ctx, value) => {
@@ -61,6 +62,7 @@ describe("Home and Session command host integration", () => {
             path: ["env", "init"],
             title: "Environment init",
             provenance: { type: "core", feature: "environment" },
+            readOnly: false,
             capabilities: ["workspace.write"],
             parse: () => ({ status: "parsed", input: undefined }),
             execute: async () => {
@@ -114,6 +116,7 @@ describe("Home and Session command host integration", () => {
             path: ["deploy"],
             title: "Core deploy",
             provenance: { type: "core", feature: "fixture" },
+            readOnly: false,
             capabilities: ["workspace.write"],
             parse: () => ({ status: "parsed", input: undefined }),
             execute: async () => ({ status: "completed" }),
@@ -127,6 +130,7 @@ describe("Home and Session command host integration", () => {
     })
 
     expect(host.slashes()[0]).toMatchObject({ identity: "plugin.deploy", provenance: { type: "upstream" } })
+    expect(upstream[0]?.readOnly).toBe(false)
     const direct = await host("/deploy release")
     expect(direct).toMatchObject({ status: "handled", identity: "plugin.deploy" })
     expect(resolveUpstreamCandidates("/deploy", upstream)[0]?.id).toBe("plugin.deploy")
@@ -147,6 +151,7 @@ describe("Home and Session command host integration", () => {
                 title: "Switch session",
                 desc: "Search and open a session",
                 slashName: "sessions",
+                readOnly: true,
               },
             },
           ],
@@ -157,6 +162,7 @@ describe("Home and Session command host integration", () => {
     })
 
     expect(host.slashes()[0]?.description).toBe("Search and open a session · upstream")
+    expect(host.slashes()[0]?.readOnly).toBe(true)
     expect(commandPaletteWinners(host.commands())[0]?.description).toBe("Search and open a session · upstream")
   })
 
@@ -187,6 +193,7 @@ describe("Home and Session command host integration", () => {
             path: ["dynamic"],
             title: "Core dynamic",
             provenance: { type: "core", feature: "fixture" },
+            readOnly: false,
             capabilities: [],
             parse: () => ({ status: "parsed", input: undefined }),
             execute: async () => ({ status: "completed" }),

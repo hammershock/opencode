@@ -26,6 +26,7 @@ export type TuiUpstreamCommand = UpstreamCandidate & {
   description?: string
   category?: string
   hidden?: boolean
+  readOnly?: boolean
   aliases?: readonly (readonly string[])[]
   dispatch:
     | { type: "client"; run: (rawArguments: string) => Promise<unknown> | unknown }
@@ -39,6 +40,7 @@ export type TuiSlashCommand = {
   aliases?: string[]
   provenance: CommandProvenance
   shadowed: readonly ResolutionDiagnostic[]
+  readOnly: boolean
   insertText?: string
   onSelect?: () => void
 }
@@ -51,6 +53,7 @@ export type TuiCommandWinner = {
   category?: string
   hidden: boolean
   enabled: boolean
+  readOnly: boolean
   provenance: CommandProvenance
   shadowed: readonly ResolutionDiagnostic[]
   dispatch: "client" | "session"
@@ -160,6 +163,7 @@ export function createCommandHost<Context extends InvocationContext>(input: {
   context: (source: InvocationContext["source"]) => Context
   upstream: () => readonly TuiUpstreamCommand[] | TuiUpstreamCommand | undefined
   restrictions?: () => CommandRestrictions | undefined
+  readOnly?: () => boolean
   invalid: (message: string) => void
   outcome: (message: string, status: "completed" | "cancelled" | "failed" | "unknown") => void
   diagnostic?: (diagnostic: ResolutionDiagnostic) => void
@@ -177,6 +181,12 @@ export function createCommandHost<Context extends InvocationContext>(input: {
       diagnosticHistory.push(diagnostic)
       input.diagnostic?.(diagnostic)
     }
+  }
+
+  const rejectReadOnly = (readOnly: boolean) => {
+    if (!input.readOnly?.() || readOnly) return false
+    input.invalid("Current Session is read-only")
+    return true
   }
 
   const invokeCore = async (
@@ -236,6 +246,13 @@ export function createCommandHost<Context extends InvocationContext>(input: {
       return { status: "invalid", message, diagnostics: resolution.diagnostics }
     }
     if (resolution.status === "core") {
+      if (rejectReadOnly(resolution.resolution.command.readOnly === true)) {
+        return {
+          status: "invalid",
+          message: "Current Session is read-only",
+          diagnostics: resolution.diagnostics,
+        }
+      }
       const handled = await invokeCore(resolution.resolution, invocationSource)
       if (!handled) return { status: "passthrough", input: source, diagnostics: resolution.diagnostics }
       return {
@@ -246,6 +263,13 @@ export function createCommandHost<Context extends InvocationContext>(input: {
       }
     }
     const candidate = resolution.candidate as TuiUpstreamCommand
+    if (rejectReadOnly(candidate.readOnly === true)) {
+      return {
+        status: "invalid",
+        message: "Current Session is read-only",
+        diagnostics: resolution.diagnostics,
+      }
+    }
     if (candidate.dispatch.type === "session") {
       return {
         status: "session",
@@ -286,7 +310,9 @@ export function createCommandHost<Context extends InvocationContext>(input: {
           enabled: () => {
             const decision = evaluateCommandRestrictions(command, input.restrictions?.())
             return (
-              decision.status === "allowed" && (command.available ? command.available(input.context("palette")) : true)
+              (!input.readOnly?.() || command.readOnly === true) &&
+              decision.status === "allowed" &&
+              (command.available ? command.available(input.context("palette")) : true)
             )
           },
           run: () => dispatch(canonical, "palette"),
@@ -319,8 +345,11 @@ export function createCommandHost<Context extends InvocationContext>(input: {
             description: withProvenance(command.description, command.provenance, resolution.diagnostics.length),
             category: command.category,
             hidden: restrictions?.hidden?.includes(command.id) === true,
+            readOnly: command.readOnly === true,
             enabled:
-              decision.status === "allowed" && (command.available ? command.available(input.context("palette")) : true),
+              (!input.readOnly?.() || command.readOnly === true) &&
+              decision.status === "allowed" &&
+              (command.available ? command.available(input.context("palette")) : true),
             provenance: command.provenance,
             shadowed: resolution.diagnostics,
             dispatch: "client" as const,
@@ -337,7 +366,8 @@ export function createCommandHost<Context extends InvocationContext>(input: {
           description: withProvenance(command.description, command.provenance, resolution.diagnostics.length),
           category: command.category,
           hidden: command.hidden === true,
-          enabled: true,
+          readOnly: command.readOnly === true,
+          enabled: !input.readOnly?.() || command.readOnly === true,
           provenance: command.provenance,
           shadowed: resolution.diagnostics,
           dispatch: command.dispatch.type,
@@ -359,6 +389,7 @@ export function createCommandHost<Context extends InvocationContext>(input: {
             command.description ?? withProvenance(command.title, command.provenance, command.shadowed.length),
           provenance: command.provenance,
           shadowed: command.shadowed,
+          readOnly: command.readOnly,
           ...(command.dispatch === "session"
             ? { insertText: `${source} ` }
             : { onSelect: () => void command.run("slash") }),

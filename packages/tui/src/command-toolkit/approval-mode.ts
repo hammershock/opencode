@@ -23,6 +23,7 @@ export const approvalModeCommand = defineCommand<void, ApprovalModeCommandContex
   description: "Change the permission approval mode",
   category: "Permissions",
   provenance: { type: "core", feature: "builtin-command-adjustments" },
+  readOnly: false,
   capabilities: ["permission.mode.write"],
   parse: empty,
   execute: async (context) => {

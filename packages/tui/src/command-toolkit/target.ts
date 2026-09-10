@@ -23,6 +23,7 @@ export const targetCommand = defineCommand<"manage" | "add", TargetCommandContex
   description: "Open target configuration without changing this Session location",
   category: "Target",
   provenance: { type: "core", feature: "target-registry" },
+  readOnly: false,
   capabilities: ["target.registry.read", "target.registry.write", "target.connection.test"],
   parse: mode,
   execute: async (ctx, input) => {

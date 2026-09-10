@@ -251,7 +251,7 @@ Top-level API groups exposed to `tui(api, options, meta)`:
 - Register commands with `api.keymap.registerLayer({ commands: [...] })`.
 - Register key bindings with `bindings: [{ key, cmd, desc }]` in the same layer or a separate layer.
 - Use `api.keymap.acquireResource(...)` for shared plugin addon setup that should ref-count against the host keymap.
-- To surface a command in the host command palette, set `namespace: "palette"` and provide metadata such as `title`, `category`, `desc`, `suggested`, `hidden`, `enabled`, `slashName`, and `slashAliases` on the command.
+- To surface a command in the host command palette, set `namespace: "palette"` and provide metadata such as `title`, `category`, `desc`, `suggested`, `hidden`, `enabled`, `slashName`, `slashAliases`, and `readOnly` on the command. Slash commands without `readOnly: true` remain available normally but are not dispatched from a read-only Session.
 - Use `api.keymap.dispatchCommand(name)` for user-style execution semantics and `api.keymap.runCommand(name)` only for forced programmatic execution.
 - Disposers returned by `api.keymap` registrations and `acquireResource(...)` are automatically cleaned up when the plugin deactivates. You do not need to add those disposers to `api.lifecycle.onDispose(...)` yourself.
 - Built-in which-key shortcuts are resolved from flat `keybinds` command ids such as `which_key_toggle`, not plugin options.
@@ -360,7 +360,7 @@ Mode pushes are automatically tracked by the plugin runtime. If a plugin is disa
 - `ui.Dialog` is the base dialog wrapper.
 - `ui.DialogAlert`, `ui.DialogConfirm`, `ui.DialogPrompt`, `ui.DialogSelect` are built-in dialog components.
 - `ui.Slot` renders host or plugin-defined slots by name from plugin JSX.
-- `ui.Prompt` renders the same prompt component used by the host app and accepts `sessionID`, `workspaceID`, `ref`, and `right` for the prompt meta row's right side.
+- `ui.Prompt` renders the same prompt component used by the host app and accepts `sessionID`, `readOnly`, `ref`, and `right` for the prompt meta row's right side. `readOnly` keeps editing available while preventing prompt submission.
 - `ui.toast(...)` shows a toast.
 - `ui.dialog` exposes the host dialog stack:
   - `replace(render, onClose?)`
@@ -426,7 +426,7 @@ Current host slot names:
 - `home_logo`
 - `home_prompt` with props `{ workspace_id?, ref? }`
 - `home_prompt_right` with props `{ workspace_id? }`
-- `session_prompt` with props `{ session_id, visible?, disabled?, on_submit?, ref? }`
+- `session_prompt` with props `{ session_id, visible?, disabled?, read_only?, on_submit?, ref? }`
 - `session_prompt_right` with props `{ session_id }`
 - `home_bottom`
 - `home_footer`

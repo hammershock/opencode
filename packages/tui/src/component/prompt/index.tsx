@@ -1950,6 +1950,7 @@ export function Prompt(props: PromptProps) {
         promptPartTypeId={() => promptPartTypeId}
         shellContextVersion={props.shellCompletionGeneration ?? 0}
         commandSlashes={activeCommandHost().slashes}
+        submit={submit}
       />
     </>
   )

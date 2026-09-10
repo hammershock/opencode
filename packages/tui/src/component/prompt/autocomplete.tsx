@@ -163,8 +163,8 @@ export function autocompleteTabAction(
   return "select" as const
 }
 
-export function autocompleteEnterEnabled(selected: AutocompleteOption | undefined) {
-  return selected !== undefined
+export function autocompleteEnterAction(selected: AutocompleteOption | undefined) {
+  return selected === undefined ? ("submit" as const) : ("select" as const)
 }
 
 export function Autocomplete(props: {
@@ -181,6 +181,7 @@ export function Autocomplete(props: {
   promptPartTypeId: () => number
   shellContextVersion: number
   commandSlashes?: () => readonly TuiSlashCommand[]
+  submit: () => Promise<boolean>
 }) {
   const editor = useEditorContext()
   const sdk = useSDK()
@@ -711,11 +712,12 @@ export function Autocomplete(props: {
         name: "prompt.autocomplete.select",
         title: "Select autocomplete item",
         category: "Autocomplete",
-        // Keep this predicate lazy. Eagerly reading options() while the layer is
-        // registered subscribes useBindings to keymap-derived slash commands;
-        // registration then emits another keymap state update and loops.
-        enabled: () => autocompleteEnterEnabled(options()[store.selected]),
         run() {
+          if (autocompleteEnterAction(options()[store.selected]) === "submit") {
+            close()
+            void props.submit()
+            return
+          }
           select()
         },
       },
@@ -755,6 +757,11 @@ export function Autocomplete(props: {
     })
   }
 
+  function close() {
+    setStore("visible", false)
+    setShellOptions([])
+  }
+
   function hide() {
     const text = props.input().plainText
     if (store.visible === "/" && !text.endsWith(" ") && text.startsWith("/")) {
@@ -765,8 +772,7 @@ export function Autocomplete(props: {
         draft.input = props.input().plainText
       })
     }
-    setStore("visible", false)
-    setShellOptions([])
+    close()
   }
 
   onMount(() => {

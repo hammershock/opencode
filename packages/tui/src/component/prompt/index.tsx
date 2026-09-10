@@ -362,20 +362,24 @@ export function Prompt(props: PromptProps) {
   })
 
   const [providerUsage, setProviderUsage] = createSignal<ProviderUsageResult>()
+  const [providerUsageNow, setProviderUsageNow] = createSignal(Date.now())
+  const providerUsageTimer = setInterval(() => setProviderUsageNow(Date.now()), 60_000)
+  onCleanup(() => clearInterval(providerUsageTimer))
   const providerUsageText = createMemo(() => {
     const result = providerUsage()
     const model = local.model.current()
     if (!result?.snapshot || !model || result.providerID !== model.providerID) return
     const provider = sync.data.provider.find((item) => item.id === model.providerID)
     const label = provider?.name ?? model.providerID
-    const value = providerUsageSummary(
-      result,
-      local.model.usage.selected(
+    const value = providerUsageSummary(result, {
+      selected: local.model.usage.selected(
         model.providerID,
         result.snapshot.meters.map((meter) => meter.id),
       ),
-      Math.max(12, Math.floor(dimensions().width * 0.35) - label.length - 3),
-    )
+      maxWidth: Math.max(12, Math.floor(dimensions().width / 2) - label.length - 19),
+      now: providerUsageNow(),
+      compact: true,
+    })
     if (!value) return
     return `${label} · ${value}`
   })
@@ -406,7 +410,7 @@ export function Prompt(props: PromptProps) {
   const footerUsageText = createMemo(() => {
     const item = usage()
     return truncateParts(
-      [item?.context, item?.cost, providerUsageText()].filter((value): value is string => Boolean(value)),
+      [providerUsageText(), item?.context, item?.cost].filter((value): value is string => Boolean(value)),
       Math.max(12, Math.floor(dimensions().width / 2) - 16),
     )
   })

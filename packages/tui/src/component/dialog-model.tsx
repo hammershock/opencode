@@ -41,9 +41,14 @@ export function DialogModel(props: { providerID?: string }) {
   const { theme } = useTheme()
   const [query, setQuery] = createSignal("")
   const [usage, setUsage] = createSignal<Record<string, Result>>({})
+  const [usageNow, setUsageNow] = createSignal(Date.now())
   const requests = new Map<string, AbortController>()
 
-  onMount(() => dialog.setSize("xlarge"))
+  onMount(() => {
+    dialog.setSize("xlarge")
+    const timer = setInterval(() => setUsageNow(Date.now()), 60_000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   function usageHeader(providerID: string, title: string) {
     return (
@@ -52,7 +57,7 @@ export function DialogModel(props: { providerID?: string }) {
           {fitText(title, providerHeaderWidths(dimensions().width, title).title)}
         </text>
         <text fg={theme.textMuted} wrapMode="none">
-          {usageStatus(usage()[providerID], providerHeaderWidths(dimensions().width, title).usage)}
+          {usageStatus(usage()[providerID], providerHeaderWidths(dimensions().width, title).usage, usageNow())}
         </text>
       </box>
     )
@@ -329,6 +334,7 @@ function DialogProviderUsageDetails(props: { providerID: string; providerName: s
   const dialog = useDialog()
   const [result, setResult] = createSignal(props.initial)
   const [refreshing, setRefreshing] = createSignal(false)
+  const [usageNow, setUsageNow] = createSignal(Date.now())
   let controller: AbortController | undefined
 
   function refresh() {
@@ -343,6 +349,8 @@ function DialogProviderUsageDetails(props: { providerID: string; providerName: s
 
   onMount(() => {
     if (!props.initial) refresh()
+    const timer = setInterval(() => setUsageNow(Date.now()), 60_000)
+    onCleanup(() => clearInterval(timer))
   })
   onCleanup(() => controller?.abort())
 
@@ -351,7 +359,7 @@ function DialogProviderUsageDetails(props: { providerID: string; providerName: s
     if (!meters().length) {
       return [
         {
-          title: usageStatus(result()),
+          title: usageStatus(result(), undefined, usageNow()),
           value: "__status__",
           description: result()?.error,
         },
@@ -360,15 +368,17 @@ function DialogProviderUsageDetails(props: { providerID: string; providerName: s
     return meters().map((meter) => ({
       title: meter.label,
       value: meter.id,
-      details: [meterDetails(meter)],
+      details: [meterDetails(meter, usageNow())],
     }))
   })
   const footer = createMemo(() => {
     if (refreshing()) return "◐ refreshing"
     const snapshot = result()?.snapshot
-    if (!snapshot) return usageStatus(result())
+    if (!snapshot) return usageStatus(result(), undefined, usageNow())
     const scope = snapshot.scopeID ? `scope ${snapshot.scopeID}` : undefined
-    return [usageStatus(result()), scope, `fetched ${formatTime(snapshot.fetchedAt)}`].filter(Boolean).join(" · ")
+    return [usageStatus(result(), undefined, usageNow()), scope, `fetched ${formatTime(snapshot.fetchedAt)}`]
+      .filter(Boolean)
+      .join(" · ")
   })
 
   return (

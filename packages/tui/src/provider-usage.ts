@@ -1,6 +1,7 @@
 export type Meter = {
   id: string
   label: string
+  kind: "balance" | "quota" | "rate_limit" | "credits" | "custom"
   used?: number
   remaining?: number
   limit?: number
@@ -60,41 +61,63 @@ export function orderedMeters(meters: Meter[], selected?: string[]) {
     .filter((meter) => selected === undefined || selected.includes(meter.id))
 }
 
-export function meterSummary(meter: Meter): string | undefined {
-  if (meter.remaining === undefined) return
-  return meter.limit === 100 && meter.unit === "percentage"
-    ? `${Math.round(meter.remaining)}% left`
-    : `${meter.remaining} ${meter.unit}`
+export function meterSummary(meter: Meter, options?: { now?: number; compact?: boolean }): string | undefined {
+  const compact = options?.compact ?? false
+  const remaining =
+    meter.remaining === undefined
+      ? undefined
+      : meter.limit === 100 && meter.unit === "percentage"
+        ? `${Math.round(meter.remaining)}%${compact ? "" : " left"}`
+        : `${meter.remaining} ${meter.unit}`
+  const reset =
+    meter.resetsAt === undefined ? undefined : formatResetCountdown(meter.resetsAt, options?.now ?? Date.now())
+  if (compact) {
+    const label = meter.kind === "quota" || meter.kind === "rate_limit" ? compactMeterLabel(meter.label) : undefined
+    return (
+      [label, remaining, reset === undefined ? undefined : `reset ${reset.replace(/^in /, "").replaceAll(" ", "")}`]
+        .filter((value): value is string => value !== undefined)
+        .join(" ") || undefined
+    )
+  }
+  return (
+    [remaining, reset === undefined ? undefined : `resets ${reset}`]
+      .filter((value): value is string => value !== undefined)
+      .join(" · ") || undefined
+  )
 }
 
-export function summary(result: Result | undefined, selected?: string[], maxWidth?: number): string | undefined {
+export function summary(
+  result: Result | undefined,
+  options?: { selected?: string[]; maxWidth?: number; now?: number; compact?: boolean },
+): string | undefined {
   if (!result?.snapshot || (result.status !== "available" && result.status !== "stale")) return
-  const values = orderedMeters(result.snapshot.meters, selected).flatMap((meter) => {
-    const value = meterSummary(meter)
+  const values = orderedMeters(result.snapshot.meters, options?.selected).flatMap((meter) => {
+    const value = meterSummary(meter, { now: options?.now, compact: options?.compact })
     return value ? [value] : []
   })
   if (!values.length) return
   const suffix = result.status === "stale" ? " (stale)" : ""
-  if (maxWidth !== undefined && maxWidth <= suffix.length) return "stale".slice(0, maxWidth)
-  return truncateParts(values, maxWidth === undefined ? undefined : maxWidth - suffix.length) + suffix
+  if (options?.maxWidth !== undefined && options.maxWidth <= suffix.length) return "stale".slice(0, options.maxWidth)
+  return truncateParts(values, options?.maxWidth === undefined ? undefined : options.maxWidth - suffix.length) + suffix
 }
 
-export function status(result: Result | undefined, maxWidth?: number) {
+export function status(result: Result | undefined, maxWidth?: number, now = Date.now()) {
   const value = (() => {
     if (!result) return "◐ loading"
     if (result.status === "unsupported") return "! unsupported"
     if (result.status === "unauthenticated") return "! not signed in"
     if (result.status === "error") return "× unavailable"
     const marker = result.status === "stale" ? "! " : "● "
-    const first = summary(
-      result,
-      result.snapshot
+    const first = summary(result, {
+      selected: result.snapshot
         ? orderedMeters(result.snapshot.meters)
             .slice(0, 1)
             .map((x) => x.id)
         : [],
-      maxWidth === undefined ? undefined : Math.max(0, maxWidth - marker.length),
-    )
+      maxWidth: maxWidth === undefined ? undefined : Math.max(0, maxWidth - marker.length),
+      now,
+      compact: true,
+    })
     if (result.status === "stale") return `${marker}${first ?? "usage"}`
     return `${marker}${first ?? "available"}`
   })()
@@ -140,14 +163,40 @@ export function fitText(value: string, width: number) {
   )
 }
 
-export function meterDetails(meter: Meter) {
+export function meterDetails(meter: Meter, now = Date.now()) {
+  const value = (input: number) =>
+    meter.limit === 100 && meter.unit === "percentage" ? `${input}%` : `${input} ${meter.unit}`
+  const reset = meter.resetsAt === undefined ? undefined : formatResetCountdown(meter.resetsAt, now)
   const values = [
-    meter.used === undefined ? undefined : `used ${meter.used} ${meter.unit}`,
-    meter.remaining === undefined ? undefined : `remaining ${meter.remaining} ${meter.unit}`,
-    meter.limit === undefined ? undefined : `limit ${meter.limit} ${meter.unit}`,
+    meter.used === undefined ? undefined : `used ${value(meter.used)}`,
+    meter.remaining === undefined ? undefined : `remaining ${value(meter.remaining)}`,
+    reset === undefined ? undefined : `resets ${reset}`,
+    meter.limit === undefined ? undefined : `limit ${value(meter.limit)}`,
   ].filter((value): value is string => value !== undefined)
-  if (meter.resetsAt !== undefined) values.push(`resets ${formatTime(meter.resetsAt)}`)
   return values.join(" · ") || meter.unit
+}
+
+export function formatResetCountdown(value: number, now = Date.now()) {
+  if (!Number.isFinite(value) || value < 0 || !Number.isFinite(now)) return
+  if (value <= now) return "now"
+
+  const minutes = Math.max(1, Math.ceil((value - now) / 60_000))
+  const days = Math.floor(minutes / (24 * 60))
+  const hours = Math.floor((minutes % (24 * 60)) / 60)
+  if (days > 0) return `in ${days}d${hours > 0 ? ` ${hours}h` : ""}`
+
+  const remainingMinutes = minutes % 60
+  if (hours > 0) return `in ${hours}h${remainingMinutes > 0 ? ` ${remainingMinutes}m` : ""}`
+  return `in ${minutes}m`
+}
+
+function compactMeterLabel(label: string) {
+  if (label === "5 hour limit") return "5h"
+  if (label === "Daily limit") return "24h"
+  if (label === "Weekly limit") return "7d"
+  if (label === "Monthly limit") return "30d"
+  if (label === "Yearly limit") return "365d"
+  return label.replace(/ limit$/i, "")
 }
 
 export function formatTime(value: number) {

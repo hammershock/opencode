@@ -163,6 +163,10 @@ export function autocompleteTabAction(
   return "select" as const
 }
 
+export function autocompleteEnterEnabled(selected: AutocompleteOption | undefined) {
+  return selected !== undefined
+}
+
 export function Autocomplete(props: {
   value: string
   shell: () => boolean
@@ -707,6 +711,7 @@ export function Autocomplete(props: {
         name: "prompt.autocomplete.select",
         title: "Select autocomplete item",
         category: "Autocomplete",
+        enabled: autocompleteEnterEnabled(options()[store.selected]),
         run() {
           select()
         },

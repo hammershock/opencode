@@ -52,7 +52,7 @@ import { SessionLocationRuntime } from "./session/location-runtime"
 import { SystemContext } from "./system-context/index"
 import { SessionContextEpoch } from "./session/context-epoch"
 import { ModelContextAssembler } from "./model-context-assembler"
-import { SkillCatalogContext } from "./skill/catalog-context"
+import { SkillCatalogContextService } from "./skill/catalog-context-service"
 import { Skill } from "@opencode-ai/schema/skill"
 
 export const RevertState = Revert.State
@@ -285,7 +285,7 @@ const layer = Layer.effect(
     ) {
       const initialized = yield* contextInitialized(session.id)
       const load = Effect.gen(function* () {
-        const catalog = yield* SkillCatalogContext.Service
+        const catalog = yield* SkillCatalogContextService.Service
         const loaded = yield* catalog.load({ forceReload })
         const assembler = yield* ModelContextAssembler.Service
         const context = yield* assembler.load(session.agent, {
@@ -299,16 +299,6 @@ const layer = Layer.effect(
       )
       if (Exit.isFailure(attempt)) {
         yield* Effect.logWarning("Skill catalog activation failed", { sessionID: session.id })
-        return Skill.Activation.make({
-          status: initialized ? "retained" : "unavailable",
-          diagnostics: [
-            Skill.ActivationDiagnostic.make({
-              kind: "reload-failed",
-              severity: "warning",
-              sourceLabel: "Skill catalog",
-            }),
-          ],
-        })
         return Skill.Activation.make({
           status: initialized ? "retained" : "unavailable",
           diagnostics: [

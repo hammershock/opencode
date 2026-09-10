@@ -1,31 +1,23 @@
 export * as SkillCatalogContext from "./catalog-context"
 
-import { Context, Effect, Layer, Ref } from "effect"
+import { Effect, Layer, Ref } from "effect"
 import { Skill } from "@opencode-ai/schema/skill"
 import { makeLocationNode } from "../effect/app-node"
 import { PluginV2 } from "../plugin"
 import { SkillV2 } from "../skill"
+import { SkillCatalogContextService } from "./catalog-context-service"
 
-export interface Loaded {
-  readonly snapshot: Skill.RegistrySnapshot
-  readonly diagnostics: ReadonlyArray<Skill.ActivationDiagnostic>
-  readonly transient: boolean
-}
-
-export interface Interface {
-  readonly load: (input: { readonly forceReload: boolean }) => Effect.Effect<Loaded>
-}
-
-export class Service extends Context.Service<Service, Interface>()("@opencode/SkillCatalogContext") {}
+export type { Loaded, Interface } from "./catalog-context-service"
+export { Service } from "./catalog-context-service"
 
 const layer = Layer.effect(
-  Service,
+  SkillCatalogContextService.Service,
   Effect.gen(function* () {
     const plugin = yield* PluginV2.Service
     const skills = yield* SkillV2.Service
     const current = yield* Ref.make<Skill.RegistrySnapshot | undefined>(undefined)
 
-    return Service.of({
+    return SkillCatalogContextService.Service.of({
       load: Effect.fn("SkillCatalogContext.load")(function* (input) {
         yield* plugin.wait(PluginV2.ID.make("config-skill"))
         const cached = yield* Ref.get(current)
@@ -49,7 +41,7 @@ const layer = Layer.effect(
 )
 
 export const node = makeLocationNode({
-  service: Service,
+  service: SkillCatalogContextService.Service,
   layer,
   deps: [PluginV2.node, SkillV2.node],
 })

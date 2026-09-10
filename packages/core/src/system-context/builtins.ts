@@ -8,34 +8,41 @@ import { InstructionContext } from "../instruction-context"
 import { SystemContextRegistry } from "./registry"
 import { FSUtil } from "../fs-util"
 import { Global } from "../global"
+import { ModelContext } from "@opencode-ai/schema/model-context"
 
 const builtIns = Layer.effectDiscard(
   Effect.gen(function* () {
     const location = yield* Location.Service
     const registry = yield* SystemContextRegistry.Service
-    const environment = [
-      "<env>",
-      `  Working directory: ${location.directory}`,
-      `  Workspace root folder: ${location.project.directory}`,
-      `  Is directory a git repo: ${location.vcs?.type === "git" ? "yes" : "no"}`,
-      `  Platform: ${process.platform}`,
-      "</env>",
-    ].join("\n")
+    const environment = ModelContext.Environment.make({
+      harness: "OpenCode REXD",
+      entrypoint: "opencode-rexd",
+      targetKind: location.target.type,
+      targetName:
+        location.targetName ?? location.lastKnownTargetName ?? (location.target.type === "local" ? "local" : "remote"),
+      directory: location.directory,
+      projectRoot: location.project.directory,
+      vcs: location.vcs?.type,
+      platform: location.platform ?? "unknown",
+    })
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
     const context = SystemContext.combine([
       SystemContext.make({
         key: SystemContext.Key.make("core/environment"),
-        codec: Schema.toCodecJson(Schema.String),
+        refresh: "generation",
+        codec: Schema.toCodecJson(ModelContext.Environment),
         load: Effect.succeed(environment),
-        baseline: (environment) =>
-          ["Here is some useful information about the environment you are running in:", environment].join("\n"),
-        update: (_previous, environment) => ["The environment you are running in is now:", environment].join("\n"),
+        baseline: renderEnvironment,
+        update: (_previous, environment) => `The execution environment is now:\n${renderEnvironment(environment)}`,
       }),
       SystemContext.make({
         key: SystemContext.Key.make("core/date"),
-        codec: Schema.toCodecJson(Schema.String),
-        load: DateTime.nowAsDate.pipe(Effect.map((date) => date.toDateString())),
-        baseline: (date) => `Today's date: ${date}`,
-        update: (_previous, date) => `Today's date is now: ${date}`,
+        codec: Schema.toCodecJson(ModelContext.ControllerTime),
+        load: DateTime.nowAsDate.pipe(
+          Effect.map((date) => ModelContext.ControllerTime.make({ date: date.toDateString(), timezone })),
+        ),
+        baseline: (time) => `Current date: ${time.date}\nUser timezone: ${time.timezone}`,
+        update: (_previous, time) => `Current date: ${time.date}\nUser timezone: ${time.timezone}`,
       }),
     ])
 
@@ -48,3 +55,16 @@ export const node = makeLocationNode({
   layer: builtIns,
   deps: [Location.node, SystemContextRegistry.node, InstructionContext.node, FSUtil.locationNode, Global.node],
 })
+
+function renderEnvironment(environment: ModelContext.Environment) {
+  return [
+    `Execution harness: ${environment.harness} (${environment.entrypoint})`,
+    "<environment>",
+    `  Target: ${environment.targetKind} (${environment.targetName})`,
+    `  Working directory: ${environment.directory}`,
+    `  Project root: ${environment.projectRoot}`,
+    `  VCS: ${environment.vcs ?? "none"}`,
+    `  Platform: ${environment.platform}`,
+    "</environment>",
+  ].join("\n")
+}

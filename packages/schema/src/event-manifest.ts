@@ -11,6 +11,7 @@ import { LegacyEvent } from "./legacy-event"
 import { LspEvent } from "./lsp-event"
 import { McpEvent } from "./mcp-event"
 import { ModelsDev } from "./models-dev"
+import { ModelContextOperationEvent } from "./model-context-operation-event"
 import { Permission } from "./permission"
 import { PermissionV1 } from "./permission-v1"
 import { Plugin } from "./plugin"
@@ -62,6 +63,7 @@ export const ServerDefinitions = Event.inventory(
   ...SessionTodo.Event.Definitions,
   ...SyncTransferEvent.Definitions,
   ...SyncInitializationEvent.Definitions,
+  ...ModelContextOperationEvent.Definitions,
 )
 
 export const Definitions = Event.inventory(
@@ -72,6 +74,7 @@ export const Definitions = Event.inventory(
   ...SessionTodo.Event.Definitions,
   ...SyncTransferEvent.Definitions,
   ...SyncInitializationEvent.Definitions,
+  ...ModelContextOperationEvent.Definitions,
   ...LspEvent.Definitions,
   ...PermissionV1.Event.Definitions,
   ...TuiEvent.Definitions,

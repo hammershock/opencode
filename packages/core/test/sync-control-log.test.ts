@@ -26,7 +26,7 @@ describe("SyncControlLog", () => {
       await a.replay()
 
       expect(await a.membership()).toMatchObject({ generation: 2, devices: ["a", "b"] })
-      const tombstone = SyncEvent.Tombstone.make({ id: "delete-session", sessionID: "session", deletedAt: 3 })
+      const tombstone = SyncEvent.Tombstone.make({ id: "sync-delete:a:delete-session", sessionID: "session", deletedAt: 3 })
       await a.enqueue(intent("delete", "a", await a.sessionDelete(tombstone), 3))
       const deletion = await a.append()
       expect(deletion).toMatchObject({ generation: 3, operation: { kind: "session.delete" } })
@@ -42,6 +42,9 @@ describe("SyncControlLog", () => {
         headDigest: stableDigest(headA),
       }, headA)
       await a.ensureFence(ackA)
+      expect(remote.paths()).toContain(
+        `control/v2/deletions/${createHash("sha256").update(tombstone.id).digest("hex")}/fences/a.json`,
+      )
       await a.enqueue(
         intent(
           "ack-a",

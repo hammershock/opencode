@@ -40,6 +40,7 @@ const instructionFS = Layer.effect(
     Effect.map((fs) =>
       FSUtil.Service.of({
         ...fs,
+        resolve: (path) => Effect.succeed(path),
         up: () => Effect.succeed([instructionFile]),
         readFileStringSafe: (path) => Effect.succeed(path === instructionFile ? "Be precise." : undefined),
       }),
@@ -49,7 +50,7 @@ const instructionFS = Layer.effect(
 const itWithInstructions = testEffect(
   AppNodeBuilder.build(builtInsNode, [
     [Location.node, locationLayer],
-    [FSUtil.node, instructionFS],
+    [FSUtil.locationNode, instructionFS],
     [Global.node, Global.layerWith({ config: "/global" })],
   ]),
 )
@@ -63,15 +64,17 @@ describe("SystemContextBuiltIns", () => {
 
       expect(initialized.baseline).toBe(
         [
-          "Here is some useful information about the environment you are running in:",
-          "<env>",
+          "Execution harness: OpenCode REXD (opencode-rexd)",
+          "<environment>",
+          "  Target: local (local)",
           `  Working directory: ${directory}`,
-          `  Workspace root folder: ${projectDirectory}`,
-          "  Is directory a git repo: yes",
-          `  Platform: ${process.platform}`,
-          "</env>",
+          `  Project root: ${projectDirectory}`,
+          "  VCS: git",
+          `  Platform: ${process.platform}-${process.arch}`,
+          "</environment>",
           "",
-          `Today's date: ${localDate(timestamp)}`,
+          `Current date: ${localDate(timestamp)}`,
+          `User timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"}`,
         ].join("\n"),
       )
     }),
@@ -88,7 +91,10 @@ describe("SystemContextBuiltIns", () => {
 
       expect(refreshed).toMatchObject({
         _tag: "Updated",
-        text: `Today's date is now: ${localDate(timestamp + 24 * 60 * 60 * 1000)}`,
+        text: [
+          `Current date: ${localDate(timestamp + 24 * 60 * 60 * 1000)}`,
+          `User timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"}`,
+        ].join("\n"),
       })
     }),
   )
@@ -111,15 +117,17 @@ describe("SystemContextBuiltIns", () => {
 
       expect((yield* SystemContext.initialize(yield* context.load())).baseline).toBe(
         [
-          "Here is some useful information about the environment you are running in:",
-          "<env>",
+          "Execution harness: OpenCode REXD (opencode-rexd)",
+          "<environment>",
+          "  Target: local (local)",
           `  Working directory: ${directory}`,
-          `  Workspace root folder: ${projectDirectory}`,
-          "  Is directory a git repo: yes",
-          `  Platform: ${process.platform}`,
-          "</env>",
+          `  Project root: ${projectDirectory}`,
+          "  VCS: git",
+          `  Platform: ${process.platform}-${process.arch}`,
+          "</environment>",
           "",
-          `Today's date: ${localDate(timestamp)}`,
+          `Current date: ${localDate(timestamp)}`,
+          `User timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"}`,
           "",
           `Instructions from: ${instructionFile}\nBe precise.`,
         ].join("\n"),

@@ -25,6 +25,8 @@ import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
 import { ConfigV1 } from "./v1/config/config"
 import { ConfigMigrateV1 } from "./v1/config/migrate"
+import { ControllerFileSystem } from "./controller-filesystem"
+import { Flag } from "./flag/flag"
 
 export class Info extends Schema.Class<Info>("Config.Info")({
   $schema: Schema.optional(Schema.String).annotate({
@@ -109,6 +111,8 @@ export class Info extends Schema.Class<Info>("Config.Info")({
 export class Document extends Schema.Class<Document>("Config.Document")({
   type: Schema.Literal("document"),
   path: Schema.String.pipe(Schema.optional),
+  scope: Schema.Literals(["global", "project"]).pipe(Schema.optional),
+  filesystem: Schema.Literals(["controller", "target"]).pipe(Schema.optional),
   info: Info,
 }) {}
 
@@ -136,6 +140,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
+    const controllerFS = yield* ControllerFileSystem.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
     const policy = yield* Policy.Service
@@ -144,8 +149,15 @@ const layer = Layer.effect(
     const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
     const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
 
-    const loadFile = Effect.fnUntraced(function* (filepath: string) {
-      const text = yield* fs.readFileStringSafe(filepath)
+    const loadFile = Effect.fnUntraced(function* (
+      filepath: string,
+      origin: {
+        readonly filesystem: FSUtil.Interface
+        readonly scope: "global" | "project"
+        readonly side: "controller" | "target"
+      },
+    ) {
+      const text = yield* origin.filesystem.readFileStringSafe(filepath)
       if (!text) return
 
       const errors: ParseError[] = []
@@ -158,12 +170,18 @@ const layer = Layer.effect(
           : decodeInfo(input),
       )
       if (!info) return
-      return new Document({ type: "document", path: filepath, info })
+      return new Document({
+        type: "document",
+        path: filepath,
+        scope: origin.scope,
+        filesystem: origin.side,
+        info,
+      })
     })
 
-    const loadDirectory = Effect.fnUntraced(function* (directory: AbsolutePath) {
+    const loadDirectory = Effect.fnUntraced(function* (directory: AbsolutePath, input: Parameters<typeof loadFile>[1]) {
       return [
-        ...(yield* Effect.forEach(names, (file) => loadFile(path.join(directory, file))).pipe(
+        ...(yield* Effect.forEach(names, (file) => loadFile(path.join(directory, file), input)).pipe(
           Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
         )),
         new Directory({ type: "directory", path: directory }),
@@ -172,17 +190,26 @@ const layer = Layer.effect(
 
     const globalDirectory = AbsolutePath.make(global.config)
     const locationIsGlobal = path.resolve(location.directory) === path.resolve(global.config)
+    const locationPath = location.target.type === "rexd" ? path.posix : path
+    const discoveryDirectory = location.canonicalDirectory ?? location.directory
+    const projectRelative = locationPath.relative(location.project.directory, discoveryDirectory)
+    const locationIsInProject =
+      projectRelative === "" ||
+      (!locationPath.isAbsolute(projectRelative) &&
+        projectRelative !== ".." &&
+        !projectRelative.startsWith(`..${locationPath.sep}`))
     // Read configuration once when this location opens. Later calls reuse these
     // values until the location is reopened.
-    const discovered = locationIsGlobal
-      ? []
-      : yield* fs
-          .up({
-            targets: [".opencode", ...names.toReversed()],
-            start: location.directory,
-            stop: location.project.directory,
-          })
-          .pipe(Effect.orDie)
+    const discovered =
+      locationIsGlobal || Flag.OPENCODE_DISABLE_PROJECT_CONFIG || !locationIsInProject
+        ? []
+        : yield* fs
+            .up({
+              targets: [".opencode", ...names.toReversed()],
+              start: discoveryDirectory,
+              stop: location.project.directory,
+            })
+            .pipe(Effect.catch(() => Effect.succeed([] as string[])))
     const directories = [
       globalDirectory,
       ...discovered
@@ -193,11 +220,17 @@ const layer = Layer.effect(
     // A config closer to the opened directory should win over one higher up.
     // Search starts nearby, so reverse the results before applying them.
     const directPaths = discovered.filter((item) => path.basename(item) !== ".opencode").toReversed()
-    const direct = yield* Effect.forEach(directPaths, loadFile).pipe(
+    const projectInput = { filesystem: fs, scope: "project" as const, side: "target" as const }
+    const direct = yield* Effect.forEach(directPaths, (filepath) => loadFile(filepath, projectInput)).pipe(
       Effect.orDie,
       Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
     )
-    const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
+    const supplementary = yield* Effect.forEach(directories, (directory, index) =>
+      loadDirectory(
+        directory,
+        index === 0 ? { filesystem: controllerFS, scope: "global", side: "controller" } : projectInput,
+      ),
+    ).pipe(Effect.orDie)
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.opencode` files.
     const configs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
@@ -223,5 +256,5 @@ export const locationLayer = layer.pipe(Layer.provideMerge(Policy.locationLayer)
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [FSUtil.node, Global.node, Location.node, Policy.node],
+  deps: [ControllerFileSystem.node, FSUtil.locationNode, Global.node, Location.node, Policy.node],
 })

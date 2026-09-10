@@ -207,6 +207,46 @@ describe("layer node", () => {
     expect(await Effect.runPromise(program)).toEqual(["Alice"])
   })
 
+  test("keeps same-service replacements within their tag", async () => {
+    const tags = LayerNode.tags({ location: ["global"], global: [] })
+    const global = tags.make("global")
+    const location = tags.make("location")
+    const controllerValue = global({ service: Value, layer: valueLayer, deps: [] })
+    const locationValue = location({ service: Value, layer: Layer.succeed(Value, Value.of({ value: "local" })), deps: [] })
+    const database = global({
+      service: Database,
+      layer: Layer.effect(Database, Effect.map(Value, (value) => Database.of({ name: value.value }))),
+      deps: [controllerValue],
+    })
+    const users = location({
+      service: Users,
+      layer: Layer.effect(
+        Users,
+        Effect.gen(function* () {
+          const db = yield* Database
+          const value = yield* Value
+          return Users.of({ list: Effect.succeed([db.name, value.value]) })
+        }),
+      ),
+      deps: [database, locationValue],
+    })
+    const replacement = location({
+      service: Value,
+      layer: Layer.succeed(Value, Value.of({ value: "remote" })),
+      deps: [],
+    })
+
+    const result = LayerNode.hoist(LayerNode.group([users]), tags.values.global, [[locationValue, replacement]])
+    const layer = LayerNode.compile(result.node).pipe(
+      Layer.provide(LayerNode.compile(result.hoisted)),
+    ) as unknown as Layer.Layer<Users>
+    const program = Effect.gen(function* () {
+      return yield* (yield* Users).list
+    }).pipe(Effect.provide(layer))
+
+    expect(await Effect.runPromise(program)).toEqual(["production", "remote"])
+  })
+
   test("rejects conflicting hoisted implementations", () => {
     const tags = LayerNode.tags({ location: ["global"], global: [] })
     const global = tags.make("global")

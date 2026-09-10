@@ -24,7 +24,6 @@ import { QuestionV2 } from "@opencode-ai/core/question"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { Snapshot } from "@opencode-ai/core/snapshot"
-import { ContextSnapshotDecodeError } from "@opencode-ai/core/session/error"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionMessage } from "@opencode-ai/core/session/message"
@@ -51,11 +50,14 @@ import { SessionStore } from "@opencode-ai/core/session/store"
 import { SessionTurn } from "@opencode-ai/core/session/turn"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
+import { SystemContextBuiltIns } from "@opencode-ai/core/system-context/builtins"
+import { InstructionContext } from "@opencode-ai/core/instruction-context"
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
 import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { ModelContext } from "@opencode-ai/schema/model-context"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
@@ -163,6 +165,25 @@ const models = SessionRunnerModel.layerWith((session) =>
   modelResolveHook.pipe(Effect.as(session.model?.id === "replacement" ? replacementModel : currentModel)),
 )
 const systemContextKey = SystemContext.Key.make("test/context")
+const environmentContext = SystemContext.make({
+  key: SystemContext.Key.make("core/environment"),
+  refresh: "generation",
+  allowEmpty: true,
+  codec: Schema.toCodecJson(ModelContext.Environment),
+  load: Effect.succeed(
+    ModelContext.Environment.make({
+      harness: "OpenCode REXD",
+      entrypoint: "opencode-rexd",
+      targetKind: "local",
+      targetName: "test",
+      directory: "/project",
+      projectRoot: "/project",
+      platform: "test",
+    }),
+  ),
+  baseline: () => "",
+  update: () => "",
+})
 let systemBaseline = "Initial context"
 let systemRemoved = false
 let systemUnavailable = false
@@ -174,8 +195,9 @@ const systemContext = Layer.effectDiscard(
       registry.register({
         key: systemContextKey,
         load: Effect.sync(() =>
-          SystemContext.combine(
-            systemRemoved
+          SystemContext.combine([
+            environmentContext,
+            ...(systemRemoved
               ? []
               : [
                   SystemContext.make({
@@ -190,8 +212,8 @@ const systemContext = Layer.effectDiscard(
                     update: (_previous, current) => current,
                     removed: () => "System context source removed: test/context",
                   }),
-                ],
-          ),
+                ]),
+          ]),
         ),
       }),
     ),
@@ -213,6 +235,12 @@ const skillGuidance = Layer.mock(SkillGuidance.Service, {
     ),
 })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
+const instructionContext = Layer.mock(InstructionContext.Service, {
+  extend: () => Effect.void,
+  reload: () => Effect.void,
+})
+const testDirectory = AbsolutePath.make(process.cwd())
+const movedDirectory = AbsolutePath.make(`${process.cwd()}/test`)
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
@@ -235,7 +263,9 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [LayerNodePlatform.llmClient, client],
   [SessionRunnerModel.node, models],
   [SystemContextRegistry.node, systemContext],
-  [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
+  [InstructionContext.node, instructionContext],
+  [SystemContextBuiltIns.node, Layer.empty],
+  [Location.node, Location.boundNode({ directory: testDirectory })],
   [SkillGuidance.node, skillGuidance],
   [ReferenceGuidance.node, referenceGuidance],
   [PermissionV2.node, permission],
@@ -286,7 +316,9 @@ const it = testEffect(
       [PermissionV2.node, permission],
       [SessionRunnerModel.node, models],
       [SystemContextRegistry.node, systemContext],
-      [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
+      [InstructionContext.node, instructionContext],
+      [SystemContextBuiltIns.node, Layer.empty],
+      [Location.node, Location.boundNode({ directory: testDirectory })],
       [SkillGuidance.node, skillGuidance],
       [ReferenceGuidance.node, referenceGuidance],
       [Snapshot.node, Snapshot.noopLayer],
@@ -307,7 +339,7 @@ const insertSession = (id: SessionV2.ID) =>
         id,
         project_id: Project.ID.global,
         slug: id,
-        directory: "/project",
+        directory: testDirectory,
         title: "test",
         version: "test",
       })
@@ -340,7 +372,7 @@ const setup = Effect.gen(function* () {
   maxActiveToolExecutions = 0
   yield* db
     .insert(ProjectTable)
-    .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+    .values({ id: Project.ID.global, worktree: testDirectory, sandboxes: [] })
     .onConflictDoNothing()
     .run()
     .pipe(Effect.orDie)
@@ -670,16 +702,16 @@ describe("SessionRunnerLLM", () => {
       const session = yield* SessionV2.Service
       const { db } = yield* Database.Service
       const messageID = SessionMessage.ID.create()
-      systemUnavailable = true
-      yield* session.prompt({ id: messageID, sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
       requests.length = 0
-
-      const exit = yield* session.resume(sessionID).pipe(Effect.exit)
+      systemUnavailable = true
+      const exit = yield* session
+        .prompt({ id: messageID, sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
+        .pipe(Effect.exit)
 
       expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(SystemContext.InitializationBlocked)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(SessionV2.OperationUnavailableError)
       expect(requests).toHaveLength(0)
-      expect(yield* SessionInput.hasPending(db, sessionID, "steer")).toBe(true)
+      expect(yield* SessionInput.hasPending(db, sessionID, "steer")).toBe(false)
       expect(
         yield* db
           .select()
@@ -710,7 +742,7 @@ describe("SessionRunnerLLM", () => {
       yield* events.publish(SessionEvent.Moved, {
         sessionID,
         timestamp: DateTime.makeUnsafe(1),
-        location: Location.Ref.make({ directory: AbsolutePath.make("/moved") }),
+        location: Location.Ref.make({ directory: movedDirectory }),
       })
 
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
@@ -736,13 +768,14 @@ describe("SessionRunnerLLM", () => {
         .where(eq(SessionContextEpochTable.session_id, sessionID))
         .run()
         .pipe(Effect.orDie)
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       requests.length = 0
 
-      const exit = yield* session.resume(sessionID).pipe(Effect.exit)
+      const exit = yield* session
+        .prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
+        .pipe(Effect.exit)
 
       expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(ContextSnapshotDecodeError)
+      if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(SessionV2.OperationUnavailableError)
       expect(requests).toHaveLength(0)
     }),
   )
@@ -764,15 +797,25 @@ describe("SessionRunnerLLM", () => {
         ["Initial context"],
         ["Initial context"],
       ])
-      expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "user", "system"])
-      expect(requests[1]?.messages.at(-1)?.content).toEqual([{ type: "text", text: "Changed context" }])
+      expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "system", "user"])
+      expect(requests[1]?.messages.findLast((message) => message.role === "system")?.content).toEqual([
+        { type: "text", text: "Changed context" },
+      ])
       expect(yield* session.messages({ sessionID })).toHaveLength(3)
       const { db } = yield* Database.Service
       expect(
         yield* db
           .select({ id: EventTable.id })
           .from(EventTable)
-          .where(eq(EventTable.type, "session.next.context.updated.1"))
+          .where(eq(EventTable.type, "session.next.context.advanced.1"))
+          .all()
+          .pipe(Effect.orDie),
+      ).toHaveLength(1)
+      expect(
+        yield* db
+          .select({ id: EventTable.id })
+          .from(EventTable)
+          .where(eq(EventTable.type, "session.next.context.generation.established.1"))
           .all()
           .pipe(Effect.orDie),
       ).toHaveLength(1)
@@ -960,8 +1003,8 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "user", "system"])
-      expect(requests[1]?.messages.at(-1)?.content).toEqual([
+      expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "system", "user"])
+      expect(requests[1]?.messages.findLast((message) => message.role === "system")?.content).toEqual([
         { type: "text", text: "System context source removed: test/context" },
       ])
       expect(yield* session.messages({ sessionID })).toHaveLength(3)
@@ -996,15 +1039,15 @@ describe("SessionRunnerLLM", () => {
         ["Initial context"],
         ["Initial context"],
       ])
-      expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "user", "system"])
+      expect(requests[1]?.messages.map((message) => message.role)).toEqual(["user", "system", "user"])
       expect(requests[2]?.messages.filter((message) => message.role === "system")).toHaveLength(2)
       expect((yield* session.context(sessionID)).map((message) => message.type)).toEqual([
         "user",
-        "user",
         "system",
+        "user",
         "model-switched",
-        "user",
         "system",
+        "user",
       ])
       yield* replaySessionProjection(sessionID)
       expect(yield* session.messages({ sessionID })).toHaveLength(6)
@@ -1045,7 +1088,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("rebuilds the baseline directly after completed compaction", () =>
+  it.effect("keeps the admitted baseline through compaction without reloading sources", () =>
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
@@ -1076,7 +1119,7 @@ describe("SessionRunnerLLM", () => {
 
       expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
         ["Initial context"],
-        ["Replacement context"],
+        ["Initial context"],
       ])
       yield* replaySessionProjection(sessionID)
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
@@ -1343,7 +1386,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("preserves effective System updates while compaction rebaseline is blocked", () =>
+  it.effect("rebaselines effective System updates from the snapshot while its source is unavailable", () =>
     Effect.gen(function* () {
       yield* setup
       const session = yield* SessionV2.Service
@@ -1375,8 +1418,8 @@ describe("SessionRunnerLLM", () => {
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Third" }), resume: false })
       yield* session.resume(sessionID)
 
-      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Initial context"])
-      expect(systemTexts(requests.at(-1)!)).toContain("Changed context")
+      expect(requests.at(-1)?.system.map((part) => part.text)).toEqual(["Changed context"])
+      expect(systemTexts(requests.at(-1)!)).not.toContain("Changed context")
     }),
   )
 

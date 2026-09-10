@@ -12,6 +12,7 @@ import { ReadToolFileSystem } from "./read-filesystem"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
+import { InstructionContext } from "../instruction-context"
 
 export const name = "read"
 const SUPPORTED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"])
@@ -34,6 +35,7 @@ const layer = Layer.effectDiscard(
     const mutation = yield* LocationMutation.Service
     const image = yield* Image.Service
     const permission = yield* PermissionV2.Service
+    const instructions = yield* InstructionContext.Service
 
     yield* tools
       .register({
@@ -77,6 +79,7 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source,
               })
+              yield* instructions.extend({ sessionID: context.sessionID, path: absolute, kind: type })
               if (type === "directory")
                 return yield* reader.list(absolute, { offset: input.offset, limit: input.limit })
               const content = yield* reader.read(absolute, resource, {
@@ -113,5 +116,12 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/read",
   layer,
-  deps: [ToolRegistry.node, ReadToolFileSystem.node, LocationMutation.node, Image.node, PermissionV2.node],
+  deps: [
+    ToolRegistry.node,
+    ReadToolFileSystem.node,
+    LocationMutation.node,
+    Image.node,
+    PermissionV2.node,
+    InstructionContext.node,
+  ],
 })

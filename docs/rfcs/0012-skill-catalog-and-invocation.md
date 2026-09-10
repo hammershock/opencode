@@ -6,6 +6,8 @@ authors:
   - hammershock
 created: 2026-09-11
 updated: 2026-09-11
+implemented-by:
+  - https://github.com/hammershock/opencode/pull/280
 depends-on:
   - 0002
   - 0003

@@ -1,8 +1,63 @@
 export * as Skill from "./skill"
 
 import { Schema } from "effect"
-import { optional } from "./schema"
-import { AbsolutePath } from "./schema"
+import { AbsolutePath, optional, RelativePath } from "./schema"
+
+export const ID = Schema.String.check(Schema.isPattern(/^skl_[0-9a-f]{64}$/)).pipe(Schema.brand("Skill.ID"))
+export type ID = typeof ID.Type
+
+export const Digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)).pipe(Schema.brand("Skill.Digest"))
+export type Digest = typeof Digest.Type
+
+export const SourceKind = Schema.Literals(["built-in", "opencode-global", "opencode-project", "imported", "url"])
+export type SourceKind = typeof SourceKind.Type
+
+export interface Metadata extends Schema.Schema.Type<typeof Metadata> {}
+export const Metadata = Schema.Struct({
+  id: ID,
+  name: Schema.String,
+  description: Schema.String.pipe(optional),
+  sourceLabel: Schema.String,
+  digest: Digest,
+}).annotate({ identifier: "Skill.Metadata" })
+
+export interface SourceDetail extends Schema.Schema.Type<typeof SourceDetail> {}
+export const SourceDetail = Schema.Struct({
+  kind: SourceKind,
+  label: Schema.String,
+  root: AbsolutePath.pipe(optional),
+  relativePath: RelativePath.pipe(optional),
+}).annotate({ identifier: "Skill.SourceDetail" })
+
+export const DiagnosticKind = Schema.Literals([
+  "root-unavailable",
+  "scan-failed",
+  "path-escape",
+  "read-failed",
+  "invalid-frontmatter",
+  "invalid-name",
+  "name-mismatch",
+  "duplicate-name",
+])
+export type DiagnosticKind = typeof DiagnosticKind.Type
+
+export interface Diagnostic extends Schema.Schema.Type<typeof Diagnostic> {}
+export const Diagnostic = Schema.Struct({
+  kind: DiagnosticKind,
+  severity: Schema.Literals(["error", "warning"]),
+  sourceLabel: Schema.String,
+  message: Schema.String,
+  path: AbsolutePath.pipe(optional),
+  skillID: ID.pipe(optional),
+}).annotate({ identifier: "Skill.Diagnostic" })
+
+export interface RegistrySnapshot extends Schema.Schema.Type<typeof RegistrySnapshot> {}
+export const RegistrySnapshot = Schema.Struct({
+  revision: Digest,
+  skills: Schema.Array(Metadata),
+  diagnostics: Schema.Array(Diagnostic),
+  digest: Digest,
+}).annotate({ identifier: "Skill.RegistrySnapshot" })
 
 export interface DirectorySource extends Schema.Schema.Type<typeof DirectorySource> {}
 export const DirectorySource = Schema.Struct({

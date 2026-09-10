@@ -9,6 +9,7 @@ import { Question } from "../src/question"
 import { Session } from "../src/session"
 import { SessionEvent } from "../src/session-event"
 import { SessionTodo } from "../src/session-todo"
+import { Skill } from "../src/skill"
 import { optional } from "../src/schema"
 
 describe("contract hygiene", () => {
@@ -33,6 +34,17 @@ describe("contract hygiene", () => {
     expect(Pty.ID.create()).toStartWith("pty_")
   })
 
+  test("skill IDs and digests enforce their exact opaque format", () => {
+    const decodeID = Schema.decodeUnknownSync(Skill.ID)
+    const decodeDigest = Schema.decodeUnknownSync(Skill.Digest)
+    const digest = "a".repeat(64)
+
+    expect(String(decodeID(`skl_${digest}` as unknown))).toBe(`skl_${digest}`)
+    expect(String(decodeDigest(digest as unknown))).toBe(digest)
+    expect(() => decodeID(`skl_${"a".repeat(63)}` as unknown)).toThrow()
+    expect(() => decodeID(`skill_${digest}` as unknown)).toThrow()
+  })
+
   test("reusable public identifiers are stable and unique", () => {
     const identifiers = [
       Agent.Color,
@@ -47,6 +59,10 @@ describe("contract hygiene", () => {
       Project.Info,
       Pty.Info,
       Session.ListAnchor,
+      Skill.Metadata,
+      Skill.SourceDetail,
+      Skill.Diagnostic,
+      Skill.RegistrySnapshot,
     ].map((schema) => schema.ast.annotations?.identifier)
 
     expect(identifiers.every((identifier) => typeof identifier === "string")).toBe(true)

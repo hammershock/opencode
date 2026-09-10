@@ -11,24 +11,41 @@ import { Location } from "../../location"
 
 export const Plugin = define({
   id: "config-skill",
-  effect: Effect.fn(function* (ctx) {
+  effect: Effect.fn(function* () {
     const config = yield* Config.Service
     const global = yield* Global.Service
     const location = yield* Location.Service
-    yield* ctx.skill.transform(
+    const skill = yield* SkillV2.Service
+    yield* skill.transform(
       Effect.fn(function* (draft) {
         const entries = yield* config.entries()
-        const directories = entries.flatMap((entry) => (entry.type === "directory" ? [entry.path] : []))
-        const items = entries.flatMap((entry) => (entry.type === "document" ? (entry.info.skills ?? []) : []))
+        const directories = entries.flatMap((entry) => {
+          if (entry.type !== "directory") return []
+          const globalDirectory = path.resolve(entry.path) === path.resolve(global.config)
+          if (!globalDirectory && location.target.type !== "local") return []
+          return [
+            { path: entry.path, kind: globalDirectory ? ("opencode-global" as const) : ("opencode-project" as const) },
+          ]
+        })
+        const items = entries.flatMap((entry) => {
+          if (entry.type !== "document") return []
+          if (entry.scope !== "global" && location.target.type !== "local") return []
+          return entry.info.skills ?? []
+        })
         for (const directory of directories) {
           draft.source(
-            SkillV2.DirectorySource.make({ type: "directory", path: AbsolutePath.make(path.join(directory, "skill")) }),
+            SkillV2.DirectorySource.make({
+              type: "directory",
+              path: AbsolutePath.make(path.join(directory.path, "skill")),
+            }),
+            { kind: directory.kind },
           )
           draft.source(
             SkillV2.DirectorySource.make({
               type: "directory",
-              path: AbsolutePath.make(path.join(directory, "skills")),
+              path: AbsolutePath.make(path.join(directory.path, "skills")),
             }),
+            { kind: directory.kind },
           )
         }
         for (const item of items) {
@@ -42,6 +59,7 @@ export const Plugin = define({
               type: "directory",
               path: AbsolutePath.make(path.isAbsolute(expanded) ? expanded : path.join(location.directory, expanded)),
             }),
+            { kind: "imported" },
           )
         }
       }),

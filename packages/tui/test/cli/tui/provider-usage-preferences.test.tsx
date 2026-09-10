@@ -19,8 +19,25 @@ import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 
 const meters: Meter[] = [
-  { id: "quota", label: "Quota", remaining: 72, limit: 100, unit: "percentage", order: 0 },
-  { id: "requests", label: "Requests", remaining: 8, unit: "requests", order: 1 },
+  {
+    id: "quota",
+    label: "5 hour limit",
+    kind: "quota",
+    remaining: 72,
+    limit: 100,
+    unit: "percentage",
+    resetsAt: 1_700_006_960_000,
+    order: 0,
+  },
+  {
+    id: "requests",
+    label: "Weekly limit",
+    kind: "quota",
+    remaining: 8,
+    unit: "requests",
+    resetsAt: 1_700_360_000_000,
+    order: 1,
+  },
 ]
 
 const result: Result = {
@@ -70,13 +87,14 @@ test("usage dialog retains missing meters while toggle/reorder update the render
                         <DialogProviderUsagePreferences providerID="openai" meters={meters} usage={usage} />
                         <text>
                           Footer{" "}
-                          {summary(
-                            result,
-                            usage.selected(
+                          {summary(result, {
+                            selected: usage.selected(
                               "openai",
                               meters.map((meter) => meter.id),
                             ),
-                          )}
+                            now: 1_700_000_000_000,
+                            compact: true,
+                          })}
                         </text>
                       </box>
                     </DialogProvider>
@@ -96,19 +114,19 @@ test("usage dialog retains missing meters while toggle/reorder update the render
       await Bun.sleep(10)
       await app.renderOnce()
     }
-    expect(app.captureCharFrame()).toContain("Footer 72% left · 8 requests")
+    expect(app.captureCharFrame()).toContain("Footer 5h 72% reset 1h56m · 7d 8 requests reset 4d4h")
 
     keymap.dispatchCommand("usage.move.down")
     keymap.dispatchCommand("usage.move.down")
     await app.renderOnce()
     expect(readSaved()).toEqual(["missing", "requests", "quota"])
     const reordered = app.captureCharFrame()
-    expect(reordered.indexOf("Requests")).toBeLessThan(reordered.indexOf("Quota"))
+    expect(reordered.indexOf("Weekly limit")).toBeLessThan(reordered.indexOf("5 hour limit"))
 
     keymap.dispatchCommand("usage.toggle")
     await app.renderOnce()
     expect(readSaved()).toEqual(["missing", "quota"])
-    expect(app.captureCharFrame()).toContain("Footer 72% left")
+    expect(app.captureCharFrame()).toContain("Footer 5h 72% reset 1h56m")
   } finally {
     app.renderer.destroy()
   }

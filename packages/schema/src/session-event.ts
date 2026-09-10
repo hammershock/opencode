@@ -159,7 +159,7 @@ export const ContextAdvanced = Event.define({
   schema: {
     ...Base,
     messageID: SessionMessage.ID,
-    cause: Schema.Literals(["dynamic", "nested-instructions"]),
+    cause: Schema.Literals(["dynamic", "nested-instructions", "skill-catalog-reloaded"]),
     text: Schema.String,
     sources: ModelContext.SourceState,
     digest: Schema.NonEmptyString,

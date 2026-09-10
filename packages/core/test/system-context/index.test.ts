@@ -7,10 +7,11 @@ const key = SystemContext.Key.make
 const stringContext = (input: {
   key: string
   value: string | SystemContext.Unavailable
-  refresh?: "generation" | "turn"
+  refresh?: "generation" | "activation" | "turn"
   baseline?: (value: string) => string
   update?: (previous: string, current: string) => string
   removed?: (value: string) => string
+  preservePrevious?: (value: string) => boolean
 }) =>
   SystemContext.make({
     key: key(input.key),
@@ -20,6 +21,7 @@ const stringContext = (input: {
     baseline: input.baseline ?? String,
     update: input.update ?? ((_previous, current) => current),
     removed: input.removed,
+    preservePrevious: input.preservePrevious,
   })
 
 describe("SystemContext", () => {
@@ -155,6 +157,103 @@ describe("SystemContext", () => {
         },
       })
       expect(loads).toBe(1)
+    }),
+  )
+
+  it.effect("observes activation sources only at the activation boundary", () =>
+    Effect.gen(function* () {
+      let loads = 0
+      const context = SystemContext.make({
+        key: key("core/skill-guidance"),
+        refresh: "activation",
+        codec: Schema.toCodecJson(Schema.String),
+        load: Effect.sync(() => {
+          loads++
+          return "current"
+        }),
+        baseline: String,
+        update: (_previous, current) => `Skills changed: ${current}`,
+      })
+      const previous = {
+        "core/skill-guidance": { value: "accepted", baseline: "accepted", refresh: "activation" as const },
+      }
+
+      expect(yield* SystemContext.reconcile(context, previous)).toEqual({ _tag: "Unchanged" })
+      expect(loads).toBe(0)
+      expect(yield* SystemContext.reconcileActivation(context, previous)).toEqual({
+        _tag: "Updated",
+        text: "Skills changed: current",
+        snapshot: {
+          "core/skill-guidance": { value: "current", baseline: "current", refresh: "activation" },
+        },
+      })
+      expect(loads).toBe(1)
+    }),
+  )
+
+  it.effect("carries admitted activation sources through ordinary replacement without loading them", () =>
+    Effect.gen(function* () {
+      let activationLoads = 0
+      const context = SystemContext.combine([
+        stringContext({ key: "core/date", value: "current" }),
+        SystemContext.make({
+          key: key("core/skill-guidance"),
+          refresh: "activation",
+          codec: Schema.toCodecJson(Schema.String),
+          load: Effect.sync(() => {
+            activationLoads++
+            return "changed on disk"
+          }),
+          baseline: (value) => `Skills: ${value}`,
+          update: (_previous, current) => `Skills: ${current}`,
+        }),
+      ])
+
+      expect(
+        yield* SystemContext.reconcile(context, {
+          "core/date": { value: 42 },
+          "core/skill-guidance": {
+            value: "accepted",
+            baseline: "Skills: accepted",
+            refresh: "activation",
+          },
+        }),
+      ).toEqual({
+        _tag: "ReplacementReady",
+        generation: {
+          baseline: "current\n\nSkills: accepted",
+          snapshot: {
+            "core/date": { value: "current", baseline: "current" },
+            "core/skill-guidance": {
+              value: "accepted",
+              baseline: "Skills: accepted",
+              refresh: "activation",
+            },
+          },
+        },
+      })
+      expect(activationLoads).toBe(0)
+    }),
+  )
+
+  it.effect("retains admitted activation state while the fresh catalog is degraded", () =>
+    Effect.gen(function* () {
+      const context = stringContext({
+        key: "core/skill-guidance",
+        value: "degraded",
+        refresh: "activation",
+        preservePrevious: (value) => value === "degraded",
+      })
+      const previous = {
+        "core/skill-guidance": { value: "accepted", baseline: "accepted", refresh: "activation" as const },
+      }
+
+      expect(yield* SystemContext.reconcileActivation(context, previous)).toEqual({ _tag: "Unchanged" })
+      expect((yield* SystemContext.initialize(context)).snapshot["core/skill-guidance"]).toEqual({
+        value: "degraded",
+        baseline: "degraded",
+        refresh: "activation",
+      })
     }),
   )
 

@@ -55,12 +55,13 @@ const it = testEffect(
 )
 const sessionID = SessionV2.ID.make("ses_prompt_test")
 const messageID = SessionMessage.ID.create()
+const directory = AbsolutePath.make(process.cwd())
 
 const setup = Effect.gen(function* () {
   const { db } = yield* Database.Service
   yield* db
     .insert(ProjectTable)
-    .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+    .values({ id: Project.ID.global, worktree: directory, sandboxes: [] })
     .onConflictDoNothing()
     .run()
     .pipe(Effect.orDie)
@@ -70,7 +71,7 @@ const setup = Effect.gen(function* () {
       id: sessionID,
       project_id: Project.ID.global,
       slug: "test",
-      directory: "/project",
+      directory,
       title: "test",
       version: "test",
     })
@@ -194,7 +195,7 @@ describe("SessionV2.prompt", () => {
       const session = yield* SessionV2.Service
       const events = yield* EventV2.Service
       const { db } = yield* Database.Service
-      const fiber = yield* session.events({ sessionID }).pipe(Stream.take(4), Stream.runCollect, Effect.forkScoped)
+      const fiber = yield* session.events({ sessionID }).pipe(Stream.take(5), Stream.runCollect, Effect.forkScoped)
       yield* Effect.yieldNow
 
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
@@ -203,10 +204,11 @@ describe("SessionV2.prompt", () => {
       const streamed = Array.from(yield* Fiber.join(fiber))
 
       expect(streamed.map((event) => [event.durable?.seq, event.type])).toEqual([
-        [0, "session.next.prompt.admitted"],
+        [0, "session.next.context.generation.established"],
         [1, "session.next.prompt.admitted"],
-        [2, "session.next.prompted"],
+        [2, "session.next.prompt.admitted"],
         [3, "session.next.prompted"],
+        [4, "session.next.prompted"],
       ])
       expect(
         Array.from(
@@ -381,7 +383,7 @@ describe("SessionV2.prompt", () => {
       )
 
       expect(yield* eventCount(EventV2.versionedType(SessionEvent.Prompted.type, 1))).toBe(1)
-      expect(yield* admitted(messageID)).toMatchObject({ promotedSeq: 1 })
+      expect(yield* admitted(messageID)).toMatchObject({ promotedSeq: 2 })
       expect(yield* session.messages({ sessionID })).toMatchObject([
         { id: messageID, type: "user", text: "Promote once" },
       ])
@@ -502,7 +504,7 @@ describe("SessionV2.prompt", () => {
           id: other,
           project_id: Project.ID.global,
           slug: "other",
-          directory: "/project",
+          directory,
           title: "other",
           version: "test",
         })

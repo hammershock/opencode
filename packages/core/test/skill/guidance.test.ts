@@ -1,36 +1,42 @@
-import path from "path"
 import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
+import { Skill } from "@opencode-ai/schema/skill"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SkillV2 } from "@opencode-ai/core/skill"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
 import { it } from "../lib/effect"
 
 const build = AgentV2.ID.make("build")
-const effect = SkillV2.Info.make({
+const digest = Skill.Digest.make("a".repeat(64))
+const effect = Skill.Metadata.make({
+  id: Skill.ID.make(`skl_${"1".repeat(64)}`),
   name: "effect",
   description: "Build applications with Effect",
-  location: AbsolutePath.make(path.resolve("/skills/effect/SKILL.md")),
-  content: "Effect guidance",
+  sourceLabel: "Imported · 11111111",
+  digest,
 })
-const hidden = SkillV2.Info.make({
+const hidden = Skill.Metadata.make({
+  id: Skill.ID.make(`skl_${"2".repeat(64)}`),
   name: "hidden",
-  location: AbsolutePath.make(path.resolve("/skills/hidden/SKILL.md")),
-  content: "Undescribed guidance",
+  sourceLabel: "OpenCode config · 22222222",
+  digest,
 })
-const denied = SkillV2.Info.make({
+const denied = Skill.Metadata.make({
+  id: Skill.ID.make(`skl_${"3".repeat(64)}`),
   name: "denied",
   description: "Must not be advertised",
-  location: AbsolutePath.make(path.resolve("/skills/denied/SKILL.md")),
-  content: "Denied guidance",
+  sourceLabel: "Built-in",
+  digest,
 })
 
-const layer = (list: () => SkillV2.Info[]) =>
+const snapshot = (skills: Skill.Metadata[], diagnostics: Skill.Diagnostic[] = []) =>
+  Skill.RegistrySnapshot.make({ revision: digest, digest, skills, diagnostics })
+
+const layer = (list: () => Skill.RegistrySnapshot) =>
   AppNodeBuilder.build(SkillGuidance.node, [
-    [SkillV2.node, Layer.mock(SkillV2.Service, { list: () => Effect.succeed(list()) })],
+    [SkillV2.node, Layer.mock(SkillV2.Service, { catalog: () => Effect.succeed({ snapshot: list(), entries: [] }) })],
   ])
 
 describe("SkillGuidance", () => {
@@ -39,7 +45,7 @@ describe("SkillGuidance", () => {
       ...AgentV2.Info.empty(build),
       permissions: [{ action: "skill", resource: "denied", effect: "deny" }],
     })
-    let skills = [hidden, denied, effect]
+    let skills = snapshot([hidden, denied, effect])
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
       const initialized = yield* guidance
@@ -54,16 +60,19 @@ describe("SkillGuidance", () => {
           "  <skill>",
           "    <name>effect</name>",
           "    <description>Build applications with Effect</description>",
+          "    <source>Imported</source>",
           "  </skill>",
           "</available_skills>",
         ].join("\n"),
       )
+      expect(JSON.stringify(initialized.snapshot)).not.toContain("skl_")
+      expect(JSON.stringify(initialized.snapshot)).not.toContain("/skills/")
 
-      skills = []
+      skills = snapshot([])
       expect(
         yield* guidance
           .load({ id: agent.id, info: agent })
-          .pipe(Effect.flatMap((context) => SystemContext.reconcile(context, initialized.snapshot))),
+          .pipe(Effect.flatMap((context) => SystemContext.reconcileActivation(context, initialized.snapshot))),
       ).toMatchObject({
         _tag: "Updated",
         text: expect.stringContaining("No skills are currently available."),
@@ -78,13 +87,12 @@ describe("SkillGuidance", () => {
     })
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      expect(
-        yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize)),
-      ).toEqual({
-        baseline: "",
-        snapshot: {},
-      })
-    }).pipe(Effect.provide(layer(() => [effect])))
+      const initialized = yield* guidance
+        .load({ id: agent.id, info: agent })
+        .pipe(Effect.flatMap(SystemContext.initialize))
+      expect(initialized.baseline).toBe("")
+      expect(initialized.snapshot["core/skill-guidance"]?.refresh).toBe("activation")
+    }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 
   it.effect("omits guidance when a resource-specific denial follows the global denial", () => {
@@ -98,12 +106,9 @@ describe("SkillGuidance", () => {
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
       expect(
-        yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize)),
-      ).toEqual({
-        baseline: "",
-        snapshot: {},
-      })
-    }).pipe(Effect.provide(layer(() => [effect])))
+        (yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize))).baseline,
+      ).toBe("")
+    }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 
   it.effect("retains specifically allowed skills after a global denial", () => {
@@ -119,7 +124,7 @@ describe("SkillGuidance", () => {
       expect(
         (yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize))).baseline,
       ).toContain("<name>effect</name>")
-    }).pipe(Effect.provide(layer(() => [effect])))
+    }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 
   it.effect("omits guidance when a specifically allowed skill is denied again", () => {
@@ -134,11 +139,8 @@ describe("SkillGuidance", () => {
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
       expect(
-        yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize)),
-      ).toEqual({
-        baseline: "",
-        snapshot: {},
-      })
-    }).pipe(Effect.provide(layer(() => [effect])))
+        (yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize))).baseline,
+      ).toBe("")
+    }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 })

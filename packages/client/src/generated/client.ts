@@ -11,6 +11,8 @@ import type {
   SessionsActiveOutput,
   SessionsGetInput,
   SessionsGetOutput,
+  SessionsActivateInput,
+  SessionsActivateOutput,
   SessionsSwitchAgentInput,
   SessionsSwitchAgentOutput,
   SessionsSwitchModelInput,
@@ -398,6 +400,17 @@ export function make(options: ClientOptions) {
             path: `/api/session/${encodeURIComponent(input.sessionID)}`,
             successStatus: 200,
             declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ).then((value) => value.data),
+      activate: (input: SessionsActivateInput, requestOptions?: RequestOptions) =>
+        request<{ readonly data: SessionsActivateOutput }>(
+          {
+            method: "POST",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}/activate`,
+            successStatus: 200,
+            declaredStatuses: [404, 503, 400, 401],
             empty: false,
           },
           requestOptions,

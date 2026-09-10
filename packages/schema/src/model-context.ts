@@ -15,7 +15,7 @@ export const SourceSnapshot = Schema.Struct({
   /** Model-visible rendering of this exact value, retained so compaction never reloads its source. */
   baseline: optional(Schema.String),
   removed: optional(Schema.NonEmptyString),
-  refresh: optional(Schema.Literal("generation")),
+  refresh: optional(Schema.Literals(["generation", "activation"])),
 }).annotate({ identifier: "ModelContext.SourceSnapshot" })
 export type SourceSnapshot = typeof SourceSnapshot.Type
 

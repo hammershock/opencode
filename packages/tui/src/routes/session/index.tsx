@@ -331,6 +331,7 @@ export function Session() {
   const sdk = useSDK()
   const editor = useEditorContext()
   const dialog = useDialog()
+  const activation = { sessionID: undefined as string | undefined }
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -358,22 +359,53 @@ export function Session() {
           await sync.bootstrap({ fatal: false })
         } catch {}
       }
-      if (route.accessMode !== "read-only") {
-        const resolution = await sdk.client.v2.sessionLocation.resolve(
-          { sessionID: route.sessionID },
-          { throwOnError: true },
-        )
-        const locationResolution = resolution.data
-        if (locationResolution.status === "resolved") {
-          const editorDirectory = localEditorDirectory(locationResolution)
-          if (editorDirectory) editor.reconnect(editorDirectory)
-          navigate({ ...route, accessMode: "read-write", resolution: undefined })
-          setLocationAccessReady(true)
-        } else {
-          dialog.replace(() => (
-            <DialogSessionLocationRecovery sessionID={route.sessionID} resolution={locationResolution} />
-          ))
+      const writable =
+        route.accessMode === "read-only"
+          ? false
+          : await (async () => {
+              const resolution = await sdk.client.v2.sessionLocation.resolve(
+                { sessionID: route.sessionID },
+                { throwOnError: true },
+              )
+              const locationResolution = resolution.data
+              if (locationResolution.status !== "resolved") {
+                dialog.replace(() => (
+                  <DialogSessionLocationRecovery sessionID={route.sessionID} resolution={locationResolution} />
+                ))
+                return false
+              }
+              const editorDirectory = localEditorDirectory(locationResolution)
+              if (editorDirectory) editor.reconnect(editorDirectory)
+              return true
+            })()
+      if (writable && activation.sessionID !== sessionID) {
+        activation.sessionID = sessionID
+        try {
+          const result = await sdk.client.v2.session.activate({ sessionID }, { throwOnError: true })
+          if (["retained", "unavailable"].includes(result.data.data.status)) {
+            toast.show({
+              title: "Skill catalog reload incomplete",
+              message:
+                result.data.data.diagnostics
+                  .slice(0, 3)
+                  .map((diagnostic) => `${diagnostic.sourceLabel}: ${diagnostic.kind}`)
+                  .join(" · ") || "The previous admitted catalog remains active.",
+              variant: "warning",
+              duration: 5000,
+            })
+          }
+        } catch (error) {
+          toast.show({
+            title: "Skill catalog reload failed",
+            message: errorMessage(error),
+            variant: "warning",
+            duration: 5000,
+          })
         }
+      }
+      if (writable) {
+        navigate({ ...route, accessMode: "read-write", resolution: undefined })
+        setLocationAccessReady(true)
       }
       await sync.session.sync(sessionID)
       if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)

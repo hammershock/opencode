@@ -14,6 +14,10 @@ test("falls back through X11 clipboard commands", () => {
   expect(copyCommand("linux", false, (name) => name === "xsel")).toEqual(["xsel", "--clipboard", "--input"])
 })
 
+test("uses the Windows clipboard from WSL", () => {
+  expect(copyCommand("linux", false, (name) => name === "powershell.exe", true)?.[0]).toBe("powershell.exe")
+})
+
 test("returns undefined when native clipboard is unavailable", () => {
   expect(copyCommand("linux", false, () => false)).toBeUndefined()
 })

@@ -97,7 +97,7 @@ import { targetCommand, type TargetCommandContext } from "../../command-toolkit/
 import { sessionControlCommands, type SessionControlCommandContext } from "../../command-toolkit/session-controls"
 import { approvalModeCommand, type ApprovalModeCommandContext } from "../../command-toolkit/approval-mode"
 import { useTargetManager } from "../../component/target-manager"
-import { DialogSessionLocationRecovery } from "../../component/dialog-session-location-recovery"
+import { DialogSessionLocationRecovery, resolutionDescription } from "../../component/dialog-session-location-recovery"
 import { syncCommands, type SyncCommandContext } from "../../command-toolkit/sync"
 import { useSyncSettings } from "../../context/sync-settings"
 import { adaptKeymapCommands, adaptServerCommands } from "../../command-toolkit/upstream"
@@ -530,7 +530,19 @@ export function Session() {
       context: (source) => {
         const current = location()
         const queryLocation = locationQuery(current)
+        const requireEnvironmentLocation = async () => {
+          if (current?.target?.type !== "rexd") return
+          const result = await sdk.client.v2.sessionLocation.resolve(
+            { sessionID: route.sessionID },
+            { throwOnError: true },
+          )
+          if (result.data.status === "resolved") return
+          throw new Error(
+            `Environment unavailable: ${resolutionDescription(result.data)}. Open /sessions and select this Session to recover its Location.`,
+          )
+        }
         const metadata = async (kind: "list" | "reload") => {
+          await requireEnvironmentLocation()
           const result = await sdk.client.v2.environment[kind]({ location: queryLocation }, { throwOnError: true })
           return {
             enabled: result.data.data.enabled,
@@ -582,6 +594,7 @@ export function Session() {
             list: () => metadata("list"),
             reload: () => metadata("reload"),
             reveal: async () => {
+              await requireEnvironmentLocation()
               const result = await sdk.client.v2.environment.reveal(
                 { location: queryLocation, confirmed: true },
                 { throwOnError: true },

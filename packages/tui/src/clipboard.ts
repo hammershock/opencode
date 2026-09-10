@@ -78,8 +78,18 @@ export function copyCommand(
   os: NodeJS.Platform,
   wayland: boolean,
   has: (name: string) => boolean,
+  wsl = false,
 ): string[] | undefined {
   if (os === "darwin" && has("osascript")) return ["osascript"]
+  if (os === "linux" && wsl && has("powershell.exe")) {
+    return [
+      "powershell.exe",
+      "-NonInteractive",
+      "-NoProfile",
+      "-Command",
+      "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+    ]
+  }
   if (os === "linux" && wayland && has("wl-copy")) return ["wl-copy"]
   if (os === "linux" && has("xclip")) return ["xclip", "-selection", "clipboard"]
   if (os === "linux" && has("xsel")) return ["xsel", "--clipboard", "--input"]
@@ -99,7 +109,12 @@ let copyMethod: Promise<(text: string) => Promise<void>> | undefined
 function getCopyMethod() {
   return (copyMethod ??= (async () => {
     const { which } = await import("@opencode-ai/core/util/which")
-    const native = copyCommand(platform(), Boolean(process.env.WAYLAND_DISPLAY), (name) => Boolean(which(name)))
+    const native = copyCommand(
+      platform(),
+      Boolean(process.env.WAYLAND_DISPLAY),
+      (name) => Boolean(which(name)),
+      release().includes("WSL"),
+    )
     if (native?.[0] === "osascript") {
       return async (text: string) => {
         const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')

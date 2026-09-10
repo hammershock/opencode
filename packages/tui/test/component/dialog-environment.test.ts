@@ -3,6 +3,7 @@ import {
   clearEnvironmentValues,
   createEnvironmentRevealAuthorization,
   displayEnvironmentValue,
+  environmentEntry,
   environmentInspectionFrame,
   environmentVariableOption,
 } from "../../src/component/dialog-environment"
@@ -84,6 +85,11 @@ describe("environment variable metadata", () => {
     expect(displayEnvironmentValue("first\r\nsecond\tcolumn")).toBe("first\\r\\nsecond\\tcolumn")
     clearEnvironmentValues(revealed)
     expect(revealed.values).toEqual({})
+  })
+
+  test("copies the selected entry without changing its raw value", () => {
+    expect(environmentEntry("EMPTY", "")).toBe("EMPTY=")
+    expect(environmentEntry("MULTILINE", "first\nsecond\tcolumn")).toBe("MULTILINE=first\nsecond\tcolumn")
   })
 
   test("cycles only the selected row while retaining value styling", () => {

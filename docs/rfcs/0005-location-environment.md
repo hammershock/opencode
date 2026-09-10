@@ -73,7 +73,7 @@ RFC-0004 的 completion helper 可以为生成原生候选单独加载目标机�
 
 这些命令必须使用 RFC-0003 的 Core command toolkit 注册和编排，不得在 prompt submit 或 autocomplete 组件中自行解析。记录和上下文效果由 workflow 调用的服务产生。
 
-- `/env list`：显示开关、generation、来源、变量名和覆盖关系，默认不显示值；不进入 Session 或模型上下文。列表保持固定面板尺寸、搜索和纵向滚动；未选中行保持稳定裁切，仅选中行横向循环展示被裁切的完整内容，不移动整个列表或右侧备注列。当前 `opencode-rexd` 进程首次 reveal 须由用户二次确认，确认后同一进程内不再重复询问；值只在当前临时 dialog 中显示，关闭 dialog 立即清除展示状态，值不得写入剪贴板、history 或普通日志。进程重启后必须重新确认。
+- `/env list`：显示开关、generation、来源、变量名和覆盖关系，默认不显示值；不进入 Session 或模型上下文。列表保持固定面板尺寸、搜索和纵向滚动；未选中行保持稳定裁切，仅选中行横向循环展示被裁切的完整内容，不移动整个列表或右侧备注列。当前 `opencode-rexd` 进程首次 reveal 须由用户二次确认，确认后同一进程内不再重复询问；值只在当前临时 dialog 中显示，关闭 dialog 立即清除展示状态。确认 reveal 后可由用户显式复制当前选中行的单个原始 `KEY=VALUE`，不得隐式或批量复制；成功/失败提示与日志不得回显值。环境值不得写入 history 或普通日志。进程重启后必须重新确认。
 - `/env reload`：重新读取、解析并校验两个来源。成功后一次性发布新 generation；任一来源失败时保留完整旧 snapshot，显示文件、行列和非敏感错误，不发布部分结果。不进入 Session 或模型上下文。
 - `/env init`：参照 `/init` 的 Agent command，确保工作目录存在 `.env` 模板，再请求 Agent 根据项目完善文件，最后执行与 `/env reload` 相同的事务校验。请求与回复进入 Session 和模型上下文，但不得把已加载值自动附加到 prompt。
 

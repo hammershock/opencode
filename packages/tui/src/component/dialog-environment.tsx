@@ -2,6 +2,8 @@ import type { DialogContext } from "../ui/dialog"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogSelect } from "../ui/dialog-select"
 import { useTheme } from "../context/theme"
+import { useClipboard } from "../context/clipboard"
+import { useToast } from "../ui/toast"
 import { createMemo, createSignal, For, onCleanup } from "solid-js"
 import type { EnvironmentMetadata, EnvironmentValues } from "../command-toolkit/environment"
 
@@ -38,6 +40,10 @@ export function clearEnvironmentValues(revealed: EnvironmentValues | undefined) 
 
 export function displayEnvironmentValue(value: string) {
   return value.replaceAll("\r", "\\r").replaceAll("\n", "\\n").replaceAll("\t", "\\t")
+}
+
+export function environmentEntry(name: string, value: string) {
+  return `${name}=${value}`
 }
 
 export function environmentInspectionFrame(name: string, value: string, width: number, offset: number) {
@@ -89,6 +95,8 @@ function EnvironmentDialog(props: {
   initial?: { revealed?: EnvironmentValues; current?: string }
 }) {
   const { theme } = useTheme()
+  const clipboard = useClipboard()
+  const toast = useToast()
   const [revealed, setRevealed] = createSignal(props.initial?.revealed)
   const [loading, setLoading] = createSignal(false)
   const options = createMemo(() =>
@@ -154,6 +162,19 @@ function EnvironmentDialog(props: {
     }
   }
 
+  async function copyEntry(name: string) {
+    const values = revealed()?.values
+    if (!values || !Object.hasOwn(values, name)) return
+    if (!clipboard.write) {
+      toast.show({ message: "Clipboard is unavailable", variant: "error" })
+      return
+    }
+    await clipboard.write(environmentEntry(name, values[name]!)).then(
+      () => toast.show({ message: "Copied environment entry to clipboard", variant: "success" }),
+      () => toast.show({ message: "Failed to copy environment entry", variant: "error" }),
+    )
+  }
+
   return (
     <DialogSelect
       title={`Environment · generation ${props.snapshot.generation}`}
@@ -167,6 +188,15 @@ function EnvironmentDialog(props: {
           disabled: () => loading() || Boolean(revealed()),
           onTrigger: (option) => void revealValues(option.value),
         },
+        ...(revealed()
+          ? [
+              {
+                command: "dialog.environment.copy",
+                title: "copy KEY=VALUE",
+                onTrigger: (option: { value: string }) => void copyEntry(option.value),
+              },
+            ]
+          : []),
       ]}
       onSelect={() => {}}
     />

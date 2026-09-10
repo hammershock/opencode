@@ -711,7 +711,10 @@ export function Autocomplete(props: {
         name: "prompt.autocomplete.select",
         title: "Select autocomplete item",
         category: "Autocomplete",
-        enabled: autocompleteEnterEnabled(options()[store.selected]),
+        // Keep this predicate lazy. Eagerly reading options() while the layer is
+        // registered subscribes useBindings to keymap-derived slash commands;
+        // registration then emits another keymap state update and loops.
+        enabled: () => autocompleteEnterEnabled(options()[store.selected]),
         run() {
           select()
         },

@@ -1,5 +1,6 @@
 import { expect, mock, test } from "bun:test"
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui"
+import { TextareaRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -15,6 +16,17 @@ async function waitForFrame(setup: Awaited<ReturnType<typeof createTestRenderer>
     await Bun.sleep(10)
   }
   throw new Error(`Timed out waiting for ${text}`)
+}
+
+async function waitForEditor(setup: Awaited<ReturnType<typeof createTestRenderer>>, timeout = 2_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    await setup.renderOnce()
+    const editor = setup.renderer.currentFocusedEditor
+    if (editor instanceof TextareaRenderable) return editor
+    await Bun.sleep(10)
+  }
+  throw new Error(`Timed out waiting for a focused textarea\n${setup.captureCharFrame()}`)
 }
 
 test("SIGHUP clears title and disposes scoped resources once", async () => {
@@ -215,6 +227,68 @@ test.each([
     mock.restore()
   }
 })
+
+test("QuickStart accepts and renders keyboard input without starving the keymap", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/target")
+      return json({ path: "/tmp/opencode/targets.jsonc", revision: "test", targets: [], diagnostics: [], valid: true })
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [{ id: "test", name: "Test", source: "custom", env: [], options: {}, models: {} }],
+        default: {},
+      })
+  })
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  let disposeSlots = () => {}
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: {},
+        pluginHost: {
+          async start(input) {
+            disposeSlots = input.runtime.setupSlots(input.api).dispose
+            started()
+          },
+          async dispose() {
+            disposeSlots()
+          },
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    const editor = await waitForEditor(setup)
+
+    const input = "QuickStart remains responsive"
+    input.split("").forEach((key) => setup.mockInput.pressKey(key))
+    await waitForFrame(setup, input, 2_000)
+
+    expect(editor.plainText).toBe(input)
+
+    setup.mockInput.pressKey("p", { ctrl: true })
+    await waitForFrame(setup, "Commands", 2_000)
+
+    process.emit("SIGHUP")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+}, 10_000)
 
 test("an open session waits for confirmation before returning home after deletion", async () => {
   const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })

@@ -598,7 +598,11 @@ describe("Config", () => {
               "opencode-helicone-session",
               { package: "@my-org/audit-plugin", options: { endpoint: "https://audit.example.com" } },
             ])
-            expect(documents[0]?.info.skills).toEqual(["./skills", "https://example.com/.well-known/skills/"])
+            expect(documents[0]?.info.skills).toEqual({
+              paths: ["./skills"],
+              urls: ["https://example.com/.well-known/skills/"],
+              targets: undefined,
+            })
             expect(documents[0]?.info.references).toEqual({
               docs: { path: "../docs", description: "Use for product documentation", hidden: true },
             })

@@ -117,6 +117,25 @@ export const SettingsSnapshot = Schema.Struct({
   valid: Schema.Boolean,
 }).annotate({ identifier: "Skill.SettingsSnapshot" })
 
+export const ActivationStatus = Schema.Literals(["initialized", "unchanged", "advanced", "retained", "unavailable"])
+export type ActivationStatus = typeof ActivationStatus.Type
+
+export const ActivationDiagnosticKind = Schema.Union([DiagnosticKind, Schema.Literal("reload-failed")])
+export type ActivationDiagnosticKind = typeof ActivationDiagnosticKind.Type
+
+export interface ActivationDiagnostic extends Schema.Schema.Type<typeof ActivationDiagnostic> {}
+export const ActivationDiagnostic = Schema.Struct({
+  kind: ActivationDiagnosticKind,
+  severity: Schema.Literals(["error", "warning"]),
+  sourceLabel: Schema.String,
+}).annotate({ identifier: "Skill.ActivationDiagnostic" })
+
+export interface Activation extends Schema.Schema.Type<typeof Activation> {}
+export const Activation = Schema.Struct({
+  status: ActivationStatus,
+  diagnostics: Schema.Array(ActivationDiagnostic),
+}).annotate({ identifier: "Skill.Activation" })
+
 export interface DiscoveryUpdate extends Schema.Schema.Type<typeof DiscoveryUpdate> {}
 export const DiscoveryUpdate = Schema.Struct({
   paths: Schema.Array(Schema.String),

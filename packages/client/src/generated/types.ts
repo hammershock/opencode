@@ -33,14 +33,6 @@ export type SessionNotFoundError = {
 export const isSessionNotFoundError = (value: unknown): value is SessionNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SessionNotFoundError"
 
-export type ConflictError = {
-  readonly _tag: "ConflictError"
-  readonly message: string
-  readonly resource?: string | undefined
-}
-export const isConflictError = (value: unknown): value is ConflictError =>
-  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
-
 export type ServiceUnavailableError = {
   readonly _tag: "ServiceUnavailableError"
   readonly message: string
@@ -48,6 +40,14 @@ export type ServiceUnavailableError = {
 }
 export const isServiceUnavailableError = (value: unknown): value is ServiceUnavailableError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ServiceUnavailableError"
+
+export type ConflictError = {
+  readonly _tag: "ConflictError"
+  readonly message: string
+  readonly resource?: string | undefined
+}
+export const isConflictError = (value: unknown): value is ConflictError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
 
 export type MessageNotFoundError = {
   readonly _tag: "MessageNotFoundError"
@@ -456,6 +456,31 @@ export type SessionsGetOutput = {
   }
 }["data"]
 
+export type SessionsActivateInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
+
+export type SessionsActivateOutput = {
+  readonly data: {
+    readonly status: "initialized" | "unchanged" | "advanced" | "retained" | "unavailable"
+    readonly diagnostics: ReadonlyArray<{
+      readonly kind:
+        | "root-unavailable"
+        | "scan-failed"
+        | "path-escape"
+        | "read-failed"
+        | "invalid-frontmatter"
+        | "invalid-name"
+        | "name-mismatch"
+        | "duplicate-name"
+        | "invalid-settings"
+        | "missing-target"
+        | "project-target-scope-ignored"
+        | "reload-failed"
+      readonly severity: "error" | "warning"
+      readonly sourceLabel: string
+    }>
+  }
+}["data"]
+
 export type SessionsSwitchAgentInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]
   readonly agent: { readonly agent: string }["agent"]
@@ -803,7 +828,7 @@ export type SessionsModelContextOutput = {
         readonly value: JsonValue
         readonly baseline?: string
         readonly removed?: string
-        readonly refresh?: "generation"
+        readonly refresh?: "generation" | "activation"
       }
     }
   } | null
@@ -936,7 +961,7 @@ export type SessionsHistoryOutput = {
                 readonly value: JsonValue
                 readonly baseline?: string
                 readonly removed?: string
-                readonly refresh?: "generation"
+                readonly refresh?: "generation" | "activation"
               }
             }
           }
@@ -1089,7 +1114,7 @@ export type SessionsHistoryOutput = {
                 readonly value: JsonValue
                 readonly baseline?: string
                 readonly removed?: string
-                readonly refresh?: "generation"
+                readonly refresh?: "generation" | "activation"
               }
             }
           }
@@ -1110,14 +1135,14 @@ export type SessionsHistoryOutput = {
           readonly timestamp: number
           readonly sessionID: string
           readonly messageID: string
-          readonly cause: "dynamic" | "nested-instructions"
+          readonly cause: "dynamic" | "nested-instructions" | "skill-catalog-reloaded"
           readonly text: string
           readonly sources: {
             readonly [x: string]: {
               readonly value: JsonValue
               readonly baseline?: string
               readonly removed?: string
-              readonly refresh?: "generation"
+              readonly refresh?: "generation" | "activation"
             }
           }
           readonly digest: string
@@ -1704,7 +1729,7 @@ export type SessionsEventsOutput =
               readonly value: JsonValue
               readonly baseline?: string
               readonly removed?: string
-              readonly refresh?: "generation"
+              readonly refresh?: "generation" | "activation"
             }
           }
         }
@@ -1857,7 +1882,7 @@ export type SessionsEventsOutput =
               readonly value: JsonValue
               readonly baseline?: string
               readonly removed?: string
-              readonly refresh?: "generation"
+              readonly refresh?: "generation" | "activation"
             }
           }
         }
@@ -1878,14 +1903,14 @@ export type SessionsEventsOutput =
         readonly timestamp: number
         readonly sessionID: string
         readonly messageID: string
-        readonly cause: "dynamic" | "nested-instructions"
+        readonly cause: "dynamic" | "nested-instructions" | "skill-catalog-reloaded"
         readonly text: string
         readonly sources: {
           readonly [x: string]: {
             readonly value: JsonValue
             readonly baseline?: string
             readonly removed?: string
-            readonly refresh?: "generation"
+            readonly refresh?: "generation" | "activation"
           }
         }
         readonly digest: string

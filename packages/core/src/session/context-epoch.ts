@@ -28,6 +28,11 @@ export interface PromptContext extends Prepared {
   readonly advances: ReadonlyArray<string>
 }
 
+export interface Activation<A> {
+  readonly status: "initialized" | "advanced" | "unchanged"
+  readonly value: A
+}
+
 export function initialize(
   db: DatabaseService,
   events: EventV2.Interface,
@@ -50,6 +55,18 @@ export function prepare(
   return locks
     .withLock(sessionID)(prepareOnce(db, events, context, sessionID, locationRevision))
     .pipe(Effect.withSpan("SessionContextEpoch.prepare"))
+}
+
+export function activate<A, E, R>(
+  db: DatabaseService,
+  events: EventV2.Interface,
+  load: Effect.Effect<{ readonly context: SystemContext.SystemContext; readonly value: A }, E, R>,
+  sessionID: SessionSchema.ID,
+  locationRevision: number,
+): Effect.Effect<Activation<A>, E | SystemContext.InitializationBlocked | ContextSnapshotDecodeError, R> {
+  return locks
+    .withLock(sessionID)(activateOnce(db, events, load, sessionID, locationRevision))
+    .pipe(Effect.withSpan("SessionContextEpoch.activate"))
 }
 
 /**
@@ -149,6 +166,38 @@ const initializeOnce = Effect.fnUntraced(function* (
     locationRevision,
   })
   return { baseline: generation.baseline, baselineSeq }
+})
+
+const activateOnce = Effect.fnUntraced(function* <A, E, R>(
+  db: DatabaseService,
+  events: EventV2.Interface,
+  load: Effect.Effect<{ readonly context: SystemContext.SystemContext; readonly value: A }, E, R>,
+  sessionID: SessionSchema.ID,
+  locationRevision: number,
+) {
+  const loaded = yield* load
+  const stored = yield* find(db, sessionID)
+  if (!stored) {
+    const generation = yield* SystemContext.initialize(loaded.context)
+    yield* establish(events, sessionID, generation, { generation: 1, reason: "created", locationRevision })
+    return { status: "initialized" as const, value: loaded.value }
+  }
+
+  const snapshot = yield* Schema.decodeUnknownEffect(SystemContext.Snapshot)(stored.snapshot).pipe(
+    Effect.mapError((error) => new ContextSnapshotDecodeError({ sessionID, details: String(error) })),
+  )
+  const result = yield* SystemContext.reconcileActivation(loaded.context, snapshot)
+  if (result._tag === "Unchanged") return { status: "unchanged" as const, value: loaded.value }
+  yield* events.publish(SessionEvent.ContextAdvanced, {
+    sessionID,
+    messageID: SessionMessage.ID.create(),
+    timestamp: yield* DateTime.now,
+    cause: "skill-catalog-reloaded",
+    text: result.text,
+    sources: result.snapshot,
+    digest: digest(result.snapshot),
+  })
+  return { status: "advanced" as const, value: loaded.value }
 })
 
 const exists = Effect.fn("SessionContextEpoch.exists")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {

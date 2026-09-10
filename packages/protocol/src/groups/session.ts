@@ -22,6 +22,7 @@ import { Location } from "@opencode-ai/schema/location"
 import { Revert } from "@opencode-ai/schema/revert"
 import { SessionEvent } from "@opencode-ai/schema/session-event"
 import { ModelContext } from "@opencode-ai/schema/model-context"
+import { Skill } from "@opencode-ai/schema/skill"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -168,6 +169,21 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           description: "Retrieve a session by ID.",
         }),
       ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.activate", "/api/session/:sessionID/activate", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Skill.Activation }),
+        error: [SessionNotFoundError, ServiceUnavailableError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.activate",
+            summary: "Activate session model context",
+            description: "Reload activation-scoped context sources before entering or resuming a session.",
+          }),
+        ),
     )
     .add(
       HttpApiEndpoint.post("session.switchAgent", "/api/session/:sessionID/agent", {

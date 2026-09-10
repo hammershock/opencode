@@ -45,12 +45,13 @@ const it = testEffect(
 )
 
 const sessionID = SessionV2.ID.make("ses_prompt_turn_race")
+const directory = AbsolutePath.make(process.cwd())
 
 const setup = Effect.gen(function* () {
   const db = (yield* Database.Service).db
   yield* db
     .insert(ProjectTable)
-    .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+    .values({ id: Project.ID.global, worktree: directory, sandboxes: [] })
     .onConflictDoNothing()
     .run()
     .pipe(Effect.orDie)
@@ -60,7 +61,7 @@ const setup = Effect.gen(function* () {
       id: sessionID,
       project_id: Project.ID.global,
       slug: "prompt-turn-race",
-      directory: "/project",
+      directory,
       title: "prompt turn race",
       version: "test",
     })
@@ -162,8 +163,7 @@ describe("SessionV2.promptTurn", () => {
       const session = yield* SessionV2.Service
       const messageID = SessionMessage.ID.create()
       let runs = 0
-      drain = () =>
-        Effect.sync(() => runs++).pipe(Effect.andThen(Effect.die("system context unavailable")))
+      drain = () => Effect.sync(() => runs++).pipe(Effect.andThen(Effect.die("system context unavailable")))
 
       expect(
         yield* session.promptTurn({ id: messageID, sessionID, prompt: { text: "Initialize the environment" } }),

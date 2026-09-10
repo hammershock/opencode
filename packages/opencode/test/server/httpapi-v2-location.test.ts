@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { Context, Schema } from "effect"
+import fs from "fs/promises"
 import path from "path"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { resetDatabase } from "../fixture/db"
@@ -144,6 +145,105 @@ describe("v2 location HttpApi", () => {
       data: { status: "failed", template: "created" },
     })
     expect(await Bun.file(`${tmp.path}/.env`).text()).toStartWith("# Project environment variables for OpenCode.")
+  })
+
+  test("reloads Skill catalog context only on activation and retains the last good snapshot", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./external-skills"] } },
+    })
+    const root = path.join(tmp.path, "external-skills")
+    const skillFile = path.join(root, "activation-review", "SKILL.md")
+    await fs.mkdir(path.dirname(skillFile), { recursive: true })
+    await fs.writeFile(
+      skillFile,
+      "---\nname: activation-review\ndescription: Review the first catalog\n---\nPRIVATE ACTIVATION BODY",
+    )
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: tmp.path } }),
+    })
+    expect(created.status, await created.clone().text()).toBe(200)
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activate = async () => {
+      const response = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+      expect(response.status, await response.clone().text()).toBe(200)
+      return (await response.json()) as {
+        data: {
+          status: string
+          diagnostics: Array<{ kind: string; severity: string; sourceLabel: string }>
+        }
+      }
+    }
+    const modelContext = async () => {
+      const response = await request(`/api/session/${sessionID}/model-context`, tmp.path)
+      expect(response.status, await response.clone().text()).toBe(200)
+      return (await response.json()) as {
+        data: {
+          generation: number
+          locationRevision: number
+          baseline: string
+          sources: Record<string, { value: unknown; refresh?: string }>
+        }
+      }
+    }
+    const advances = async () => {
+      const response = await request(`/api/session/${sessionID}/history?limit=100`, tmp.path)
+      expect(response.status, await response.clone().text()).toBe(200)
+      const body = (await response.json()) as { data: Array<{ data: { cause?: string } }> }
+      return body.data.filter((event) => event.data.cause === "skill-catalog-reloaded")
+    }
+
+    expect(await activate()).toMatchObject({ data: { status: "initialized" } })
+    const initial = (await modelContext()).data
+    const initialSkillSource = initial.sources["core/skill-guidance"]
+    expect(initialSkillSource).toMatchObject({
+      refresh: "activation",
+      value: {
+        enabled: true,
+        skills: expect.arrayContaining([
+          expect.objectContaining({ name: "activation-review", description: "Review the first catalog" }),
+        ]),
+      },
+    })
+    expect(JSON.stringify(initialSkillSource)).not.toContain("PRIVATE ACTIVATION BODY")
+    expect(JSON.stringify(initialSkillSource)).not.toContain("skl_")
+    expect(await activate()).toMatchObject({ data: { status: "unchanged" } })
+    expect(await advances()).toHaveLength(0)
+
+    await fs.writeFile(
+      skillFile,
+      "---\nname: activation-review\ndescription: Review the second catalog\n---\nCHANGED PRIVATE BODY",
+    )
+    expect((await modelContext()).data.sources["core/skill-guidance"]).toEqual(initialSkillSource)
+    expect(await activate()).toMatchObject({ data: { status: "advanced" } })
+    const advanced = (await modelContext()).data
+    expect(advanced).toMatchObject({
+      generation: initial.generation,
+      locationRevision: initial.locationRevision,
+      baseline: initial.baseline,
+    })
+    expect(advanced.sources["core/skill-guidance"]).toMatchObject({
+      value: {
+        skills: expect.arrayContaining([
+          expect.objectContaining({ name: "activation-review", description: "Review the second catalog" }),
+        ]),
+      },
+    })
+    expect(await advances()).toHaveLength(1)
+
+    await fs.rename(root, `${root}-offline`)
+    expect(await activate()).toMatchObject({
+      data: {
+        status: "retained",
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ kind: "root-unavailable", sourceLabel: "Imported" }),
+        ]),
+      },
+    })
+    expect((await modelContext()).data.sources["core/skill-guidance"]).toEqual(advanced.sources["core/skill-guidance"])
+    expect(await advances()).toHaveLength(1)
   })
 
   test("streams native EventV2 payloads across locations", async () => {

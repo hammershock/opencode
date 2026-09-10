@@ -125,6 +125,8 @@ export interface PublishOptions {
 
 export interface ReplayOptions {
   readonly publish?: boolean
+  /** Durable definitions accepted by this replay boundary. Defaults to the complete Core manifest. */
+  readonly manifest?: ReadonlyMap<string, Definition>
   /** Persist the durable event without running local materialized-view projectors. */
   readonly project?: boolean
   readonly ownerID?: string
@@ -458,7 +460,7 @@ export const layerWith = (options?: LayerOptions) =>
 
       function replay(event: SerializedEvent, options?: ReplayOptions) {
         return Effect.gen(function* () {
-          const definition = Durable.get(event.type)
+          const definition = (options?.manifest ?? Durable).get(event.type)
           if (!definition?.durable) {
             yield* Effect.die(
               new InvalidDurableEventError({ type: event.type, message: `Unknown durable event type ${event.type}` }),

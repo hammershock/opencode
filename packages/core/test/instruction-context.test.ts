@@ -14,6 +14,17 @@ import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
+import { Database } from "@opencode-ai/core/database/database"
+import { EventV2 } from "@opencode-ai/core/event"
+import { EventTable } from "@opencode-ai/core/event/sql"
+import { Project } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { SessionContextEpochTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { eq } from "drizzle-orm"
+import { Config } from "@opencode-ai/core/config"
+import { ControllerFileSystem } from "@opencode-ai/core/controller-filesystem"
+import { ModelContext } from "@opencode-ai/schema/model-context"
 
 const it = testEffect(Layer.empty)
 
@@ -21,12 +32,21 @@ const instructionLayer = (input: {
   config: string
   locationServiceLayer: Layer.Layer<Location.Service>
   filesystemLayer?: Layer.Layer<FSUtil.Service>
+  controllerFilesystemLayer?: Layer.Layer<ControllerFileSystem.Service>
+  configLayer?: Layer.Layer<Config.Service>
 }) =>
-  AppNodeBuilder.build(LayerNode.group([SystemContextRegistry.node, InstructionContext.node]), [
-    [Global.node, Global.layerWith({ config: input.config })],
-    [Location.node, input.locationServiceLayer],
-    ...(input.filesystemLayer ? [[FSUtil.node, input.filesystemLayer] as const] : []),
-  ])
+  AppNodeBuilder.build(
+    LayerNode.group([Database.node, EventV2.node, SystemContextRegistry.node, InstructionContext.node]),
+    [
+      [Global.node, Global.layerWith({ config: input.config })],
+      [Location.node, input.locationServiceLayer],
+      ...(input.filesystemLayer ? [[FSUtil.locationNode, input.filesystemLayer] as const] : []),
+      ...(input.controllerFilesystemLayer
+        ? [[ControllerFileSystem.node, input.controllerFilesystemLayer] as const]
+        : []),
+      ...(input.configLayer ? [[Config.node, input.configLayer] as const] : []),
+    ],
+  )
 
 describe("InstructionContext", () => {
   it.live("loads global and upward project AGENTS.md files as one aggregate context", () =>
@@ -73,37 +93,21 @@ describe("InstructionContext", () => {
           const initialized = yield* SystemContext.initialize(yield* load)
           expect(initialized.baseline).toBe(
             [
-              `Instructions from: ${globalFile}\nglobal`,
-              `Instructions from: ${packageFile}\npackage`,
+              "Instructions from: <user-config>/AGENTS.md\nglobal",
               `Instructions from: ${projectFile}\nproject`,
+              `Instructions from: ${packageFile}\npackage`,
             ].join("\n\n"),
           )
           expect(initialized.baseline).not.toContain("outside")
 
           yield* Effect.promise(() => fs.writeFile(packageFile, "changed"))
-          expect(yield* SystemContext.reconcile(yield* load, initialized.snapshot)).toMatchObject({
-            _tag: "Updated",
-            text: expect.stringContaining(`Instructions from: ${packageFile}\nchanged`),
-          })
+          expect(yield* SystemContext.reconcile(yield* load, initialized.snapshot)).toEqual({ _tag: "Unchanged" })
 
           yield* Effect.promise(() => fs.rm(packageFile))
-          const partial = yield* SystemContext.reconcile(yield* load, initialized.snapshot)
-          expect(partial).toEqual({
-            _tag: "Updated",
-            text: [
-              "These instructions replace all previously loaded ambient instructions.",
-              `Instructions from: ${globalFile}\nglobal`,
-              `Instructions from: ${projectFile}\nproject`,
-            ].join("\n\n"),
-            snapshot: expect.any(Object),
-          })
+          expect(yield* SystemContext.reconcile(yield* load, initialized.snapshot)).toEqual({ _tag: "Unchanged" })
 
           yield* Effect.promise(() => Promise.all([fs.rm(globalFile), fs.rm(projectFile)]))
-          expect(yield* SystemContext.reconcile(yield* load, initialized.snapshot)).toEqual({
-            _tag: "Updated",
-            text: "Previously loaded instructions no longer apply.",
-            snapshot: {},
-          })
+          expect(yield* SystemContext.reconcile(yield* load, initialized.snapshot)).toEqual({ _tag: "Unchanged" })
         }),
       ),
     ),
@@ -131,7 +135,209 @@ describe("InstructionContext", () => {
             ),
           )
 
-          expect((yield* SystemContext.initialize(context)).baseline).toBe(`Instructions from: ${file}\n`)
+          const generation = yield* SystemContext.initialize(context)
+          expect(generation.baseline).toBe("")
+          expect(generation.snapshot["core/instructions"].value).toMatchObject([
+            { source: file, status: "loaded", content: "" },
+          ])
+        }),
+      ),
+    ),
+  )
+
+  it.live("uses CLAUDE.md only when AGENTS.md is absent from the applicable project chain", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const project = path.join(tmp.path, "project")
+        const directory = path.join(project, "child")
+        const rootClaude = path.join(project, "CLAUDE.md")
+        const childClaude = path.join(directory, "CLAUDE.md")
+        const rootAgents = path.join(project, "AGENTS.md")
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(global, { recursive: true })
+            await fs.mkdir(directory, { recursive: true })
+            await fs.writeFile(rootClaude, "root claude")
+            await fs.writeFile(childClaude, "child claude")
+          })
+          const load = () =>
+            SystemContextRegistry.Service.pipe(
+              Effect.flatMap((service) => service.load()),
+              Effect.flatMap(SystemContext.initialize),
+              Effect.provide(
+                instructionLayer({
+                  config: global,
+                  locationServiceLayer: Layer.succeed(
+                    Location.Service,
+                    Location.Service.of(
+                      location(
+                        { directory: AbsolutePath.make(directory) },
+                        { projectDirectory: AbsolutePath.make(project) },
+                      ),
+                    ),
+                  ),
+                }),
+              ),
+            )
+
+          expect((yield* load()).baseline).toContain(`Instructions from: ${rootClaude}\nroot claude`)
+          expect((yield* load()).baseline).toContain(`Instructions from: ${childClaude}\nchild claude`)
+          yield* Effect.promise(() => fs.writeFile(rootAgents, "canonical"))
+          const canonical = yield* load()
+          expect(canonical.baseline).toContain(`Instructions from: ${rootAgents}\ncanonical`)
+          expect(canonical.baseline).not.toContain("root claude")
+          expect(canonical.baseline).not.toContain("child claude")
+        })
+      }),
+    ),
+  )
+
+  it.effect("resolves configured instruction files on their declaring filesystem in stable scope order", () =>
+    Effect.gen(function* () {
+      const reads: string[] = []
+      const filesystem = (side: "controller" | "target") =>
+        FSUtil.Service.of({
+          existsSafe: () => Effect.succeed(false),
+          readFileStringSafe: (filepath: string) =>
+            Effect.sync(() => {
+              reads.push(`${side}:${filepath}`)
+              return side === "controller" ? "private global" : "remote project"
+            }),
+          resolve: (filepath: string) => Effect.succeed(filepath),
+          up: () => Effect.succeed([]),
+          glob: () => Effect.succeed([]),
+          globMatch: () => false,
+        } as unknown as FSUtil.Interface)
+      const documents = [
+        new Config.Document({
+          type: "document",
+          path: "/controller/opencode.json",
+          scope: "global",
+          filesystem: "controller",
+          info: new Config.Info({ instructions: ["rules.md"] }),
+        }),
+        new Config.Document({
+          type: "document",
+          path: "/target/opencode.json",
+          scope: "project",
+          filesystem: "target",
+          info: new Config.Info({ instructions: ["rules.md"] }),
+        }),
+      ]
+      const generation = yield* SystemContextRegistry.Service.pipe(
+        Effect.flatMap((service) => service.load()),
+        Effect.flatMap(SystemContext.initialize),
+        Effect.provide(
+          instructionLayer({
+            config: "/controller",
+            filesystemLayer: Layer.succeed(FSUtil.Service, filesystem("target")),
+            controllerFilesystemLayer: Layer.succeed(
+              ControllerFileSystem.Service,
+              ControllerFileSystem.Service.of(filesystem("controller")),
+            ),
+            configLayer: Layer.succeed(Config.Service, Config.Service.of({ entries: () => Effect.succeed(documents) })),
+            locationServiceLayer: Layer.succeed(
+              Location.Service,
+              Location.Service.of(
+                location(
+                  { directory: AbsolutePath.make("/target") },
+                  { projectDirectory: AbsolutePath.make("/target") },
+                ),
+              ),
+            ),
+          }),
+        ),
+      )
+      const instructions = generation.snapshot["core/instructions"]?.value as ModelContext.Instructions
+      expect(instructions).toMatchObject([
+        { scope: "global", source: "<user-config>/rules.md", content: "private global" },
+        { scope: "project", source: "/target/rules.md", content: "remote project" },
+      ])
+      expect(reads).toEqual(["controller:/controller/rules.md", "target:/target/rules.md"])
+    }),
+  )
+
+  it.live("keeps configured glob and URL results in declaration and lexical order", () =>
+    Effect.acquireRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: () => new Response("remote URL rules"),
+        }),
+      ),
+      (server) => Effect.sync(() => server.stop(true)),
+    ).pipe(
+      Effect.flatMap((server) =>
+        Effect.gen(function* () {
+          const filesystem = (side: "controller" | "target") =>
+            FSUtil.Service.of({
+              existsSafe: () => Effect.succeed(false),
+              readFileStringSafe: (filepath: string) => Effect.succeed(`${side}:${path.basename(filepath)}`),
+              resolve: (filepath: string) => Effect.succeed(filepath),
+              up: () => Effect.succeed([]),
+              glob: () =>
+                Effect.succeed(
+                  side === "controller"
+                    ? [AbsolutePath.make("/controller/z.md"), AbsolutePath.make("/controller/a.md")]
+                    : [AbsolutePath.make("/target/z.md"), AbsolutePath.make("/target/a.md")],
+                ),
+              globMatch: () => false,
+            } as unknown as FSUtil.Interface)
+          const documents = [
+            new Config.Document({
+              type: "document",
+              path: "/controller/opencode.json",
+              scope: "global",
+              filesystem: "controller",
+              info: new Config.Info({ instructions: ["*.md", server.url.href] }),
+            }),
+            new Config.Document({
+              type: "document",
+              path: "/target/opencode.json",
+              scope: "project",
+              filesystem: "target",
+              info: new Config.Info({ instructions: ["*.md"] }),
+            }),
+          ]
+          const generation = yield* SystemContextRegistry.Service.pipe(
+            Effect.flatMap((service) => service.load()),
+            Effect.flatMap(SystemContext.initialize),
+            Effect.provide(
+              instructionLayer({
+                config: "/controller",
+                filesystemLayer: Layer.succeed(FSUtil.Service, filesystem("target")),
+                controllerFilesystemLayer: Layer.succeed(
+                  ControllerFileSystem.Service,
+                  ControllerFileSystem.Service.of(filesystem("controller")),
+                ),
+                configLayer: Layer.succeed(
+                  Config.Service,
+                  Config.Service.of({ entries: () => Effect.succeed(documents) }),
+                ),
+                locationServiceLayer: Layer.succeed(
+                  Location.Service,
+                  Location.Service.of(
+                    location(
+                      { directory: AbsolutePath.make("/target") },
+                      { projectDirectory: AbsolutePath.make("/target") },
+                    ),
+                  ),
+                ),
+              }),
+            ),
+          )
+          const instructions = generation.snapshot["core/instructions"]?.value as ModelContext.Instructions
+          expect(instructions.map((item) => [item.scope, item.source, item.content])).toEqual([
+            ["global", "<user-config>/a.md", "controller:a.md"],
+            ["global", "<user-config>/z.md", "controller:z.md"],
+            ["global", server.url.href, "remote URL rules"],
+            ["project", "/target/a.md", "target:a.md"],
+            ["project", "/target/z.md", "target:z.md"],
+          ])
         }),
       ),
     ),
@@ -233,6 +439,7 @@ describe("InstructionContext", () => {
 
       yield* SystemContextRegistry.Service.pipe(
         Effect.flatMap((service) => service.load()),
+        Effect.flatMap(SystemContext.initialize),
         Effect.provide(
           instructionLayer({
             config: "/global",
@@ -248,7 +455,7 @@ describe("InstructionContext", () => {
       )
 
       expect(observed).toEqual({
-        targets: ["AGENTS.md"],
+        targets: ["AGENTS.md", "CLAUDE.md", "CONTEXT.md"],
         start: FSUtil.resolve("/repo"),
         stop: FSUtil.resolve("/repo"),
       })
@@ -319,5 +526,108 @@ describe("InstructionContext", () => {
 
       expect(scanned).toBe(false)
     }),
+  )
+
+  it.live("durably appends nested target instructions before deeper content is consumed", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const project = path.join(tmp.path, "repo")
+        const child = path.join(project, "packages", "app")
+        const target = path.join(child, "source.ts")
+        const projectFile = path.join(project, "AGENTS.md")
+        const nestedFile = path.join(child, "AGENTS.md")
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(global, { recursive: true })
+            await fs.mkdir(child, { recursive: true })
+            await fs.writeFile(projectFile, "project")
+            await fs.writeFile(nestedFile, "nested")
+            await fs.writeFile(target, "content")
+          })
+
+          const sessionID = SessionV2.ID.make("ses_nested_instruction")
+          yield* Effect.gen(function* () {
+            const { db } = yield* Database.Service
+            const registry = yield* SystemContextRegistry.Service
+            const instructions = yield* InstructionContext.Service
+            const initial = yield* registry.load().pipe(Effect.flatMap(SystemContext.initialize))
+            yield* db
+              .insert(ProjectTable)
+              .values({ id: Project.ID.global, worktree: AbsolutePath.make(project), sandboxes: [] })
+              .run()
+            yield* db
+              .insert(SessionTable)
+              .values({
+                id: sessionID,
+                project_id: Project.ID.global,
+                slug: "nested",
+                directory: project,
+                title: "nested",
+                version: "test",
+              })
+              .run()
+            yield* db
+              .insert(SessionContextEpochTable)
+              .values({
+                session_id: sessionID,
+                baseline: initial.baseline,
+                snapshot: initial.snapshot,
+                baseline_seq: 0,
+                generation: 1,
+                reason: "created",
+                location_revision: 0,
+                digest: "initial",
+              })
+              .run()
+
+            yield* instructions.extend({ sessionID, path: target, kind: "file" })
+            const event = yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, sessionID)).get()
+            expect(event?.type).toBe("session.next.context.advanced.1")
+            expect(event?.data).toMatchObject({
+              cause: "nested-instructions",
+              text: `Instructions from: ${nestedFile}\nnested`,
+            })
+            if (!event) return yield* Effect.die("ContextAdvanced event missing")
+            const sources = (event.data as { sources: SystemContext.Snapshot }).sources
+            expect(sources["core/instructions"]?.value).toMatchObject([
+              { source: projectFile, origin: "project-file", content: "project" },
+              { source: nestedFile, origin: "nested-file", content: "nested" },
+            ])
+
+            yield* db
+              .update(SessionContextEpochTable)
+              .set({ snapshot: sources })
+              .where(eq(SessionContextEpochTable.session_id, sessionID))
+              .run()
+            yield* instructions.extend({ sessionID, path: target, kind: "file" })
+            expect(
+              yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, sessionID)).all(),
+            ).toHaveLength(1)
+          }).pipe(
+            Effect.provide(
+              instructionLayer({
+                config: global,
+                locationServiceLayer: Layer.succeed(
+                  Location.Service,
+                  Location.Service.of(
+                    location(
+                      { directory: AbsolutePath.make(project) },
+                      {
+                        projectDirectory: AbsolutePath.make(project),
+                        canonicalDirectory: AbsolutePath.make(project),
+                      },
+                    ),
+                  ),
+                ),
+              }),
+            ),
+          )
+        })
+      }),
+    ),
   )
 })

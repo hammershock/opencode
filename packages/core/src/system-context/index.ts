@@ -1,6 +1,7 @@
 export * as SystemContext from "./index"
 
 import { Effect, Option, Schema } from "effect"
+import { ModelContext } from "@opencode-ai/schema/model-context"
 
 /**
  * Models privileged system context as independently refreshable typed sources.
@@ -19,9 +20,7 @@ import { Effect, Option, Schema } from "effect"
  */
 
 /** Stable namespaced identity for one independently refreshable context source. */
-export const Key = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._/-]*$/)).pipe(
-  Schema.brand("SystemContext.Key"),
-)
+export const Key = ModelContext.Key
 export type Key = typeof Key.Type
 
 /** Indicates that a source could not be observed without treating it as removed. */
@@ -32,6 +31,10 @@ export type Unavailable = typeof unavailable
 export interface Source<A> {
   readonly key: Key
   readonly codec: Schema.Codec<A, Schema.Json, never, never>
+  /** Generation sources are observed only at explicit context replacement boundaries. */
+  readonly refresh?: "generation" | "turn"
+  /** Preserve structured state even when this source has no model-visible body. */
+  readonly allowEmpty?: boolean
   readonly load: Effect.Effect<A | Unavailable>
   readonly baseline: (current: A) => string
   readonly update: (previous: A, current: A) => string
@@ -46,14 +49,11 @@ export interface SystemContext {
 }
 
 /** Durable comparison state for one admitted source. */
-export const SourceSnapshot = Schema.Struct({
-  value: Schema.Json,
-  removed: Schema.optional(Schema.NonEmptyString),
-})
+export const SourceSnapshot = ModelContext.SourceSnapshot
 export type SourceSnapshot = typeof SourceSnapshot.Type
 
 /** Durable structured comparison state for one active context generation. */
-export const Snapshot = Schema.Record(Key, SourceSnapshot)
+export const Snapshot = ModelContext.SourceState
 export type Snapshot = Readonly<Record<string, SourceSnapshot>>
 
 export interface Generation {
@@ -98,7 +98,9 @@ export class DuplicateKeyError extends Schema.TaggedErrorClass<DuplicateKeyError
 
 interface PackedSource {
   readonly key: Key
+  readonly refresh: "generation" | "turn"
   readonly load: Effect.Effect<Loaded | Unavailable>
+  readonly restore: (previous: Schema.Json) => Rendered | undefined
 }
 
 interface Loaded {
@@ -136,21 +138,31 @@ export function make<A>(source: Source<A>): SystemContext {
   const decode = Schema.decodeUnknownOption(source.codec)
   const encode = Schema.encodeSync(source.codec)
   const equivalent = Schema.toEquivalence(source.codec)
+  const text = (kind: string, value: string) => (source.allowEmpty ? value : requireText(source.key, kind, value))
+  const snapshot = (value: A, baseline: string): SourceSnapshot => ({
+    value: encode(value),
+    baseline,
+    ...(source.removed ? { removed: requireText(source.key, "removal", source.removed(value)) } : {}),
+    ...(source.refresh === "generation" ? { refresh: "generation" as const } : {}),
+  })
+  const renderBaseline = (value: A): Rendered => {
+    const baseline = text("baseline", source.baseline(value))
+    return { text: baseline, snapshot: snapshot(value, baseline) }
+  }
   return context([
     {
       key: source.key,
+      refresh: source.refresh ?? "turn",
+      restore: (previous) =>
+        Option.match(decode(previous), {
+          onNone: () => undefined,
+          onSome: renderBaseline,
+        }),
       load: source.load.pipe(
         Effect.map((value) => {
           if (isUnavailable(value)) return value
-          const snapshot = (): SourceSnapshot => ({
-            value: encode(value),
-            ...(source.removed ? { removed: requireText(source.key, "removal", source.removed(value)) } : {}),
-          })
           return {
-            baseline: (): Rendered => ({
-              text: requireText(source.key, "baseline", source.baseline(value)),
-              snapshot: snapshot(),
-            }),
+            baseline: () => renderBaseline(value),
             compare: (previous): Compared =>
               Option.match(decode(previous), {
                 onNone: (): Compared => ({ _tag: "Incompatible" }),
@@ -160,8 +172,8 @@ export function make<A>(source: Source<A>): SystemContext {
                     : {
                         _tag: "Updated",
                         render: () => ({
-                          text: requireText(source.key, "update", source.update(decoded, value)),
-                          snapshot: snapshot(),
+                          text: text("update", source.update(decoded, value)),
+                          snapshot: snapshot(value, text("baseline", source.baseline(value))),
                         }),
                       },
               }),
@@ -179,9 +191,9 @@ export function combine(values: ReadonlyArray<SystemContext>): SystemContext {
   return context(sources)
 }
 
-const observe = (value: SystemContext) =>
+const observe = (value: SystemContext, refresh: "all" | "turn" | "generation" = "all") =>
   Effect.forEach(
-    value[ContextTypeId],
+    value[ContextTypeId].filter((source) => refresh === "all" || source.refresh === refresh),
     (source) =>
       source.load.pipe(
         Effect.map(
@@ -216,11 +228,25 @@ function initializeObservation(entries: ReadonlyArray<Entry>): Generation {
 
 /** Reconciles current source values with one active generation. */
 export function reconcile(value: SystemContext, previous: Snapshot): Effect.Effect<ReconcileResult> {
-  return observe(value).pipe(
-    Effect.map((entries): ReconcileResult => {
-      const result = reconcileObservation(entries, previous)
-      if (result._tag === "Unchanged" || result._tag === "Updated") return result
-      return replaceObservation(entries, previous)
+  return observe(value, "turn").pipe(
+    Effect.flatMap((entries): Effect.Effect<ReconcileResult> => {
+      const generationKeys = new Set(
+        value[ContextTypeId].filter((source) => source.refresh === "generation").map((source) => source.key),
+      )
+      const result = reconcileObservation(entries, previous, generationKeys)
+      if (result._tag === "Unchanged" || result._tag === "Updated") return Effect.succeed(result)
+      return observe(value, "generation").pipe(
+        Effect.map((generationEntries) => {
+          const observed = new Map([...entries, ...generationEntries].map((entry) => [entry.key, entry] as const))
+          return replaceObservation(
+            value[ContextTypeId].flatMap((source) => {
+              const entry = observed.get(source.key)
+              return entry ? [entry] : []
+            }),
+            previous,
+          )
+        }),
+      )
     }),
   )
 }
@@ -228,6 +254,7 @@ export function reconcile(value: SystemContext, previous: Snapshot): Effect.Effe
 function reconcileObservation(
   entries: ReadonlyArray<Entry>,
   previous: Snapshot,
+  generationKeys: ReadonlySet<Key> = new Set(),
 ): { readonly _tag: "Unchanged" } | Updated | { readonly _tag: "Replace" } {
   const keys = new Set(entries.map((entry) => entry.key))
   const comparisons = new Map<Key, Compared>()
@@ -240,11 +267,15 @@ function reconcileObservation(
     comparisons.set(entry.key, compared)
   }
   for (const key of Object.keys(previous).sort()) {
+    if (previous[key].refresh === "generation" || generationKeys.has(Key.make(key))) continue
     if (keys.has(Key.make(key))) continue
     if (previous[key].removed === undefined) return { _tag: "Replace" }
   }
 
   const snapshot: Record<string, SourceSnapshot> = {}
+  for (const key of Object.keys(previous).sort()) {
+    if (previous[key].refresh === "generation" || generationKeys.has(Key.make(key))) snapshot[key] = previous[key]
+  }
   const updates: string[] = []
   for (const entry of entries) {
     const stored = getSnapshot(previous, entry.key)
@@ -270,6 +301,7 @@ function reconcileObservation(
     snapshot[entry.key] = rendered.snapshot
   }
   for (const key of Object.keys(previous).sort()) {
+    if (previous[key].refresh === "generation" || generationKeys.has(Key.make(key))) continue
     if (keys.has(Key.make(key))) continue
     const removed = previous[key].removed
     if (removed === undefined) throw new Error(`Missing removal rendering for system context source ${key}`)
@@ -284,6 +316,26 @@ export function replace(value: SystemContext, previous: Snapshot): Effect.Effect
   return observe(value).pipe(Effect.map((entries) => replaceObservation(entries, previous)))
 }
 
+/** Rebuilds a compaction baseline exclusively from the admitted snapshot; it never observes a source. */
+export function rebaseline(value: SystemContext, previous: Snapshot): ReplacementResult {
+  const sources = new Map(value[ContextTypeId].map((source) => [source.key, source] as const))
+  const snapshot: Record<string, SourceSnapshot> = {}
+  const parts: string[] = []
+  for (const key of Object.keys(previous)) {
+    const stored = previous[key]!
+    if (stored.baseline !== undefined) {
+      parts.push(stored.baseline)
+      snapshot[key] = stored
+      continue
+    }
+    const restored = sources.get(Key.make(key))?.restore(stored.value)
+    if (!restored) return { _tag: "ReplacementBlocked" }
+    parts.push(restored.text)
+    snapshot[key] = { ...stored, baseline: restored.snapshot.baseline }
+  }
+  return { _tag: "ReplacementReady", generation: { baseline: render(parts), snapshot } }
+}
+
 function replaceObservation(entries: ReadonlyArray<Entry>, previous: Snapshot): ReplacementResult {
   if (entries.some((entry) => entry._tag === "Unavailable" && getSnapshot(previous, entry.key) !== undefined))
     return { _tag: "ReplacementBlocked" }
@@ -295,7 +347,7 @@ function context(sources: ReadonlyArray<PackedSource>): SystemContext {
 }
 
 function render(parts: ReadonlyArray<string>) {
-  return parts.join("\n\n")
+  return parts.filter((part) => part.length > 0).join("\n\n")
 }
 
 function getSnapshot(snapshot: Snapshot, key: Key) {

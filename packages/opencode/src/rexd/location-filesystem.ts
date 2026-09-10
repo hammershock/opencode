@@ -9,7 +9,7 @@ import * as PlatformError from "effect/PlatformError"
 import fuzzysort from "fuzzysort"
 import { RexdFiles } from "./location-files"
 import { RexdLocationSession } from "./location-session"
-import { runRexdProcess } from "./location-process"
+import { runRexdProcess } from "./process-runner"
 
 export function rexdFilesystemNodes(
   session: ReturnType<typeof import("./location-session").rexdSessionNode>,
@@ -204,10 +204,7 @@ export function rexdFilesystemNodes(
           globMatch: (pattern, value) => new Bun.Glob(pattern).match(value),
           findUp: (target, start, stop) => upward(files, target, start, stop),
           globUp: (pattern, start, stop) => upwardGlob(files, pattern, start, stop),
-          up: (input) =>
-            Effect.forEach(input.targets, (target) => upward(files, target, input.start, input.stop)).pipe(
-              Effect.map((x) => x.flat()),
-            ),
+          up: (input) => upwardMany(files, input.targets, input.start, input.stop),
         }
         return FSUtil.Service.of(
           new Proxy(methods as FSUtil.Interface, {
@@ -231,31 +228,40 @@ export function rexdFilesystemNodes(
   ] as const
 }
 
-function upward(files: RexdFiles, target: string, start: string, stop?: string) {
+export function upward(files: RexdFiles, target: string, start: string, stop?: string) {
   return Effect.promise(async () => {
-    const result: string[] = []
-    let current = files.resolve(start, start)
-    while (true) {
-      const candidate = path.posix.join(current, target)
-      if ((await files.stat(candidate, current)).exists) result.push(candidate)
-      if (current === stop || current === "/") break
-      current = path.posix.dirname(current)
-    }
-    return result
+    const candidates = ancestors(files, start, stop).map((current) => path.posix.join(current, target))
+    const status = await Promise.all(candidates.map((candidate) => files.stat(candidate, "/")))
+    return candidates.filter((_candidate, index) => status[index]!.exists)
   })
 }
 
-function upwardGlob(files: RexdFiles, pattern: string, start: string, stop?: string) {
+export function upwardMany(files: RexdFiles, targets: readonly string[], start: string, stop?: string) {
   return Effect.promise(async () => {
-    const result: string[] = []
-    let current = files.resolve(start, start)
-    while (true) {
-      result.push(...(await files.glob(pattern, current)))
-      if (current === stop || current === "/") break
-      current = path.posix.dirname(current)
-    }
-    return result
+    const directories = ancestors(files, start, stop)
+    const candidates = targets.flatMap((target) => directories.map((current) => path.posix.join(current, target)))
+    const status = await Promise.all(candidates.map((candidate) => files.stat(candidate, "/")))
+    return candidates.filter((_candidate, index) => status[index]!.exists)
   })
+}
+
+export function upwardGlob(files: RexdFiles, pattern: string, start: string, stop?: string) {
+  return Effect.promise(async () => {
+    const matches = await Promise.all(ancestors(files, start, stop).map((current) => files.glob(pattern, current)))
+    return matches.flat()
+  })
+}
+
+function ancestors(files: RexdFiles, start: string, stop?: string) {
+  const result: string[] = []
+  let current = files.resolve(start, start)
+  const boundary = stop ? files.resolve(stop, stop) : undefined
+  while (true) {
+    result.push(current)
+    if (current === boundary || current === "/") break
+    current = path.posix.dirname(current)
+  }
+  return result
 }
 
 export function remoteGrep(

@@ -19,10 +19,16 @@ import { SessionMessageUpdater } from "@opencode-ai/core/session/message-updater
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
-import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import {
+  SessionContextEpochTable,
+  SessionInputTable,
+  SessionMessageTable,
+  SessionTable,
+} from "@opencode-ai/core/session/sql"
 import { testEffect } from "./lib/effect"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { Location } from "@opencode-ai/core/location"
+import { ModelContext } from "@opencode-ai/schema/model-context"
 
 const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, EventV2.node, SessionProjector.node])))
 const sessionsLayer = AppNodeBuilder.build(SessionV2.node, [[SessionExecution.node, SessionExecution.noopLayer]])
@@ -45,6 +51,155 @@ const assistantRow = (
 }
 
 describe("SessionProjector", () => {
+  it.effect("rebuilds a durable model-context generation and its advances during replay", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const events = yield* EventV2.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/project",
+          title: "test",
+          version: "test",
+        })
+        .run()
+
+      yield* events.replay({
+        id: EventV2.ID.create(),
+        type: EventV2.versionedType(SessionEvent.ContextGenerationEstablished.type, 1),
+        seq: 0,
+        aggregateID: sessionID,
+        data: {
+          sessionID,
+          timestamp: 1,
+          context: {
+            version: 1,
+            generation: 1,
+            reason: "created",
+            locationRevision: 0,
+            environment: ModelContext.Environment.make({
+              harness: "OpenCode REXD",
+              entrypoint: "opencode-rexd",
+              targetKind: "local",
+              targetName: "test",
+              directory: "/project",
+              projectRoot: "/project",
+              platform: "test",
+            }),
+            instructions: [],
+            digest: "digest-initial",
+            baseline: "Initial context",
+            sources: { "test/context": { value: "initial" } },
+          },
+        },
+      })
+
+      const messageID = SessionMessage.ID.create()
+      yield* events.replay({
+        id: EventV2.ID.create(),
+        type: EventV2.versionedType(SessionEvent.ContextGenerationEstablished.type, 1),
+        seq: 1,
+        aggregateID: sessionID,
+        data: {
+          sessionID,
+          timestamp: 2,
+          context: {
+            version: 1,
+            generation: 2,
+            reason: "init",
+            locationRevision: 0,
+            environment: ModelContext.Environment.make({
+              harness: "OpenCode REXD",
+              entrypoint: "opencode-rexd",
+              targetKind: "local",
+              targetName: "test",
+              directory: "/project",
+              projectRoot: "/project",
+              platform: "test",
+            }),
+            instructions: [],
+            digest: "digest-replacement",
+            baseline: "Replacement context",
+            sources: { "test/context": { value: "replacement" } },
+          },
+        },
+      })
+
+      yield* events.replay({
+        id: EventV2.ID.create(),
+        type: EventV2.versionedType(SessionEvent.ContextAdvanced.type, 1),
+        seq: 2,
+        aggregateID: sessionID,
+        data: {
+          sessionID,
+          messageID,
+          timestamp: 3,
+          cause: "dynamic",
+          text: "Context changed",
+          sources: { "test/context": { value: "current" } },
+          digest: "digest-current",
+        },
+      })
+
+      // A later durable event carrying an older semantic generation must not roll the epoch back.
+      yield* events.replay({
+        id: EventV2.ID.create(),
+        type: EventV2.versionedType(SessionEvent.ContextGenerationEstablished.type, 1),
+        seq: 3,
+        aggregateID: sessionID,
+        data: {
+          sessionID,
+          timestamp: 4,
+          context: {
+            version: 1,
+            generation: 1,
+            reason: "legacy-backfill",
+            locationRevision: 0,
+            environment: ModelContext.Environment.make({
+              harness: "OpenCode REXD",
+              entrypoint: "opencode-rexd",
+              targetKind: "local",
+              targetName: "stale",
+              directory: "/stale",
+              projectRoot: "/stale",
+              platform: "test",
+            }),
+            instructions: [],
+            digest: "digest-stale",
+            baseline: "Stale context",
+            sources: { "test/context": { value: "stale" } },
+          },
+        },
+      })
+
+      expect(yield* db.select().from(SessionContextEpochTable).get()).toMatchObject({
+        session_id: sessionID,
+        baseline: "Replacement context",
+        baseline_seq: 1,
+        generation: 2,
+        reason: "init",
+        location_revision: 0,
+        digest: "digest-current",
+        snapshot: { "test/context": { value: "current" } },
+      })
+      expect(
+        yield* db.select().from(SessionMessageTable).where(eq(SessionMessageTable.id, messageID)).get(),
+      ).toMatchObject({
+        session_id: sessionID,
+        type: "system",
+        seq: 2,
+        data: { text: "Context changed" },
+      })
+    }),
+  )
+
   it.effect("projects moved sessions without the transitional context epoch table", () =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service

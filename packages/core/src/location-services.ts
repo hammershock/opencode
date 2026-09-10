@@ -13,12 +13,14 @@ import { FileSystemSearch } from "./filesystem/search"
 import { Watcher } from "./filesystem/watcher"
 import { Image } from "./image"
 import { Integration } from "./integration"
+import { InstructionContext } from "./instruction-context"
 import { Location } from "./location"
 import { LocationMutation } from "./location-mutation"
 import { LocationEnvironment } from "./location-environment"
 import { LocationProcess } from "./location-process"
 import { LocationFormatter } from "./location-formatter"
 import { LocationServiceMap } from "./location-service-map"
+import { ModelContextAssembler } from "./model-context-assembler"
 import { PermissionV2 } from "./permission"
 import { PluginV2 } from "./plugin"
 import { PluginInternal } from "./plugin/internal"
@@ -64,6 +66,7 @@ export const locationServices = LayerNode.group([
   Pty.node,
   SkillV2.node,
   SystemContextRegistry.node,
+  InstructionContext.node,
   SystemContextBuiltIns.node,
   LocationMutation.node,
   LocationEnvironment.node,
@@ -77,6 +80,7 @@ export const locationServices = LayerNode.group([
   Image.node,
   SkillGuidance.node,
   ReferenceGuidance.node,
+  ModelContextAssembler.node,
   SessionTodo.node,
   QuestionV2.node,
   ReadToolFileSystem.node,

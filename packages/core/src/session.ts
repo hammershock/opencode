@@ -14,7 +14,7 @@ import { PromptInput } from "@opencode-ai/schema/prompt-input"
 import { EventV2 } from "./event"
 import { Database } from "./database/database"
 import { SessionProjector } from "./session/projector"
-import { SessionMessageTable, SessionTable } from "./session/sql"
+import { SessionContextEpochTable, SessionMessageTable, SessionTable } from "./session/sql"
 import { SessionSchema } from "./session/schema"
 import { AbsolutePath, PositiveInt, RelativePath } from "./schema"
 import { AgentV2 } from "./agent"
@@ -29,7 +29,7 @@ import { SessionStore } from "./session/store"
 import { SessionExecution } from "./session/execution"
 import { makeGlobalNode } from "./effect/app-node"
 import { LocationServiceMap } from "./location-service-map"
-import { MessageDecodeError } from "./session/error"
+import { ContextSnapshotDecodeError, MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
 import { SessionTurn } from "./session/turn"
@@ -46,8 +46,12 @@ import { SessionLocationAccess } from "./session/location-access"
 import { SessionLocationMutation } from "./session/location-mutation"
 import { SyncSetup } from "./sync/setup"
 import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
+import type { ModelContext } from "@opencode-ai/schema/model-context"
 import { FileSystem } from "./filesystem"
 import { SessionLocationRuntime } from "./session/location-runtime"
+import { SystemContext } from "./system-context/index"
+import { SessionContextEpoch } from "./session/context-epoch"
+import { ModelContextAssembler } from "./model-context-assembler"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -107,7 +111,16 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Ses
 export class OperationUnavailableError extends Schema.TaggedErrorClass<OperationUnavailableError>()(
   "Session.OperationUnavailableError",
   {
-    operation: Schema.Literals(["move", "shell", "skill", "switchAgent", "compact", "wait", "location"]),
+    operation: Schema.Literals([
+      "move",
+      "shell",
+      "skill",
+      "switchAgent",
+      "compact",
+      "wait",
+      "location",
+      "modelContext",
+    ]),
   },
 ) {}
 
@@ -145,6 +158,10 @@ export interface Interface {
   readonly context: (
     sessionID: SessionSchema.ID,
   ) => Effect.Effect<SessionMessage.Message[], NotFoundError | MessageDecodeError>
+  /** Inspect the frozen durable model context without resolving the Session Location. */
+  readonly modelContext: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<ModelContext.Generation | undefined, NotFoundError | ContextSnapshotDecodeError>
   readonly events: (input: {
     sessionID: SessionSchema.ID
     after?: number
@@ -246,6 +263,37 @@ const layer = Layer.effect(
       )
     })
     const syncSetup = yield* SyncSetup.Service
+    const ensureContextForAdmission = Effect.fn("V2Session.ensureContextForAdmission")(function* (
+      session: SessionSchema.Info,
+      location: Location.Ref,
+    ) {
+      const assembler = yield* ModelContextAssembler.Service.pipe(Effect.provide(locations.get(location)))
+      const existing = yield* db
+        .select({ id: SessionMessageTable.id })
+        .from(SessionMessageTable)
+        .where(eq(SessionMessageTable.session_id, session.id))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+      const unavailable = () => new OperationUnavailableError({ operation: "modelContext" })
+      if (existing) {
+        yield* SessionContextEpoch.prepare(
+          db,
+          events,
+          assembler.load(session.agent),
+          session.id,
+          session.locationRevision,
+        ).pipe(Effect.catch(unavailable))
+        return
+      }
+      yield* SessionContextEpoch.initialize(
+        db,
+        events,
+        assembler.load(session.agent),
+        session.id,
+        session.locationRevision,
+      ).pipe(Effect.catch(unavailable))
+    })
     const runtimeBlockers = Effect.fn("V2Session.runtimeLocationBlockers")(function* (sessionID: SessionSchema.ID) {
       if (!(yield* store.get(sessionID))) return yield* new NotFoundError({ sessionID })
       const blockers: string[] = []
@@ -308,8 +356,9 @@ const layer = Layer.effect(
           "session_mutation",
           Effect.uninterruptible(
             Effect.gen(function* () {
-              yield* requireLocation(input.sessionID)
-              yield* result.get(input.sessionID)
+              const location = yield* requireLocation(input.sessionID)
+              const session = yield* result.get(input.sessionID)
+              yield* ensureContextForAdmission(session, location)
               const resolved = resolvePrompt(input.prompt)
               const messageID = input.id ?? SessionMessage.ID.create()
               const delivery = input.delivery ?? "steer"
@@ -426,7 +475,14 @@ const layer = Layer.effect(
 
               // Materialize the candidate and prove its root can actually be used before
               // committing. Service construction alone does not reject a missing local path.
-              yield* Effect.scoped(
+              const epoch = yield* db
+                .select({ generation: SessionContextEpochTable.generation })
+                .from(SessionContextEpochTable)
+                .where(eq(SessionContextEpochTable.session_id, input.sessionID))
+                .get()
+                .pipe(Effect.orDie)
+              const revision = input.expectedRevision + 1
+              const contextGeneration = yield* Effect.scoped(
                 Effect.gen(function* () {
                   const context = yield* locations.contextEffect(input.destination)
                   const filesystem = Context.get(context, FileSystem.Service)
@@ -438,6 +494,18 @@ const layer = Layer.effect(
                   // Listing is the least invasive cross-provider access check and catches
                   // unreadable local directories as well as Rexd filesystem denial.
                   yield* filesystem.list({ path: RelativePath.make(".") })
+                  const assembler = Context.get(context, ModelContextAssembler.Service)
+                  const assembled = yield* assembler.load(before.agent).pipe(
+                    Effect.flatMap(SystemContext.initialize),
+                    Effect.mapError(
+                      () => new LocationRebindError({ message: "Destination model context is unavailable" }),
+                    ),
+                  )
+                  return SessionContextEpoch.materialize(assembled, {
+                    generation: (epoch?.generation ?? 0) + 1,
+                    reason: "location-rebound",
+                    locationRevision: revision,
+                  })
                 }),
               ).pipe(
                 Effect.catchDefect(
@@ -453,13 +521,13 @@ const layer = Layer.effect(
                 return yield* new LocationRebindError({
                   message: `Session became non-idle during validation: ${finalBlockers.join(", ")}`,
                 })
-              const revision = input.expectedRevision + 1
               yield* events.publish(SessionEvent.LocationRebound, {
                 sessionID: input.sessionID,
                 timestamp: DateTime.makeUnsafe(Date.now()),
                 previous: current.location,
                 location: input.destination,
                 revision,
+                context: contextGeneration,
               })
               const warnings: string[] = []
               yield* locations.invalidate(current.location).pipe(
@@ -563,6 +631,10 @@ const layer = Layer.effect(
       context: Effect.fn("V2Session.context")(function* (sessionID) {
         yield* result.get(sessionID)
         return yield* store.context(sessionID)
+      }),
+      modelContext: Effect.fn("V2Session.modelContext")(function* (sessionID) {
+        yield* result.get(sessionID)
+        return yield* SessionContextEpoch.inspect(db, sessionID)
       }),
       events: (input) =>
         Stream.unwrap(

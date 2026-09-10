@@ -15,13 +15,10 @@ import { Database } from "../../database/database"
 import { EventV2 } from "../../event"
 import { Location } from "../../location"
 import { ModelV2 } from "../../model"
+import { ModelContextAssembler } from "../../model-context-assembler"
 import { PermissionV2 } from "../../permission"
 import { ProviderV2 } from "../../provider"
 import { QuestionV2 } from "../../question"
-import { SystemContext } from "../../system-context/index"
-import { SystemContextRegistry } from "../../system-context/registry"
-import { SkillGuidance } from "../../skill/guidance"
-import { ReferenceGuidance } from "../../reference/guidance"
 import { ToolRegistry } from "../../tool/registry"
 import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
@@ -101,9 +98,7 @@ const layer = Layer.effect(
     const models = yield* SessionRunnerModel.Service
     const store = yield* SessionStore.Service
     const location = yield* Location.Service
-    const systemContext = yield* SystemContextRegistry.Service
-    const skillGuidance = yield* SkillGuidance.Service
-    const referenceGuidance = yield* ReferenceGuidance.Service
+    const modelContext = yield* ModelContextAssembler.Service
     const config = yield* Config.Service
     const snapshots = yield* Snapshot.Service
     const db = (yield* Database.Service).db
@@ -166,11 +161,6 @@ const layer = Layer.effect(
     const continueAfterOverflowCompaction = (step: number) =>
       new TurnTransitionError({ _tag: "ContinueAfterOverflowCompaction", step })
 
-    const loadSystemContext = (agent: AgentV2.Selection) =>
-      Effect.all([systemContext.load(), skillGuidance.load(agent), referenceGuidance.load()], {
-        concurrency: "unbounded",
-      }).pipe(Effect.map(SystemContext.combine))
-
     const runTurnAttempt = Effect.fn("SessionRunner.runTurn")(function* (
       sessionID: SessionSchema.ID,
       promotion: SessionInput.Delivery | undefined,
@@ -186,7 +176,13 @@ const layer = Layer.effect(
       )
         return yield* Effect.interrupt
       const agent = yield* agents.select(session.agent)
-      const initialized = yield* SessionContextEpoch.initialize(db, loadSystemContext(agent), session.id)
+      const initialized = yield* SessionContextEpoch.initialize(
+        db,
+        events,
+        modelContext.load(agent.id),
+        session.id,
+        session.locationRevision,
+      )
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       let needsContinuation = false
       let currentStep = step
@@ -205,7 +201,14 @@ const layer = Layer.effect(
         }
       }
       const system =
-        initialized ?? (yield* SessionContextEpoch.prepare(db, events, loadSystemContext(agent), session.id))
+        initialized ??
+        (yield* SessionContextEpoch.prepare(
+          db,
+          events,
+          modelContext.load(agent.id),
+          session.id,
+          session.locationRevision,
+        ))
       const model = yield* models.resolve(session)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
@@ -471,9 +474,7 @@ export const node = makeLocationNode({
     SessionRunnerModel.node,
     SessionStore.node,
     Location.node,
-    SystemContextRegistry.node,
-    SkillGuidance.node,
-    ReferenceGuidance.node,
+    ModelContextAssembler.node,
     Config.node,
     Snapshot.node,
     Database.node,

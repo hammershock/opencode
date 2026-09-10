@@ -24,6 +24,20 @@ const projectLayer = Layer.succeed(
 )
 const it = testEffect(AppNodeBuilder.build(Location.boundNode(ref), [[Project.node, projectLayer]]))
 
+const nonGitProjectLayer = Layer.succeed(
+  Project.Service,
+  Project.Service.of({
+    directories: () => Effect.succeed([]),
+    resolve: () =>
+      Effect.succeed({
+        id: Project.ID.global,
+        directory: AbsolutePath.make("/"),
+      }),
+    commit: () => Effect.void,
+  }),
+)
+const nonGit = testEffect(AppNodeBuilder.build(Location.boundNode(ref), [[Project.node, nonGitProjectLayer]]))
+
 describe("Location", () => {
   it.effect("resolves the current project and vcs information", () =>
     Effect.gen(function* () {
@@ -37,6 +51,14 @@ describe("Location", () => {
         type: "git",
         store: AbsolutePath.make("/repo/.git"),
       })
+    }),
+  )
+
+  nonGit.effect("uses the selected directory as the non-Git project boundary", () =>
+    Effect.gen(function* () {
+      const location = yield* Location.Service
+      expect(location.project.id).toBe(Project.ID.global)
+      expect(location.project.directory).toBe(ref.directory)
     }),
   )
 })

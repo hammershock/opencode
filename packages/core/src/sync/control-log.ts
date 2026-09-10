@@ -893,7 +893,11 @@ function entryPath(generation: number) {
 function fencePath(tombstoneID: string, deviceID: SyncEvent.DeviceID) {
   validateID(tombstoneID)
   validateID(String(deviceID))
-  return SyncProvider.objectPath(`control/v2/deletions/${tombstoneID}/fences/${deviceID}.json`)
+  // Tombstone IDs intentionally contain `:` separators. Baidu accepts them
+  // as metadata values but rejects them in file or directory names with
+  // errno=-7. Keep the identity in the checkpoint payload and use its stable
+  // digest as the provider-safe path component.
+  return SyncProvider.objectPath(`control/v2/deletions/${digest(tombstoneID)}/fences/${deviceID}.json`)
 }
 
 function validateCheckpoint(

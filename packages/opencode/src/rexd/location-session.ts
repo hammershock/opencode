@@ -9,6 +9,8 @@ import { Context, Effect, Layer } from "effect"
 import path from "node:path"
 import type { RexdLease } from "./connection"
 import { RexdConnectionPool } from "./connection-pool"
+import { RexdFiles } from "./location-files"
+import { runRexdProcess } from "./process-runner"
 
 export class RexdLocationSession extends Context.Service<RexdLocationSession, RexdLease>()(
   "@opencode/RexdLocationSession",
@@ -49,24 +51,57 @@ export function rexdLocationNode(ref: Location.Ref, session: ReturnType<typeof r
       Location.Service,
       Effect.gen(function* () {
         const lease = yield* RexdLocationSession
-        const project =
-          lease.handshake.workspaceRoots
-            .filter((root) => within(root, ref.directory))
-            .sort((left, right) => right.length - left.length)[0] ?? ref.directory
+        const registry = yield* TargetRegistry.Service
+        const snapshot = yield* Effect.promise(() => registry.load())
+        const target = snapshot.targets.find((item) => item.id === targetID)
+        const metadata = yield* Effect.promise(() => inspectRexdLocation(targetID, ref.directory, lease))
         return Location.Service.of({
           target: ref.target,
           directory: ref.directory,
           workspaceID: ref.workspaceID,
           lastKnownTargetName: ref.lastKnownTargetName,
           project: {
-            id: Project.ID.make(Hash.fast(`rexd:${targetID}:${project}`)),
-            directory: AbsolutePath.make(project),
+            id: Project.ID.make(Hash.fast(`rexd:${targetID}:${metadata.project}`)),
+            directory: AbsolutePath.make(metadata.project),
           },
+          vcs: metadata.vcs ? { type: "git", store: AbsolutePath.make(metadata.project) } : undefined,
+          platform: lease.prepared?.platform ?? "unknown",
+          targetName: target?.name ?? ref.lastKnownTargetName ?? "remote",
+          home: lease.prepared?.home,
+          canonicalDirectory: metadata.directory,
         })
       }),
     ),
-    deps: [session],
+    deps: [session, TargetRegistry.node],
   })
+}
+
+/** Discover target-side project identity without opening another SSH connection. */
+export async function inspectRexdLocation(targetID: Location.TargetID, directory: string, lease: RexdLease) {
+  const logical = path.posix.normalize(directory)
+  const fallback = { directory: logical, project: logical, vcs: false as const }
+  try {
+    const files = new RexdFiles(targetID, lease)
+    const status = await files.directoryStatus(directory, "/")
+    const cwd = status.status === "directory" ? (status.resolvedPath ?? status.path) : directory
+    const result = await runRexdProcess(lease, {
+      argv: ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+      shell: false,
+      cwd,
+      timeout: "5 seconds",
+      maxOutputBytes: 64 * 1024,
+    })
+    const nonGit = { ...fallback, directory: cwd, project: cwd }
+    if (result.exitCode !== 0 || result.stdoutTruncated) return nonGit
+    const candidate = path.posix.normalize(result.stdout.toString("utf8").trim().split("\n", 1)[0] ?? "")
+    if (!path.posix.isAbsolute(candidate) || !lease.handshake.workspaceRoots.some((root) => within(root, candidate)))
+      return nonGit
+    const root = await files.directoryStatus(candidate, "/")
+    if (root.status !== "directory") return nonGit
+    return { directory: cwd, project: root.resolvedPath ?? candidate, vcs: true as const }
+  } catch {
+    return fallback
+  }
 }
 
 function within(root: string, value: string) {

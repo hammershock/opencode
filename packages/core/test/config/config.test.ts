@@ -9,7 +9,6 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ConfigMigrateV1 } from "@opencode-ai/core/v1/config/migrate"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
-import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { Location } from "@opencode-ai/core/location"
 import { Policy } from "@opencode-ai/core/policy"
@@ -771,6 +770,14 @@ describe("Config", () => {
               "directory",
               "root-dot",
               "directory-dot",
+            ])
+            expect(documents.map((document) => [document.scope, document.filesystem])).toEqual([
+              ["global", "controller"],
+              ["project", "target"],
+              ["project", "target"],
+              ["project", "target"],
+              ["project", "target"],
+              ["project", "target"],
             ])
             expect(entries.map((entry) => (entry.type === "document" ? entry.info.$schema : entry.path))).toEqual([
               "global",

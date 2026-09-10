@@ -148,6 +148,18 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             time: { created: event.data.timestamp },
           }),
         ),
+      "session.next.context.generation.established": () => Effect.void,
+      "session.next.context.advanced": (event) =>
+        event.data.text.length === 0
+          ? Effect.void
+          : adapter.appendMessage(
+              SessionMessage.System.make({
+                id: event.data.messageID,
+                type: "system",
+                text: event.data.text,
+                time: { created: event.data.timestamp },
+              }),
+            ),
       "session.next.synthetic": (event) => {
         return adapter.appendMessage(
           SessionMessage.Synthetic.make({

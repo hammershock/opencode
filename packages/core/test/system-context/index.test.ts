@@ -7,12 +7,14 @@ const key = SystemContext.Key.make
 const stringContext = (input: {
   key: string
   value: string | SystemContext.Unavailable
+  refresh?: "generation" | "turn"
   baseline?: (value: string) => string
   update?: (previous: string, current: string) => string
   removed?: (value: string) => string
 }) =>
   SystemContext.make({
     key: key(input.key),
+    refresh: input.refresh,
     codec: Schema.toCodecJson(Schema.String),
     load: Effect.succeed(input.value),
     baseline: input.baseline ?? String,
@@ -57,8 +59,12 @@ describe("SystemContext", () => {
       expect(yield* SystemContext.initialize(context)).toEqual({
         baseline: "Today's date is 2026-06-03.\n\nDirectory: /repo",
         snapshot: {
-          "core/date": { value: "2026-06-03", removed: "The date was removed." },
-          "core/location": { value: "/repo" },
+          "core/date": {
+            value: "2026-06-03",
+            baseline: "Today's date is 2026-06-03.",
+            removed: "The date was removed.",
+          },
+          "core/location": { value: "/repo", baseline: "Directory: /repo" },
         },
       })
       expect(loads).toBe(1)
@@ -85,7 +91,7 @@ describe("SystemContext", () => {
         _tag: "Updated",
         text: "The date changed from 2026-06-03 to 2026-06-04.",
         snapshot: {
-          "core/date": { value: "2026-06-04", removed: "The date was removed." },
+          "core/date": { value: "2026-06-04", baseline: "2026-06-04", removed: "The date was removed." },
           "core/location": { value: "/repo", removed: "Removed: /repo" },
         },
       })
@@ -102,6 +108,56 @@ describe("SystemContext", () => {
     }),
   )
 
+  it.effect("does not reload generation sources during ordinary reconciliation", () =>
+    Effect.gen(function* () {
+      let loads = 0
+      const context = SystemContext.make({
+        key: key("core/instructions"),
+        refresh: "generation",
+        codec: Schema.toCodecJson(Schema.String),
+        load: Effect.sync(() => {
+          loads++
+          return "changed on disk"
+        }),
+        baseline: String,
+        update: (_previous, current) => current,
+      })
+
+      expect(
+        yield* SystemContext.reconcile(context, {
+          "core/instructions": { value: "accepted", refresh: "generation" },
+        }),
+      ).toEqual({ _tag: "Unchanged" })
+      expect(loads).toBe(0)
+    }),
+  )
+
+  it.effect("reloads generation sources only for an explicit replacement", () =>
+    Effect.gen(function* () {
+      let loads = 0
+      const context = SystemContext.make({
+        key: key("core/instructions"),
+        refresh: "generation",
+        codec: Schema.toCodecJson(Schema.String),
+        load: Effect.sync(() => {
+          loads++
+          return "current"
+        }),
+        baseline: String,
+        update: (_previous, current) => current,
+      })
+
+      expect(yield* SystemContext.replace(context, { "core/instructions": { value: "accepted" } })).toMatchObject({
+        _tag: "ReplacementReady",
+        generation: {
+          baseline: "current",
+          snapshot: { "core/instructions": { value: "current", refresh: "generation" } },
+        },
+      })
+      expect(loads).toBe(1)
+    }),
+  )
+
   it.effect("uses the baseline for a newly added source", () =>
     Effect.gen(function* () {
       const context = stringContext({
@@ -113,7 +169,7 @@ describe("SystemContext", () => {
       expect(yield* SystemContext.reconcile(context, {})).toEqual({
         _tag: "Updated",
         text: "Available skill: effect",
-        snapshot: { "core/skills": { value: "effect" } },
+        snapshot: { "core/skills": { value: "effect", baseline: "Available skill: effect" } },
       })
     }),
   )
@@ -126,6 +182,37 @@ describe("SystemContext", () => {
       expect(yield* SystemContext.reconcile(context, previous)).toEqual({ _tag: "Unchanged" })
       expect(yield* SystemContext.replace(context, previous)).toEqual({ _tag: "ReplacementBlocked" })
       expect(yield* SystemContext.replace(context, {})).toMatchObject({ _tag: "ReplacementReady" })
+    }),
+  )
+
+  it.effect("rebuilds a compaction baseline from admitted values without loading sources", () =>
+    Effect.gen(function* () {
+      let loads = 0
+      const context = SystemContext.combine([
+        SystemContext.make({
+          key: key("core/date"),
+          codec: Schema.toCodecJson(Schema.String),
+          load: Effect.sync(() => {
+            loads++
+            return "new"
+          }),
+          baseline: (value) => `Date: ${value}`,
+          update: (_previous, value) => `Date: ${value}`,
+        }),
+      ])
+
+      expect(
+        SystemContext.rebaseline(context, {
+          "core/date": { value: "accepted", baseline: "Date: accepted" },
+        }),
+      ).toEqual({
+        _tag: "ReplacementReady",
+        generation: {
+          baseline: "Date: accepted",
+          snapshot: { "core/date": { value: "accepted", baseline: "Date: accepted" } },
+        },
+      })
+      expect(loads).toBe(0)
     }),
   )
 

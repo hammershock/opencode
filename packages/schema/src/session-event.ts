@@ -12,6 +12,7 @@ import { SessionID } from "./session-id"
 import { Location } from "./location"
 import { SessionMessage } from "./session-message"
 import { Revert } from "./revert"
+import { ModelContext } from "./model-context"
 
 export { FileAttachment }
 
@@ -92,6 +93,8 @@ export const LocationRebound = Event.define({
     previous: Location.Ref,
     location: Location.Ref,
     revision: NonNegativeInt,
+    /** New Location context committed atomically with the rebind. Absent only on legacy events. */
+    context: optional(ModelContext.Generation),
   },
 })
 export type LocationRebound = typeof LocationRebound.Type
@@ -137,6 +140,32 @@ export const ContextUpdated = Event.define({
   },
 })
 export type ContextUpdated = typeof ContextUpdated.Type
+
+/** Establishes or replaces the canonical, syncable model-context generation. */
+export const ContextGenerationEstablished = Event.define({
+  type: "session.next.context.generation.established",
+  ...options,
+  schema: {
+    ...Base,
+    context: ModelContext.Generation,
+  },
+})
+export type ContextGenerationEstablished = typeof ContextGenerationEstablished.Type
+
+/** Advances dynamic or nested state without replacing the active generation. */
+export const ContextAdvanced = Event.define({
+  type: "session.next.context.advanced",
+  ...options,
+  schema: {
+    ...Base,
+    messageID: SessionMessage.ID,
+    cause: Schema.Literals(["dynamic", "nested-instructions"]),
+    text: Schema.String,
+    sources: ModelContext.SourceState,
+    digest: Schema.NonEmptyString,
+  },
+})
+export type ContextAdvanced = typeof ContextAdvanced.Type
 
 export const Synthetic = Event.define({
   type: "session.next.synthetic",
@@ -483,6 +512,8 @@ export const DurableDefinitions = Event.inventory(
   PromptAdmitted,
   Turn.Settled,
   ContextUpdated,
+  ContextGenerationEstablished,
+  ContextAdvanced,
   Synthetic,
   Shell.Started,
   Shell.Ended,
@@ -516,6 +547,8 @@ export const Definitions = Event.inventory(
   PromptAdmitted,
   Turn.Settled,
   ContextUpdated,
+  ContextGenerationEstablished,
+  ContextAdvanced,
   Synthetic,
   Shell.Started,
   Shell.Ended,

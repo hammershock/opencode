@@ -238,7 +238,7 @@ export function hoist<A, E, T extends Tag, const Items extends Replacements = re
       }
       return { ...node, dependencies: node.dependencies.map(context.visit) }
     },
-    { resolve: (node) => replacementMap.get(node.name) ?? node },
+    { resolve: (node) => replacementMap.get(identity(node)) ?? node },
   )
 
   return {
@@ -264,7 +264,7 @@ export function compile<A, E, const Items extends Replacements = readonly []>(
           ? implementation
           : implementation.pipe(Layer.provide(dependencies as [RuntimeLayer, ...RuntimeLayer[]]))
       },
-      { cache, resolve: (node) => replacementMap.get(node.name) ?? node },
+      { cache, resolve: (node) => replacementMap.get(identity(node)) ?? node },
     )
   const layers = flatten(root).map((node) => compileNode(node))
   const layer = layers.reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty)
@@ -275,9 +275,9 @@ function replacementMapFrom(replacements?: Replacements) {
   return (
     replacements?.reduce((map, [source, replacement]) => {
       const normalized = rewriteReplacementDependencies(replacementNode(source, replacement), map)
-      const current = new Map([[source.name, normalized]])
-      for (const [name, node] of map) map.set(name, rewriteReplacementDependencies(node, current))
-      map.set(source.name, normalized)
+      const current = new Map([[identity(source), normalized]])
+      for (const [key, node] of map) map.set(key, rewriteReplacementDependencies(node, current))
+      map.set(identity(source), normalized)
       return map
     }, new Map<string, AnyNode>()) ?? new Map<string, AnyNode>()
   )
@@ -290,7 +290,7 @@ function rewriteReplacementDependencies(root: AnyNode, replacements: ReadonlyMap
   const stack: AnyNode[] = []
 
   const recur = (node: AnyNode, isRoot = false): AnyNode => {
-    const target = isRoot ? node : (replacements.get(node.name) ?? node)
+    const target = isRoot ? node : (replacements.get(identity(node)) ?? node)
     const cached = cache.get(target)
     if (cached !== undefined || cache.has(target)) return cached!
     if (visiting.has(target)) {
@@ -318,6 +318,10 @@ function rewriteReplacementDependencies(root: AnyNode, replacements: ReadonlyMap
   return recur(root, true)
 }
 
+function identity(node: AnyNode) {
+  return `${node.tag ?? "untagged"}:${node.name}`
+}
+
 export function hasUnbound(
   root: Node<unknown, unknown, any>,
   source: AnyNode,
@@ -331,7 +335,7 @@ export function hasUnbound(
       if (node === source) return true
       return node.dependencies.some(context.visit)
     },
-    { resolve: (node) => replacementMap.get(node.name) ?? node },
+    { resolve: (node) => replacementMap.get(identity(node)) ?? node },
   )
 }
 

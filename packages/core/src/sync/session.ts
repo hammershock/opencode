@@ -311,7 +311,8 @@ function replayOptions(event: Pick<SyncEvent.Envelope, "type">, options: EventV2
     event.type === SessionEvent.LocationRebound.type ||
     event.type ===
       EventV2.versionedType(SessionEvent.LocationRebound.type, SessionEvent.LocationRebound.durable!.version)
-  return rebound ? { ...options, publish: false, project: false } : options
+  const scoped = { ...options, manifest: SessionSyncDurable.definitions }
+  return rebound ? { ...scoped, publish: false, project: false } : scoped
 }
 
 function replaceSessionID(value: unknown, source: string, target: string): any {

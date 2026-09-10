@@ -72,6 +72,18 @@ const VersionedMessage = EventV2.define({
   },
 })
 
+const ScopedReplayMessage = EventV2.define({
+  type: "test.scoped-replay",
+  durable: {
+    version: 1,
+    aggregate: "id",
+  },
+  schema: {
+    id: Schema.String,
+    text: Schema.String,
+  },
+})
+
 const DurableMessage = SessionV1.Event.MessageRemoved
 const durableData = (sessionID: Session.ID, text: string) => ({
   sessionID,
@@ -559,6 +571,32 @@ describe("EventV2", () => {
 
       expect(received[0]?.type).toBe(DurableMessage.type)
       expect(received[0]?.data).toEqual(durableData(aggregateID, "hello"))
+    }),
+  )
+
+  it.effect("replays against an explicitly scoped durable manifest", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const received = new Array<EventV2.Payload>()
+      yield* events.project(ScopedReplayMessage, (event) =>
+        Effect.sync(() => {
+          received.push(event)
+        }),
+      )
+
+      yield* events.replay(
+        {
+          id: EventV2.ID.create(),
+          type: EventV2.versionedType(ScopedReplayMessage.type, 1),
+          seq: 0,
+          aggregateID: "scoped",
+          data: { id: "scoped", text: "hello" },
+        },
+        { manifest: Event.durable([ScopedReplayMessage]) },
+      )
+
+      expect(received).toHaveLength(1)
+      expect(received[0]?.data).toEqual({ id: "scoped", text: "hello" })
     }),
   )
 

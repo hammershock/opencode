@@ -5,6 +5,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventSequenceTable, EventTable } from "@opencode-ai/core/event/sql"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionContextEpoch } from "@opencode-ai/core/session/context-epoch"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
@@ -14,6 +15,7 @@ import { SyncOwnership } from "@opencode-ai/core/sync/ownership"
 import { SessionSync } from "@opencode-ai/core/sync/session"
 import { Session } from "@opencode-ai/schema/session"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
+import { ModelContext } from "@opencode-ai/schema/model-context"
 import { eq } from "drizzle-orm"
 import path from "node:path"
 import { tmpdir } from "./fixture/tmpdir"
@@ -385,6 +387,98 @@ describe("SessionSync", () => {
       { publish: true },
     ])
     expect(calls[1]).toEqual(["remove", "s1"])
+  })
+
+  test("hydrates the complete frozen model context body and order", async () => {
+    await using tmp = await tmpdir()
+    const layer = LayerNode.compile(LayerNode.group([Database.node, EventV2.node, SessionProjector.node]), [
+      [Database.node, Database.layerFromPath(path.join(tmp.path, "session.db"))],
+    ])
+    const sessionID = Session.ID.make("ses_context_hydrate")
+    const environment = ModelContext.Environment.make({
+      harness: "OpenCode REXD",
+      entrypoint: "opencode-rexd",
+      targetKind: "rexd",
+      targetName: "mywindows",
+      directory: "/home/hammer/project",
+      projectRoot: "/home/hammer/project",
+      vcs: "git",
+      platform: "linux",
+    })
+    const instructions = ModelContext.Instructions.make([
+      {
+        id: "global",
+        origin: "global-file",
+        scope: "global",
+        source: "/controller/AGENTS.md",
+        status: "loaded",
+        content: "controller rules",
+        digest: "digest-global",
+      },
+      {
+        id: "project",
+        origin: "project-file",
+        scope: "project",
+        source: "/home/hammer/project/AGENTS.md",
+        status: "loaded",
+        content: "target rules",
+        digest: "digest-project",
+      },
+    ])
+    const context = ModelContext.Generation.make({
+      version: 1,
+      generation: 1,
+      reason: "created",
+      locationRevision: 0,
+      environment,
+      instructions,
+      digest: "digest-generation",
+      baseline: "frozen model context",
+      sources: {
+        [ModelContext.Key.make("core/environment")]: { value: environment, baseline: "environment" },
+        [ModelContext.Key.make("core/instructions")]: {
+          value: instructions,
+          baseline: "controller rules\ntarget rules",
+        },
+      },
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const events = yield* EventV2.Service
+        const database = (yield* Database.Service).db
+        const projector = SessionSync.projector(events)
+        yield* projector.project({
+          id: EventV2.ID.create(),
+          aggregateID: sessionID,
+          seq: 0,
+          type: "session.created.1",
+          data: {
+            sessionID,
+            info: {
+              id: sessionID,
+              slug: "context-hydrate",
+              projectID: "global",
+              directory: "/home/hammer/project",
+              title: "Context hydrate",
+              version: "test",
+              time: { created: 1, updated: 1 },
+            },
+          },
+        })
+        yield* projector.project({
+          id: EventV2.ID.create(),
+          aggregateID: sessionID,
+          seq: 1,
+          type: "session.next.context.generation.established.1",
+          data: { sessionID, timestamp: 2, context },
+        })
+
+        const hydrated = yield* SessionContextEpoch.inspect(database, sessionID)
+        expect(hydrated).toEqual(context)
+        expect(hydrated?.instructions.map((item) => item.content)).toEqual(["controller rules", "target rules"])
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    )
   })
 
   test("records remote Location rebind sequence without changing this device Location", async () => {

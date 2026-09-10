@@ -23,7 +23,7 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInput } from "@opencode-ai/core/session/input"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionLocationRuntime } from "@opencode-ai/core/session/location-runtime"
-import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionContextEpochTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
@@ -119,6 +119,27 @@ describe("SessionV2.create", () => {
       ).toMatchObject({ status: "rebound", revision: created.locationRevision + 1 })
       expect((yield* session.get(created.id)).location).toEqual(destination)
       expect(reset).toEqual([created.id])
+      const { db } = yield* Database.Service
+      expect(
+        yield* db
+          .select()
+          .from(SessionContextEpochTable)
+          .where(eq(SessionContextEpochTable.session_id, created.id))
+          .get(),
+      ).toMatchObject({
+        session_id: created.id,
+        generation: 1,
+        reason: "location-rebound",
+        location_revision: created.locationRevision + 1,
+      })
+      const rebound = yield* db
+        .select({ data: EventTable.data })
+        .from(EventTable)
+        .where(eq(EventTable.type, "session.next.location.rebound.1"))
+        .get()
+      expect(rebound?.data).toMatchObject({
+        context: { reason: "location-rebound", locationRevision: created.locationRevision + 1 },
+      })
     }),
   )
 
@@ -349,21 +370,55 @@ describe("SessionV2.create", () => {
     }),
   )
 
-  it.effect("omits legacy creation rows from the V2 Session event stream", () =>
+  it.effect("establishes canonical context before admitting the first V2 prompt", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const events = yield* EventV2.Service
       const { db } = yield* Database.Service
-      const created = yield* session.create({ location })
+      const promptLocation = Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) })
+      const created = yield* session.create({ location: promptLocation })
       yield* session.prompt({ sessionID: created.id, prompt: Prompt.make({ text: "Hello" }), resume: false })
       yield* SessionInput.promoteSteers(db, events, created.id, Number.MAX_SAFE_INTEGER)
 
       expect(
-        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(2), Stream.runCollect)),
+        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(3), Stream.runCollect)),
       ).toMatchObject([
-        { durable: { seq: 1 }, type: "session.next.prompt.admitted", data: { prompt: { text: "Hello" } } },
-        { durable: { seq: 2 }, type: "session.next.prompted" },
+        {
+          durable: { seq: 1 },
+          type: "session.next.context.generation.established",
+          data: { context: { reason: "created", generation: 1 } },
+        },
+        { durable: { seq: 2 }, type: "session.next.prompt.admitted", data: { prompt: { text: "Hello" } } },
+        { durable: { seq: 3 }, type: "session.next.prompted" },
       ])
+    }),
+  )
+
+  it.effect("establishes only one context generation for concurrent first prompts", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const { db } = yield* Database.Service
+      const promptLocation = Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) })
+      const created = yield* session.create({ location: promptLocation })
+
+      yield* Effect.all(
+        [
+          session.prompt({ sessionID: created.id, prompt: Prompt.make({ text: "First" }), resume: false }),
+          session.prompt({ sessionID: created.id, prompt: Prompt.make({ text: "Second" }), resume: false }),
+        ],
+        { concurrency: "unbounded" },
+      )
+
+      const events = yield* db
+        .select({ type: EventTable.type })
+        .from(EventTable)
+        .where(eq(EventTable.aggregate_id, created.id))
+        .all()
+      expect(
+        events.filter(
+          (event) => event.type === EventV2.versionedType(SessionEvent.ContextGenerationEstablished.type, 1),
+        ),
+      ).toHaveLength(1)
     }),
   )
 
@@ -372,7 +427,11 @@ describe("SessionV2.create", () => {
       const session = yield* SessionV2.Service
       const sourceEvents = yield* EventV2.Service
       const sourceDb = (yield* Database.Service).db
-      const created = yield* session.create({ id: SessionV2.ID.make("ses_fresh_target_replay"), location })
+      const promptLocation = Location.Ref.make({ directory: AbsolutePath.make(process.cwd()) })
+      const created = yield* session.create({
+        id: SessionV2.ID.make("ses_fresh_target_replay"),
+        location: promptLocation,
+      })
       const admitted = yield* session.prompt({
         sessionID: created.id,
         prompt: Prompt.make({ text: "Replay lifecycle" }),
@@ -409,29 +468,29 @@ describe("SessionV2.create", () => {
         const store = yield* SessionStore.Service
         yield* db
           .insert(ProjectTable)
-          .values({ id: ProjectV2.ID.global, worktree: location.directory, sandboxes: [] })
+          .values({ id: ProjectV2.ID.global, worktree: promptLocation.directory, sandboxes: [] })
           .run()
           .pipe(Effect.orDie)
 
         expect(yield* store.get(created.id)).toBeUndefined()
-        expect(yield* events.replayAll(serialized.slice(0, 2))).toBe(created.id)
+        expect(yield* events.replayAll(serialized.slice(0, 3))).toBe(created.id)
         expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
           id: admitted.id,
           sessionID: created.id,
           prompt: { text: "Replay lifecycle" },
           delivery: "steer",
-          admittedSeq: 1,
+          admittedSeq: 2,
         })
         expect(yield* store.context(created.id)).toEqual([])
 
-        expect(yield* events.replayAll(serialized.slice(2))).toBe(created.id)
+        expect(yield* events.replayAll(serialized.slice(3))).toBe(created.id)
         expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
           id: admitted.id,
           sessionID: created.id,
           prompt: { text: "Replay lifecycle" },
           delivery: "steer",
-          admittedSeq: 1,
-          promotedSeq: 2,
+          admittedSeq: 2,
+          promotedSeq: 3,
         })
         expect(yield* store.context(created.id)).toMatchObject([
           { id: admitted.id, type: "user", text: "Replay lifecycle" },
@@ -446,8 +505,9 @@ describe("SessionV2.create", () => {
             .pipe(Effect.orDie)).map((event) => [event.seq, event.type]),
         ).toEqual([
           [0, EventV2.versionedType(SessionV1.Event.Created.type, 1)],
-          [1, EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1)],
-          [2, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
+          [1, EventV2.versionedType(SessionEvent.ContextGenerationEstablished.type, 1)],
+          [2, EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1)],
+          [3, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
         ])
       }).pipe(Effect.provide(Layer.fresh(targetLayer)))
     }),

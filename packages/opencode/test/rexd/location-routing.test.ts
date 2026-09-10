@@ -9,9 +9,9 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import type { RexdLease } from "../../src/rexd/connection"
 import { RexdFiles } from "../../src/rexd/location-files"
-import { remoteGrep } from "../../src/rexd/location-filesystem"
+import { remoteGrep, upwardMany } from "../../src/rexd/location-filesystem"
 import { rexdFilesystemNodes } from "../../src/rexd/location-filesystem"
-import { rexdSessionNode, RexdLocationSession } from "../../src/rexd/location-session"
+import { inspectRexdLocation, rexdSessionNode, RexdLocationSession } from "../../src/rexd/location-session"
 import { runRexdProcess } from "../../src/rexd/location-process"
 import { probeTarget, targetHealthWithDeadline } from "../../src/rexd/target-registry"
 import {
@@ -214,6 +214,93 @@ describe("Rexd Location routing contract", () => {
     expect(String(matches[0]?.entry.path)).toBe("src/a.ts")
     expect(calls.some((call) => call.method === "fs.read")).toBe(false)
     expect(calls.find((call) => call.method === "exec.start")?.params).toMatchObject({ shell: false })
+  })
+
+  test("remote Location discovers the target-side Git root on its existing lease", async () => {
+    const { lease, calls } = processLease((method, params, emit) => {
+      if (method === "fs.stat") {
+        if (params.path === "/workspace-link")
+          return { path: params.path, exists: true, type: "symlink", symlink_target: "/srv/repo/sub", mtime: 1 }
+        if (params.path === "/srv/repo/sub" || params.path === "/srv/repo")
+          return { path: params.path, exists: true, type: "dir", mtime: 1 }
+        return { path: params.path, exists: false }
+      }
+      if (method === "exec.start") {
+        expect(params).toMatchObject({
+          argv: ["git", "-C", "/srv/repo/sub", "rev-parse", "--show-toplevel"],
+          shell: false,
+          cwd: "/srv/repo/sub",
+        })
+        queueMicrotask(() => {
+          emit("exec.stdout", { process_id: "git-root", data: "/srv/repo\n" })
+          emit("exec.exit", { process_id: "git-root", exit_code: 0 })
+        })
+        return { process_id: "git-root" }
+      }
+      return undefined
+    })
+    lease.handshake.workspaceRoots = ["/"]
+
+    const result = await inspectRexdLocation(targetID, "/workspace-link", lease)
+
+    expect(result).toEqual({ directory: "/srv/repo/sub", project: "/srv/repo", vcs: true })
+    expect(calls.filter((call) => call.method === "exec.start")).toHaveLength(1)
+  })
+
+  test("a non-Git remote Location uses the selected directory, never the workspace access root", async () => {
+    const selected = "/home/hammer/workspace/plain-project"
+    const { lease, calls } = processLease((method, params, emit) => {
+      if (method === "fs.stat") return { path: params.path, exists: true, type: "dir", mtime: 1 }
+      if (method === "exec.start") {
+        queueMicrotask(() => {
+          emit("exec.stderr", { process_id: "git-root", data: "not a git repository" })
+          emit("exec.exit", { process_id: "git-root", exit_code: 128 })
+        })
+        return { process_id: "git-root" }
+      }
+      return undefined
+    })
+    lease.handshake.workspaceRoots = ["/"]
+
+    expect(await inspectRexdLocation(targetID, selected, lease)).toEqual({
+      directory: selected,
+      project: selected,
+      vcs: false,
+    })
+    expect(calls.find((call) => call.method === "exec.start")?.params).toMatchObject({
+      argv: ["git", "-C", selected, "rev-parse", "--show-toplevel"],
+      cwd: selected,
+    })
+    expect(calls.some((call) => call.params.path === "/AGENTS.md")).toBe(false)
+  })
+
+  test("remote upward rule discovery pipelines all candidate stats and preserves deterministic order", async () => {
+    let active = 0
+    let maximum = 0
+    const { lease } = processLease((method, params) => {
+      if (method !== "fs.stat") return undefined
+      active++
+      maximum = Math.max(maximum, active)
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          active--
+          resolve({
+            path: params.path,
+            exists: params.path === "/a/AGENTS.md" || params.path === "/a/b/CLAUDE.md",
+            type: "file",
+            mtime: 1,
+          })
+        }, 5),
+      )
+    })
+    lease.handshake.workspaceRoots = ["/"]
+
+    const result = await Effect.runPromise(
+      upwardMany(new RexdFiles("gpu", lease), ["AGENTS.md", "CLAUDE.md"], "/a/b/c", "/"),
+    )
+
+    expect(result).toEqual(["/a/AGENTS.md", "/a/b/CLAUDE.md"])
+    expect(maximum).toBeGreaterThan(1)
   })
 
   test("location FS boots and resolves a remote-only path without controller fallback", async () => {

@@ -28,6 +28,7 @@ import { SyncProvider } from "./provider"
 import { SyncState } from "./state"
 import { SyncTransfer } from "./transfer"
 import { TargetBindingRegistry } from "../target-binding-registry"
+import { TargetRegistry } from "../target-registry"
 import { SessionActivity } from "../session/activity"
 import { SessionLocationMutation } from "../session/location-mutation"
 import { SyncTransferEvent } from "@opencode-ai/schema/sync-transfer-event"
@@ -154,6 +155,7 @@ const make = (input: LayerOptions) =>
     const membership = yield* SyncMembership.Service
     const sessionDB = (yield* Database.Service).db
     const targetBindings = yield* TargetBindingRegistry.Service
+    const targetRegistry = yield* TargetRegistry.Service
     const activity = yield* SessionActivity.Service
     const locationMutation = yield* SessionLocationMutation.Service
     let lastSuccessAt: number | undefined
@@ -1473,22 +1475,24 @@ const make = (input: LayerOptions) =>
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
       const metadata = metadataStore.scope(config.namespaceID)
-      const [indexed, local, bindingSnapshot] = yield* Effect.all([
+      const [indexed, local, bindingSnapshot, targetSnapshot] = yield* Effect.all([
         metadata.list(),
         sessionDB.select({ id: SessionTable.id }).from(SessionTable).all(),
         Effect.tryPromise({ try: () => targetBindings.load(), catch: () => new ControlError({ kind: "storage" }) }),
+        Effect.tryPromise({ try: () => targetRegistry.load(), catch: () => new ControlError({ kind: "storage" }) }),
       ])
       const localIDs = new Set(local.map((item) => String(item.id)))
       return yield* Effect.forEach(indexed, (item) => {
-        // A portable label is intentionally all that crosses devices. It is
-        // unresolved until this device explicitly binds it to one of its own
-        // targets; neither an SSH config nor a target ID is synced.
+        // A portable label is intentionally all that crosses devices. An
+        // explicit binding wins; otherwise an exact local target name resolves
+        // it without syncing either SSH configuration or target IDs.
         const next: SyncMetadata.Availability =
           item.availability === "conflict"
             ? "conflict"
             : item.ownerDeviceID === config.deviceID && localIDs.has(item.sessionID)
               ? "ready"
-              : item.targetLabel && !bindingSnapshot.bindings.has(item.targetLabel)
+              : item.targetLabel &&
+                  !portableTargetResolvable(item.targetLabel, bindingSnapshot.bindings, targetSnapshot.targets)
                 ? "unresolved"
                 : localIDs.has(item.sessionID)
                   ? "ready"
@@ -1621,6 +1625,7 @@ export const node = makeGlobalNode({
     SyncOwnership.node,
     SyncMembership.node,
     TargetBindingRegistry.node,
+    TargetRegistry.node,
     SessionActivity.node,
     SessionLocationMutation.node,
   ],
@@ -1636,6 +1641,14 @@ export function codecFor(config: Pick<SyncState.Active, "namespaceID" | "encrypt
     },
     catch: () => new ControlError({ kind: "locked" }),
   })
+}
+
+export function portableTargetResolvable(
+  label: string,
+  bindings: ReadonlyMap<string, unknown>,
+  targets: readonly Pick<TargetRegistry.Definition, "name">[],
+) {
+  return bindings.has(label) || targets.some((target) => target.name === label)
 }
 
 export function portableTargetMetadata(input: {

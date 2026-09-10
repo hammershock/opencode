@@ -27,20 +27,20 @@ superseded-by: []
 
 ## 动机与风险
 
-同步或设备变化后，Session 原 Location 可能无法恢复：云端事件只有 portable target label，而新设备尚无对应 binding；本地 registry 中被 Session 引用的 target ID 也可能已经被移除。用户还可能有意在另一机器或目录继续同一段对话。直接修改 Location 有明显风险：历史工具输出、文件路径和 Agent 对代码状态的理解可能不再对应新工作区。
+同步或设备变化后，Session 原 Location 可能无法恢复：云端事件只有 portable target label，而新设备尚无对应 binding 或同名 target；本地 registry 中被 Session 引用的 target ID 也可能已经被移除。用户还可能有意在另一机器或目录继续同一段对话。直接修改 Location 有明显风险：历史工具输出、文件路径和 Agent 对代码状态的理解可能不再对应新工作区。
 
-因此 target 缺失时必须显式提示恢复选项，不能自动连接同名 target 或静默回退到 local。只读打开和为原逻辑 target 建立本地配置属于正常恢复能力；只有把 Session 改到另一个逻辑 target 的 rebind 才是实验性高级操作。
+因此 portable label 在本机存在唯一、完全同名的 target 时直接使用该 target，并继续执行连接、Rexd、workspace root、Session directory 与环境校验；显式 binding 优先于同名匹配。只有既无 binding 也无同名 target 时才提示恢复，且始终不能静默回退到 local。只读打开和为原逻辑 target 建立本地配置属于正常恢复能力；只有把 Session 改到另一个逻辑 target 的 rebind 才是实验性高级操作。
 
 ## Target resolution 状态
 
 Session 打开前，Core 将 Location 解析为以下状态之一：
 
-- `resolved`：设备本地 target ID 或 portable label binding 能解析到有效 target definition；
+- `resolved`：设备本地 target ID、portable label binding，或 portable label 与唯一同名本地 target 的匹配能解析到有效 target definition；
 - `missing_local_target`：Session 引用设备本地 target ID，但 registry 已不存在该 definition；
-- `unbound_portable_target`：同步 Session 携带 portable target label，但本设备尚未建立 binding；
-- `target_unavailable`：definition/binding 存在，但连接、Rexd、目录或环境验证失败。
+- `unbound_portable_target`：同步 Session 携带 portable target label，但本设备既没有 binding，也没有唯一同名 target；
+- `target_unavailable`：target definition 通过本地 ID、binding 或同名规则解析成功，但连接、Rexd、目录或环境验证失败。
 
-后三种状态统一称为 unresolved，但 UI 必须展示具体原因。Session Location 保留非敏感的 `lastKnownTargetName` 或 portable label 作为恢复提示；它不是连接配置，也不能参与自动匹配。认证失败、设备离线等 `target_unavailable` 不应诱导用户重复创建同名 target，必须优先提供重试与编辑现有配置。
+后三种状态统一称为 unresolved，但 UI 必须展示具体原因。Session Location 保留的 `lastKnownTargetName` 只用于恢复提示，不能参与自动匹配；同步协议中的 portable label 可以与唯一同名本地 target 匹配，但它本身仍不是连接配置。认证失败、设备离线等 `target_unavailable` 不应诱导用户重复创建同名 target，必须优先提供重试与编辑现有配置。
 
 ## 入口与开关
 
@@ -64,19 +64,19 @@ Session 打开前，Core 将 Location 解析为以下状态之一：
 1. 使用 target 配置向导重新填写连接信息；保存时恢复 Session 已引用的原 target ID，而不是生成另一个 ID；该受限操作必须明确列出会同时恢复的所有引用 Session；
 2. 在实验性 rebind 开启时，把当前 Session 显式重绑定到一个已有 target。
 
-如果该 Session 曾参与 RFC-0010 同步，云端保存的 portable target name/label 可以作为向导中的名称、机器用途和工作位置参考；它不包含 SSH 连接信息，也不能自动选择 host、credential 或已有本地 target。
+如果该 Session 曾参与 RFC-0010 同步，云端保存的 portable target name/label 可以匹配本机唯一、完全同名的 target；它不包含 SSH 连接信息，也不能选择不同名称的 host、credential 或 target。匹配后的 target 仍必须通过完整 Location 校验。
 
 恢复原 ID 只修复设备本地 registry，不产生 Location revision，也不改变 Session directory。它是 registry 级修复：本设备上引用同一缺失 target ID 的 Session 形成一个恢复批次，验证成功后可以一起恢复 resolved。向导必须在保存前列出该批次。保存后仍必须重新执行连接、Rexd、workspace root、各 Session directory 和 RFC-0005 环境验证；某个 Session 的目录或环境验证失败时，该 Session 单独保持 unresolved，不能让整个 registry 修复回滚。普通 target 创建流程不得任意指定或复用 ID，只有针对当前缺失引用的恢复 transaction 可以执行该操作。
 
 ### 解析云端 portable target
 
-当状态为 `unbound_portable_target` 时，向导显示云端 portable label，并允许用户：
+当 portable label 没有显式 binding 时，解析器先查找本机唯一、完全同名的 target：命中后直接使用并校验，不写入 binding，也不修改 Location revision。未命中而进入 `unbound_portable_target` 时，向导显示云端 portable label，并允许用户：
 
 1. 将该 label 显式绑定到一个已有的设备本地 target；
 2. 进入 RFC-0002 的 target 配置向导创建新 target，验证后再建立 binding；
 3. 只读打开，暂不建立 binding。
 
-binding 是设备本地映射，不修改云端 Session Location revision，也不要求本地 target 与其他设备使用相同 ID 或名称。一个 binding 可以恢复本设备上引用同一 portable label 的多个 Session；提交前必须向用户展示影响范围。名称相同只能作为候选提示，绝不能自动确认 binding。
+binding 是设备本地显式映射，不修改云端 Session Location revision，也不要求本地 target 与其他设备使用相同 ID 或名称。一个 binding 可以覆盖同名规则，或在名称不同时恢复本设备上引用同一 portable label 的多个 Session；提交前必须向用户展示影响范围。同名隐式匹配不写 binding，target 改名后若无显式 binding，相关 Session 会重新进入 unresolved。
 
 ## 空闲条件
 
@@ -159,7 +159,7 @@ PortableSessionLocation {
 }
 ```
 
-云端不保存设备本地 target ID 或连接详情。其他设备收到 revision 后，通过自己的显式 label binding 解析 target；没有 binding 时保持 Session 可查看但 Location unresolved。并发 Location revisions 由 RFC-0010 的确定性冲突规则收敛，不能按到达顺序静默覆盖。
+云端不保存设备本地 target ID 或连接详情。其他设备收到 revision 后，优先通过自己的显式 label binding 解析 target，否则使用唯一、完全同名的本地 target；两者都没有时保持 Session 可查看但 Location unresolved。并发 Location revisions 由 RFC-0010 的确定性冲突规则收敛，不能按到达顺序静默覆盖。
 
 RFC-0010 的“未归属 Session”只表示没有 `syncSpaceID`，与本 RFC 的 Location `unresolved` 是两个正交状态。全局删除 space 或从本设备完整移除同步时，清除 sync ownership 不得清除 Location、target binding 或本地 target definition；Session 随后仍按原 Location 独立解析。同步设置中的批量归属提示也只改变 sync ownership，不能替代、触发或绕过 unresolved target 恢复向导。
 
@@ -176,7 +176,7 @@ RFC-0010 的“未归属 Session”只表示没有 `syncSpaceID`，与本 RFC �
 - 迁移运行中的 Agent、process 或 PTY；
 - 同步或复制两个工作区的文件；
 - 校验新工作区内容与历史工具输出相同；
-- 自动选择同名 target 或目录；
+- 根据模糊名称、别名或目录自动选择 target；
 - 提供负载均衡、故障转移或透明本地回退。
 
 ## 验收条件
@@ -189,7 +189,7 @@ RFC-0010 的“未归属 Session”只表示没有 `syncSpaceID`，与本 RFC �
 6. 成功后 User Shell cwd、completion、environment、lease 和全部 Location services 切换到新位置，历史 Session 内容保持不变。
 7. cleanup failure 不回滚已提交 Location，并产生可诊断 warning。
 8. 同步开启时只发送 portable label/directory/revision，不发送 target ID、SSH 配置或凭据。
-9. 未绑定 portable label 的设备保持 unresolved，不自动使用 local 或同名 target。
+9. 未绑定 portable label 时自动使用唯一、完全同名的本地 target 并执行完整 Location 校验；没有同名 target 时保持 unresolved，绝不回退 local。
 10. 恢复被移除 target 的原 ID 和建立 portable label binding 都不产生 Location revision，并且在恢复执行前完成完整 Location 验证。
 11. 恢复向导在影响多个 Session 时展示影响范围；普通 target CRUD 不能任意复用缺失 ID。
 12. registry 级恢复可以批量恢复同一缺失 target ID 的 Session；强制 rebind 只修改一个 Session，不修改 registry/binding 或其他 Session，同步开启时也只发布该 Session 的 Location revision。

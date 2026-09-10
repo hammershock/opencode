@@ -67,12 +67,14 @@ describe("SessionLocationAccess", () => {
     })
   })
 
-  test("fails closed when a portable target has no device-local binding", async () => {
-    const access = SessionLocationAccess.make(adapter(session(remote, "lab-gpu"), { targets: [target] }))
+  test("uses an exact-name target when a portable target has no device-local binding", async () => {
+    const access = SessionLocationAccess.make(
+      adapter(session(remote, "lab-gpu"), { targets: [{ ...target, name: "lab-gpu" }] }),
+    )
 
-    await expect(Effect.runPromise(access.require(sessionID))).rejects.toMatchObject({
-      _tag: "SessionLocationAccess.UnresolvedError",
-      status: "unbound_portable_target",
+    expect(await Effect.runPromise(access.require(sessionID))).toMatchObject({
+      target: { type: "rexd", targetID },
+      directory,
     })
   })
 

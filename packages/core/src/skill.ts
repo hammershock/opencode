@@ -1,15 +1,11 @@
 export * as SkillV2 from "./skill"
 
 import { makeLocationNode } from "./effect/app-node"
-import path from "path"
-import { Context, Effect, Layer, Schema, Types } from "effect"
+import { Context, Effect, Layer, Types } from "effect"
 import { Skill } from "@opencode-ai/schema/skill"
 import { AgentV2 } from "./agent"
-import { ConfigMarkdown } from "./config/markdown"
-import { FSUtil } from "./fs-util"
 import { PermissionV2 } from "./permission"
-import { AbsolutePath } from "./schema"
-import { SkillDiscovery } from "./skill/discovery"
+import { SkillRegistry } from "./skill/registry"
 import { State } from "./state"
 
 export const DirectorySource = Skill.DirectorySource
@@ -30,25 +26,19 @@ export type Info = Skill.Info
 export const available = (skills: ReadonlyArray<Info>, agent: AgentV2.Info) =>
   skills.filter((skill) => PermissionV2.evaluate("skill", skill.name, agent.permissions).effect !== "deny")
 
-const Frontmatter = Schema.Struct({
-  name: Schema.String.pipe(Schema.optional),
-  description: Schema.String.pipe(Schema.optional),
-  slash: Schema.Boolean.pipe(Schema.optional),
-})
-const decodeFrontmatter = Schema.decodeUnknownOption(Frontmatter)
-
 export type Data = {
-  sources: Types.DeepMutable<Source>[]
+  registrations: Types.DeepMutable<SkillRegistry.Registration>[]
 }
 
 export type Draft = {
-  source: (source: Source) => void
+  source: (source: Source, options?: SkillRegistry.SourceOptions) => void
   list: () => readonly Source[]
 }
 
 export interface Interface extends State.Transformable<Draft> {
   readonly sources: () => Effect.Effect<Source[]>
   readonly list: () => Effect.Effect<Info[]>
+  readonly catalog: (options?: SkillRegistry.LoadOptions) => Effect.Effect<SkillRegistry.Result>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Skill") {}
@@ -56,77 +46,56 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const discovery = yield* SkillDiscovery.Service
-    const fs = yield* FSUtil.Service
+    const registry = yield* SkillRegistry.Service
 
     const state = State.create<Data, Draft>({
-      initial: () => ({ sources: [] }),
+      initial: () => ({ registrations: [] }),
       draft: (draft) => ({
-        source: (source) => {
-          if (draft.sources.some((item) => Source.equals(item, source))) return
-          draft.sources.push(source as Types.DeepMutable<Source>)
+        source: (source, options) => {
+          const registration = { source, options }
+          if (draft.registrations.some((item) => SkillRegistry.key(item) === SkillRegistry.key(registration))) return
+          draft.registrations.push(registration as Types.DeepMutable<SkillRegistry.Registration>)
         },
-        list: () => draft.sources as Source[],
+        list: () => draft.registrations.map((item) => item.source) as Source[],
       }),
     })
 
-    const load = Effect.fn("SkillV2.load")(function* (source: Source) {
-      const skills: Info[] = []
-      if (source.type === "embedded") return [source.skill]
-      const directories = source.type === "directory" ? [source.path] : yield* discovery.pull(source.url)
-      for (const directory of directories) {
-        const files = yield* fs
-          .glob("{*.md,**/SKILL.md}", { cwd: directory, absolute: true, include: "file", symlink: true, dot: true })
-          .pipe(Effect.catch(() => Effect.succeed([] as string[])))
-        for (const filepath of files.toSorted()) {
-          const content = yield* fs.readFileStringSafe(filepath).pipe(Effect.catch(() => Effect.succeed(undefined)))
-          if (!content) continue
-          const markdown = ConfigMarkdown.parseOption(content)
-          if (!markdown) continue
-          const frontmatter = decodeFrontmatter(markdown.data).valueOrUndefined
-          if (!frontmatter) continue
-          const name =
-            frontmatter.name !== undefined
-              ? frontmatter.name
-              : path.dirname(filepath) === directory
-                ? path.basename(filepath, ".md")
-                : undefined
-          if (!name) continue
-          skills.push({
-            name,
-            description: frontmatter.description,
-            slash: frontmatter.slash,
-            location: AbsolutePath.make(filepath),
-            content: markdown.content,
-          })
-        }
-      }
-      return skills
+    const result = Effect.fn("SkillV2.registry")(function* (options?: SkillRegistry.LoadOptions) {
+      return yield* registry.load(state.get().registrations, options)
     })
 
-    // QUESTION(Dax): Should local skill sources invalidate on filesystem watch
-    // events, following the reload policy chosen for other context sources?
-    const cache = new Map<string, Info[]>()
     const list = Effect.fn("SkillV2.list")(function* () {
       const skills = new Map<string, Info>()
-      for (const source of state.get().sources) {
-        const key = Source.key(source)
-        const loaded = cache.get(key) ?? (yield* load(source))
-        cache.set(key, loaded)
-        for (const skill of loaded) skills.set(skill.name, skill)
+      const priority = new Map(
+        state.get().registrations.map((registration, index) => [SkillRegistry.key(registration), index]),
+      )
+      const entries = (yield* result()).entries.toSorted(
+        (a, b) =>
+          (priority.get(a.sourceKey) ?? 0) - (priority.get(b.sourceKey) ?? 0) ||
+          a.metadata.id.localeCompare(b.metadata.id),
+      )
+      for (const entry of entries) {
+        skills.set(entry.metadata.name, {
+          name: entry.metadata.name,
+          ...(entry.metadata.description === undefined ? {} : { description: entry.metadata.description }),
+          ...(entry.slash === undefined ? {} : { slash: entry.slash }),
+          location: entry.location,
+          content: entry.content,
+        })
       }
-      return Array.from(skills.values())
+      return Array.from(skills.values()).toSorted((a, b) => a.name.localeCompare(b.name))
     })
 
     return Service.of({
       transform: state.transform,
       reload: state.reload,
       sources: Effect.fn("SkillV2.sources")(function* () {
-        return state.get().sources
+        return state.get().registrations.map((item) => item.source)
       }),
       list,
+      catalog: result,
     })
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer, deps: [SkillDiscovery.node, FSUtil.locationNode] })
+export const node = makeLocationNode({ service: Service, layer, deps: [SkillRegistry.node] })

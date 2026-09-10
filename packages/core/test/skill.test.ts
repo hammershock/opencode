@@ -85,6 +85,9 @@ describe("SkillV2", () => {
               content: "# review",
             },
           ])
+          const catalog = yield* skill.catalog()
+          expect(catalog.snapshot.skills.filter((item) => item.name === "review")).toHaveLength(2)
+          expect(catalog.snapshot.diagnostics.map((item) => item.kind)).toContain("duplicate-name")
         }),
       ),
     ),

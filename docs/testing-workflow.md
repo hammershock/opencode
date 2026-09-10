@@ -173,6 +173,7 @@ For account-wide cloud reset, verify the manifest is invalidated before object c
 
 ### I. TUI interaction
 
+- QuickStart production prompt reaches a focused first paint, echoes sustained keyboard input within a bounded automated deadline, and keeps global keymap commands dispatchable;
 - `Shift+Up` and `Shift+Down` move through declared variants without wrapping;
 - `Ctrl+T` retains upstream cycle behavior;
 - autocomplete and modal focus take priority over variant shortcuts;

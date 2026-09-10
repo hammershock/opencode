@@ -41,6 +41,7 @@ export type TuiSlashCommand = {
   provenance: CommandProvenance
   shadowed: readonly ResolutionDiagnostic[]
   readOnly: boolean
+  preserveInputOnSelect?: boolean
   insertText?: string
   onSelect?: () => void
 }
@@ -390,6 +391,7 @@ export function createCommandHost<Context extends InvocationContext>(input: {
           provenance: command.provenance,
           shadowed: command.shadowed,
           readOnly: command.readOnly,
+          preserveInputOnSelect: input.readOnly?.() === true && !command.readOnly,
           ...(command.dispatch === "session"
             ? { insertText: `${source} ` }
             : { onSelect: () => void command.run("slash") }),

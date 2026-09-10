@@ -90,6 +90,11 @@ export type TuiCommandDispatch =
       arguments: string
       diagnostics: readonly ResolutionDiagnostic[]
     }
+  | {
+      status: "invalid"
+      message: string
+      diagnostics: readonly ResolutionDiagnostic[]
+    }
   | { status: "passthrough"; input: string; diagnostics: readonly ResolutionDiagnostic[] }
 
 export function normalizeCommandRestrictions(value: unknown): CommandRestrictions {
@@ -224,7 +229,12 @@ export function createCommandHost<Context extends InvocationContext>(input: {
   ): Promise<TuiCommandDispatch> => {
     const resolution = resolve(source)
     report(resolution.diagnostics)
-    if (resolution.status === "passthrough") return resolution
+    if (resolution.status === "passthrough") {
+      if (!source.startsWith("/")) return resolution
+      const message = "Slash command does not exist"
+      input.invalid(message)
+      return { status: "invalid", message, diagnostics: resolution.diagnostics }
+    }
     if (resolution.status === "core") {
       const handled = await invokeCore(resolution.resolution, invocationSource)
       if (!handled) return { status: "passthrough", input: source, diagnostics: resolution.diagnostics }

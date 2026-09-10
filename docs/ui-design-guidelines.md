@@ -46,6 +46,7 @@ This document defines the normative interaction and presentation rules for fork-
 - Input, cursor, scope or generation changes invalidate pending results. Late asynchronous results never steal focus or replace newer text.
 - Modal focus, autocomplete and confirmation take precedence over global shortcuts. Closing a child surface returns focus to the element that opened it when that element still exists.
 - Every key-driven action exposed in a footer must use the configured keybinding label rather than a hard-coded key name, except when an RFC intentionally fixes the interaction.
+- Input whose first character is `/` is an explicit slash-command attempt. If no registered command matches, keep the input for correction, show `Slash command does not exist`, and stop before Session creation, prompt history, optimistic rendering or model-context admission. A slash elsewhere in ordinary text keeps its normal prompt meaning.
 
 ## Async and error behavior
 

@@ -360,7 +360,7 @@ Mode pushes are automatically tracked by the plugin runtime. If a plugin is disa
 - `ui.Dialog` is the base dialog wrapper.
 - `ui.DialogAlert`, `ui.DialogConfirm`, `ui.DialogPrompt`, `ui.DialogSelect` are built-in dialog components.
 - `ui.Slot` renders host or plugin-defined slots by name from plugin JSX.
-- `ui.Prompt` renders the same prompt component used by the host app and accepts `sessionID`, `readOnly`, `ref`, and `right` for the prompt meta row's right side. `readOnly` keeps editing available while preventing prompt submission.
+- `ui.Prompt` renders the same prompt component used by the host app and accepts `sessionID`, `workspaceID`, `readOnly`, `ref`, and `right` for the prompt meta row's right side. `readOnly` keeps editing available while preventing prompt submission.
 - `ui.toast(...)` shows a toast.
 - `ui.dialog` exposes the host dialog stack:
   - `replace(render, onClose?)`

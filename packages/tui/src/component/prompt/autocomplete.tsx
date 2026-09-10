@@ -94,22 +94,17 @@ export type AutocompleteOption = {
   description?: string
   isDirectory?: boolean
   onSelect?: () => void
-  preserveInputOnSelect?: boolean
   path?: string
 }
 
 export function slashAutocompleteOptions(
-  slashes: readonly Pick<
-    TuiSlashCommand,
-    "display" | "description" | "aliases" | "onSelect" | "preserveInputOnSelect"
-  >[],
+  slashes: readonly Pick<TuiSlashCommand, "display" | "description" | "aliases" | "onSelect">[],
 ): AutocompleteOption[] {
   const results = slashes.map((command) => ({
     display: command.display,
     description: command.description,
     aliases: command.aliases,
     onSelect: command.onSelect,
-    preserveInputOnSelect: command.preserveInputOnSelect,
   }))
   results.sort((a, b) => a.display.localeCompare(b.display))
   const max = firstBy(results, [(item) => item.display.length, "desc"])?.display.length
@@ -660,8 +655,7 @@ export function Autocomplete(props: {
   function select() {
     const selected = options()[store.selected]
     if (!selected) return
-    if (selected.preserveInputOnSelect) close()
-    else hide()
+    hide()
     selected.onSelect?.()
   }
 

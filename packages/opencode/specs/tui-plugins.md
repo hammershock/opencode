@@ -251,7 +251,7 @@ Top-level API groups exposed to `tui(api, options, meta)`:
 - Register commands with `api.keymap.registerLayer({ commands: [...] })`.
 - Register key bindings with `bindings: [{ key, cmd, desc }]` in the same layer or a separate layer.
 - Use `api.keymap.acquireResource(...)` for shared plugin addon setup that should ref-count against the host keymap.
-- To surface a command in the host command palette, set `namespace: "palette"` and provide metadata such as `title`, `category`, `desc`, `suggested`, `hidden`, `enabled`, `slashName`, `slashAliases`, and `readOnly` on the command. Slash commands without `readOnly: true` remain available normally but are not dispatched from a read-only Session.
+- To surface a command in the host command palette, set `namespace: "palette"` and provide metadata such as `title`, `category`, `desc`, `suggested`, `hidden`, `enabled`, `slashName`, `slashAliases`, and `readOnly` on the command. Slash commands without `readOnly: true` remain available normally but are hidden from autocomplete and are not dispatched from a read-only Session.
 - Use `api.keymap.dispatchCommand(name)` for user-style execution semantics and `api.keymap.runCommand(name)` only for forced programmatic execution.
 - Disposers returned by `api.keymap` registrations and `acquireResource(...)` are automatically cleaned up when the plugin deactivates. You do not need to add those disposers to `api.lifecycle.onDispose(...)` yourself.
 - Built-in which-key shortcuts are resolved from flat `keybinds` command ids such as `which_key_toggle`, not plugin options.

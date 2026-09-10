@@ -231,5 +231,6 @@ describe("TUI command toolkit host", () => {
     expect(calls).toEqual(["inspect", "exit", "exit", "exit"])
     expect(invalid).toEqual(["Current Session is read-only"])
     expect(host.commands().find((command) => command.identity === "plugin.deploy")?.enabled).toBe(false)
+    expect(host.slashes().map((command) => command.display)).toEqual(["/exit", "/inspect", "/q", "/quit"])
   })
 })

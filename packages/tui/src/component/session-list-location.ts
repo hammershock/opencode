@@ -77,6 +77,7 @@ export function sessionListFooter(location: SessionListLocation, syncStatus: str
   })()
   return {
     text,
+    detail,
     full: [location.label, location.device, status].filter(Boolean).join(" · "),
     status,
   }

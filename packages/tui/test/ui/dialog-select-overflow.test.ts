@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { displayTruncate, inspectionFrame, selectFooter, selectFooterWidth } from "../../src/ui/dialog-select"
+import {
+  displayTruncate,
+  inspectionFooterFrame,
+  inspectionFrame,
+  selectFooter,
+  selectFooterWidth,
+} from "../../src/ui/dialog-select"
 
 describe("dialog selected-title inspection", () => {
   test("keeps every frame inside the row and reveals the complete identity over time", () => {
@@ -34,6 +40,29 @@ describe("dialog selected-title inspection", () => {
     expect(frames.every((frame) => Bun.stringWidth(frame) <= 18)).toBe(true)
     expect(frames.join(" ")).toContain("中文")
     expect(frames.join(" ")).toContain("suffix")
+  })
+
+  test("cycles selected footer detail without moving its fixed status", () => {
+    const detail = "a100-2gpu · /a/very/long/session/location"
+    const frames = Array.from({ length: [...`${detail}   `].length }, (_, offset) =>
+      inspectionFooterFrame(detail, "! partial", 24, offset, true),
+    )
+
+    expect(frames.every((frame) => frame.suffix === "! partial")).toBe(true)
+    expect(frames.every((frame) => frame.separator)).toBe(true)
+    expect(frames.every((frame) => Bun.stringWidth(frame.detail) + Bun.stringWidth(` · ${frame.suffix}`) <= 24)).toBe(
+      true,
+    )
+    expect(frames.map((frame) => frame.detail).join(" ")).toContain("a100-2gpu")
+    expect(frames.map((frame) => frame.detail).join(" ")).toContain("location")
+  })
+
+  test("keeps an unfocused footer static and bounded", () => {
+    const frame = inspectionFooterFrame("local · /a/very/long/session/location", "● ready", 20, 12, false)
+    expect(frame.suffix).toBe("● ready")
+    expect(frame.separator).toBe(true)
+    expect(frame.detail).toEndWith("…")
+    expect(Bun.stringWidth(frame.detail) + Bun.stringWidth(` · ${frame.suffix}`)).toBeLessThanOrEqual(20)
   })
 
   test("switches the Free footer to the bounded provider category in search mode", () => {

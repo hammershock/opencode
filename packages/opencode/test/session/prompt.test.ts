@@ -26,7 +26,7 @@ import { Image } from "../../src/image/image"
 import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "@/session/session"
-import { SessionMessageTable } from "@opencode-ai/core/session/sql"
+import { SessionContextEpochTable, SessionMessageTable } from "@opencode-ai/core/session/sql"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { FSUtil } from "@opencode-ai/core/fs-util"
@@ -557,6 +557,37 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("legacy loop consumes the canonical Location context and project instructions", () =>
+  Effect.gen(function* () {
+    const { dir, llm } = yield* useServerConfig(providerCfg)
+    yield* writeText(path.join(dir, "AGENTS.md"), "REMOTE-SAFE PROJECT RULE")
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "hello" }],
+    })
+    yield* llm.text("world")
+
+    yield* prompt.loop({ sessionID: chat.id })
+
+    const hits = yield* llm.hits
+    expect(hits).toHaveLength(1)
+    const body = JSON.stringify(hits[0]?.body)
+    expect(body).toContain("Execution harness: OpenCode REXD (opencode-rexd)")
+    expect(body).toContain(`Working directory: ${dir}`)
+    expect(body).toContain(`Project root: ${dir}`)
+    expect(body).toContain("REMOTE-SAFE PROJECT RULE")
+    expect(body).not.toContain("Here is some useful information about the environment you are running in")
+  }),
+)
+
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>
@@ -583,7 +614,7 @@ withMcpInstructions.instance(
   15_000,
 )
 
-it.instance("legacy prompt emits message events without session.next events", () =>
+it.instance("legacy prompt establishes canonical durable context before message events", () =>
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
     const prompt = yield* SessionPrompt.Service
@@ -627,7 +658,9 @@ it.instance("legacy prompt emits message events without session.next events", ()
     expect(seen).toContain(Session.Event.Updated.type)
     expect(seen).toContain(MessageV2.Event.Updated.type)
     expect(seen).toContain(MessageV2.Event.PartUpdated.type)
-    expect(seen.filter((type) => type.startsWith("session.next."))).toEqual([])
+    const next = seen.filter((type) => type.startsWith("session.next."))
+    expect(next[0]).toBe("session.next.context.generation.established")
+    expect(next.every((type) => type.startsWith("session.next.context."))).toBe(true)
   }),
 )
 
@@ -1845,6 +1878,32 @@ unix(
       }),
     ),
   30_000,
+)
+
+it.instance("successful init command establishes a new durable context generation", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const { prompt, chat } = yield* boot()
+    const database = yield* Database.Service
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "seed" }],
+    })
+    yield* llm.text("done")
+
+    yield* prompt.command({ sessionID: chat.id, command: "init", arguments: "" })
+
+    const epoch = yield* database.db
+      .select()
+      .from(SessionContextEpochTable)
+      .where(eq(SessionContextEpochTable.session_id, chat.id))
+      .get()
+      .pipe(Effect.orDie)
+    expect(epoch?.generation).toBe(2)
+    expect(epoch?.reason).toBe("init")
+  }),
 )
 
 unixNoLLMServer(

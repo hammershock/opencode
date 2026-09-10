@@ -108,18 +108,14 @@ export function status(result: Result | undefined, maxWidth?: number, now = Date
     if (result.status === "unauthenticated") return "! not signed in"
     if (result.status === "error") return "× unavailable"
     const marker = result.status === "stale" ? "! " : "● "
-    const first = summary(result, {
-      selected: result.snapshot
-        ? orderedMeters(result.snapshot.meters)
-            .slice(0, 1)
-            .map((x) => x.id)
-        : [],
+    const summaryText = summary(result, {
+      selected: result.snapshot ? orderedMeters(result.snapshot.meters).map((x) => x.id) : [],
       maxWidth: maxWidth === undefined ? undefined : Math.max(0, maxWidth - marker.length),
       now,
       compact: true,
     })
-    if (result.status === "stale") return `${marker}${first ?? "usage"}`
-    return `${marker}${first ?? "available"}`
+    if (result.status === "stale") return `${marker}${summaryText ?? "usage"}`
+    return `${marker}${summaryText ?? "available"}`
   })()
   return maxWidth === undefined ? value : fitText(value, maxWidth)
 }

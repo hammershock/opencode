@@ -84,6 +84,40 @@ describe("provider usage presentation", () => {
     expect(status(reset, undefined, now)).toBe("● Quota 72% reset 2d4h")
   })
 
+  test("shows every reliable usage window in provider summaries", () => {
+    const now = 1_700_000_000_000
+    const windows = {
+      ...result(),
+      snapshot: {
+        ...snapshot,
+        meters: [
+          {
+            id: "five-hour",
+            label: "5 hour limit",
+            kind: "quota" as const,
+            remaining: 72,
+            limit: 100,
+            unit: "percentage",
+            resetsAt: now + 60 * 60_000,
+            order: 0,
+          },
+          {
+            id: "weekly",
+            label: "Weekly limit",
+            kind: "quota" as const,
+            remaining: 91,
+            limit: 100,
+            unit: "percentage",
+            resetsAt: now + 52 * 60 * 60_000,
+            order: 1,
+          },
+        ],
+      },
+    }
+    expect(status(windows, undefined, now)).toBe("● 5h 72% reset 1h · 7d 91% reset 2d4h")
+    expect(status(windows, 25, now)).toBe("● 5h 72% reset 1h · …")
+  })
+
   test("keeps adapter order deterministic and honors saved meter order", () => {
     const meters = [
       { id: "later", label: "Later", kind: "credits" as const, remaining: 2, unit: "credits", order: 2 },

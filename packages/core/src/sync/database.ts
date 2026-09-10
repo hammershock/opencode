@@ -18,7 +18,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncDatabase") {}
 
-const schemaVersion = 8
+const schemaVersion = 13
 
 const layer = Layer.effect(
   Service,
@@ -66,6 +66,26 @@ const layer = Layer.effect(
             yield* Effect.forEach(schemaV8, (statement) => tx.run(statement), { discard: true })
             yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (8)`)
           }
+          if ((current?.version ?? 1) < 9) {
+            yield* Effect.forEach(schemaV9, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (9)`)
+          }
+          if ((current?.version ?? 1) < 10) {
+            yield* Effect.forEach(schemaV10, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (10)`)
+          }
+          if ((current?.version ?? 1) < 11) {
+            yield* Effect.forEach(schemaV11, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (11)`)
+          }
+          if ((current?.version ?? 1) < 12) {
+            yield* Effect.forEach(schemaV12, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (12)`)
+          }
+          if ((current?.version ?? 1) < 13) {
+            yield* Effect.forEach(schemaV13, (statement) => tx.run(statement), { discard: true })
+            yield* tx.run(sql`INSERT INTO sync_schema (version) VALUES (13)`)
+          }
         }),
       { behavior: "immediate" },
     )
@@ -98,6 +118,15 @@ export function purgeSpace(db: Interface["db"], spaceID: string) {
         sql`DELETE FROM sync_session_space WHERE space_id = ${spaceID}`,
         sql`DELETE FROM sync_segment_aggregate WHERE space_id = ${spaceID}`,
         sql`DELETE FROM sync_local_operation WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_control_entry WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_control_cursor WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_control_outbox WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_control_projection WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_device_member WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_head_outbox WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_deletion_ack WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_run_request WHERE space_id = ${spaceID}`,
+        sql`DELETE FROM sync_membership_bootstrap WHERE space_id = ${spaceID}`,
       ],
       (statement) => tx.run(statement),
       { discard: true },
@@ -339,4 +368,86 @@ const schemaV8 = [
       END
     FROM sync_event_segment AS source, json_each(source.payload, '$.operations') AS operation
     WHERE json_extract(operation.value, '$.kind') IN ('event', 'tombstone')`,
+]
+
+// Protocol v2 correctness state. Remote control/head/ack objects are
+// append-only; these tables make every intent and replay cursor recoverable
+// across process crashes and shared by all TUIs on the device.
+const schemaV9 = [
+  sql`CREATE TABLE sync_control_entry (
+    space_id TEXT NOT NULL, generation INTEGER NOT NULL, digest TEXT NOT NULL,
+    payload TEXT NOT NULL, applied_at INTEGER NOT NULL,
+    PRIMARY KEY(space_id, generation), UNIQUE(space_id, digest)
+  )`,
+  sql`CREATE TABLE sync_control_cursor (
+    space_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, digest TEXT NOT NULL
+  )`,
+  sql`CREATE TABLE sync_control_outbox (
+    space_id TEXT NOT NULL, operation_id TEXT NOT NULL, payload TEXT NOT NULL,
+    created_at INTEGER NOT NULL, committed_generation INTEGER,
+    PRIMARY KEY(space_id, operation_id)
+  )`,
+  sql`CREATE INDEX sync_control_outbox_pending_idx
+    ON sync_control_outbox(space_id, committed_generation, created_at, operation_id)`,
+  sql`CREATE TABLE sync_device_member (
+    space_id TEXT NOT NULL, device_id TEXT NOT NULL, installation_id TEXT NOT NULL,
+    name TEXT NOT NULL, join_generation INTEGER NOT NULL, revision_generation INTEGER NOT NULL,
+    revoked_generation INTEGER,
+    PRIMARY KEY(space_id, device_id)
+  )`,
+  sql`CREATE TABLE sync_head_outbox (
+    space_id TEXT NOT NULL, device_id TEXT NOT NULL, revision INTEGER NOT NULL,
+    digest TEXT NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL,
+    committed_at INTEGER,
+    PRIMARY KEY(space_id, device_id, revision), UNIQUE(space_id, device_id, digest)
+  )`,
+  sql`CREATE INDEX sync_head_outbox_pending_idx
+    ON sync_head_outbox(space_id, device_id, committed_at, revision)`,
+  sql`CREATE TABLE sync_deletion_ack (
+    space_id TEXT NOT NULL, tombstone_id TEXT NOT NULL, device_id TEXT NOT NULL,
+    payload TEXT NOT NULL, created_at INTEGER NOT NULL, committed_at INTEGER,
+    gc_generation INTEGER,
+    PRIMARY KEY(space_id, tombstone_id, device_id)
+  )`,
+  sql`CREATE INDEX sync_deletion_ack_pending_idx
+    ON sync_deletion_ack(space_id, device_id, committed_at, tombstone_id)`,
+]
+
+// The verified control-chain cursor and the application projection cursor are
+// intentionally separate. A crash may happen after a durable Session deletion
+// is applied but before its control generation is marked projected; replaying
+// the idempotent deletion is safe, while skipping it would permit resurrection.
+const schemaV10 = [
+  sql`CREATE TABLE sync_control_projection (
+    space_id TEXT PRIMARY KEY, generation INTEGER NOT NULL
+  )`,
+]
+
+// Manual synchronization is a durable request to the device-wide worker,
+// rather than a second provider writer in the calling TUI process. The cutoff
+// used by a run prevents a request arriving mid-flight from being reported as
+// completed by work that did not observe it.
+const schemaV11 = [
+  sql`CREATE TABLE sync_run_request (
+    space_id TEXT NOT NULL, request_id TEXT NOT NULL, requested_at INTEGER NOT NULL,
+    status TEXT NOT NULL, completed_at INTEGER, diagnostic TEXT,
+    PRIMARY KEY(space_id, request_id)
+  )`,
+  sql`CREATE INDEX sync_run_request_pending_idx
+    ON sync_run_request(space_id, status, requested_at)`,
+]
+
+const schemaV12 = [
+  sql`ALTER TABLE sync_run_request ADD COLUMN run_id TEXT`,
+  sql`ALTER TABLE sync_run_request ADD COLUMN claim_owner TEXT`,
+  sql`ALTER TABLE sync_run_request ADD COLUMN claimed_at INTEGER`,
+]
+
+// Binding a device to a new cloud epoch and backfilling every local Session
+// cross two databases. This durable completion marker makes the operation
+// idempotently resumable after a crash between those commits.
+const schemaV13 = [
+  sql`CREATE TABLE sync_membership_bootstrap (
+    space_id TEXT PRIMARY KEY, completed_at INTEGER NOT NULL
+  )`,
 ]

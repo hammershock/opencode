@@ -63,16 +63,14 @@ describe("Session list location presentation", () => {
     expect(sessionListMatches(session, "device-windows")).toBe(true)
   })
 
-  test.each([
-    ["missing_local_target", "unresolved"],
-    ["unbound_portable_target", "unresolved"],
-    ["target_unavailable", "unavailable"],
-  ] as const)("keeps %s locations visible as %s", (locationStatus, expected) => {
-    const session = { title: "Recovered", directory: "/repo", targetName: "removed", locationStatus }
-    expect(sessionListLocation(session).status).toBe(expected)
-    expect(sessionListLocation(session).label).toBe("removed · /repo")
-    expect(sessionListMatches(session, expected)).toBe(true)
-  })
+  test.each(["missing_local_target", "unbound_portable_target", "target_unavailable"] as const)(
+    "does not expose %s target state in the session list",
+    (locationStatus) => {
+      const session = { title: "Recovered", directory: "/repo", targetName: "removed", locationStatus }
+      expect(sessionListLocation(session).label).toBe("removed · /repo")
+      expect(sessionListMatches(session, locationStatus)).toBe(false)
+    },
+  )
 
   test("prefers portable labels and never exposes a device-local target ID", () => {
     const portable = sessionListLocation({
@@ -92,7 +90,7 @@ describe("Session list location presentation", () => {
     expect(fallback.search).not.toContain("0199-device-local")
   })
 
-  test.each([1, 12, 28, 48, 72])("keeps status at the right edge within a %i-column footer", (width) => {
+  test.each([1, 12, 28, 48, 72])("keeps sync status at the right edge within a %i-column footer", (width) => {
     const location = sessionListLocation({
       directory: "/a/very/long/workspace/location/with/a/project-name",
       targetLabel: "portable-gpu-target",
@@ -105,7 +103,7 @@ describe("Session list location presentation", () => {
     if (width === 1) expect(row.text).toBe("…")
     if (width > 1 && width <= row.status.length) expect(row.text.endsWith(row.status.slice(-(width - 1)))).toBe(true)
     expect(row.full).toBe(
-      "portable-gpu-target · /a/very/long/workspace/location/with/a/project-name · mywindows · ! unavailable/partial",
+      "portable-gpu-target · /a/very/long/workspace/location/with/a/project-name · mywindows · ! partial",
     )
   })
 

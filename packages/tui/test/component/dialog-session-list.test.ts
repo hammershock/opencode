@@ -144,7 +144,7 @@ describe("dialog session list", () => {
     ).toBe("mymac")
   })
 
-  test("marks cloud-only rows without changing hydrated availability labels", () => {
+  test("marks cloud-only and actionable transfer states without exposing target resolution", () => {
     const metadata = {
       sessionID: "session",
       title: "Cloud",
@@ -155,7 +155,9 @@ describe("dialog session list", () => {
       availability: "unresolved" as const,
     }
     expect(dialogSessionListSyncStatus({ cloudOnly: true, syncMetadata: metadata })).toBe("cloud")
-    expect(dialogSessionListSyncStatus({ syncMetadata: metadata })).toBe("! unresolved")
+    expect(dialogSessionListSyncStatus({ syncMetadata: metadata })).toBeUndefined()
+    expect(dialogSessionListSyncStatus({ syncMetadata: { ...metadata, availability: "ready" } })).toBeUndefined()
+    expect(dialogSessionListSyncStatus({ syncMetadata: { ...metadata, availability: "partial" } })).toBe("! partial")
     expect(dialogSessionListSyncStatus({})).toBeUndefined()
   })
 })

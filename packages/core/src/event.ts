@@ -125,8 +125,12 @@ export interface PublishOptions {
 
 export interface ReplayOptions {
   readonly publish?: boolean
+  /** Persist the durable event without running local materialized-view projectors. */
+  readonly project?: boolean
   readonly ownerID?: string
   readonly strictOwner?: boolean
+  /** Allow a different device to append the next sequence without transferring aggregate ownership. */
+  readonly allowForeignAppend?: boolean
   /** Treat the same type and payload at the same sequence as an already committed replay. */
   readonly allowEquivalent?: boolean
 }
@@ -214,7 +218,9 @@ export const layerWith = (options?: LayerOptions) =>
           readonly aggregateID: string
           readonly ownerID?: string
           readonly strictOwner?: boolean
+          readonly allowForeignAppend?: boolean
           readonly allowEquivalent?: boolean
+          readonly project?: boolean
         },
         commit?: (seq: number) => Effect.Effect<void>,
       ) {
@@ -294,7 +300,7 @@ export const layerWith = (options?: LayerOptions) =>
                               }),
                             )
                           }
-                          if (input && row?.ownerID && row.ownerID !== input.ownerID) {
+                          if (input && row?.ownerID && row.ownerID !== input.ownerID && !input.allowForeignAppend) {
                             return
                           }
                           const seq = input?.seq ?? latest + 1
@@ -323,9 +329,10 @@ export const layerWith = (options?: LayerOptions) =>
                             ...event,
                             durable: { aggregateID, seq, version: durable.version },
                           } as Payload
-                          for (const projector of list) {
-                            yield* projector(committed)
-                          }
+                          if (input?.project !== false)
+                            for (const projector of list) {
+                              yield* projector(committed)
+                            }
                           if (commit) yield* commit(seq)
                           yield* db
                             .insert(EventSequenceTable)
@@ -467,7 +474,9 @@ export const layerWith = (options?: LayerOptions) =>
               aggregateID: event.aggregateID,
               ownerID: options?.ownerID,
               strictOwner: options?.strictOwner,
+              allowForeignAppend: options?.allowForeignAppend,
               allowEquivalent: options?.allowEquivalent,
+              project: options?.project,
             })
             if (committed && options?.publish) {
               yield* notify(

@@ -13,7 +13,7 @@ import { remoteGrep } from "../../src/rexd/location-filesystem"
 import { rexdFilesystemNodes } from "../../src/rexd/location-filesystem"
 import { rexdSessionNode, RexdLocationSession } from "../../src/rexd/location-session"
 import { runRexdProcess } from "../../src/rexd/location-process"
-import { probeTarget } from "../../src/rexd/target-registry"
+import { probeTarget, targetHealthWithDeadline } from "../../src/rexd/target-registry"
 import {
   makeProvider as makeUserShellProvider,
   readExecutionControl,
@@ -557,15 +557,40 @@ describe("Rexd Location routing contract", () => {
     if (ready.status === "ready") expect(ready.stages).toContain("capabilities")
 
     let probedDirectory: string | undefined
+    let probedSignal: AbortSignal | undefined
+    const signal = AbortSignal.timeout(1_000)
     await probeTarget(
       target,
       async (_target, options) => {
         probedDirectory = options.directory
+        probedSignal = options.signal
         return { handshake: {}, prepared: undefined } as never
       },
       true,
       "/workspace/historical",
+      signal,
     )
     expect(probedDirectory).toBe("/workspace/historical")
+    expect(probedSignal).toBe(signal)
+  })
+
+  test("target health returns at its deadline even when SSH cleanup is still pending", async () => {
+    let aborted = false
+    const result = await targetHealthWithDeadline(
+      (signal) =>
+        new Promise(() => {
+          signal.addEventListener("abort", () => {
+            aborted = true
+          })
+        }),
+      10,
+    )
+
+    expect(aborted).toBe(true)
+    expect(result).toEqual({
+      status: "unavailable",
+      stage: "ssh",
+      message: "SSH connection timed out after 0.01 seconds",
+    })
   })
 })

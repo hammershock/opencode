@@ -14,6 +14,8 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { RexdConnectionPool } from "./connection-pool"
 
+export const TARGET_HEALTH_TIMEOUT_MS = 8_000
+
 export const rexdTargetRegistryNode = makeGlobalNode({
   service: TargetRegistry.Service,
   layer: Layer.effect(
@@ -42,7 +44,10 @@ export const rexdTargetRegistryNode = makeGlobalNode({
         (current) => Effect.promise(() => current.close()),
       )
       const probe: TargetRegistry.ConnectionProbe = {
-        test: (target) => probeTarget(target, testInstalledRexdConnection, false),
+        test: (target) =>
+          targetHealthWithDeadline((signal) =>
+            probeTarget(target, testInstalledRexdConnection, false, target.defaultDirectory, signal),
+          ),
         prepare: (target, directory) => probeTarget(target, pooled, true, directory),
         inspect: wizard.inspect,
         complete: wizard.complete,
@@ -160,10 +165,12 @@ export async function probeTarget(
   ) => Promise<unknown> = testRexdConnection,
   prepared = true,
   directory = target.defaultDirectory,
+  signal?: AbortSignal,
 ): Promise<TargetRegistry.ProbeResult> {
   return test(target, {
     directory,
     clientVersion: InstallationVersion,
+    signal,
   })
     .then(
       () =>
@@ -184,6 +191,30 @@ export async function probeTarget(
       stage: stage(error),
       message: error instanceof Error ? error.message : "Rexd target probe failed",
     }))
+}
+
+export async function targetHealthWithDeadline(
+  probe: (signal: AbortSignal) => Promise<TargetRegistry.ProbeResult>,
+  timeoutMs = TARGET_HEALTH_TIMEOUT_MS,
+) {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<TargetRegistry.ProbeResult>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort(new DOMException("Target health check timed out", "TimeoutError"))
+      resolve({
+        status: "unavailable",
+        stage: "ssh",
+        message: `SSH connection timed out after ${timeoutMs / 1_000} seconds`,
+      })
+    }, timeoutMs)
+    timer.unref?.()
+  })
+  try {
+    return await Promise.race([probe(controller.signal), timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 async function testInstalledRexdConnection(

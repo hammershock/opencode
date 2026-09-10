@@ -46,6 +46,12 @@ describe("Sync Settings presentation", () => {
     expect(buildSyncOverviewRows({ ...connected, cloud: "uninitialized" })).toEqual(
       expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "○ not initialized" })]),
     )
+    expect(buildSyncOverviewRows({ ...connected, cloud: "upgrade-required" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "! upgrade required" })]),
+    )
+    expect(buildSyncOverviewRows({ ...connected, cloud: "replaced" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ title: "Cloud status", status: "! cloud data replaced" })]),
+    )
     expect(buildSyncOverviewRows({ ...connected, cloud: "unavailable" })).toEqual(
       expect.arrayContaining([expect.objectContaining({ title: "Retry cloud status", status: "! unavailable" })]),
     )

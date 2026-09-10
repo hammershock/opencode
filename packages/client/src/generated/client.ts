@@ -142,6 +142,8 @@ import type {
   TargetsRestoreOutput,
   TargetsTestConnectionInput,
   TargetsTestConnectionOutput,
+  TargetsRefreshInput,
+  TargetsRefreshOutput,
   TargetsPrepareInput,
   TargetsPrepareOutput,
   TargetsPreviewLegacyImportOutput,
@@ -1220,6 +1222,17 @@ export function make(options: ClientOptions) {
           {
             method: "POST",
             path: `/api/target/${encodeURIComponent(input.targetID)}/test`,
+            successStatus: 200,
+            declaredStatuses: [409, 403, 400, 404, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      refresh: (input: TargetsRefreshInput, requestOptions?: RequestOptions) =>
+        request<TargetsRefreshOutput>(
+          {
+            method: "POST",
+            path: `/api/target/${encodeURIComponent(input.targetID)}/refresh`,
             successStatus: 200,
             declaredStatuses: [409, 403, 400, 404, 500, 401],
             empty: false,

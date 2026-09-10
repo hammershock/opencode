@@ -136,6 +136,8 @@ At minimum run Mac to a configured Linux Rexd target and exercise `mywindows` as
 
 ### G. Multi-device Session sync
 
+Before designing or changing a cloud-provider adapter, qualify the real account against a dedicated, exact test prefix. This is a release prerequisite, not evidence that mocks or documentation may replace. Record sanitized requests, provider codes and observed visibility latency for: missing singleton and batched metadata; absent-only create; unknown create outcome; mutable replacement; paginated recursive listing; metadata-to-download consistency; missing-object deletion; and immediate read-after-write/read-after-replace behavior. Repeat the probe from both supported devices when their HTTP stacks or credential stores differ. Do not attribute a failed product scenario to the provider until this probe reproduces it independently of Core sync state.
+
 Run bidirectionally between Mac and `mywindows`:
 
 - the TUI completes the product-owned Baidu OAuth flow without requesting AppKey, SecretKey or an external login state;

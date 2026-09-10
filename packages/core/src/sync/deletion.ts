@@ -74,27 +74,57 @@ export function make(input: { readonly provider: SyncProvider.Adapter; readonly 
 
   const list = async (signal?: AbortSignal) => (await scan(signal)).map((item) => item.marker)
 
+  const read = async (sessionID: string, signal?: AbortSignal) => {
+    const path = markerPath(sessionID)
+    const object = await input.provider.stat(path, signal)
+    if (!object) return
+    const cached = markerCache.get(path)
+    if (cached?.version === object.version) return cached.value
+    const marker = decode(Marker, (await input.provider.download(path, object.version, signal)).bytes)
+    markerCache.set(path, { version: object.version, value: marker })
+    return marker
+  }
+
   const ensure = async (
     tombstone: SyncEvent.Tombstone,
     requiredDevices: readonly SyncEvent.DeviceID[],
     signal?: AbortSignal,
   ) => {
-    const marker = Marker.make({
+    let marker = Marker.make({
       version: 1,
       tombstone,
       requiredDevices: [...new Set(requiredDevices)].sort((left, right) => String(left).localeCompare(String(right))),
       publishedAt: now(),
     })
     const path = markerPath(tombstone.sessionID)
-    try {
-      await input.provider.uploadAtomic(path, encode(marker), { type: "absent" }, signal)
-      return marker
-    } catch (cause) {
-      if (!(cause instanceof SyncProvider.ProviderError) || cause.kind !== "conflict") throw cause
+    for (let attempt = 0; attempt < 4; attempt++) {
       const object = await input.provider.stat(path, signal)
-      if (!object) throw cause
-      return decode(Marker, (await input.provider.download(path, object.version, signal)).bytes)
+      if (object) {
+        const current = decode(Marker, (await input.provider.download(path, object.version, signal)).bytes)
+        const combined = Marker.make({
+          ...current,
+          requiredDevices: [...new Set([...current.requiredDevices, ...marker.requiredDevices])].sort((left, right) =>
+            String(left).localeCompare(String(right)),
+          ),
+          publishedAt: Math.min(current.publishedAt, marker.publishedAt),
+        })
+        if (JSON.stringify(current) === JSON.stringify(combined)) return current
+        marker = combined
+      }
+      try {
+        const uploaded = await input.provider.uploadAtomic(
+          path,
+          encode(marker),
+          object ? { type: "version", version: object.version } : { type: "absent" },
+          signal,
+        )
+        markerCache.set(path, { version: uploaded.version, value: marker })
+        return marker
+      } catch (cause) {
+        if (!(cause instanceof SyncProvider.ProviderError) || cause.kind !== "conflict" || attempt === 3) throw cause
+      }
     }
+    throw new SyncProvider.ProviderError(input.provider.id, "upload", "conflict", true)
   }
 
   const acknowledge = async (marker: Marker, deviceID: SyncEvent.DeviceID, signal?: AbortSignal) => {
@@ -117,12 +147,12 @@ export function make(input: { readonly provider: SyncProvider.Adapter; readonly 
     }
   }
 
-  const references = async (
-    marker: Marker,
-    revoked: ReadonlySet<SyncEvent.DeviceID>,
-    signal?: AbortSignal,
-  ) => {
-    const objects = await SyncProvider.listAll(input.provider, acknowledgementPrefix(marker.tombstone.sessionID), signal)
+  const references = async (marker: Marker, revoked: ReadonlySet<SyncEvent.DeviceID>, signal?: AbortSignal) => {
+    const objects = await SyncProvider.listAll(
+      input.provider,
+      acknowledgementPrefix(marker.tombstone.sessionID),
+      signal,
+    )
     const acknowledged = new Set(
       (
         await Promise.all(
@@ -138,7 +168,11 @@ export function make(input: { readonly provider: SyncProvider.Adapter; readonly 
   }
 
   const remove = async (marker: Marker, signal?: AbortSignal) => {
-    const objects = await SyncProvider.listAll(input.provider, acknowledgementPrefix(marker.tombstone.sessionID), signal)
+    const objects = await SyncProvider.listAll(
+      input.provider,
+      acknowledgementPrefix(marker.tombstone.sessionID),
+      signal,
+    )
     const markerObject = await input.provider.stat(markerPath(marker.tombstone.sessionID), signal)
     const values = [...objects, ...(markerObject ? [markerObject] : [])]
     if (!values.length) return
@@ -169,7 +203,7 @@ export function make(input: { readonly provider: SyncProvider.Adapter; readonly 
     }
   }
 
-  return { list, scan, ensure, acknowledge, references, remove, removeScanned }
+  return { list, read, scan, ensure, acknowledge, references, remove, removeScanned }
 }
 
 function markerPath(sessionID: string) {

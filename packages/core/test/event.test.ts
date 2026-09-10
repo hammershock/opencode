@@ -822,6 +822,65 @@ describe("EventV2", () => {
     }),
   )
 
+  it.effect("allows an explicitly authorized sequential append from another owner", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const aggregateID = Session.ID.create()
+      const received = new Array<EventV2.Payload>()
+      yield* events.replay(
+        {
+          id: EventV2.ID.create(),
+          type: EventV2.versionedType(DurableMessage.type, 1),
+          seq: 0,
+          aggregateID,
+          data: durableData(aggregateID, "created-on-a"),
+        },
+        { ownerID: "owner-a" },
+      )
+      yield* events.project(DurableMessage, (event) => Effect.sync(() => void received.push(event)))
+
+      yield* events.replay(
+        {
+          id: EventV2.ID.create(),
+          type: EventV2.versionedType(DurableMessage.type, 1),
+          seq: 1,
+          aggregateID,
+          data: durableData(aggregateID, "continued-on-b"),
+        },
+        { ownerID: "owner-b", allowForeignAppend: true, publish: true },
+      )
+
+      expect(received).toHaveLength(1)
+      expect(received[0]?.data).toEqual(durableData(aggregateID, "continued-on-b"))
+    }),
+  )
+
+  it.effect("persists replay while explicitly suppressing local projection", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const aggregateID = Session.ID.create()
+      const projected = new Array<EventV2.Payload>()
+      yield* events.project(DurableMessage, (event) => Effect.sync(() => void projected.push(event)))
+
+      yield* events.replay(
+        {
+          id: EventV2.ID.create(),
+          type: EventV2.versionedType(DurableMessage.type, 1),
+          seq: 0,
+          aggregateID,
+          data: durableData(aggregateID, "device-local projection"),
+        },
+        { project: false },
+      )
+
+      expect(projected).toHaveLength(0)
+      expect(
+        yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, aggregateID)).all().pipe(Effect.orDie),
+      ).toHaveLength(1)
+    }),
+  )
+
   it.effect("allows an equivalent owned replay with a different event ID for crash recovery", () =>
     Effect.gen(function* () {
       const events = yield* EventV2.Service

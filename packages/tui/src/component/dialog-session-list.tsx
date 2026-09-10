@@ -126,6 +126,7 @@ export function syncAvailabilityLabel(availability: SyncAvailability) {
 
 export function dialogSessionListSyncStatus(session: Pick<DialogSessionEntry, "cloudOnly" | "syncMetadata">) {
   if (session.cloudOnly) return "cloud"
+  if (["ready", "unresolved"].includes(session.syncMetadata?.availability ?? "")) return undefined
   return session.syncMetadata ? syncAvailabilityLabel(session.syncMetadata.availability) : undefined
 }
 
@@ -226,6 +227,22 @@ export function DialogSessionList() {
       }
     },
   )
+  let listRefreshRequested = false
+  let listRefreshFlight: Promise<void> | undefined
+  function refreshList() {
+    listRefreshRequested = true
+    if (listRefreshFlight) return listRefreshFlight
+    listRefreshFlight = (async () => {
+      while (listRefreshRequested) {
+        listRefreshRequested = false
+        await Promise.all([refetchBrowse(), refetchSyncedSessions(), ...(search() ? [refetch()] : [])])
+      }
+    })().finally(() => {
+      listRefreshFlight = undefined
+      if (listRefreshRequested) void refreshList()
+    })
+    return listRefreshFlight
+  }
 
   const currentSessionID = createMemo(() => (route.data.type === "session" ? route.data.sessionID : undefined))
   const allSessions = createMemo(() => {
@@ -284,6 +301,11 @@ export function DialogSessionList() {
   onCleanup(
     event.on("session.deleted", (event) => {
       setDeleted((current) => new Set(current).add(event.properties.info.id))
+    }),
+  )
+  onCleanup(
+    event.on("sync.projection.updated", () => {
+      void refreshList()
     }),
   )
 

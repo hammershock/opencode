@@ -1059,14 +1059,26 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   })
 
   let deletedSessionNotice: string | undefined
-  event.on("session.deleted", (evt) => {
-    const sessionID = evt.properties.info.id
+  function showDeletedSessionNotice(sessionID: string) {
     if (route.data.type !== "session" || route.data.sessionID !== sessionID) return
     if (deletedSessionNotice === sessionID) return
     deletedSessionNotice = sessionID
     void DialogAlert.show(dialog, "Session deleted", "This session is no longer available.").finally(() => {
       if (route.data.type === "session" && route.data.sessionID === sessionID) route.navigate({ type: "home" })
       if (deletedSessionNotice === sessionID) deletedSessionNotice = undefined
+    })
+  }
+
+  event.on("session.deleted", (evt) => {
+    showDeletedSessionNotice(evt.properties.info.id)
+  })
+
+  event.on("sync.projection.updated", () => {
+    if (route.data.type !== "session") return
+    const sessionID = route.data.sessionID
+    void sync.session.refresh().then(() => {
+      if (sync.session.get(sessionID)) return
+      showDeletedSessionNotice(sessionID)
     })
   })
 

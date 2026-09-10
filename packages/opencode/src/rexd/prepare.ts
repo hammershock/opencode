@@ -2,6 +2,8 @@ import { artifactURL, REXD_ARTIFACTS, REXD_BASELINE_VERSION, type RexdPlatform }
 import { RexdError } from "./error"
 import { runSshInput, runSshScript, type RexdTarget } from "./ssh"
 
+export const REMOTE_DETECT_TIMEOUT_MS = 8_000
+
 export type RemotePlatform = {
   platform: RexdPlatform
   home: string
@@ -21,6 +23,7 @@ export type PrepareDependencies = {
   upload?: typeof runSshInput
   download?: (url: string, signal?: AbortSignal) => Promise<Uint8Array>
   verify?: (payload: Uint8Array, expected: string) => void
+  detectTimeoutMs?: number
 }
 
 export async function detectRemotePlatform(
@@ -28,7 +31,11 @@ export async function detectRemotePlatform(
   signal?: AbortSignal,
   dependencies: PrepareDependencies = {},
 ): Promise<RemotePlatform> {
-  const result = await (dependencies.run ?? runSshScript)(target.connection, DETECT_SCRIPT, signal).catch((error) => {
+  const result = await withDetectionDeadline(
+    (operationSignal) => (dependencies.run ?? runSshScript)(target.connection, DETECT_SCRIPT, operationSignal),
+    signal,
+    dependencies.detectTimeoutMs,
+  ).catch((error) => {
     if (error instanceof RexdError) throw error
     throw new RexdError("detect", "Could not detect remote environment", true)
   })
@@ -53,6 +60,39 @@ export async function detectRemotePlatform(
     dataHome: fields[3]!,
     configHome: fields[4]!,
     wsl: fields[5] === "wsl",
+  }
+}
+
+async function withDetectionDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  parent?: AbortSignal,
+  timeoutMs = REMOTE_DETECT_TIMEOUT_MS,
+) {
+  if (parent?.aborted) throw new RexdError("cancelled", "Rexd operation cancelled", true)
+  const controller = new AbortController()
+  const cancel = () => controller.abort(parent?.reason)
+  parent?.addEventListener("abort", cancel, { once: true })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort(new DOMException("Remote environment detection timed out", "TimeoutError"))
+      reject(
+        new RexdError(
+          "ssh",
+          `SSH connection timed out after ${timeoutMs / 1_000} seconds`,
+          true,
+          "unknown",
+          "TimeoutError",
+        ),
+      )
+    }, timeoutMs)
+    timer.unref?.()
+  })
+  try {
+    return await Promise.race([operation(controller.signal), timeout])
+  } finally {
+    if (timer) clearTimeout(timer)
+    parent?.removeEventListener("abort", cancel)
   }
 }
 

@@ -152,14 +152,23 @@ export const TargetGroup = HttpApiGroup.make("server.target")
   .add(
     HttpApiEndpoint.post("target.test", "/api/target/:targetID/test", {
       params: { targetID: Location.TargetID },
-      success: Target.ProbeResult,
+      success: Target.HealthResult,
       error: errors,
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.target.test", summary: "Test a target connection" })),
   )
   .add(
+    HttpApiEndpoint.post("target.refresh", "/api/target/:targetID/refresh", {
+      params: { targetID: Location.TargetID },
+      success: Target.HealthResult,
+      error: errors,
+    }).annotateMerge(
+      OpenApi.annotations({ identifier: "v2.target.refresh", summary: "Force refresh a target connection" }),
+    ),
+  )
+  .add(
     HttpApiEndpoint.post("target.prepare", "/api/target/:targetID/prepare", {
       params: { targetID: Location.TargetID },
-      success: Target.ProbeResult,
+      success: Target.HealthResult,
       error: errors,
     }).annotateMerge(OpenApi.annotations({ identifier: "v2.target.prepare", summary: "Prepare a target" })),
   )

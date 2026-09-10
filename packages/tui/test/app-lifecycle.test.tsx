@@ -7,6 +7,16 @@ import { Global } from "@opencode-ai/core/global"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 
+async function waitForFrame(setup: Awaited<ReturnType<typeof createTestRenderer>>, text: string, timeout = 2_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    await setup.renderOnce()
+    if (setup.captureCharFrame().includes(text)) return
+    await Bun.sleep(10)
+  }
+  throw new Error(`Timed out waiting for ${text}`)
+}
+
 test("SIGHUP clears title and disposes scoped resources once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
@@ -268,6 +278,149 @@ test("an open session waits for confirmation before returning home after deletio
     await setup.waitForVisualIdle()
     expect(setup.captureCharFrame()).not.toContain("Session deleted")
     expect(setup.captureCharFrame()).toContain("Sync")
+
+    process.emit("SIGHUP")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("an open session detects a remotely projected deletion outside its routed Location", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const session = {
+    id: "dummy",
+    title: "Deleted on another device",
+    slug: "dummy",
+    projectID: "project",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 0 },
+  }
+  let present = true
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/target")
+      return json({ path: "/tmp/opencode/targets.jsonc", revision: "test", targets: [], diagnostics: [], valid: true })
+    if (url.pathname === "/session/dummy") return json(session)
+    if (url.pathname === "/api/session/dummy/target-resolution")
+      return json({ status: "resolved", location: { directory } })
+    if (url.pathname === "/session") return json(present ? [session] : [])
+  })
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { continue: true },
+        pluginHost: {
+          async start() {
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    await setup.waitForVisualIdle()
+    present = false
+    events.emit({
+      directory: "/home/remote",
+      project: "proj_test",
+      payload: { id: "evt_projection", type: "sync.projection.updated", properties: { revision: 1 } },
+    })
+    await waitForFrame(setup, "Session deleted")
+
+    expect(setup.captureCharFrame()).toContain("This session is no longer available.")
+    setup.mockInput.pressEnter()
+    await waitForFrame(setup, "Sync")
+
+    process.emit("SIGHUP")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+})
+
+test("an open Sessions dialog refreshes when another device projects a Session", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const first = {
+    id: "first",
+    title: "Existing session",
+    slug: "first",
+    projectID: "proj_test",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 1, updated: 1 },
+  }
+  const second = {
+    ...first,
+    id: "second",
+    slug: "second",
+    title: "Created on mywindows",
+    time: { created: 2, updated: 2 },
+  }
+  let sessions = [first]
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/target")
+      return json({ path: "/tmp/opencode/targets.jsonc", revision: "test", targets: [], diagnostics: [], valid: true })
+    if (url.pathname === "/session") return json(sessions)
+    if (url.pathname === "/global/sync/status") return json({ configured: true, deviceID: "mac" })
+    if (url.pathname === "/global/sync/sessions") return json([])
+  })
+  let api: TuiPluginApi | undefined
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: {},
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            started()
+          },
+          async dispose() {},
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    api?.keymap.dispatchCommand("session.list")
+    await waitForFrame(setup, "Existing session")
+    sessions = [first, second]
+    events.emit({
+      directory: "/home/remote",
+      project: "proj_test",
+      payload: { id: "evt_projection", type: "sync.projection.updated", properties: { revision: 2 } },
+    })
+    await waitForFrame(setup, "Created on mywindows")
 
     process.emit("SIGHUP")
     await task

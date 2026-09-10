@@ -182,6 +182,7 @@ export type Session = {
   directory: string
   target?: LocationTarget
   lastKnownTargetName?: string
+  portableTargetLabel?: string
   syncSpaceID?: string
   path?: string
   parentID?: string
@@ -2348,6 +2349,7 @@ export type GlobalSession = {
   directory: string
   target?: LocationTarget
   lastKnownTargetName?: string
+  portableTargetLabel?: string
   syncSpaceID?: string
   path?: string
   parentID?: string
@@ -6528,6 +6530,20 @@ export type SessionLocationRebindingResolution =
       target?: {
         id: string
         status: "unverified"
+        health?:
+          | {
+              status: "ready"
+              stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
+          | {
+              status: "unavailable" | "invalid"
+              stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              message: string
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
         name: string
         transport: "ssh"
         connection:
@@ -6569,6 +6585,20 @@ export type SessionLocationRebindingResolution =
       target: {
         id: string
         status: "unverified"
+        health?:
+          | {
+              status: "ready"
+              stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
+          | {
+              status: "unavailable" | "invalid"
+              stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              message: string
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
         name: string
         transport: "ssh"
         connection:
@@ -6629,6 +6659,20 @@ export type SessionLocationRebindingRestoreResult = {
   target: {
     id: string
     status: "unverified"
+    health?:
+      | {
+          status: "ready"
+          stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      | {
+          status: "unavailable" | "invalid"
+          stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          message: string
+          checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
     name: string
     transport: "ssh"
     connection:
@@ -6656,6 +6700,20 @@ export type SessionLocationRebindingRestoreResult = {
     targets: Array<{
       id: string
       status: "unverified"
+      health?:
+        | {
+            status: "ready"
+            stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "unavailable" | "invalid"
+            stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            message: string
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
       name: string
       transport: "ssh"
       connection:
@@ -8961,9 +9019,15 @@ export type GlobalSyncCloudStatusResponses = {
   200:
     | {
         status: "uninitialized"
+        reset?: {
+          version: 2
+          state: "reset"
+          resetID: string
+          resetAt: number
+        }
       }
     | {
-        status: "ready"
+        status: "legacy-upgrade-required"
         manifest: {
           version: 1
           protocol: {
@@ -8972,6 +9036,37 @@ export type GlobalSyncCloudStatusResponses = {
           }
           createdAt: number
         }
+      }
+    | {
+        status: "ready"
+        manifest: {
+          version: 2
+          state: "ready"
+          protocol: {
+            major: number
+            minor: number
+          }
+          instanceID: string
+          createdAt: number
+        }
+      }
+    | {
+        status: "unavailable"
+        expectedInstanceID: string
+      }
+    | {
+        status: "replaced"
+        manifest: {
+          version: 2
+          state: "ready"
+          protocol: {
+            major: number
+            minor: number
+          }
+          instanceID: string
+          createdAt: number
+        }
+        expectedInstanceID: string
       }
     | {
         status: "incompatible"
@@ -9010,6 +9105,35 @@ export type GlobalSyncCloudInitializeResponses = {
 
 export type GlobalSyncCloudInitializeResponse =
   GlobalSyncCloudInitializeResponses[keyof GlobalSyncCloudInitializeResponses]
+
+export type GlobalSyncCloudJoinData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/global/sync/cloud/join"
+}
+
+export type GlobalSyncCloudJoinErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * SyncControlApiError
+   */
+  503: SyncControlApiError
+}
+
+export type GlobalSyncCloudJoinError = GlobalSyncCloudJoinErrors[keyof GlobalSyncCloudJoinErrors]
+
+export type GlobalSyncCloudJoinResponses = {
+  /**
+   * Success
+   */
+  200: Array<string>
+}
+
+export type GlobalSyncCloudJoinResponse = GlobalSyncCloudJoinResponses[keyof GlobalSyncCloudJoinResponses]
 
 export type GlobalSyncSessionsData = {
   body?: never
@@ -15864,6 +15988,20 @@ export type V2TargetListResponses = {
     targets: Array<{
       id: string
       status: "unverified"
+      health?:
+        | {
+            status: "ready"
+            stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "unavailable" | "invalid"
+            stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            message: string
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
       name: string
       transport: "ssh"
       connection:
@@ -15965,6 +16103,20 @@ export type V2TargetCreateResponses = {
     target: {
       id: string
       status: "unverified"
+      health?:
+        | {
+            status: "ready"
+            stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "unavailable" | "invalid"
+            stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            message: string
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
       name: string
       transport: "ssh"
       connection:
@@ -15992,6 +16144,20 @@ export type V2TargetCreateResponses = {
       targets: Array<{
         id: string
         status: "unverified"
+        health?:
+          | {
+              status: "ready"
+              stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
+          | {
+              status: "unavailable" | "invalid"
+              stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              message: string
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
         name: string
         transport: "ssh"
         connection:
@@ -16462,6 +16628,20 @@ export type V2TargetRemoveResponses = {
     targets: Array<{
       id: string
       status: "unverified"
+      health?:
+        | {
+            status: "ready"
+            stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "unavailable" | "invalid"
+            stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            message: string
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
       name: string
       transport: "ssh"
       connection:
@@ -16565,6 +16745,20 @@ export type V2TargetUpdateResponses = {
     target: {
       id: string
       status: "unverified"
+      health?:
+        | {
+            status: "ready"
+            stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "unavailable" | "invalid"
+            stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            message: string
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
       name: string
       transport: "ssh"
       connection:
@@ -16592,6 +16786,20 @@ export type V2TargetUpdateResponses = {
       targets: Array<{
         id: string
         status: "unverified"
+        health?:
+          | {
+              status: "ready"
+              stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
+          | {
+              status: "unavailable" | "invalid"
+              stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              message: string
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
         name: string
         transport: "ssh"
         connection:
@@ -16744,15 +16952,79 @@ export type V2TargetTestResponses = {
     | {
         status: "ready"
         stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+        checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       }
     | {
         status: "unavailable" | "invalid"
         stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
         message: string
+        checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       }
 }
 
 export type V2TargetTestResponse = V2TargetTestResponses[keyof V2TargetTestResponses]
+
+export type V2TargetRefreshData = {
+  body?: never
+  path: {
+    targetID: string
+  }
+  query?: never
+  url: "/api/target/{targetID}/refresh"
+}
+
+export type V2TargetRefreshErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
+   * SessionNotFoundError | TargetNotFoundError
+   */
+  404: SessionNotFoundError | TargetNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2TargetRefreshError = V2TargetRefreshErrors[keyof V2TargetRefreshErrors]
+
+export type V2TargetRefreshResponses = {
+  /**
+   * Success
+   */
+  200:
+    | {
+        status: "ready"
+        stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+        checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+    | {
+        status: "unavailable" | "invalid"
+        stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+        message: string
+        checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      }
+}
+
+export type V2TargetRefreshResponse = V2TargetRefreshResponses[keyof V2TargetRefreshResponses]
 
 export type V2TargetPrepareData = {
   body?: never
@@ -16800,11 +17072,15 @@ export type V2TargetPrepareResponses = {
     | {
         status: "ready"
         stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+        checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       }
     | {
         status: "unavailable" | "invalid"
         stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
         message: string
+        checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       }
 }
 
@@ -16844,6 +17120,20 @@ export type V2TargetLegacyPreviewResponses = {
     candidates: Array<{
       id: string
       status: "unverified"
+      health?:
+        | {
+            status: "ready"
+            stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "unavailable" | "invalid"
+            stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            message: string
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
       name: string
       transport: "ssh"
       connection:
@@ -16923,6 +17213,20 @@ export type V2TargetLegacyImportResponses = {
     imported: Array<{
       id: string
       status: "unverified"
+      health?:
+        | {
+            status: "ready"
+            stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
+        | {
+            status: "unavailable" | "invalid"
+            stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            message: string
+            checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          }
       name: string
       transport: "ssh"
       connection:
@@ -16950,6 +17254,20 @@ export type V2TargetLegacyImportResponses = {
       targets: Array<{
         id: string
         status: "unverified"
+        health?:
+          | {
+              status: "ready"
+              stages: Array<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
+          | {
+              status: "unavailable" | "invalid"
+              stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              message: string
+              checkedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+              trustedUntil: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+            }
         name: string
         transport: "ssh"
         connection:

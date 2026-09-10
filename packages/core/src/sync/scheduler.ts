@@ -1,7 +1,7 @@
 export * as SyncScheduler from "./scheduler"
 
 export function make(input: {
-  readonly run: () => Promise<void>
+  readonly run: (signal: AbortSignal) => Promise<void>
   readonly intervalMs?: number
   readonly maximumBackoffMs?: number
   readonly random?: () => number
@@ -17,6 +17,7 @@ export function make(input: {
   let failures = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   let flight: Promise<void> | undefined
+  let controller: AbortController | undefined
 
   const schedule = (delay: number) => {
     if (!enabled) return
@@ -34,14 +35,17 @@ export function make(input: {
   const trigger = () => {
     if (!enabled) return Promise.resolve()
     if (flight) return flight
+    const current = new AbortController()
+    controller = current
     flight = input
-      .run()
+      .run(current.signal)
       .then(() => void (failures = 0))
       .catch((cause) => {
         failures++
         throw cause
       })
       .finally(() => {
+        if (controller === current) controller = undefined
         flight = undefined
         schedule(nextDelay())
       })
@@ -53,10 +57,12 @@ export function make(input: {
       enabled = true
       schedule(0)
     },
-    stop: () => {
+    stop: async () => {
       enabled = false
       if (timer) clearTimer(timer)
       timer = undefined
+      controller?.abort(new Error("Sync scheduler stopped"))
+      await flight?.catch(() => undefined)
     },
     trigger,
     networkRestored: trigger,

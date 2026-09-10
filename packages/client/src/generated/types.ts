@@ -3614,6 +3614,21 @@ export type TargetsListOutput = {
   readonly targets: ReadonlyArray<{
     readonly id: string
     readonly status: "unverified"
+    readonly health?:
+      | {
+          readonly status: "ready"
+          readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | {
+          readonly status: "unavailable" | "invalid"
+          readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          readonly message: string
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | undefined
     readonly name: string
     readonly transport: "ssh"
     readonly connection:
@@ -3652,6 +3667,23 @@ export type TargetsResolveSessionOutput =
       readonly target?: {
         readonly id: string
         readonly status: "unverified"
+        readonly health?:
+          | {
+              readonly status: "ready"
+              readonly stages: ReadonlyArray<
+                "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              >
+              readonly checkedAt: number | "Infinity" | "-Infinity" | "NaN"
+              readonly trustedUntil: number | "Infinity" | "-Infinity" | "NaN"
+            }
+          | {
+              readonly status: "unavailable" | "invalid"
+              readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              readonly message: string
+              readonly checkedAt: number | "Infinity" | "-Infinity" | "NaN"
+              readonly trustedUntil: number | "Infinity" | "-Infinity" | "NaN"
+            }
+          | null
         readonly name: string
         readonly transport: "ssh"
         readonly connection:
@@ -3697,6 +3729,23 @@ export type TargetsResolveSessionOutput =
       readonly target: {
         readonly id: string
         readonly status: "unverified"
+        readonly health?:
+          | {
+              readonly status: "ready"
+              readonly stages: ReadonlyArray<
+                "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              >
+              readonly checkedAt: number | "Infinity" | "-Infinity" | "NaN"
+              readonly trustedUntil: number | "Infinity" | "-Infinity" | "NaN"
+            }
+          | {
+              readonly status: "unavailable" | "invalid"
+              readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+              readonly message: string
+              readonly checkedAt: number | "Infinity" | "-Infinity" | "NaN"
+              readonly trustedUntil: number | "Infinity" | "-Infinity" | "NaN"
+            }
+          | null
         readonly name: string
         readonly transport: "ssh"
         readonly connection:
@@ -3954,6 +4003,21 @@ export type TargetsCreateOutput = {
   readonly target: {
     readonly id: string
     readonly status: "unverified"
+    readonly health?:
+      | {
+          readonly status: "ready"
+          readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | {
+          readonly status: "unavailable" | "invalid"
+          readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          readonly message: string
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | undefined
     readonly name: string
     readonly transport: "ssh"
     readonly connection:
@@ -3975,6 +4039,23 @@ export type TargetsCreateOutput = {
     readonly targets: ReadonlyArray<{
       readonly id: string
       readonly status: "unverified"
+      readonly health?:
+        | {
+            readonly status: "ready"
+            readonly stages: ReadonlyArray<
+              "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            >
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | {
+            readonly status: "unavailable" | "invalid"
+            readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            readonly message: string
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | undefined
       readonly name: string
       readonly transport: "ssh"
       readonly connection:
@@ -4046,6 +4127,21 @@ export type TargetsUpdateOutput = {
   readonly target: {
     readonly id: string
     readonly status: "unverified"
+    readonly health?:
+      | {
+          readonly status: "ready"
+          readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | {
+          readonly status: "unavailable" | "invalid"
+          readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          readonly message: string
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | undefined
     readonly name: string
     readonly transport: "ssh"
     readonly connection:
@@ -4067,6 +4163,23 @@ export type TargetsUpdateOutput = {
     readonly targets: ReadonlyArray<{
       readonly id: string
       readonly status: "unverified"
+      readonly health?:
+        | {
+            readonly status: "ready"
+            readonly stages: ReadonlyArray<
+              "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            >
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | {
+            readonly status: "unavailable" | "invalid"
+            readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            readonly message: string
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | undefined
       readonly name: string
       readonly transport: "ssh"
       readonly connection:
@@ -4103,6 +4216,21 @@ export type TargetsRemoveOutput = {
   readonly targets: ReadonlyArray<{
     readonly id: string
     readonly status: "unverified"
+    readonly health?:
+      | {
+          readonly status: "ready"
+          readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | {
+          readonly status: "unavailable" | "invalid"
+          readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          readonly message: string
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | undefined
     readonly name: string
     readonly transport: "ssh"
     readonly connection:
@@ -4195,6 +4323,21 @@ export type TargetsRestoreOutput = {
   readonly target: {
     readonly id: string
     readonly status: "unverified"
+    readonly health?:
+      | {
+          readonly status: "ready"
+          readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | {
+          readonly status: "unavailable" | "invalid"
+          readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          readonly message: string
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | undefined
     readonly name: string
     readonly transport: "ssh"
     readonly connection:
@@ -4216,6 +4359,23 @@ export type TargetsRestoreOutput = {
     readonly targets: ReadonlyArray<{
       readonly id: string
       readonly status: "unverified"
+      readonly health?:
+        | {
+            readonly status: "ready"
+            readonly stages: ReadonlyArray<
+              "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            >
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | {
+            readonly status: "unavailable" | "invalid"
+            readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            readonly message: string
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | undefined
       readonly name: string
       readonly transport: "ssh"
       readonly connection:
@@ -4249,11 +4409,32 @@ export type TargetsTestConnectionOutput =
   | {
       readonly status: "ready"
       readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+      readonly checkedAt: number
+      readonly trustedUntil: number
     }
   | {
       readonly status: "unavailable" | "invalid"
       readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       readonly message: string
+      readonly checkedAt: number
+      readonly trustedUntil: number
+    }
+
+export type TargetsRefreshInput = { readonly targetID: { readonly targetID: string }["targetID"] }
+
+export type TargetsRefreshOutput =
+  | {
+      readonly status: "ready"
+      readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+      readonly checkedAt: number
+      readonly trustedUntil: number
+    }
+  | {
+      readonly status: "unavailable" | "invalid"
+      readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+      readonly message: string
+      readonly checkedAt: number
+      readonly trustedUntil: number
     }
 
 export type TargetsPrepareInput = { readonly targetID: { readonly targetID: string }["targetID"] }
@@ -4262,11 +4443,15 @@ export type TargetsPrepareOutput =
   | {
       readonly status: "ready"
       readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+      readonly checkedAt: number
+      readonly trustedUntil: number
     }
   | {
       readonly status: "unavailable" | "invalid"
       readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       readonly message: string
+      readonly checkedAt: number
+      readonly trustedUntil: number
     }
 
 export type TargetsPreviewLegacyImportOutput = {
@@ -4275,6 +4460,21 @@ export type TargetsPreviewLegacyImportOutput = {
   readonly candidates: ReadonlyArray<{
     readonly id: string
     readonly status: "unverified"
+    readonly health?:
+      | {
+          readonly status: "ready"
+          readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | {
+          readonly status: "unavailable" | "invalid"
+          readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          readonly message: string
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | undefined
     readonly name: string
     readonly transport: "ssh"
     readonly connection:
@@ -4307,6 +4507,21 @@ export type TargetsImportLegacyOutput = {
   readonly imported: ReadonlyArray<{
     readonly id: string
     readonly status: "unverified"
+    readonly health?:
+      | {
+          readonly status: "ready"
+          readonly stages: ReadonlyArray<"ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory">
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | {
+          readonly status: "unavailable" | "invalid"
+          readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+          readonly message: string
+          readonly checkedAt: number
+          readonly trustedUntil: number
+        }
+      | undefined
     readonly name: string
     readonly transport: "ssh"
     readonly connection:
@@ -4328,6 +4543,23 @@ export type TargetsImportLegacyOutput = {
     readonly targets: ReadonlyArray<{
       readonly id: string
       readonly status: "unverified"
+      readonly health?:
+        | {
+            readonly status: "ready"
+            readonly stages: ReadonlyArray<
+              "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            >
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | {
+            readonly status: "unavailable" | "invalid"
+            readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
+            readonly message: string
+            readonly checkedAt: number
+            readonly trustedUntil: number
+          }
+        | undefined
       readonly name: string
       readonly transport: "ssh"
       readonly connection:

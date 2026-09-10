@@ -290,6 +290,7 @@ const layer = Layer.effectDiscard(
           directory: event.data.location.directory,
           target: event.data.location.target,
           last_known_target_name: event.data.location.lastKnownTargetName ?? null,
+          portable_target_label: null,
           workspace_id: event.data.location.workspaceID ? WorkspaceV2.ID.make(event.data.location.workspaceID) : null,
           location_revision: event.data.revision,
           time_updated: DateTime.toEpochMillis(event.data.timestamp),

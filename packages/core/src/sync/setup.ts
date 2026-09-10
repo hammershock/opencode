@@ -71,8 +71,9 @@ export interface Interface {
   readonly switchAccount: (input: CompleteInput) => Effect.Effect<SyncState.State, SetupError>
   readonly logout: () => Effect.Effect<SyncState.State, SetupError>
   readonly cloudStatus: () => Effect.Effect<SyncRoot.Inspection, SetupError>
-  readonly initializeCloud: () => Effect.Effect<SyncState.State, SetupError>
-  readonly clearCloud: () => Effect.Effect<SyncState.State, SetupError>
+  readonly initializeCloud: (signal?: AbortSignal) => Effect.Effect<SyncState.State, SetupError>
+  readonly joinCurrentCloud: (signal?: AbortSignal) => Effect.Effect<SyncState.State, SetupError>
+  readonly clearCloud: (signal?: AbortSignal) => Effect.Effect<SyncState.State, SetupError>
   readonly discover: () => Effect.Effect<SyncSpaceCatalog.Discovery, SetupError>
   readonly create: (input: CreateInput) => Effect.Effect<
     {
@@ -88,7 +89,7 @@ export interface Interface {
   readonly setEnabled: (enabled: boolean) => Effect.Effect<SyncState.State, SetupError>
   readonly setInterval: (seconds: SyncState.IntervalSeconds) => Effect.Effect<SyncState.State, SetupError>
   readonly setDeviceName: (name: string) => Effect.Effect<SyncState.State, SetupError>
-  readonly deleteSpace: (namespaceID: string) => Effect.Effect<string, SetupError>
+  readonly deleteSpace: (namespaceID: string, signal?: AbortSignal) => Effect.Effect<string, SetupError>
   readonly applyRemoteDeletion: (namespaceID: string) => Effect.Effect<boolean, SetupError>
   readonly removeFromDevice: () => Effect.Effect<readonly string[], SetupError>
 }
@@ -101,6 +102,7 @@ export function make(input: {
   readonly request?: BaiduSyncProvider.Request
   readonly now?: () => number
   readonly randomUUID?: () => string
+  readonly createInstanceID?: () => string
   readonly createSpace?: () => SyncCrypto.SpaceKey
   readonly provider?: SyncProvider.Adapter
 }) {
@@ -195,7 +197,7 @@ export function make(input: {
       })
     return {
       current,
-      root: SyncRoot.make({ provider, now }),
+      root: SyncRoot.make({ provider, now, randomUUID: input.createInstanceID }),
       catalog: SyncSpaceCatalog.make({
         provider,
         now,
@@ -204,57 +206,98 @@ export function make(input: {
     }
   }
   const cloudStatus = Effect.fn("SyncSetup.cloudStatus")(() =>
-    effect("remote", async () => (await remote()).root.inspect(), "catalog"),
-  )
-  const initializeCloud = Effect.fn("SyncSetup.initializeCloud")(() =>
     effect(
       "remote",
       async () => {
         const context = await remote()
-        const manifest = await context.root.initialize()
-        const descriptor: SyncSpace.Descriptor = {
-          namespaceID: SyncRoot.INTERNAL_SCOPE,
-          name: "Baidu Netdisk",
-          protocol: manifest.protocol,
-          encryption: "none",
-          createdAt: manifest.createdAt,
-          updatedAt: manifest.createdAt,
-          summary: { sessions: 0, devices: 0, updatedAt: manifest.createdAt },
-          revision: 1,
+        const inspection = await context.root.inspect()
+        const active = SyncState.active(context.current)
+        const expectedInstanceID = active ? SyncRoot.accountInstanceID(active.namespaceID) : undefined
+        if (inspection.status === "uninitialized" && !inspection.reset && expectedInstanceID)
+          return { status: "unavailable" as const, expectedInstanceID }
+        if (inspection.status !== "ready") return inspection
+        if (!expectedInstanceID || expectedInstanceID === inspection.manifest.instanceID) return inspection
+        return {
+          status: "replaced" as const,
+          manifest: inspection.manifest,
+          expectedInstanceID,
         }
-        const accountState = {
-          ...context.current,
-          enabled: false,
-          activeSpaceID: undefined,
-          spaces: [],
-        }
-        return states.write(
-          SyncState.activate(
-            SyncState.bind(accountState, {
-              accountID: context.current.account!.id,
-              descriptor,
-              remoteRoot: SyncRoot.REMOTE_ROOT,
-              joinedAt: now(),
-            }),
-            SyncRoot.INTERNAL_SCOPE,
-          ),
-          context.current.revision,
-        )
       },
       "catalog",
     ),
   )
-  const clearCloud = Effect.fn("SyncSetup.clearCloud")(() =>
+  const initializeCloud = Effect.fn("SyncSetup.initializeCloud")((signal?: AbortSignal) =>
     effect(
       "remote",
       async () => {
         const context = await remote()
-        await context.root.clear()
+        const inspection = await context.root.inspect(signal)
+        if (inspection.status !== "uninitialized") throw new SetupError({ kind: "invalid" })
+        const manifest = await context.root.initialize(signal)
+        return bindAccountManifest(context.current, manifest, now())
+      },
+      "catalog",
+    ),
+  )
+  const joinCurrentCloud = Effect.fn("SyncSetup.joinCurrentCloud")((signal?: AbortSignal) =>
+    effect(
+      "remote",
+      async () => {
+        const context = await remote()
+        const inspection = await context.root.inspect(signal)
+        if (inspection.status !== "ready") throw new SetupError({ kind: "invalid" })
+        return bindAccountManifest(context.current, inspection.manifest, now())
+      },
+      "catalog",
+    ),
+  )
+
+  const bindAccountManifest = async (current: SyncState.State, manifest: SyncRoot.Manifest, joinedAt: number) => {
+    const namespaceID = SyncRoot.accountScope(manifest.instanceID)
+    const descriptor: SyncSpace.Descriptor = {
+      namespaceID,
+      name: "Baidu Netdisk",
+      protocol: manifest.protocol,
+      encryption: "none",
+      createdAt: manifest.createdAt,
+      updatedAt: manifest.createdAt,
+      summary: { sessions: 0, devices: 0, updatedAt: manifest.createdAt },
+      revision: 1,
+    }
+    const accountState = {
+      ...current,
+      enabled: false,
+      activeSpaceID: undefined,
+      spaces: [],
+    }
+    return states.write(
+      SyncState.activate(
+        SyncState.bind(accountState, {
+          accountID: current.account!.id,
+          descriptor,
+          remoteRoot: SyncRoot.instanceRoot(manifest.instanceID),
+          joinedAt,
+        }),
+        namespaceID,
+      ),
+      current.revision,
+    )
+  }
+  const clearCloud = Effect.fn("SyncSetup.clearCloud")((signal?: AbortSignal) =>
+    effect(
+      "remote",
+      async () => {
+        const context = await remote()
+        await context.root.clear(signal)
         return states.update((current) => ({
           ...current,
           enabled: false,
           activeSpaceID: undefined,
-          spaces: current.spaces.filter((item) => item.descriptor.namespaceID !== SyncRoot.INTERNAL_SCOPE),
+          spaces: current.spaces.filter(
+            (item) =>
+              item.descriptor.namespaceID !== SyncRoot.LEGACY_SCOPE &&
+              !SyncRoot.isAccountScope(item.descriptor.namespaceID),
+          ),
         }))
       },
       "delete",
@@ -331,7 +374,7 @@ export function make(input: {
   const setDeviceName = Effect.fn("SyncSetup.setDeviceName")((deviceName: string) =>
     update(states, (current) => ({ ...current, deviceName })),
   )
-  const deleteSpace = Effect.fn("SyncSetup.deleteSpace")(function* (namespaceID: string) {
+  const deleteSpace = Effect.fn("SyncSetup.deleteSpace")(function* (namespaceID: string, signal?: AbortSignal) {
     const context = yield* effect("remote", remote)
     const binding = context.current.spaces.find(
       (item) => item.descriptor.namespaceID === namespaceID && item.accountID === context.current.account?.id,
@@ -339,14 +382,14 @@ export function make(input: {
     if (binding && !SyncSpace.compatible(binding.descriptor.protocol)) return yield* new SetupError({ kind: "invalid" })
     if (!binding) {
       const inspection = yield* deleteEffect(() =>
-        context.catalog.inspect(namespaceID).catch((cause) => {
+        context.catalog.inspect(namespaceID, signal).catch((cause) => {
           if (cause instanceof SyncSpaceCatalog.CatalogError && cause.kind === "deleted") return undefined
           throw cause
         }),
       )
       if (inspection?.status === "unsupported") return yield* new SetupError({ kind: "invalid" })
     }
-    yield* deleteEffect(() => context.catalog.remove(namespaceID))
+    yield* deleteEffect(() => context.catalog.remove(namespaceID, signal))
     yield* effect("storage", () =>
       states.update((current) => {
         if (current.account?.id !== context.current.account?.id) throw new SetupError({ kind: "account-mismatch" })
@@ -411,6 +454,7 @@ export function make(input: {
     logout,
     cloudStatus,
     initializeCloud,
+    joinCurrentCloud,
     clearCloud,
     discover,
     create,
@@ -436,8 +480,9 @@ function binding(state: SyncState.State, descriptor: SyncSpace.Descriptor, joine
   return {
     accountID: state.account.id,
     descriptor,
-    remoteRoot:
-      descriptor.namespaceID === SyncRoot.INTERNAL_SCOPE
+    remoteRoot: SyncRoot.isAccountScope(descriptor.namespaceID)
+      ? SyncRoot.instanceRoot(SyncRoot.accountInstanceID(descriptor.namespaceID)!)
+      : descriptor.namespaceID === SyncRoot.LEGACY_SCOPE
         ? SyncRoot.REMOTE_ROOT
         : `${SyncRoot.REMOTE_ROOT}/spaces/${descriptor.namespaceID}`,
     joinedAt,

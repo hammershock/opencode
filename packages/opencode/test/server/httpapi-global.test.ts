@@ -355,7 +355,7 @@ describe("global HttpApi", () => {
       expect(generic.status).toBe(400)
       expect(yield* generic.json).toEqual({
         name: "SyncSetupError",
-        data: { kind: "bad-request", message: "Sync setup request failed" },
+        data: { kind: "storage", message: "Sync setup failed (storage)" },
       })
     }),
   )

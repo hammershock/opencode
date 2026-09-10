@@ -86,7 +86,7 @@ export const layer = Layer.effect(
         (sessionID) =>
           ownership
             .assign(sessionID, spaceID)
-            .pipe(Effect.andThen(SessionSync.backfill(db, store, sessionID, spaceID))),
+            .pipe(Effect.andThen(SessionSync.backfill(db, store, sessionID, spaceID, { includeForeignHistory: true }))),
         { discard: true },
       )
       return ids

@@ -23,36 +23,6 @@ export const Command = Schema.Struct({
   args: Schema.Array(Schema.String),
 })
 
-export const Input = Schema.Struct({
-  name: Schema.String,
-  transport: Schema.Literal("ssh"),
-  connection: Connection,
-  defaultDirectory: Schema.optional(Schema.String),
-  workspaceRoots: Schema.Array(Schema.String),
-  command: Schema.optional(Command),
-})
-
-export const Definition = Schema.Struct({
-  id: Location.TargetID,
-  status: Schema.Literal("unverified"),
-  ...Input.fields,
-})
-
-export const Diagnostic = Schema.Struct({
-  severity: Schema.Literals(["error", "warning"]),
-  path: Schema.String,
-  message: Schema.String,
-  offset: Schema.optional(Schema.Number),
-})
-
-export const Snapshot = Schema.Struct({
-  path: Schema.String,
-  revision: Schema.String,
-  targets: Schema.Array(Definition),
-  diagnostics: Schema.Array(Diagnostic),
-  valid: Schema.Boolean,
-})
-
 export const ConnectionStage = Schema.Literals([
   "ssh",
   "environment",
@@ -70,6 +40,53 @@ export const ProbeResult = Schema.Union([
     message: Schema.String,
   }),
 ])
+
+export const HealthResult = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("ready"),
+    stages: Schema.Array(ConnectionStage),
+    checkedAt: Schema.Number,
+    trustedUntil: Schema.Number,
+  }),
+  Schema.Struct({
+    status: Schema.Literals(["unavailable", "invalid"]),
+    stage: ConnectionStage,
+    message: Schema.String,
+    checkedAt: Schema.Number,
+    trustedUntil: Schema.Number,
+  }),
+])
+
+export const Input = Schema.Struct({
+  name: Schema.String,
+  transport: Schema.Literal("ssh"),
+  connection: Connection,
+  defaultDirectory: Schema.optional(Schema.String),
+  workspaceRoots: Schema.Array(Schema.String),
+  command: Schema.optional(Command),
+})
+
+export const Definition = Schema.Struct({
+  id: Location.TargetID,
+  status: Schema.Literal("unverified"),
+  health: Schema.optional(HealthResult),
+  ...Input.fields,
+})
+
+export const Diagnostic = Schema.Struct({
+  severity: Schema.Literals(["error", "warning"]),
+  path: Schema.String,
+  message: Schema.String,
+  offset: Schema.optional(Schema.Number),
+})
+
+export const Snapshot = Schema.Struct({
+  path: Schema.String,
+  revision: Schema.String,
+  targets: Schema.Array(Definition),
+  diagnostics: Schema.Array(Diagnostic),
+  valid: Schema.Boolean,
+})
 
 export const WizardInspection = Schema.Struct({ home: Schema.String })
 export const PathCompletion = Schema.Struct({

@@ -45,7 +45,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
           body &&
           typeof body === "object" &&
           "status" in body &&
-          body.status !== "ready"
+          body.status !== (operation.successStatus ?? "ready")
         ) {
           const value = body as { stage?: string; message?: string; status?: string }
           remoteStatus.fail(
@@ -194,7 +194,7 @@ export const { use: useSDK, provider: SDKProvider } = createSimpleContext({
   },
 })
 
-function remoteRequest(input: RequestInfo | URL, init?: RequestInit) {
+export function remoteRequest(input: RequestInfo | URL, init?: RequestInit) {
   const url = new URL(input instanceof Request ? input.url : String(input))
   const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
   const sync = syncOperation(url.pathname, method)
@@ -204,10 +204,18 @@ function remoteRequest(input: RequestInfo | URL, init?: RequestInit) {
     return { area: "Target" as const, operation: "open target connection", phase: "SSH and Rexd" }
   if (url.pathname === "/api/target/wizard/complete")
     return { area: "Target" as const, operation: "complete remote path", phase: "filesystem" }
-  if (/^\/api\/target\/[^/]+\/test$/.test(url.pathname))
+  if (/^\/api\/target\/[^/]+\/(test|refresh)$/.test(url.pathname))
     return { area: "Target" as const, operation: "test connection", phase: "SSH", inspectResponse: true }
   if (/^\/api\/target\/[^/]+\/prepare$/.test(url.pathname))
     return { area: "Target" as const, operation: "prepare target", phase: "daemon and handshake" }
+  if (/^\/api\/session\/[^/]+\/target-resolution$/.test(url.pathname))
+    return {
+      area: "Target" as const,
+      operation: "open session target",
+      phase: "SSH and Rexd",
+      inspectResponse: true,
+      successStatus: "resolved",
+    }
   if (url.pathname.startsWith("/api/fs/") && remoteLocation(url))
     return {
       area: "Target" as const,

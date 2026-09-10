@@ -48,6 +48,18 @@ describe("managed Rexd prepare", () => {
     expect(calls).toBe(1)
   })
 
+  test("bounds the initial SSH environment probe independently from installation", async () => {
+    await expect(
+      detectRemotePlatform(target, undefined, {
+        detectTimeoutMs: 5,
+        run: async () => new Promise(() => undefined),
+      }),
+    ).rejects.toMatchObject({
+      phase: "ssh",
+      message: "SSH connection timed out after 0.005 seconds",
+    })
+  })
+
   test.each(["ready", "installed"] as const)("accepts idempotent installer status %s", async (status) => {
     const scripts: string[] = []
     const result = await prepareManagedRexd(target, undefined, {

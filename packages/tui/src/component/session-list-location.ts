@@ -24,7 +24,6 @@ export type SessionListLocation = {
   directory: string
   target: string
   device?: string
-  status?: "unresolved" | "unavailable"
   label: string
   search: string
 }
@@ -56,34 +55,17 @@ export function sessionListLocation(session: SessionListLocationRecord): Session
     nonempty(session.sync?.device) ??
     nonempty(session.metadata?.deviceName) ??
     nonempty(session.metadata?.device)
-  const rawStatus =
-    nonempty(session.locationStatus) ??
-    nonempty(session.location?.status) ??
-    nonempty(session.metadata?.locationStatus) ??
-    nonempty(session.metadata?.locationResolution)
-  const status =
-    rawStatus === "unresolved" || rawStatus === "missing_local_target" || rawStatus === "unbound_portable_target"
-      ? "unresolved"
-      : rawStatus === "unavailable" || rawStatus === "target_unavailable"
-        ? "unavailable"
-        : undefined
   return {
     directory,
     target,
     device,
-    status,
     label: `${target} · ${directory}`,
-    search: [target, directory, device, status].filter(Boolean).join(" ").toLowerCase(),
+    search: [target, directory, device].filter(Boolean).join(" ").toLowerCase(),
   }
 }
 
 export function sessionListFooter(location: SessionListLocation, syncStatus: string | undefined, maxWidth: number) {
-  const syncState = syncStatus?.replace(/^[●◐!×]\s*/, "")
-  const status = location.status
-    ? syncState && syncState !== location.status
-      ? `! ${location.status}/${syncState}`
-      : `! ${location.status}`
-    : (syncStatus ?? "")
+  const status = syncStatus ?? ""
   const width = Math.max(1, Math.floor(maxWidth))
   const detail = [location.label, location.device].filter(Boolean).join(" · ")
   const text = (() => {

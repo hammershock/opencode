@@ -26,7 +26,7 @@ export const sessionControlCommands = [
     category: "Session",
     provenance: { type: "core", feature: "builtin-command-adjustments" },
     requires: { session: true },
-    readOnly: true,
+    readOnly: false,
     capabilities: ["session.view.write"],
     parse: empty,
     execute: async (ctx) => {
@@ -42,7 +42,7 @@ export const sessionControlCommands = [
     category: "Session",
     provenance: { type: "core", feature: "builtin-command-adjustments" },
     requires: { session: true },
-    readOnly: true,
+    readOnly: false,
     capabilities: ["session.view.write"],
     parse: empty,
     execute: async (ctx) => {

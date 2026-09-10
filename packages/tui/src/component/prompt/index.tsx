@@ -562,6 +562,7 @@ export function Prompt(props: PromptProps) {
         category: "Session",
         name: "prompt.editor",
         slashName: "editor",
+        readOnly: false,
         run: async () => {
           dialog.clear()
 
@@ -655,6 +656,7 @@ export function Prompt(props: PromptProps) {
         name: "prompt.skills",
         category: "Prompt",
         slashName: "skills",
+        readOnly: false,
         run: () => {
           dialog.replace(() => (
             <DialogSkill
@@ -677,6 +679,7 @@ export function Prompt(props: PromptProps) {
         category: "Session",
         enabled: Flag.OPENCODE_EXPERIMENTAL_WORKSPACES,
         slashName: "warp",
+        readOnly: false,
         run: () => {
           workspace.open()
         },
@@ -687,6 +690,7 @@ export function Prompt(props: PromptProps) {
         name: "session.move",
         category: "Session",
         slashName: "move",
+        readOnly: false,
         run: () => {
           move.open()
         },

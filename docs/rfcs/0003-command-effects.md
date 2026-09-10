@@ -253,7 +253,7 @@ type CommandDefinition<Input, Context> = {
 - group 只是具有共同 path prefix 的展示结果，不是可执行对象；如果 `/env` 本身可执行，它必须注册为独立叶子；
 - `parse` 属于叶子命令并返回类型化 input，不提供全局 flags DSL；
 - `available` 只表达客户端状态可用性，不代替权限检查；
-- `readOnly` 表示 command handler 在只读 Session 中可安全执行，是 client host 的提交策略，不描述 workflow 是否写入 Session、进入 context 或调用模型；未声明时按 `false` 处理；
+- `readOnly: true` 是 command 对只读 Session 安全性的显式声明：该 command 不得接纳 prompt、进入 Agent/model context、调用模型、执行 Shell/tool、访问不可用 Location，或持久化 Session、配置、target、workspace 等状态；纯展示、只读查询、恢复入口导航和退出流程可以声明为 `true`。未声明或不能证明满足这些约束时按 `false` 处理；
 - `capabilities` 是静态上界和审查信息，v1 不把它实现成新的安全沙箱；
 - `execute` 只能通过 context 中暴露的窄服务执行，并返回统一 outcome。
 

@@ -8,6 +8,7 @@ created: 2026-09-11
 updated: 2026-09-11
 implemented-by:
   - https://github.com/hammershock/opencode/pull/280
+  - https://github.com/hammershock/opencode/pull/281
 depends-on:
   - 0002
   - 0003

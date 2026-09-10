@@ -91,6 +91,17 @@ import type {
   CommandsListOutput,
   SkillsListInput,
   SkillsListOutput,
+  SkillsCatalogInput,
+  SkillsCatalogOutput,
+  SkillsReloadInput,
+  SkillsReloadOutput,
+  SkillsSettingsOutput,
+  SkillsDiscoveryUpdateInput,
+  SkillsDiscoveryUpdateOutput,
+  SkillsDiscoveryResetInput,
+  SkillsDiscoveryResetOutput,
+  SkillsTargetScopeUpdateInput,
+  SkillsTargetScopeUpdateOutput,
   EventsSubscribeOutput,
   PtysListInput,
   PtysListOutput,
@@ -888,6 +899,77 @@ export function make(options: ClientOptions) {
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      catalog: (input?: SkillsCatalogInput, requestOptions?: RequestOptions) =>
+        request<SkillsCatalogOutput>(
+          {
+            method: "GET",
+            path: `/api/skill/catalog`,
+            query: { location: input?.["location"], forceReload: input?.["forceReload"] },
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      reload: (input?: SkillsReloadInput, requestOptions?: RequestOptions) =>
+        request<SkillsReloadOutput>(
+          {
+            method: "POST",
+            path: `/api/skill/reload`,
+            query: { location: input?.["location"] },
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      settings: (requestOptions?: RequestOptions) =>
+        request<SkillsSettingsOutput>(
+          {
+            method: "GET",
+            path: `/api/skill/settings`,
+            successStatus: 200,
+            declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      discoveryUpdate: (input: SkillsDiscoveryUpdateInput, requestOptions?: RequestOptions) =>
+        request<SkillsDiscoveryUpdateOutput>(
+          {
+            method: "PUT",
+            path: `/api/skill/settings/discovery`,
+            body: { paths: input["paths"], urls: input["urls"], expectedRevision: input["expectedRevision"] },
+            successStatus: 200,
+            declaredStatuses: [409, 400, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      discoveryReset: (input: SkillsDiscoveryResetInput, requestOptions?: RequestOptions) =>
+        request<SkillsDiscoveryResetOutput>(
+          {
+            method: "POST",
+            path: `/api/skill/settings/discovery/reset`,
+            body: { expectedRevision: input["expectedRevision"] },
+            successStatus: 200,
+            declaredStatuses: [409, 400, 500, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      targetScopeUpdate: (input: SkillsTargetScopeUpdateInput, requestOptions?: RequestOptions) =>
+        request<SkillsTargetScopeUpdateOutput>(
+          {
+            method: "PUT",
+            path: `/api/skill/settings/${encodeURIComponent(input.skillID)}/target-scope`,
+            body: { scope: input["scope"], expectedRevision: input["expectedRevision"] },
+            successStatus: 200,
+            declaredStatuses: [409, 400, 500, 401],
             empty: false,
           },
           requestOptions,

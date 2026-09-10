@@ -8,6 +8,8 @@ import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SkillV2 } from "@opencode-ai/core/skill"
 import { SkillRegistry } from "@opencode-ai/core/skill/registry"
+import { SkillSettings } from "@opencode-ai/core/skill/settings"
+import { Skill } from "@opencode-ai/schema/skill"
 import { location } from "../fixture/location"
 import { testEffect } from "../lib/effect"
 import { host } from "../plugin/host"
@@ -21,12 +23,15 @@ describe("ConfigSkillPlugin.Plugin", () => {
       const directory = AbsolutePath.make("/repo/packages/app")
       const sources: SkillV2.Source[] = []
       const options: Array<SkillRegistry.SourceOptions | undefined> = []
+      const diagnostics: Skill.Diagnostic[] = []
       const transform = Effect.fnUntraced(function* (update: (draft: SkillV2.Draft) => void | Effect.Effect<void>) {
         const result = update({
           source: (source, sourceOptions) => {
             sources.push(source)
             options.push(sourceOptions)
           },
+          diagnostic: (diagnostic) => diagnostics.push(diagnostic),
+          target: () => {},
           list: () => sources,
         })
         if (Effect.isEffect(result)) yield* result
@@ -43,6 +48,23 @@ describe("ConfigSkillPlugin.Plugin", () => {
           skill: { transform, reload: () => Effect.void },
         }),
       ).pipe(
+        Effect.provideService(
+          SkillSettings.Service,
+          SkillSettings.Service.of({
+            load: async () =>
+              Skill.SettingsSnapshot.make({
+                path: AbsolutePath.make("/home/test/.config/opencode/opencode.jsonc"),
+                revision: Skill.Digest.make("0".repeat(64)),
+                roots: [],
+                targets: {},
+                diagnostics: [],
+                valid: true,
+              }),
+            updateDiscovery: async () => Effect.die("unused") as never,
+            resetDiscovery: async () => Effect.die("unused") as never,
+            updateTargetScope: async () => Effect.die("unused") as never,
+          }),
+        ),
         Effect.provideService(
           SkillV2.Service,
           SkillV2.Service.of({
@@ -64,7 +86,11 @@ describe("ConfigSkillPlugin.Plugin", () => {
                 new Config.Document({
                   type: "document",
                   info: decode({
-                    skills: ["./skills", "~/shared-skills", "/opt/skills", "https://example.test/skills/"],
+                    skills: {
+                      paths: ["./skills", "~/shared-skills", "/opt/skills"],
+                      urls: ["https://example.test/skills/"],
+                      targets: { [`skl_${"1".repeat(64)}`]: ["local"] },
+                    },
                   }),
                 }),
               ]),
@@ -100,6 +126,9 @@ describe("ConfigSkillPlugin.Plugin", () => {
         { kind: "imported" },
         undefined,
       ])
+      expect(diagnostics).toEqual([
+        expect.objectContaining({ kind: "project-target-scope-ignored", severity: "warning" }),
+      ])
     }),
   )
 
@@ -113,6 +142,8 @@ describe("ConfigSkillPlugin.Plugin", () => {
             sources.push(source)
             options.push(sourceOptions)
           },
+          diagnostic: () => {},
+          target: () => {},
           list: () => sources,
         })
         if (Effect.isEffect(result)) yield* result
@@ -131,6 +162,51 @@ describe("ConfigSkillPlugin.Plugin", () => {
       })
 
       yield* ConfigSkillPlugin.Plugin.effect(host({ skill: { transform, reload: () => Effect.void } })).pipe(
+        Effect.provideService(
+          SkillSettings.Service,
+          SkillSettings.Service.of({
+            load: async () =>
+              Skill.SettingsSnapshot.make({
+                path: AbsolutePath.make("/home/controller/.config/opencode/opencode.jsonc"),
+                revision: Skill.Digest.make("0".repeat(64)),
+                roots: [
+                  Skill.DiscoveryRoot.make({
+                    kind: "opencode-global",
+                    value: "/home/controller/.config/opencode/skill",
+                    resolved: AbsolutePath.make("/home/controller/.config/opencode/skill"),
+                    default: true,
+                    status: "ready",
+                  }),
+                  Skill.DiscoveryRoot.make({
+                    kind: "opencode-global",
+                    value: "/home/controller/.config/opencode/skills",
+                    resolved: AbsolutePath.make("/home/controller/.config/opencode/skills"),
+                    default: true,
+                    status: "ready",
+                  }),
+                  Skill.DiscoveryRoot.make({
+                    kind: "imported",
+                    value: "/home/controller/shared-skills",
+                    resolved: AbsolutePath.make("/home/controller/shared-skills"),
+                    default: false,
+                    status: "ready",
+                  }),
+                  Skill.DiscoveryRoot.make({
+                    kind: "url",
+                    value: "https://example.test/skills/",
+                    default: false,
+                    status: "configured",
+                  }),
+                ],
+                targets: {},
+                diagnostics: [],
+                valid: true,
+              }),
+            updateDiscovery: async () => Effect.die("unused") as never,
+            resetDiscovery: async () => Effect.die("unused") as never,
+            updateTargetScope: async () => Effect.die("unused") as never,
+          }),
+        ),
         Effect.provideService(
           SkillV2.Service,
           SkillV2.Service.of({

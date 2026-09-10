@@ -45,6 +45,17 @@ describe("contract hygiene", () => {
     expect(() => decodeID(`skill_${digest}` as unknown)).toThrow()
   })
 
+  test("skill target scopes use stable target identities and preserve explicit disabled state", () => {
+    const decode = Schema.decodeUnknownSync(Skill.TargetScope)
+    const targetID = "9a858c60-01c7-4a3d-a137-f5df09560d42"
+
+    expect(decode("*")).toBe("*")
+    expect(decode([])).toEqual([])
+    const selected = decode(["local", targetID])
+    expect(selected === "*" ? selected : selected.map(String)).toEqual(["local", targetID])
+    expect(() => decode(["mywindows"])).toThrow()
+  })
+
   test("reusable public identifiers are stable and unique", () => {
     const identifiers = [
       Agent.Color,
@@ -63,6 +74,14 @@ describe("contract hygiene", () => {
       Skill.SourceDetail,
       Skill.Diagnostic,
       Skill.RegistrySnapshot,
+      Skill.Target,
+      Skill.TargetScope,
+      Skill.DiscoveryRoot,
+      Skill.SettingsDiagnostic,
+      Skill.SettingsSnapshot,
+      Skill.DiscoveryUpdate,
+      Skill.TargetScopeUpdate,
+      Skill.RevisionInput,
     ].map((schema) => schema.ast.annotations?.identifier)
 
     expect(identifiers.every((identifier) => typeof identifier === "string")).toBe(true)

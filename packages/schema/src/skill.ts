@@ -1,6 +1,7 @@
 export * as Skill from "./skill"
 
 import { Schema } from "effect"
+import { Location } from "./location"
 import { AbsolutePath, optional, RelativePath } from "./schema"
 
 export const ID = Schema.String.check(Schema.isPattern(/^skl_[0-9a-f]{64}$/)).pipe(Schema.brand("Skill.ID"))
@@ -11,6 +12,16 @@ export type Digest = typeof Digest.Type
 
 export const SourceKind = Schema.Literals(["built-in", "opencode-global", "opencode-project", "imported", "url"])
 export type SourceKind = typeof SourceKind.Type
+
+export const Target = Schema.Union([Schema.Literal("local"), Location.TargetID]).annotate({
+  identifier: "Skill.Target",
+})
+export type Target = typeof Target.Type
+
+export const TargetScope = Schema.Union([Schema.Literal("*"), Schema.Array(Target)]).annotate({
+  identifier: "Skill.TargetScope",
+})
+export type TargetScope = typeof TargetScope.Type
 
 export interface Metadata extends Schema.Schema.Type<typeof Metadata> {}
 export const Metadata = Schema.Struct({
@@ -38,6 +49,9 @@ export const DiagnosticKind = Schema.Literals([
   "invalid-name",
   "name-mismatch",
   "duplicate-name",
+  "invalid-settings",
+  "missing-target",
+  "project-target-scope-ignored",
 ])
 export type DiagnosticKind = typeof DiagnosticKind.Type
 
@@ -58,6 +72,68 @@ export const RegistrySnapshot = Schema.Struct({
   diagnostics: Schema.Array(Diagnostic),
   digest: Digest,
 }).annotate({ identifier: "Skill.RegistrySnapshot" })
+
+export const DiscoveryRootKind = Schema.Literals(["opencode-global", "imported", "url"])
+export type DiscoveryRootKind = typeof DiscoveryRootKind.Type
+
+export const DiscoveryRootStatus = Schema.Literals(["ready", "unavailable", "configured"])
+export type DiscoveryRootStatus = typeof DiscoveryRootStatus.Type
+
+export interface DiscoveryRoot extends Schema.Schema.Type<typeof DiscoveryRoot> {}
+export const DiscoveryRoot = Schema.Struct({
+  kind: DiscoveryRootKind,
+  value: Schema.String,
+  resolved: AbsolutePath.pipe(optional),
+  default: Schema.Boolean,
+  status: DiscoveryRootStatus,
+}).annotate({ identifier: "Skill.DiscoveryRoot" })
+
+export const SettingsDiagnosticKind = Schema.Literals([
+  "invalid-config",
+  "invalid-path",
+  "invalid-url",
+  "duplicate-root",
+  "missing-target",
+])
+export type SettingsDiagnosticKind = typeof SettingsDiagnosticKind.Type
+
+export interface SettingsDiagnostic extends Schema.Schema.Type<typeof SettingsDiagnostic> {}
+export const SettingsDiagnostic = Schema.Struct({
+  kind: SettingsDiagnosticKind,
+  severity: Schema.Literals(["error", "warning"]),
+  field: Schema.String,
+  message: Schema.String,
+  skillID: ID.pipe(optional),
+  targetID: Location.TargetID.pipe(optional),
+}).annotate({ identifier: "Skill.SettingsDiagnostic" })
+
+export interface SettingsSnapshot extends Schema.Schema.Type<typeof SettingsSnapshot> {}
+export const SettingsSnapshot = Schema.Struct({
+  path: AbsolutePath,
+  revision: Digest,
+  roots: Schema.Array(DiscoveryRoot),
+  targets: Schema.Record(ID, TargetScope),
+  diagnostics: Schema.Array(SettingsDiagnostic),
+  valid: Schema.Boolean,
+}).annotate({ identifier: "Skill.SettingsSnapshot" })
+
+export interface DiscoveryUpdate extends Schema.Schema.Type<typeof DiscoveryUpdate> {}
+export const DiscoveryUpdate = Schema.Struct({
+  paths: Schema.Array(Schema.String),
+  urls: Schema.Array(Schema.String),
+  expectedRevision: Digest,
+}).annotate({ identifier: "Skill.DiscoveryUpdate" })
+
+export interface TargetScopeUpdate extends Schema.Schema.Type<typeof TargetScopeUpdate> {}
+export const TargetScopeUpdate = Schema.Struct({
+  scope: TargetScope,
+  expectedRevision: Digest,
+}).annotate({ identifier: "Skill.TargetScopeUpdate" })
+
+export interface RevisionInput extends Schema.Schema.Type<typeof RevisionInput> {}
+export const RevisionInput = Schema.Struct({
+  expectedRevision: Digest,
+}).annotate({ identifier: "Skill.RevisionInput" })
 
 export interface DirectorySource extends Schema.Schema.Type<typeof DirectorySource> {}
 export const DirectorySource = Schema.Struct({

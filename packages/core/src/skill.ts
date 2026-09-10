@@ -7,6 +7,8 @@ import { AgentV2 } from "./agent"
 import { PermissionV2 } from "./permission"
 import { SkillRegistry } from "./skill/registry"
 import { State } from "./state"
+import { SkillSettings } from "./skill/settings"
+import { Hash } from "./util/hash"
 
 export const DirectorySource = Skill.DirectorySource
 export type DirectorySource = Skill.DirectorySource
@@ -28,10 +30,14 @@ export const available = (skills: ReadonlyArray<Info>, agent: AgentV2.Info) =>
 
 export type Data = {
   registrations: Types.DeepMutable<SkillRegistry.Registration>[]
+  diagnostics: Types.DeepMutable<Skill.Diagnostic>[]
+  target: Skill.Target
 }
 
 export type Draft = {
   source: (source: Source, options?: SkillRegistry.SourceOptions) => void
+  diagnostic: (diagnostic: Skill.Diagnostic) => void
+  target: (target: Skill.Target) => void
   list: () => readonly Source[]
 }
 
@@ -47,21 +53,58 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const registry = yield* SkillRegistry.Service
+    const settings = yield* SkillSettings.Service
 
     const state = State.create<Data, Draft>({
-      initial: () => ({ registrations: [] }),
+      initial: () => ({ registrations: [], diagnostics: [], target: "local" }),
       draft: (draft) => ({
         source: (source, options) => {
           const registration = { source, options }
           if (draft.registrations.some((item) => SkillRegistry.key(item) === SkillRegistry.key(registration))) return
           draft.registrations.push(registration as Types.DeepMutable<SkillRegistry.Registration>)
         },
+        diagnostic: (diagnostic) => {
+          draft.diagnostics.push(diagnostic as Types.DeepMutable<Skill.Diagnostic>)
+        },
+        target: (target) => {
+          draft.target = target
+        },
         list: () => draft.registrations.map((item) => item.source) as Source[],
       }),
     })
 
     const result = Effect.fn("SkillV2.registry")(function* (options?: SkillRegistry.LoadOptions) {
-      return yield* registry.load(state.get().registrations, options)
+      const loaded = yield* registry.load(state.get().registrations, options)
+      const configured = yield* Effect.promise(() => settings.load())
+      const target = state.get().target
+      const entries = loaded.entries.filter((entry) => {
+        const scope = configured.targets[entry.metadata.id] ?? "*"
+        return scope === "*" || scope.includes(target)
+      })
+      const diagnostics = [
+        ...loaded.snapshot.diagnostics,
+        ...state.get().diagnostics,
+        ...configured.diagnostics.map((diagnostic) =>
+          Skill.Diagnostic.make({
+            kind: diagnostic.kind === "missing-target" ? "missing-target" : "invalid-settings",
+            severity: diagnostic.severity,
+            sourceLabel: "Skill settings",
+            message: diagnostic.message,
+            ...(diagnostic.skillID === undefined ? {} : { skillID: diagnostic.skillID }),
+          }),
+        ),
+      ].toSorted(
+        (a, b) =>
+          a.sourceLabel.localeCompare(b.sourceLabel) ||
+          a.kind.localeCompare(b.kind) ||
+          a.message.localeCompare(b.message),
+      )
+      const skills = entries.map((entry) => entry.metadata)
+      const digest = Skill.Digest.make(Hash.sha256(JSON.stringify({ skills, diagnostics, target })))
+      return {
+        entries,
+        snapshot: Skill.RegistrySnapshot.make({ revision: digest, skills, diagnostics, digest }),
+      }
     })
 
     const list = Effect.fn("SkillV2.list")(function* () {
@@ -98,4 +141,8 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer, deps: [SkillRegistry.node] })
+export const node = makeLocationNode({
+  service: Service,
+  layer,
+  deps: [SkillRegistry.node, SkillSettings.node],
+})

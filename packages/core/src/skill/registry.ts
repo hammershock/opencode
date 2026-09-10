@@ -50,6 +50,7 @@ export interface Registration {
 
 export interface Interface {
   readonly load: (sources: ReadonlyArray<Registration>, options?: LoadOptions) => Effect.Effect<Result>
+  readonly invalidate: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SkillRegistry") {}
@@ -85,6 +86,9 @@ const layer = Layer.effect(
     })
 
     return Service.of({
+      invalidate: Effect.fn("SkillRegistry.invalidate")(function* () {
+        cache.clear()
+      }),
       load: Effect.fn("SkillRegistry.load")(function* (sources, options) {
         const unique = Array.from(
           new Map(sources.map((registration) => [key(registration), registration])).values(),

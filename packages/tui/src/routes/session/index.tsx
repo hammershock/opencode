@@ -338,9 +338,9 @@ export function Session() {
     return children().flatMap((x) => sync.data.question[x.id] ?? [])
   })
   const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
+  const readOnly = createMemo(() => route.accessMode === "read-only")
   const disabled = createMemo(
-    () =>
-      !locationAccessReady() || route.accessMode === "read-only" || permissions().length > 0 || questions().length > 0,
+    () => (!locationAccessReady() && !readOnly()) || permissions().length > 0 || questions().length > 0,
   )
 
   const pending = createMemo(() => {
@@ -750,6 +750,7 @@ export function Session() {
         ),
       ],
       restrictions: () => normalizeCommandRestrictions(kv.get(COMMAND_RESTRICTIONS_KEY)),
+      readOnly,
       diagnostic: (diagnostic) => console.warn("[command-kit] shadowed command", diagnostic),
       invalid: (message) => toast.show({ message, variant: "warning" }),
       outcome: (message, status) =>
@@ -1659,8 +1660,9 @@ export function Session() {
                     borderColor={theme.warning}
                   >
                     <text fg={theme.warning}>
-                      Read-only · Session target is unresolved ({route.resolution ?? "unavailable"}). Prompt, Shell,
-                      tools, Terminal and file access are disabled. Open /sessions to resolve it.
+                      Read-only · Session target is unresolved ({route.resolution ?? "unavailable"}). Draft editing is
+                      available; Agent prompts, Shell, tools, Terminal and file access are disabled. Open /sessions to
+                      resolve it.
                     </text>
                   </box>
                 </Show>
@@ -1705,6 +1707,7 @@ export function Session() {
                     session_id={route.sessionID}
                     visible={visible()}
                     disabled={disabled()}
+                    read_only={readOnly()}
                     on_submit={toBottom}
                     ref={bind}
                   >
@@ -1712,6 +1715,7 @@ export function Session() {
                       visible={visible()}
                       ref={bind}
                       disabled={disabled()}
+                      readOnly={readOnly()}
                       commandHost={coreCommandHost()}
                       shellCompletionGeneration={shellCompletionGeneration()}
                       onSubmit={() => {

@@ -598,6 +598,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         suggested: sync.data.session.length > 0,
         slashName: "sessions",
         slashAliases: ["resume", "continue"],
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogSessionList />)
         },
@@ -610,6 +611,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Session",
         slashName: "new",
         slashAliases: ["clear"],
+        readOnly: false,
         run: () => {
           route.navigate({
             type: "home",
@@ -639,6 +641,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Workspace",
         hidden: !Flag.OPENCODE_EXPERIMENTAL_WORKSPACES,
         slashName: "workspaces",
+        readOnly: false,
         run: () => {
           dialog.replace(() => <DialogWorkspaceList />)
         },
@@ -661,6 +664,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "models",
         // Bias /mo toward /models over /move without changing global fuzzy scoring.
         slashAliases: ["mo"],
+        readOnly: false,
         run: () => {
           dialog.replace(() => <DialogModel />)
         },
@@ -707,6 +711,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         desc: "Choose the active agent",
         category: "Agent",
         slashName: "agents",
+        readOnly: false,
         run: () => {
           dialog.replace(() => <DialogAgent />)
         },
@@ -717,6 +722,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         desc: "Enable or disable MCP servers",
         category: "Agent",
         slashName: "mcps",
+        readOnly: false,
         run: () => {
           dialog.replace(() => <DialogMcp />)
         },
@@ -745,6 +751,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Agent",
         hidden: local.model.variant.list().length === 0,
         slashName: "variants",
+        readOnly: false,
         run: () => {
           if (local.model.variant.list().length === 0) {
             return toast.show({
@@ -771,6 +778,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         desc: "Connect a model provider",
         suggested: !connected(),
         slashName: "connect",
+        readOnly: false,
         run: () => {
           dialog.replace(() => <DialogProviderList />)
         },
@@ -785,6 +793,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
               suggested: Boolean(sync.data.console_state.activeOrgName),
               slashName: "org",
               slashAliases: ["orgs", "switch-org"],
+              readOnly: false,
               run: () => {
                 dialog.replace(() => <DialogConsoleOrg />)
               },
@@ -797,6 +806,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "View status",
         desc: "Inspect providers, MCP servers, and system state",
         slashName: "status",
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogStatus />)
         },
@@ -807,6 +817,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "View debug info",
         desc: "Inspect diagnostic paths and runtime details",
         slashName: "debug",
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogDebug />)
         },
@@ -825,6 +836,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Switch theme",
         desc: "Choose the TUI color theme",
         slashName: "themes",
+        readOnly: false,
         run: () => {
           dialog.replace(() => <DialogThemeList />)
         },
@@ -854,6 +866,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         title: "Help",
         desc: "View shortcuts and help",
         slashName: "help",
+        readOnly: true,
         run: () => {
           dialog.replace(() => <DialogHelp />)
         },
@@ -874,6 +887,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         desc: appExitMetadata.description,
         slashName: appExitMetadata.slash.aliases[0],
         slashAliases: appExitMetadata.slash.aliases.slice(1),
+        readOnly: true,
         run: () => exit(),
         category: appExitMetadata.category,
       },
@@ -885,6 +899,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
             : appExitMetadata.title,
         desc: "Return to QuickStart or exit OpenCode",
         slashName: appExitMetadata.slash.name,
+        readOnly: true,
         run: () => {
           const current = route.data.type === "session" ? "session" : route.data.type === "home" ? "home" : "other"
           void exitOverride()

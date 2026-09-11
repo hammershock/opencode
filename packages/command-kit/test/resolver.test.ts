@@ -138,6 +138,7 @@ function command(id: string, path: readonly string[], aliases?: readonly (readon
     aliases,
     title: id,
     provenance: { type: "core", feature: id.includes("environment") ? "environment" : "session" },
+    readOnly: false,
     capabilities: [],
     parse: (raw) => ({ status: "parsed", input: raw.value }),
     execute: async (_context: InvocationContext, value) => ({ status: "completed", message: value }),

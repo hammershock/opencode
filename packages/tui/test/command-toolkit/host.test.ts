@@ -20,6 +20,7 @@ describe("TUI command toolkit host", () => {
             path: ["test"],
             title: "test",
             provenance: { type: "core", feature: "test" },
+            readOnly: false,
             capabilities: [],
             parse: (raw) => ({ status: "parsed", input: raw.value }),
             execute: async (_ctx, value) => {
@@ -54,6 +55,7 @@ describe("TUI command toolkit host", () => {
             path: ["test"],
             title: "test",
             provenance: { type: "core", feature: "test" },
+            readOnly: false,
             capabilities: [],
             parse: () => ({ status: "parsed", input: undefined }),
             execute: async () => {
@@ -96,6 +98,7 @@ describe("TUI command toolkit host", () => {
             path: ["fail"],
             title: "fail",
             provenance: { type: "core", feature: "test" },
+            readOnly: false,
             capabilities: [],
             parse: () => ({ status: "parsed", input: undefined }),
             execute: async () => {
@@ -151,6 +154,7 @@ describe("TUI command toolkit host", () => {
             path: ["write"],
             title: "write",
             provenance: { type: "core", feature: "test" },
+            readOnly: false,
             capabilities: ["workspace.write"],
             parse: () => ({ status: "parsed", input: undefined }),
             execute: async () => {
@@ -169,5 +173,64 @@ describe("TUI command toolkit host", () => {
     expect(ran).toBe(false)
     expect(outcomes).toEqual(["failed:Capability denied by user policy: workspace.write"])
     expect(host.registrations()[0]?.enabled()).toBe(false)
+  })
+
+  test("only executes commands marked safe in a read-only Session", async () => {
+    const calls: string[] = []
+    const invalid: string[] = []
+    const host = createCommandHost({
+      register: (registry) =>
+        registry.register(
+          defineCommand({
+            id: "fork.test.inspect",
+            path: ["inspect"],
+            title: "inspect",
+            provenance: { type: "core", feature: "test" },
+            readOnly: true,
+            capabilities: [],
+            parse: () => ({ status: "parsed", input: undefined }),
+            execute: async () => {
+              calls.push("inspect")
+              return { status: "completed" }
+            },
+          }),
+        ),
+      context: (source) => ({ ...context, source }),
+      upstream: () => [
+        {
+          id: "app.exit",
+          path: ["exit"],
+          aliases: [["quit"], ["q"]],
+          title: "Exit",
+          readOnly: true,
+          provenance: { type: "upstream", host: "tui", identity: "app.exit" },
+          dispatch: { type: "client", run: () => calls.push("exit") },
+        },
+        {
+          id: "plugin.deploy",
+          path: ["deploy"],
+          title: "Deploy",
+          provenance: { type: "plugin", pluginID: "fixture" },
+          dispatch: { type: "client", run: () => calls.push("deploy") },
+        },
+      ],
+      readOnly: () => true,
+      invalid: (message) => invalid.push(message),
+      outcome: () => undefined,
+    })
+
+    expect(await host("/inspect")).toMatchObject({ status: "handled", identity: "fork.test.inspect" })
+    expect(await host("/exit")).toMatchObject({ status: "handled", identity: "app.exit" })
+    expect(await host("/quit")).toMatchObject({ status: "handled", identity: "app.exit" })
+    expect(await host("/q")).toMatchObject({ status: "handled", identity: "app.exit" })
+    expect(await host("/deploy")).toEqual({
+      status: "invalid",
+      message: "Current Session is read-only",
+      diagnostics: [],
+    })
+    expect(calls).toEqual(["inspect", "exit", "exit", "exit"])
+    expect(invalid).toEqual(["Current Session is read-only"])
+    expect(host.commands().find((command) => command.identity === "plugin.deploy")?.enabled).toBe(false)
+    expect(host.slashes().map((command) => command.display)).toEqual(["/exit", "/inspect", "/q", "/quit"])
   })
 })

@@ -40,6 +40,7 @@ export const environmentCommands = [
     category: "Environment",
     provenance: { type: "core", feature: "location-environment" },
     requires: { location: true },
+    readOnly: false,
     capabilities: ["environment.metadata.read"],
     parse: empty,
     execute: async (ctx) => {
@@ -55,6 +56,7 @@ export const environmentCommands = [
     category: "Environment",
     provenance: { type: "core", feature: "location-environment" },
     requires: { location: true },
+    readOnly: false,
     capabilities: ["environment.reload"],
     parse: empty,
     execute: async (ctx) => {
@@ -71,6 +73,7 @@ export const environmentCommands = [
     category: "Environment",
     provenance: { type: "core", feature: "location-environment" },
     requires: { session: true, location: true },
+    readOnly: false,
     capabilities: ["workspace.write", "agent.invoke", "environment.reload"],
     parse: empty,
     execute: async (ctx) => {

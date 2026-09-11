@@ -74,6 +74,8 @@ export type CommandDefinition<Input, Context extends InvocationContext = Invocat
   category?: string
   provenance: CommandProvenance
   requires?: { session?: boolean; location?: boolean }
+  /** Whether the command may execute while the current Session is read-only. Defaults to false. */
+  readOnly?: boolean
   capabilities: readonly string[]
   parse: (input: RawArguments) => ParseResult<Input>
   complete?: (input: CompletionInput, context: Context) => Promise<readonly CompletionItem[]>
@@ -95,6 +97,7 @@ export type RegisteredCommand<Context extends InvocationContext = InvocationCont
   | "category"
   | "provenance"
   | "requires"
+  | "readOnly"
   | "capabilities"
   | "complete"
   | "available"

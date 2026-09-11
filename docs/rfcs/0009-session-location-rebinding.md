@@ -5,7 +5,7 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-06
-updated: 2026-09-07
+updated: 2026-09-11
 implemented-by:
   - https://github.com/hammershock/opencode/pull/86
 depends-on:
@@ -55,7 +55,9 @@ Session 打开前，Core 将 Location 解析为以下状态之一：
 
 ### 只读打开
 
-只读模式保留完整对话、工具结果和 metadata，但禁用 prompt、User Shell、Agent tools、Terminal、文件访问及其他 Location-dependent mutation。用户可以随时从 Session banner 重新进入恢复向导。
+只读模式保留完整对话、工具结果和 metadata。prompt 编辑器仍可输入、编辑、粘贴和使用 slash autocomplete，但普通 prompt 提交必须在创建 Session message、写入 prompt history、optimistic render 或模型调用前被拒绝，并完整保留 draft。User Shell、Agent tools、Terminal、文件访问及其他 Location-dependent mutation 继续禁用。
+
+Slash command 由 command toolkit 的 `readOnly` metadata 在 autocomplete 展示和 winner/alias 解析后、handler 或 `session.command` 执行前统一控制；只读 Session 的 autocomplete 只展示显式标记为 `readOnly: true` 的 command，也只有这些 command（例如 `/exit`、`/quit`、`/q` 和 `/sessions`）可以执行。完整手输的非只读 command 仍在 dispatch 前拒绝并保留输入。外部 custom command、MCP prompt、Skill 和 plugin command 不需要修改既有接口，未声明 metadata 时默认拒绝且不展示。用户可以随时从 Session banner 或 `/sessions` 重新进入恢复向导。
 
 ### 恢复被移除的本地 target
 

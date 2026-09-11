@@ -1060,6 +1060,7 @@ const tui: TuiPlugin = async (api) => {
         title: "Open diff viewer",
         desc: "Review workspace or Session changes",
         slashName: "diff",
+        readOnly: false,
         category: "VCS",
         namespace: "palette",
         enabled: () => permitsRouteLocationActions(api.route.current),

@@ -91,6 +91,7 @@ export type PromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
+  readOnly?: boolean
   onSubmit?: () => void
   onPromptSubmit?: () => void
   shellCompletionGeneration?: number
@@ -229,6 +230,7 @@ export function Prompt(props: PromptProps) {
         ...adaptServerCommands(sync.data.command),
         ...adaptKeymapCommands(upstreamCommandEntries(), (identity) => keymap.dispatchCommand(identity)),
       ],
+      readOnly: () => props.readOnly === true,
       invalid: (message) => toast.show({ message, variant: "warning" }),
       outcome: (message, result) =>
         toast.show({
@@ -562,6 +564,7 @@ export function Prompt(props: PromptProps) {
         category: "Session",
         name: "prompt.editor",
         slashName: "editor",
+        readOnly: false,
         run: async () => {
           dialog.clear()
 
@@ -667,6 +670,7 @@ export function Prompt(props: PromptProps) {
         desc: "Open Skill autocomplete in the prompt",
         name: "prompt.skills",
         category: "Prompt",
+        readOnly: false,
         run: () => {
           dialog.clear()
           setTimeout(() => {
@@ -684,6 +688,7 @@ export function Prompt(props: PromptProps) {
         category: "Session",
         enabled: Flag.OPENCODE_EXPERIMENTAL_WORKSPACES,
         slashName: "warp",
+        readOnly: false,
         run: () => {
           workspace.open()
         },
@@ -694,6 +699,7 @@ export function Prompt(props: PromptProps) {
         name: "session.move",
         category: "Session",
         slashName: "move",
+        readOnly: false,
         run: () => {
           move.open()
         },
@@ -954,7 +960,7 @@ export function Prompt(props: PromptProps) {
   useBindings(() => {
     return {
       target: inputTarget,
-      enabled: inputTarget() !== undefined && !props.disabled,
+      enabled: inputTarget() !== undefined && !props.disabled && !props.readOnly,
       bindings: tuiConfig.keybinds.get("prompt.paste"),
     }
   })
@@ -975,6 +981,7 @@ export function Prompt(props: PromptProps) {
         return (
           inputTarget() !== undefined &&
           !props.disabled &&
+          !props.readOnly &&
           store.mode === "normal" &&
           !auto()?.visible &&
           input?.visualCursor.offset === 0
@@ -1012,7 +1019,8 @@ export function Prompt(props: PromptProps) {
 
   useBindings(() => ({
     target: inputTarget,
-    enabled: inputTarget() !== undefined && !props.disabled && store.mode === "shell" && !auto()?.visible,
+    enabled:
+      inputTarget() !== undefined && !props.disabled && !props.readOnly && store.mode === "shell" && !auto()?.visible,
     priority: 1,
     bindings: [
       {
@@ -1183,12 +1191,17 @@ export function Prompt(props: PromptProps) {
     if (slashDispatch.status === "invalid") return false
     if (slashDispatch.status === "handled") {
       history.append({ ...store.prompt, mode: store.mode })
+      if (!input || input.isDestroyed) return true
       input.extmarks.clear()
       setStore("prompt", { input: "", parts: [] })
       setStore("extmarkToPartIndex", new Map())
       input.clear()
       props.onSubmit?.()
       return true
+    }
+    if (props.readOnly) {
+      toast.show({ message: "Current Session is read-only", variant: "warning" })
+      return false
     }
     const agent = local.agent.current()
     if (!agent) return false
@@ -1699,6 +1712,11 @@ export function Prompt(props: PromptProps) {
                 // Windows ConPTY/Terminal often sends CR-only newlines in bracketed paste
                 // Replace CRLF first, then any remaining CR
                 const normalizedText = decodePasteBytes(event.bytes).replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+                if (props.readOnly) {
+                  event.preventDefault()
+                  input.insertText(normalizedText)
+                  return
+                }
                 const pastedContent = normalizedText.trim()
 
                 // Windows Terminal <1.25 can surface image-only clipboard as an
@@ -1988,6 +2006,7 @@ export function Prompt(props: PromptProps) {
       </box>
       <Autocomplete
         sessionID={props.sessionID}
+        readOnly={props.readOnly}
         shell={() => store.mode === "shell"}
         ref={(r) => {
           setAuto(() => r)

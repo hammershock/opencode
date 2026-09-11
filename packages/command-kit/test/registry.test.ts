@@ -69,6 +69,7 @@ function command(
     ...input,
     title: input.id,
     provenance: { type: "core", feature: "test" },
+    readOnly: false,
     capabilities: [],
     parse: (raw) => ({ status: "parsed", input: raw.value }),
     execute: async (_context: InvocationContext, value) => ({ status: "completed", message: value }),

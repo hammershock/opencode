@@ -14,6 +14,7 @@ describe("command contracts", () => {
       path: ["env", "reload"],
       title: "Reload environment",
       provenance: { type: "core", feature: "environment" },
+      readOnly: false,
       capabilities: ["environment.reload"],
       parse: (raw) => ({ status: "parsed", input: raw.value }),
       complete: async (input): Promise<readonly CompletionItem[]> => [
@@ -44,6 +45,7 @@ describe("command contracts", () => {
       path: ["env", "reload"],
       title: "Reload environment",
       provenance: { type: "core", feature: "environment" },
+      readOnly: false,
       capabilities: ["environment.reload"],
       parse: () => ({ status: "parsed", input: undefined }),
       execute: async () => {
@@ -64,6 +66,7 @@ describe("command contracts", () => {
         path: ["rename"],
         title: "Rename session",
         provenance: { type: "core", feature: "session" },
+        readOnly: false,
         capabilities: ["session.write"],
         parse: (raw) =>
           raw.value

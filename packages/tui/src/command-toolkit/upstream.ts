@@ -10,6 +10,7 @@ type KeymapEntry = {
     hidden?: unknown
     slashName?: unknown
     slashAliases?: unknown
+    readOnly?: unknown
     commandKitIdentity?: unknown
   }
 }
@@ -52,6 +53,7 @@ export function adaptKeymapCommands(
         description: typeof command.desc === "string" ? command.desc : undefined,
         category: typeof command.category === "string" ? command.category : undefined,
         hidden: command.hidden === true,
+        readOnly: command.readOnly === true,
         provenance: { type: "upstream", host: "tui", identity: command.name },
         dispatch: { type: "client", run: () => dispatch(command.name) },
       },
@@ -67,6 +69,7 @@ export function adaptServerCommands(commands: readonly ServerCommand[]): TuiUpst
     title: command.name,
     description: command.description,
     hidden: command.source === "skill",
+    readOnly: false,
     provenance:
       command.provenance?.type === "mcp"
         ? { type: "mcp", serverID: command.provenance.serverID }

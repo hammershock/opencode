@@ -1083,7 +1083,6 @@ export function Autocomplete(props: {
               paddingRight={1}
               backgroundColor={index === store.selected ? theme.primary : undefined}
               flexDirection="row"
-              onMouseMove={() => moveTo(index)}
               onMouseDown={() => moveTo(index)}
               onMouseUp={() => select()}
             >

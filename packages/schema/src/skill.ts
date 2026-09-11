@@ -12,6 +12,9 @@ export type Digest = typeof Digest.Type
 
 export const MAX_NAME_CHARACTERS = 64
 export const MAX_DESCRIPTION_CHARACTERS = 1024
+export const MAX_GUIDANCE_ENTRIES = 64
+export const MAX_GUIDANCE_DESCRIPTION_CHARACTERS = 256
+export const MAX_GUIDANCE_BYTES = 16 * 1024
 
 export const SourceKind = Schema.Literals(["built-in", "opencode-global", "opencode-project", "imported", "url"])
 export type SourceKind = typeof SourceKind.Type

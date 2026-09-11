@@ -168,6 +168,48 @@ describe("SkillRegistry", () => {
     ),
   )
 
+  it.live("discovers only canonical packages with bounded descriptions", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const root = path.join(tmp.path, "skills")
+          yield* Effect.promise(async () => {
+            await writeSkill(root, "valid", "valid", "Valid instructions", "好".repeat(1024))
+            await writeSkill(root, "oversized", "oversized", "Oversized instructions", "好".repeat(1025))
+            await fs.mkdir(path.join(root, "missing"), { recursive: true })
+            await fs.writeFile(path.join(root, "missing", "SKILL.md"), "---\nname: missing\n---\nMissing")
+            await fs.mkdir(path.join(root, "empty"), { recursive: true })
+            await fs.writeFile(path.join(root, "empty", "SKILL.md"), "---\nname: empty\ndescription: '  '\n---\nEmpty")
+            await fs.writeFile(
+              path.join(root, "legacy.md"),
+              "---\nname: legacy\ndescription: Must not be discovered\n---\nLegacy",
+            )
+            await fs.writeFile(path.join(root, "notes.md"), "# Ordinary documentation")
+          })
+
+          const result = yield* (yield* SkillRegistry.Service).load([source(root)], { forceReload: true })
+
+          expect(result.snapshot.skills.map((skill) => skill.name)).toEqual(["valid"])
+          expect(result.snapshot.diagnostics.map((item) => item.kind)).toEqual([
+            "invalid-description",
+            "invalid-description",
+            "invalid-description",
+            "legacy-layout",
+          ])
+          expect(result.snapshot.diagnostics.map((item) => item.message)).toEqual([
+            "Skill description must be non-empty and at most 1024 characters",
+            "Skill description must be non-empty and at most 1024 characters",
+            "Skill description must be non-empty and at most 1024 characters",
+            'Single-file Skill "legacy" is not supported; move it to legacy/SKILL.md',
+          ])
+        }),
+      ),
+    ),
+  )
+
   it.live("keeps cached packages until a forced reload", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

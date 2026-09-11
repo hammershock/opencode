@@ -16,6 +16,7 @@ RFC（Request for Comments）用于记录本 fork 中影响多个模块或核心
 | [0010](0010-encrypted-session-sync.md)       | Multi-device Session Sync    | Accepted |
 | [0011](0011-location-aware-model-context.md) | Location-aware Model Context | Accepted |
 | [0012](0012-skill-catalog-and-invocation.md) | Skill Catalog and Sync       | Accepted |
+| [0013](0013-opencode-transit-identity.md)    | OpenCode Transit Identity    | Accepted |
 
 ## 状态
 

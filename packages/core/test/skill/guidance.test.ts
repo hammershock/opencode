@@ -40,7 +40,7 @@ const layer = (list: () => Skill.RegistrySnapshot) =>
   ])
 
 describe("SkillGuidance", () => {
-  it.effect("renders described agent skills and reconciles the complete available list", () => {
+  it.effect("renders agent skills with optional descriptions and reconciles the complete available list", () => {
     const agent = AgentV2.Info.make({
       ...AgentV2.Info.empty(build),
       permissions: [{ action: "skill", resource: "denied", effect: "deny" }],
@@ -61,6 +61,10 @@ describe("SkillGuidance", () => {
           "    <name>effect</name>",
           "    <description>Build applications with Effect</description>",
           "    <source>Imported</source>",
+          "  </skill>",
+          "  <skill>",
+          "    <name>hidden</name>",
+          "    <source>OpenCode config</source>",
           "  </skill>",
           "</available_skills>",
         ].join("\n"),

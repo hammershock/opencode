@@ -256,6 +256,32 @@ describe("SessionV2.prompt", () => {
     }),
   )
 
+  it.effect("commits a staged revert before admitting its replacement prompt", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const original = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Original prompt" }),
+        resume: false,
+      })
+      yield* SessionInput.promoteSteers((yield* Database.Service).db, events, sessionID, Number.MAX_SAFE_INTEGER)
+      yield* session.revert.stage({ sessionID, messageID: original.id, files: false })
+
+      const replacement = yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Replacement prompt" }),
+        resume: false,
+      })
+
+      expect((yield* session.get(sessionID)).revert).toBeUndefined()
+      expect(yield* session.messages({ sessionID })).toEqual([])
+      expect(yield* admitted(original.id)).toBeUndefined()
+      expect(yield* admitted(replacement.id)).toMatchObject({ prompt: { text: "Replacement prompt" } })
+    }),
+  )
+
   it.effect("returns the original recorded message when the ID is retried", () =>
     Effect.gen(function* () {
       yield* setup

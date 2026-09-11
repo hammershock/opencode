@@ -6,9 +6,80 @@ import type {
   Part,
   SessionMessage,
   SessionMessageAssistantTool,
+  SessionMessageUser,
+  SkillMetadata,
   TextPart,
   UserMessage,
 } from "@opencode-ai/sdk/v2"
+import type { PromptInfo, SkillMentionPart } from "../prompt/history"
+
+export function canonicalUserText(message: SessionMessageUser) {
+  return message.text
+}
+
+export function commitCanonicalRevert(messages: readonly SessionMessage[], messageID: string) {
+  const boundary = messages.findIndex((message) => message.id === messageID)
+  return boundary === -1 ? messages : messages.slice(boundary + 1)
+}
+
+export function restoreCanonicalPrompt(message: SessionMessageUser, catalog: readonly SkillMetadata[]) {
+  const skills: ({ part: SkillMentionPart } | { missing: string })[] = (message.skills ?? []).map((invocation) => {
+    const metadata = catalog.find(
+      (skill) =>
+        skill.name === invocation.snapshot.name &&
+        skill.digest === invocation.snapshot.digest &&
+        skill.sourceLabel.replace(/ · [0-9a-f]{8}$/i, "") === invocation.snapshot.source.label,
+    )
+    if (!metadata) return { missing: invocation.snapshot.name }
+    return {
+      part: {
+        type: "skill" as const,
+        id: metadata.id,
+        name: metadata.name,
+        description: metadata.description,
+        sourceLabel: metadata.sourceLabel,
+        digest: metadata.digest,
+        source: {
+          start: invocation.source.start,
+          end: invocation.source.end,
+          value: invocation.source.text,
+        },
+      },
+    }
+  })
+  const missing = skills.find((skill) => "missing" in skill)?.missing
+  if (missing) return { missing }
+
+  return {
+    prompt: {
+      input: message.text,
+      parts: [
+        ...(message.files ?? []).map((file) => ({
+          type: "file" as const,
+          mime: file.mime,
+          filename: file.name,
+          url: file.uri,
+          description: file.description,
+          source: file.source
+            ? {
+                type: "file" as const,
+                path: file.name ?? file.uri,
+                text: { value: file.source.text, start: file.source.start, end: file.source.end },
+              }
+            : undefined,
+        })),
+        ...(message.agents ?? []).map((agent) => ({
+          type: "agent" as const,
+          name: agent.name,
+          source: agent.source
+            ? { value: agent.source.text, start: agent.source.start, end: agent.source.end }
+            : undefined,
+        })),
+        ...skills.flatMap((skill) => ("part" in skill ? [skill.part] : [])),
+      ],
+    } satisfies PromptInfo,
+  }
+}
 
 export function projectCanonicalSessionMessages(input: {
   sessionID: string

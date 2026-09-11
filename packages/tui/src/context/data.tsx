@@ -22,6 +22,7 @@ import { createSimpleContext } from "./helper"
 import { useSDK } from "./sdk"
 import { useEvent } from "./event"
 import { createSignal, onCleanup, onMount } from "solid-js"
+import { commitCanonicalRevert } from "../util/session-message"
 
 type LocationData = {
   agent?: AgentV2Info[]
@@ -162,6 +163,25 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           break
         }
         case "session.next.prompt.admitted":
+          break
+        case "session.next.revert.staged":
+          setStore("session", "info", event.data.sessionID, (session) =>
+            session ? { ...session, revert: event.data.revert } : session,
+          )
+          break
+        case "session.next.revert.cleared":
+          setStore("session", "info", event.data.sessionID, (session) =>
+            session ? { ...session, revert: undefined } : session,
+          )
+          break
+        case "session.next.revert.committed":
+          setStore("session", "info", event.data.sessionID, (session) =>
+            session ? { ...session, revert: undefined } : session,
+          )
+          message.update(event.data.sessionID, (draft) => {
+            const remaining = commitCanonicalRevert(draft, event.data.messageID)
+            draft.splice(0, draft.length, ...remaining)
+          })
           break
         case "session.next.location.rebound":
           setStore("session", "info", event.data.sessionID, (session) =>

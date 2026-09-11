@@ -320,7 +320,7 @@ describe("SessionProjector", () => {
       })
       expect(
         (yield* db.select({ id: SessionMessageTable.id }).from(SessionMessageTable).all()).map((row) => row.id),
-      ).toEqual([boundary])
+      ).toEqual([])
     }),
   )
 

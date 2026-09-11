@@ -1471,7 +1471,7 @@ export function Session() {
     bindings: tuiConfig.keybinds.get("session.background"),
   }))
 
-  const revertInfo = createMemo(() => session()?.revert)
+  const revertInfo = createMemo(() => data.session.get(route.sessionID)?.revert ?? session()?.revert)
   const revertMessageID = createMemo(() => revertInfo()?.messageID)
   const revertMessageIndex = createMemo(() => {
     const messageID = revertMessageID()

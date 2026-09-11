@@ -5,7 +5,7 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-11
-updated: 2026-09-11
+updated: 2026-09-12
 implemented-by:
   - https://github.com/hammershock/opencode-transit/pull/280
   - https://github.com/hammershock/opencode-transit/pull/281
@@ -25,7 +25,7 @@ superseded-by: []
 
 OpenCode 必须把 Skill 作为结构化能力，而不是把完整 `SKILL.md` 注册成普通 slash command template。用户在 normal prompt 中输入 `$` 可以搜索并 mention Skill；提交后，原始用户请求与 Skill invocation 保持独立，Skill 正文不会参与 `$ARGUMENTS` 或 `$1` 替换。TUI 只显示 `$skill` token 和默认折叠的 Skill context 行，模型仍收到完整指令。
 
-Skill package、发现路径和 target 适用范围由控制设备拥有，不复制到 Rexd target。账户同步可以显式开启 OpenCode Skill sync，但只同步 OpenCode 用户配置目录 `skill/` 与 `skills/` 中的完整 Skill package；Codex、Claude、自定义 imported roots、project Skill、built-in Skill 和 target scope 均保持 device-local。每个 Skill 默认适用于全部 execution target，用户可以在统一设置入口中改为 `local` 与具体 target ID 的名单。Rexd Agent 如需访问 Skill 的辅助文件，使用有界、只读的 controller-side resource tool；它不能在控制设备执行脚本，也不能把控制设备目录伪装成 Session Location。
+Skill package、发现路径和 target 适用范围由控制设备拥有。账户同步可以显式开启 OpenCode Skill sync，但只同步 OpenCode 用户配置目录 `skill/` 与 `skills/` 中的完整 Skill package；Codex、Claude、自定义 imported roots、project Skill、built-in Skill 和 target scope 均保持 device-local。每个 Skill 默认适用于全部 execution target，用户可以在统一设置入口中改为 `local` 与具体 target ID 的名单。本地 Session 直接向 Agent 提供正式 Skill 目录；Rexd Session 复用现有 Rexd filesystem 与 exec 管道，把已调用的完整 package 加载到 target 上的真实共享临时目录，使 Agent 继续使用原生文件与 Shell tools。Rexd protocol 不增加 Skill 专用方法，控制设备目录也不直接暴露给 target。
 
 Agent 可用 Skill 的元信息在 Session model context 初始化时接纳一次，普通 provider turn 不重新扫描。新建、resume 或切回 Session 时执行一次强制 catalog reload；变化通过 RFC-0011 当前 Context Generation 内的隐藏 context advance 生效，不重写原始 system baseline，也不建立新的 Location generation。显式或隐式加载的 Skill 正文形成隐藏、可展开的 durable invocation snapshot，并随完整 Session 同步，以保证跨设备续聊使用已经接纳的准确内容。
 
@@ -53,13 +53,14 @@ Codex 的可观察行为提供了合适的交互基线：composer 发送结构�
 6. 新 Skill 在退出并重新进入 Session 后可被 TUI 和 Agent 发现，不要求重启 OpenCode。
 7. Skill 设置与非 OpenCode roots 保持 device-local；用户可显式同步 OpenCode global Skill package，已调用正文仍作为 Session context durable 同步。
 8. 每个 Skill 可以按稳定 target identity 限定适用范围，默认包括全部当前及未来 target。
-9. Rexd Session 可以安全读取 controller-owned Skill 的文本资源，但不能因此获得隐式控制机执行权限。
+9. Rexd Session 可以通过 target 上的真实临时目录读取、修改和执行 controller-owned Skill package，同时不获得控制机 filesystem 或 process authority。
 
 ## 非目标
 
 - 同步 Codex、Claude、自定义 imported root、project Skill、built-in Skill 或 target scope 配置；
-- 自动复制或安装 Skill 到 Rexd target；
-- 在控制设备执行 Skill 脚本，或为 Skill 绕过 RFC-0001/0002 的 Agent execution scope；
+- 修改 Rexd protocol 或要求 target 安装 SSHFS、rsync、scp、压缩、摘要等额外工具；
+- 在控制设备执行远程 Session 的 Skill 脚本，或为 Skill 绕过 RFC-0001/0002 的 Agent execution scope；
+- 把 Rexd 临时副本的修改自动写回正式 Skill；后续显式写回仍必须复用现有 Rexd filesystem 管道；
 - 在活跃 Session 中监听文件并热更新 catalog；
 - 为 Web/Desktop 实现完整 Skill manager；
 - 新增远程 Skill marketplace、安装协议或 URL source 格式；
@@ -125,7 +126,7 @@ SkillInvocationSnapshot {
 
 `invocationID` 是 Session-scoped identity，不是 device-local `SkillID`。snapshot 在 prompt admission 或 tool completion 的 durable transaction 中建立。模型消费 snapshot 的 `content`，后续 replay、compaction、fork 和 sync 使用同一正文，不重新读取可能已经变化或消失的 controller file。
 
-invocation snapshot 是用户已经选择进入会话的 model context，因此始终跟随 RFC-0010 的完整 Session payload，不依赖 Skill sync 是否开启。Session 同步端不得包含 device-local `SkillID`、controller absolute root、未调用资源清单或 target-scope 配置。另一设备即使没有安装该 Skill，也可以显示并继续使用已经接纳的正文；读取尚未进入 Session 的辅助资源要求当前控制设备按 snapshot 的 name 与 content digest 找到唯一完全匹配的本地 Skill。OpenCode global Skill package 的独立同步语义见下文。
+invocation snapshot 是用户已经选择进入会话的 model context，因此始终跟随 RFC-0010 的完整 Session payload，不依赖 Skill sync 是否开启。Session 同步端不得包含 device-local `SkillID`、controller absolute root、target 临时路径、未调用资源清单或 target-scope 配置。另一设备即使没有安装该 Skill，也可以显示并继续使用已经接纳的正文；为当前 Location 生成 model request 前，runtime 按 snapshot 的 name 与 content digest 找到唯一完全匹配的本地 Skill，并重新渲染本设备当前有效的 package path。OpenCode global Skill package 的独立同步语义见下文。
 
 ## 默认发现范围
 
@@ -434,34 +435,25 @@ raw Session/API export 必须保留 structured invocation snapshot 以支持恢�
 
 compaction 必须保留仍适用 Skill invocation 的语义和 digest。它可以把旧 invocation 纳入 checkpoint，但不能在 compaction 时重新读取本地 Skill，也不能把隐藏正文误标为新的用户请求。
 
-## Controller-side Skill resource access
+## Location-native Skill package access
 
-controller-owned Skill 的正文可以直接进入远程 Session，但正文引用的 `scripts/`、`references/` 或 templates 不存在于 Rexd filesystem。为避免暴露任意控制机文件工具，新增一个窄接口 `skill_resource`：
+本地 Session 直接向 Agent 提供 controller 上正式 Skill package 的 canonical directory，与原生 Codex/OpenCode 行为一致。Agent 对该路径的读取、修改和执行使用普通 Location tools；修改正式生效并遵守既有 filesystem、Shell 与 permission 边界。
 
-```text
-skill_resource {
-  skill: SkillID | InvocationID
-  resource?: RelativePath
-  cursor?: string
-}
-```
+Rexd Session 在 Agent 获得 package path 前，把准确版本的完整 package 加载到 target 上的真实临时目录。实现只编排现有 Rexd `fs.write`、`fs.read`、`fs.list`、`fs.stat`、`fs.patch` 与 `exec`，不得新增 Skill 专用 Rexd method、修改 Rexd server，或依赖 SSHFS、反向 SSH、rsync、scp、tar、压缩或 target 摘要工具。托管 Rexd 的现有配置生成器为 `/tmp/opencode-transit/skills` 增加 allowed root 并在 `session.open` 请求它；自定义 Rexd 必须配置一个已由握手确认的 `skillStagingRoot`，否则 remote Skill package access 明确不可用。
 
-- 省略 `resource` 时返回有界、排序稳定的 relative file manifest；
-- 指定 resource 时分页返回一个 UTF-8 text file；
-- response 包含 resource identity、content、digest 与 next cursor，不返回 controller absolute path；
-- binary 或超出支持限制的资源只返回 metadata 与 unsupported diagnostic，不自动编码进 context；
-- read result 是普通 durable tool result，按 Session 规则同步并默认折叠显示。
+controller 先建立稳定、排序的 package manifest，再以 256 KiB 块通过 `fs.write` 写入唯一 staging directory。大文件写成多个块，使用现有 `exec` 的非 Shell argv 调用基础 POSIX `cat` 合并；controller 通过带 offset/length 的 `fs.read` 分块读回并验证每个文件与完整 manifest digest。校验完成后使用 `exec` 的非 Shell argv 原子 rename 到 content-addressed directory。失败不暴露半个 package，后续相同 digest 命中已验证目录而不重复传输。
 
-每次调用重新验证 Skill 当前对 Session target 和 Agent 可用，并要求既有 `skill` permission。path 必须是 Skill root 内的规范相对路径；拒绝 absolute path、空段、`.`、`..`、编码后 traversal、symlink escape、special file 和 root 外 hardlink/realpath 结果。manifest 不跟随越界 symlink，也不递归无界扫描。
+单个 package 最多 64 MiB、4,096 files，单文件最多 16 MiB。package root 可以是 canonicalized symlink；root 内 symlink 只有在最终目标仍位于 package root 时才可按普通文件或目录 materialize。拒绝 escape、cycle、special file、大小写 collision、不稳定读取与 limit overflow。nested Skill directory 由自己的 `SKILL.md` 拥有，不进入父 package。任何失败拒绝整个 remote materialization，不截断 package。
 
-该 tool 使用 `ControllerFileSystem`，属于 RFC-0002 所允许的纯控制面 read capability。它不是 Session Location filesystem：
+同一 target 上相同 package digest 使用同一个真实目录。每个使用它的 OpenCode Session 通过该目录内的 controller-owned attachment record 建立引用；同一目录允许普通 target tools 和脚本修改，因此共享 Session 可以观察到彼此的临时修改。该竞态与本地共享正式 Skill 的行为一致，但 target 修改绝不自动写回 controller，也不改变 invocation snapshot digest。Skill source 更新后形成新 digest 与新目录，不覆盖旧版本。
 
-- 不返回可传给 target bash/read 的伪路径；
-- 不执行 controller process；
-- 不自动上传、mount 或复制文件到 target；
-- Agent 若要在 target 使用脚本内容，必须通过现有 Location-scoped tools 执行显式、可审计的 target mutation，并遵守 permission。
+应用使用现有 `fs.write` 续期 attachment record，正常退出时使用现有 `fs.patch`/`exec` 释放自己持有的全部 record。最后一个有效 record 消失后，使用严格校验、非模型输入的 exact path 通过现有 `exec` 清理 package directory。managed Rexd command 的外层 lifecycle wrapper 在 stdio 结束时尽力释放当前应用的 records；未完成的 staging、失联 record 与无引用 package 在下一次连接时按 timeout 扫描清理。cleanup failure 只产生诊断并保留下一次重试，不阻止其他 package 或 Session。
 
-当前设备创建的 invocation 可以直接关联 local `SkillID`；同步到另一设备后，resolver 改用 invocation snapshot 的 name 与 digest 匹配本地 catalog。没有唯一完全匹配项时，新的 resource read 返回 `resource_unavailable_on_device`；已经进入 Session 的 invocation snapshot 和历史 resource result 仍可继续读取。
+显式 mention 一旦成为 composer 中的结构化选择即可后台预热；submit 在 admission 前确认 materialization，失败时整条 prompt 不接纳且保留 draft。implicit `skill` tool 在返回正文和路径前完成 materialization；失败产生正常 failed tool result。Session activation 并发预热当前 context 中仍适用的 invocation，不上传整个 catalog；真正发送 model request 前仍验证路径存在，失效时重新 materialize。
+
+target path 是 runtime-only fact，不进入 invocation snapshot、Session event、export、sync 或 compaction。user/compaction Skill fragment 与 completed implicit `skill` result 在 provider-history lowering 时从 structured snapshot 重新渲染当前 Location path。本地渲染正式 directory；Rexd 渲染已验证临时 directory。Agent 必须被明确告知 Rexd directory 是共享、可修改但临时的运行副本，会随应用退出或 timeout 被回收；持久后台任务必须先把所需文件复制到持久目录。
+
+后续显式 remote writeback 必须继续使用现有 Rexd `fs.list`、`fs.stat` 与分页 `fs.read` 读取临时副本，再由 controller filesystem 原子保存正式 package。它不得引入 Skill 专用 Rexd method；保存前比较 invocation 原始 digest，真正发生冲突时停止并交给用户处理，不静默覆盖或自动合并。
 
 ## Schema、API 与实现边界
 
@@ -498,8 +490,8 @@ Prompt API 接受 structured Skill mention。公共 Protocol 或 Server `HttpApi
 - Location-scoped model context assembler 消费 registry snapshot并应用当前 target/Agent filter，但不扫描 target filesystem；
 - Session admission 负责 mention resolution 与 durable invocation snapshot；
 - Session Context Epoch 负责 activation-scoped catalog baseline/advance；
-- Tool registry 提供 implicit `skill` 与 controller-side `skill_resource`，两者共享 canonical resolver；
-- TUI 只渲染 typed state、维护 composer extmark 并 dispatch registry/session actions；
+- Tool registry 只提供 implicit `skill`；Location-scoped materializer 使用 canonical resolver 与既有 Rexd filesystem/exec services 准备 package path；
+- TUI 只渲染 typed state、维护 composer extmark、dispatch registry/session actions，并在共享 remote status surface 展示 Skill materialization；
 - sync adapter 传输正式 Session events 与 Skill Sync operations；它不能上传 registry 配置、非 eligible root 或当前 filesystem 的临时扫描结果。
 
 legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一个 canonical service。兼容层可以转换旧 API shape，但不得保留另一份 cache、precedence 或 body rendering 语义。
@@ -513,12 +505,14 @@ legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一
 - manager mutation conflict、permission failure 或 invalid path 不改变已有配置和当前 selection。
 - Session activation reload failure 不修改 Context Epoch；下一次重新进入可以重试，同一活跃会话不后台轮询。
 - target scope 中出现 missing target 只产生设置诊断，不影响其他明确 target。
-- resource read 失败不得回退 Location filesystem、Shell、网络 URL 或同名 Skill。
+- remote materialization 失败不得回退 controller filesystem、controller Shell、网络 URL、同名 Skill 或已移除的 resource tool；
+- explicit mention 的 remote materialization 在 admission 前失败时整条 prompt 不接纳且 draft 保留；implicit load 失败形成正常 failed tool result；
+- cleanup、stdio wrapper 或 stale-record sweep 失败只产生脱敏诊断并在下一次连接重试，不能删除仍有有效 attachment 的 package；
 - Skill sync 关闭、旧客户端或未 opt in 设备不 inventory、下载或 ack Skill objects；Session sync 继续独立工作。
 - package scan、staging download、digest verification 或 atomic rename 失败时保留 last admitted local package 与 pending operation，不留下可发现的半包。
 - remote delete 与本地修改并发时形成 conflict，不删除本地内容；一次 missing/list/stat 结果不能产生 tombstone。
 - cloud/provider failure 沿用 RFC-0010 bounded retry、leader fencing 与脱敏状态，不能阻止本地 Skill 使用。
-- 日志记录 SkillID、阶段、stable error kind 与 digest 摘要；不得记录 Skill body、resource content、controller absolute private path 或 credential。
+- 日志记录 SkillID、阶段、stable error kind 与 digest 摘要；不得记录 Skill body、package content、controller absolute private path 或 credential。
 
 ## 兼容与迁移
 
@@ -529,7 +523,7 @@ legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一
 5. 已有 Session 中作为普通 user text 保存的历史 Skill 展开不重写。新的调用使用 structured snapshot；旧消息首次 resume 不尝试反向猜测 Skill identity。
 6. 没有 `core/skill-guidance` snapshot 的旧 Session 在首次可写 activation 时建立一次 catalog advance；不重写 RFC-0011 baseline。
 7. 现有 Skill permission 继续生效。target scope 是额外 availability filter，不替代 allow/ask/deny。
-8. Skill Registry、discovery/target 配置与非 eligible package 始终排除在 RFC-0010 sync 外；invocation snapshot 和已读取 resource result 跟随 Session。
+8. Skill Registry、discovery/target 配置、target 临时路径与非 eligible package 始终排除在 RFC-0010 sync 外；invocation snapshot 跟随 Session，runtime path 在当前设备重新渲染。
 9. 用户显式开启 Skill sync 后，OpenCode global roots 的 eligible package 通过独立 Skill namespace 同步，不混入 Session payload。
 10. 既有 Session sync 用户升级后 `OpenCode Skills` 为关闭，不发生静默 backfill。开启时才扫描并排队现有 OpenCode global package。
 11. 不支持 Skill payload 的旧客户端继续同步 Session，但不下载、不确认、不删除 Skill objects；新客户端不能把旧客户端视为已 ack Skill tombstone。
@@ -550,18 +544,21 @@ legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一
 11. local、all targets、具体 Rexd target、空名单、renamed target、missing target 与 restored same-ID target 的 availability 都符合本 RFC。
 12. model request 收到完整 invocation snapshot，TUI 默认只显示 `$name` 与折叠行；展开显示准确 snapshot 而不重新读盘。
 13. copy、fork、edit、timeline title 与 rendered export 不把 Skill body 当作用户输入；raw export、replay 与 compaction 保留结构化内容。
-14. Session sync payload 包含已调用正文与已读取 resource result，不包含 controller root、target scope、registry config 或 package inventory；独立 Skill namespace 只包含 opt-in eligible package。没有本地 Skill 的另一设备仍可继续已有 invocation snapshot。
-15. `skill_resource` 可以从 local 与 Rexd Session 读取 controller-owned text resource，并拒绝 absolute path、traversal、symlink escape、binary 与越界请求。
-16. Rexd Agent 不能通过 Skill resource 获得 controller Shell/process authority，也不能把 controller path 传给 Location tools 后静默回退本地。
-17. `OpenCode Skills` 在新装和升级设备均默认关闭；未 opt in 时没有 Skill inventory、upload、download 或 acknowledgement，Session sync 不受影响。
-18. 开启后只同步 global `skill/`、`skills/` 下的完整 package；project、Codex、Claude、`.agents`、custom、URL cache、built-in、symlink 与内部 state 均不进入 payload。
-19. package manifest 保持原子，nested Skill ownership、大小写 collision、稳定 scan、size limit、content digest、staging 与 crash recovery 有 contract/integration test。
-20. 两设备顺序编辑自动 fast-forward；相同 digest 幂等；并发编辑、并发 delete/update 与 Keep current/Use incoming/Keep both resolution 不静默丢失内容且最终收敛。
-21. Skill tombstone 在 offline old head、pending old update、重启和 GC 后不复活；remote delete 先进入 managed trash，任何清理都不越出该目录。
-22. Skill sync 成功 materialize 后 registry cache 失效；活跃 Session catalog 保持冻结，退出重进后发现同步到的新 Skill 或版本。
-23. cloud reset 的确认与清理同时覆盖 Session 和 Skill namespaces，本地 Skill 保留；logout、disable 与旧客户端兼容不删除本地 package。
-24. registry、admission、Context Epoch、sync 与 TUI failure states 有 unit/contract/integration coverage；公共 API generation 与 package-local typecheck 通过。
-25. Mac 与 `mywindows` 使用同一提交构建的 `opencode-transit` 完成 local 与 Rexd 的 import、target filter、`$` mention、re-enter reload、fold/expand、resource read、OpenCode Skill 双向同步、并发冲突、删除防复活和跨设备 resume 实测，并附 TUI 截图或录屏。
+14. Session sync payload 包含已调用正文，不包含 controller root、target 临时路径、target scope、registry config 或 package inventory；独立 Skill namespace 只包含 opt-in eligible package。没有本地 Skill 的另一设备仍可继续已有 invocation snapshot，但不能伪造可用 package path。
+15. local invocation 向 Agent 提供正式 Skill directory；Rexd invocation 在模型获得 path 前通过现有 Rexd fs/exec pipeline 完整 materialize package，并且不要求 Rexd protocol/server 改动或 target 安装额外工具。
+16. remote package 限制为 64 MiB、4,096 files 与 16 MiB per file；chunk write、read-back digest verification、atomic commit、cache hit、partial failure 与 retry 都有 contract/integration coverage。
+17. 同 target、同 digest 的 Session 共享真实临时 directory 与其临时修改；source update 使用新 directory，target mutation 不自动写回 controller。
+18. normal exit、transport end、last attachment release 与 stale timeout 都尽力清理；仍有有效 attachment 时不得删除 package，cleanup failure 可在下一次 connection 恢复。
+19. provider-facing Skill instructions 明确区分 local durable source path 与 Rexd temporary path；remote background work 必须先复制所需文件到 persistent directory。
+20. `OpenCode Skills` 在新装和升级设备均默认关闭；未 opt in 时没有 Skill inventory、upload、download 或 acknowledgement，Session sync 不受影响。
+21. 开启后只同步 global `skill/`、`skills/` 下的完整 package；project、Codex、Claude、`.agents`、custom、URL cache、built-in、symlink 与内部 state 均不进入 payload。
+22. package manifest 保持原子，nested Skill ownership、大小写 collision、稳定 scan、size limit、content digest、staging 与 crash recovery 有 contract/integration test。
+23. 两设备顺序编辑自动 fast-forward；相同 digest 幂等；并发编辑、并发 delete/update 与 Keep current/Use incoming/Keep both resolution 不静默丢失内容且最终收敛。
+24. Skill tombstone 在 offline old head、pending old update、重启和 GC 后不复活；remote delete 先进入 managed trash，任何清理都不越出该目录。
+25. Skill sync 成功 materialize 后 registry cache 失效；活跃 Session catalog 保持冻结，退出重进后发现同步到的新 Skill 或版本。
+26. cloud reset 的确认与清理同时覆盖 Session 和 Skill namespaces，本地 Skill 保留；logout、disable 与旧客户端兼容不删除本地 package。
+27. registry、admission、Context Epoch、sync 与 TUI failure states 有 unit/contract/integration coverage；公共 API generation 与 package-local typecheck 通过。
+28. Mac 与 `mywindows` 使用同一提交构建的 `opencode-transit` 完成 local 与 Rexd 的 import、target filter、`$` mention、re-enter reload、fold/expand、package materialization、native file/Shell access、cleanup、OpenCode Skill 双向同步、并发冲突、删除防复活和跨设备 resume 实测，并附 TUI 截图或录屏。
 
 ## 参考
 

@@ -3,7 +3,7 @@ export * as OpenCodeSessionRunnerModel from "./runner-model"
 import { Auth } from "@/auth"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
 import { Integration } from "@opencode-ai/core/integration"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { Effect, Layer } from "effect"
@@ -71,7 +71,7 @@ export function legacyCredential(info: Auth.Info | undefined): Credential.Value 
     })
 }
 
-export const node = LayerNode.make({
+export const node = makeLocationNode({
   service: SessionRunnerModel.Service,
   layer,
   deps: [Auth.node, Catalog.node, Integration.node],

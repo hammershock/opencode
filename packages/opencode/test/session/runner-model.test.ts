@@ -1,18 +1,25 @@
 import { describe, expect, test } from "bun:test"
+import { Node } from "@opencode-ai/core/effect/app-node"
+import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { Auth } from "../../src/auth"
-import { legacyCredential } from "../../src/session/runner-model"
+import { OpenCodeSessionRunnerModel } from "../../src/session/runner-model"
 
 describe("SessionRunnerModel compatibility", () => {
+  test("preserves location and controller-global dependency scopes", () => {
+    expect(OpenCodeSessionRunnerModel.node.tag).toBe(SessionRunnerModel.node.tag)
+    expect(Auth.node.tag).toBe(Node.tags.values.global)
+  })
+
   test("adapts legacy API credentials without persisting a new credential", () => {
-    expect(legacyCredential(new Auth.Api({ type: "api", key: "secret", metadata: { tenant: "work" } }))).toEqual({
-      type: "key",
-      key: "secret",
-      metadata: { tenant: "work" },
-    })
+    expect(
+      OpenCodeSessionRunnerModel.legacyCredential(
+        new Auth.Api({ type: "api", key: "secret", metadata: { tenant: "work" } }),
+      ),
+    ).toEqual({ type: "key", key: "secret", metadata: { tenant: "work" } })
   })
 
   test("adapts legacy OAuth credentials in memory", () => {
-    const credential = legacyCredential(
+    const credential = OpenCodeSessionRunnerModel.legacyCredential(
       new Auth.Oauth({
         type: "oauth",
         refresh: "refresh",
@@ -32,6 +39,10 @@ describe("SessionRunnerModel compatibility", () => {
   })
 
   test("does not treat well-known configuration tokens as model credentials", () => {
-    expect(legacyCredential(new Auth.WellKnown({ type: "wellknown", key: "TOKEN", token: "value" }))).toBeUndefined()
+    expect(
+      OpenCodeSessionRunnerModel.legacyCredential(
+        new Auth.WellKnown({ type: "wellknown", key: "TOKEN", token: "value" }),
+      ),
+    ).toBeUndefined()
   })
 })

@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { optional } from "./schema"
 import { statics } from "./schema"
+import { SkillInvocation } from "./skill-invocation"
 
 export interface Source extends Schema.Schema.Type<typeof Source> {}
 export const Source = Schema.Struct({
@@ -37,21 +38,31 @@ export const AgentAttachment = Schema.Struct({
   source: Source.pipe(optional),
 }).annotate({ identifier: "Prompt.AgentAttachment" })
 
+export interface SkillInvocationPart extends Schema.Schema.Type<typeof SkillInvocationPart> {}
+export const SkillInvocationPart = Schema.Struct({
+  source: Source,
+  snapshot: SkillInvocation.Snapshot,
+}).annotate({ identifier: "Prompt.SkillInvocation" })
+
 export interface Prompt extends Schema.Schema.Type<typeof Prompt> {}
 export const Prompt = Schema.Struct({
   text: Schema.String,
   files: Schema.Array(FileAttachment).pipe(optional),
   agents: Schema.Array(AgentAttachment).pipe(optional),
+  invocations: Schema.Array(SkillInvocationPart).pipe(optional),
 })
   .annotate({ identifier: "Prompt" })
   .pipe(
     statics((schema) => ({
       equivalence: Schema.toEquivalence(schema),
-      fromUserMessage: (input: Pick<Prompt, "text" | "files" | "agents">) =>
+      fromUserMessage: (
+        input: Pick<Prompt, "text" | "files" | "agents"> & { readonly skills?: Prompt["invocations"] },
+      ) =>
         schema.make({
           text: input.text,
           ...(input.files === undefined ? {} : { files: input.files }),
           ...(input.agents === undefined ? {} : { agents: input.agents }),
+          ...(input.skills === undefined ? {} : { invocations: input.skills }),
         }),
     })),
   )

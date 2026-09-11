@@ -657,6 +657,7 @@ export type Prompt = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  invocations?: Array<PromptSkillInvocation>
 }
 
 export type Pty = {
@@ -1223,6 +1224,7 @@ export type GlobalEvent = {
           reason: "auto" | "manual"
           text: string
           recent: string
+          skills?: Array<SessionSkillInvocationSnapshot>
         }
       }
     | {
@@ -2958,12 +2960,21 @@ export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  skills?: Array<PromptSkillMention>
 }
 
 export type ConflictError = {
   _tag: "ConflictError"
   message: string
   resource?: string
+}
+
+export type SkillMentionError = {
+  _tag: "SkillMentionError"
+  message: string
+  kind: "invalid-mention" | "unavailable" | "target-inapplicable" | "permission-denied" | "stale-catalog" | "malformed"
+  skillID: string
+  name: string
 }
 
 export type MessageNotFoundError = {
@@ -3385,6 +3396,26 @@ export type PromptFileAttachment = {
 export type PromptAgentAttachment = {
   name: string
   source?: PromptSource
+}
+
+export type SessionSkillInvocationSource = {
+  kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+  label: string
+}
+
+export type SessionSkillInvocationSnapshot = {
+  id: string
+  name: string
+  description?: string
+  digest: string
+  source: SessionSkillInvocationSource
+  content: string
+  status: "loaded"
+}
+
+export type PromptSkillInvocation = {
+  source: PromptSource
+  snapshot: SessionSkillInvocationSnapshot
 }
 
 export type SessionErrorUnknown = {
@@ -4166,6 +4197,7 @@ export type SyncEventSessionNextCompactionEnded = {
       reason: "auto" | "manual"
       text: string
       recent: string
+      skills?: Array<SessionSkillInvocationSnapshot>
     }
   }
 }
@@ -4363,6 +4395,12 @@ export type PromptInputFileAttachment = {
   source?: PromptSource
 }
 
+export type PromptSkillMention = {
+  id: string
+  name: string
+  source: PromptSource
+}
+
 export type SessionInputAdmitted = {
   admittedSeq: number
   id: string
@@ -4408,6 +4446,7 @@ export type SessionMessageUser = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  skills?: Array<PromptSkillInvocation>
   type: "user"
 }
 
@@ -4570,6 +4609,7 @@ export type SessionMessageCompaction = {
   reason: "auto" | "manual"
   summary: string
   recent: string
+  skills?: Array<SessionSkillInvocationSnapshot>
   id: string
   metadata?: {
     [key: string]: unknown
@@ -5223,6 +5263,7 @@ export type SessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    skills?: Array<SessionSkillInvocationSnapshot>
   }
 }
 
@@ -7571,6 +7612,7 @@ export type EventSessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    skills?: Array<SessionSkillInvocationSnapshot>
   }
 }
 
@@ -14166,9 +14208,9 @@ export type V2SessionPromptData = {
 
 export type V2SessionPromptErrors = {
   /**
-   * InvalidRequestError
+   * InvalidRequestError | SkillMentionError
    */
-  400: InvalidRequestError
+  400: InvalidRequestError | SkillMentionError
   /**
    * UnauthorizedError
    */

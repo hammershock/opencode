@@ -16,11 +16,57 @@ import { SessionSync } from "@opencode-ai/core/sync/session"
 import { Session } from "@opencode-ai/schema/session"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
 import { ModelContext } from "@opencode-ai/schema/model-context"
+import { Skill } from "@opencode-ai/schema/skill"
+import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
 import { eq } from "drizzle-orm"
 import path from "node:path"
 import { tmpdir } from "./fixture/tmpdir"
 
 describe("SessionSync", () => {
+  test("captures portable Skill invocation bodies with Session history", async () => {
+    const captured: SyncEvent.Envelope[] = []
+    const store = {
+      enqueue: (event: SyncEvent.Envelope) => Effect.sync(() => void captured.push(event)),
+      delete: () => Effect.void,
+    } as unknown as SyncEventStore.Interface
+    const snapshot = SkillInvocation.Snapshot.make({
+      id: SkillInvocation.ID.make("ski_synced"),
+      name: "review",
+      digest: Skill.Digest.make("a".repeat(64)),
+      source: { kind: "imported", label: "Imported" },
+      content: "Portable Skill body",
+      status: "loaded",
+    })
+
+    await Effect.runPromise(
+      SessionSync.capture(store, {
+        id: "evt_skill_snapshot",
+        type: "session.next.prompt.admitted",
+        durable: { aggregateID: "ses_skill_snapshot", seq: 1, version: 1 },
+        data: {
+          sessionID: "ses_skill_snapshot",
+          messageID: "msg_skill_snapshot",
+          timestamp: 1,
+          delivery: "steer",
+          prompt: {
+            text: "$review inspect",
+            invocations: [{ source: { start: 0, end: 7, text: "$review" }, snapshot }],
+          },
+        },
+      }),
+    )
+
+    expect(captured).toHaveLength(1)
+    expect(captured[0]?.data).toMatchObject({
+      prompt: {
+        text: "$review inspect",
+        invocations: [{ snapshot: { id: "ski_synced", content: "Portable Skill body" } }],
+      },
+    })
+    expect(JSON.stringify(captured[0])).not.toContain("skl_")
+    expect(JSON.stringify(captured[0])).not.toContain("/Users/")
+  })
+
   test("backfills assigned V1 Session history into its target space", async () => {
     await using tmp = await tmpdir()
     const layer = LayerNode.compile(LayerNode.group([Database.node, SyncEventStore.node, SyncOwnership.node]), [

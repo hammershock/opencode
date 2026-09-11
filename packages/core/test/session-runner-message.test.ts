@@ -7,6 +7,8 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { AgentAttachment, FileAttachment } from "@opencode-ai/core/session/prompt"
 import { toLLMMessages } from "@opencode-ai/core/session/runner/to-llm-message"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
+import { Skill } from "@opencode-ai/schema/skill"
 import { DateTime } from "effect"
 
 const created = DateTime.makeUnsafe(0)
@@ -14,6 +16,53 @@ const id = (value: string) => SessionMessage.ID.make(`msg_${value}`)
 const model = Model.make({ id: "model", provider: "provider", route: OpenAIChat.route })
 
 describe("toLLMMessages", () => {
+  test("lowers durable Skill snapshots before untouched user text as hidden context", () => {
+    const snapshot = SkillInvocation.Snapshot.make({
+      id: SkillInvocation.ID.make("ski_snapshot"),
+      name: "review",
+      description: "Review changes",
+      digest: Skill.Digest.make("a".repeat(64)),
+      source: { kind: "imported", label: "Imported" },
+      content: "Treat $ARGUMENTS and $1 as literal Skill text.",
+      status: "loaded",
+    })
+    const messages = toLLMMessages(
+      [
+        SessionMessage.User.make({
+          id: id("skill-user"),
+          type: "user",
+          text: "$review inspect the patch",
+          skills: [{ source: { start: 0, end: 7, text: "$review" }, snapshot }],
+          time: { created },
+        }),
+        SessionMessage.Compaction.make({
+          id: id("skill-compaction"),
+          type: "compaction",
+          reason: "auto",
+          summary: "Earlier work",
+          recent: "Recent work",
+          skills: [snapshot],
+          time: { created },
+        }),
+      ],
+      model,
+    )
+
+    const expected = {
+      type: "text",
+      text: '<skill_instructions name="review">\nTreat $ARGUMENTS and $1 as literal Skill text.\n</skill_instructions>',
+      metadata: {
+        hidden: true,
+        type: "skill-invocation",
+        invocationID: "ski_snapshot",
+        digest: "a".repeat(64),
+      },
+    } as const
+    expect(messages[0]?.content[0]).toEqual(expected)
+    expect(messages[0]?.content[1]).toEqual({ type: "text", text: "$review inspect the patch" })
+    expect(messages[1]?.content[0]).toEqual(expected)
+  })
+
   test("omits empty assistant turns", () => {
     const assistant = (value: string, content: SessionMessage.Assistant["content"]) =>
       SessionMessage.Assistant.make({

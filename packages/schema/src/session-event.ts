@@ -13,6 +13,7 @@ import { Location } from "./location"
 import { SessionMessage } from "./session-message"
 import { Revert } from "./revert"
 import { ModelContext } from "./model-context"
+import { SkillInvocation } from "./skill-invocation"
 
 export { FileAttachment }
 
@@ -484,6 +485,7 @@ export namespace Compaction {
       reason: Started.data.fields.reason,
       text: Schema.String,
       recent: Schema.String,
+      skills: Schema.Array(SkillInvocation.Snapshot).pipe(optional),
     },
   })
   export type Ended = typeof Ended.Type

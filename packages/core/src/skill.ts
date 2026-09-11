@@ -45,7 +45,13 @@ export interface Interface extends State.Transformable<Draft> {
   readonly sources: () => Effect.Effect<Source[]>
   readonly list: () => Effect.Effect<Info[]>
   readonly catalog: (options?: SkillRegistry.LoadOptions) => Effect.Effect<SkillRegistry.Result>
+  readonly lookup: (id: Skill.ID) => Effect.Effect<Lookup>
 }
+
+export type Lookup =
+  | { readonly status: "missing" }
+  | { readonly status: "target-inapplicable"; readonly entry: SkillRegistry.Entry }
+  | { readonly status: "available"; readonly entry: SkillRegistry.Entry }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Skill") {}
 
@@ -137,6 +143,15 @@ const layer = Layer.effect(
       }),
       list,
       catalog: result,
+      lookup: Effect.fn("SkillV2.lookup")(function* (id) {
+        const loaded = yield* registry.load(state.get().registrations)
+        const entry = loaded.entries.find((item) => item.metadata.id === id)
+        if (!entry) return { status: "missing" as const }
+        const configured = yield* Effect.promise(() => settings.load())
+        const scope = configured.targets[id] ?? "*"
+        if (scope === "*" || scope.includes(state.get().target)) return { status: "available" as const, entry }
+        return { status: "target-inapplicable" as const, entry }
+      }),
     })
   }),
 )

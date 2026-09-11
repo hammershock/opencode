@@ -138,7 +138,12 @@ export class LocationRebindError extends Schema.TaggedErrorClass<LocationRebindE
 export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 
-export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
+export type Error =
+  | NotFoundError
+  | MessageDecodeError
+  | OperationUnavailableError
+  | PromptConflictError
+  | SkillCatalogContextService.AdmissionError
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
@@ -187,7 +192,10 @@ export interface Interface {
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
-  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | OperationUnavailableError>
+  }) => Effect.Effect<
+    SessionInput.Admitted,
+    NotFoundError | PromptConflictError | OperationUnavailableError | SkillCatalogContextService.AdmissionError
+  >
   /** Admits one queued prompt and resolves only from that exact input's durable terminal settlement. */
   readonly promptTurn: (input: {
     id?: SessionMessage.ID
@@ -195,7 +203,11 @@ export interface Interface {
     prompt: PromptInput.Prompt
   }) => Effect.Effect<
     SessionTurn.Outcome,
-    NotFoundError | PromptConflictError | OperationUnavailableError | SessionRunner.RunError
+    | NotFoundError
+    | PromptConflictError
+    | OperationUnavailableError
+    | SkillCatalogContextService.AdmissionError
+    | SessionRunner.RunError
   >
   readonly shell: (input: {
     id?: EventV2.ID
@@ -399,10 +411,44 @@ const layer = Layer.effect(
             Effect.gen(function* () {
               const location = yield* requireLocation(input.sessionID)
               const session = yield* result.get(input.sessionID)
-              yield* ensureContextForAdmission(session, location)
-              const resolved = resolvePrompt(input.prompt)
               const messageID = input.id ?? SessionMessage.ID.create()
               const delivery = input.delivery ?? "steer"
+              const base = resolvePrompt(input.prompt)
+              const recorded = input.id === undefined ? undefined : yield* SessionInput.find(db, messageID)
+              if (recorded) {
+                if (
+                  recorded.sessionID !== input.sessionID ||
+                  recorded.delivery !== delivery ||
+                  !SkillCatalogContextService.retryEquivalent(recorded.prompt, base, input.prompt.skills ?? [])
+                )
+                  return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+                if (input.resume !== false) yield* execution.wake(recorded.sessionID)
+                return recorded
+              }
+              yield* ensureContextForAdmission(session, location)
+              const catalog = yield* SessionContextEpoch.inspect(db, input.sessionID).pipe(
+                Effect.catch(() => new OperationUnavailableError({ operation: "modelContext" })),
+              )
+              if (!catalog) return yield* new OperationUnavailableError({ operation: "modelContext" })
+              const mentions = input.prompt.skills ?? []
+              const skills =
+                mentions.length === 0
+                  ? []
+                  : yield* Effect.gen(function* () {
+                      const admission = yield* SkillCatalogContextService.Service
+                      return yield* admission.resolve({
+                        sessionID: input.sessionID,
+                        messageID,
+                        text: input.prompt.text,
+                        mentions,
+                        agent: session.agent,
+                        catalog: catalog.sources,
+                      })
+                    }).pipe(Effect.provide(locations.get(location)))
+              const resolved = Prompt.make({
+                ...base,
+                ...(skills.length === 0 ? {} : { invocations: skills }),
+              })
               const expected = { sessionID: input.sessionID, messageID, prompt: resolved, delivery }
               const admitted = yield* SessionInput.admit(db, events, {
                 id: messageID,

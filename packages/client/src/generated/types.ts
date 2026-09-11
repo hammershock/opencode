@@ -49,6 +49,22 @@ export type ConflictError = {
 export const isConflictError = (value: unknown): value is ConflictError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ConflictError"
 
+export type SkillMentionError = {
+  readonly _tag: "SkillMentionError"
+  readonly message: string
+  readonly kind:
+    | "invalid-mention"
+    | "unavailable"
+    | "target-inapplicable"
+    | "permission-denied"
+    | "stale-catalog"
+    | "malformed"
+  readonly skillID: string
+  readonly name: string
+}
+export const isSkillMentionError = (value: unknown): value is SkillMentionError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "SkillMentionError"
+
 export type MessageNotFoundError = {
   readonly _tag: "MessageNotFoundError"
   readonly sessionID: string
@@ -513,6 +529,11 @@ export type SessionsPromptInput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly skills?: ReadonlyArray<{
+        readonly id: string
+        readonly name: string
+        readonly source: { readonly start: number; readonly end: number; readonly text: string }
+      }>
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
@@ -530,6 +551,11 @@ export type SessionsPromptInput = {
       readonly agents?: ReadonlyArray<{
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly skills?: ReadonlyArray<{
+        readonly id: string
+        readonly name: string
+        readonly source: { readonly start: number; readonly end: number; readonly text: string }
       }>
     }
     readonly delivery?: "steer" | "queue" | null
@@ -549,6 +575,11 @@ export type SessionsPromptInput = {
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
       }>
+      readonly skills?: ReadonlyArray<{
+        readonly id: string
+        readonly name: string
+        readonly source: { readonly start: number; readonly end: number; readonly text: string }
+      }>
     }
     readonly delivery?: "steer" | "queue" | null
     readonly resume?: boolean | null
@@ -566,6 +597,11 @@ export type SessionsPromptInput = {
       readonly agents?: ReadonlyArray<{
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly skills?: ReadonlyArray<{
+        readonly id: string
+        readonly name: string
+        readonly source: { readonly start: number; readonly end: number; readonly text: string }
       }>
     }
     readonly delivery?: "steer" | "queue" | null
@@ -590,6 +626,21 @@ export type SessionsPromptOutput = {
       readonly agents?: ReadonlyArray<{
         readonly name: string
         readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+      }>
+      readonly invocations?: ReadonlyArray<{
+        readonly source: { readonly start: number; readonly end: number; readonly text: string }
+        readonly snapshot: {
+          readonly id: string
+          readonly name: string
+          readonly description?: string
+          readonly digest: string
+          readonly source: {
+            readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+            readonly label: string
+          }
+          readonly content: string
+          readonly status: "loaded"
+        }
       }>
     }
     readonly delivery: "steer" | "queue"
@@ -669,6 +720,21 @@ export type SessionsContextOutput = {
         readonly agents?: ReadonlyArray<{
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+        }>
+        readonly skills?: ReadonlyArray<{
+          readonly source: { readonly start: number; readonly end: number; readonly text: string }
+          readonly snapshot: {
+            readonly id: string
+            readonly name: string
+            readonly description?: string
+            readonly digest: string
+            readonly source: {
+              readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+              readonly label: string
+            }
+            readonly content: string
+            readonly status: "loaded"
+          }
         }>
         readonly type: "user"
       }
@@ -785,6 +851,18 @@ export type SessionsContextOutput = {
         readonly reason: "auto" | "manual"
         readonly summary: string
         readonly recent: string
+        readonly skills?: ReadonlyArray<{
+          readonly id: string
+          readonly name: string
+          readonly description?: string
+          readonly digest: string
+          readonly source: {
+            readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+            readonly label: string
+          }
+          readonly content: string
+          readonly status: "loaded"
+        }>
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
@@ -995,6 +1073,21 @@ export type SessionsHistoryOutput = {
               readonly name: string
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
             }>
+            readonly invocations?: ReadonlyArray<{
+              readonly source: { readonly start: number; readonly end: number; readonly text: string }
+              readonly snapshot: {
+                readonly id: string
+                readonly name: string
+                readonly description?: string
+                readonly digest: string
+                readonly source: {
+                  readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+                  readonly label: string
+                }
+                readonly content: string
+                readonly status: "loaded"
+              }
+            }>
           }
           readonly delivery: "steer" | "queue"
         }
@@ -1026,6 +1119,21 @@ export type SessionsHistoryOutput = {
             readonly agents?: ReadonlyArray<{
               readonly name: string
               readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+            }>
+            readonly invocations?: ReadonlyArray<{
+              readonly source: { readonly start: number; readonly end: number; readonly text: string }
+              readonly snapshot: {
+                readonly id: string
+                readonly name: string
+                readonly description?: string
+                readonly digest: string
+                readonly source: {
+                  readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+                  readonly label: string
+                }
+                readonly content: string
+                readonly status: "loaded"
+              }
             }>
           }
           readonly delivery: "steer" | "queue"
@@ -1543,6 +1651,18 @@ export type SessionsHistoryOutput = {
           readonly reason: "auto" | "manual"
           readonly text: string
           readonly recent: string
+          readonly skills?: ReadonlyArray<{
+            readonly id: string
+            readonly name: string
+            readonly description?: string
+            readonly digest: string
+            readonly source: {
+              readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+              readonly label: string
+            }
+            readonly content: string
+            readonly status: "loaded"
+          }>
         }
       }
     | {
@@ -1763,6 +1883,21 @@ export type SessionsEventsOutput =
             readonly name: string
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
           }>
+          readonly invocations?: ReadonlyArray<{
+            readonly source: { readonly start: number; readonly end: number; readonly text: string }
+            readonly snapshot: {
+              readonly id: string
+              readonly name: string
+              readonly description?: string
+              readonly digest: string
+              readonly source: {
+                readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+                readonly label: string
+              }
+              readonly content: string
+              readonly status: "loaded"
+            }
+          }>
         }
         readonly delivery: "steer" | "queue"
       }
@@ -1794,6 +1929,21 @@ export type SessionsEventsOutput =
           readonly agents?: ReadonlyArray<{
             readonly name: string
             readonly source?: { readonly start: number; readonly end: number; readonly text: string }
+          }>
+          readonly invocations?: ReadonlyArray<{
+            readonly source: { readonly start: number; readonly end: number; readonly text: string }
+            readonly snapshot: {
+              readonly id: string
+              readonly name: string
+              readonly description?: string
+              readonly digest: string
+              readonly source: {
+                readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+                readonly label: string
+              }
+              readonly content: string
+              readonly status: "loaded"
+            }
           }>
         }
         readonly delivery: "steer" | "queue"
@@ -2311,6 +2461,18 @@ export type SessionsEventsOutput =
         readonly reason: "auto" | "manual"
         readonly text: string
         readonly recent: string
+        readonly skills?: ReadonlyArray<{
+          readonly id: string
+          readonly name: string
+          readonly description?: string
+          readonly digest: string
+          readonly source: {
+            readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+            readonly label: string
+          }
+          readonly content: string
+          readonly status: "loaded"
+        }>
       }
     }
   | {
@@ -2410,6 +2572,21 @@ export type SessionsMessageOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
+        readonly skills?: ReadonlyArray<{
+          readonly source: { readonly start: number; readonly end: number; readonly text: string }
+          readonly snapshot: {
+            readonly id: string
+            readonly name: string
+            readonly description?: string
+            readonly digest: string
+            readonly source: {
+              readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+              readonly label: string
+            }
+            readonly content: string
+            readonly status: "loaded"
+          }
+        }>
         readonly type: "user"
       }
     | {
@@ -2525,6 +2702,18 @@ export type SessionsMessageOutput = {
         readonly reason: "auto" | "manual"
         readonly summary: string
         readonly recent: string
+        readonly skills?: ReadonlyArray<{
+          readonly id: string
+          readonly name: string
+          readonly description?: string
+          readonly digest: string
+          readonly source: {
+            readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+            readonly label: string
+          }
+          readonly content: string
+          readonly status: "loaded"
+        }>
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
@@ -2582,6 +2771,21 @@ export type MessagesListOutput = {
           readonly name: string
           readonly source?: { readonly start: number; readonly end: number; readonly text: string }
         }>
+        readonly skills?: ReadonlyArray<{
+          readonly source: { readonly start: number; readonly end: number; readonly text: string }
+          readonly snapshot: {
+            readonly id: string
+            readonly name: string
+            readonly description?: string
+            readonly digest: string
+            readonly source: {
+              readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+              readonly label: string
+            }
+            readonly content: string
+            readonly status: "loaded"
+          }
+        }>
         readonly type: "user"
       }
     | {
@@ -2697,6 +2901,18 @@ export type MessagesListOutput = {
         readonly reason: "auto" | "manual"
         readonly summary: string
         readonly recent: string
+        readonly skills?: ReadonlyArray<{
+          readonly id: string
+          readonly name: string
+          readonly description?: string
+          readonly digest: string
+          readonly source: {
+            readonly kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+            readonly label: string
+          }
+          readonly content: string
+          readonly status: "loaded"
+        }>
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }

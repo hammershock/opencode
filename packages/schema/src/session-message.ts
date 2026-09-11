@@ -5,6 +5,7 @@ import { optional } from "./schema"
 import { ProviderMetadata, ToolContent } from "./llm"
 import { Model } from "./model"
 import { FileAttachment, Prompt } from "./prompt"
+import { SkillInvocation } from "./skill-invocation"
 import { DateTimeUtcFromMillis, RelativePath, statics } from "./schema"
 import { SessionID } from "./session-id"
 import { ascending } from "./identifier"
@@ -47,6 +48,7 @@ export const User = Schema.Struct({
   text: Prompt.fields.text,
   files: Prompt.fields.files,
   agents: Prompt.fields.agents,
+  skills: Prompt.fields.invocations,
   type: Schema.Literal("user"),
 }).annotate({ identifier: "Session.Message.User" })
 
@@ -194,6 +196,7 @@ export const Compaction = Schema.Struct({
   reason: Schema.Literals(["auto", "manual"]),
   summary: Schema.String,
   recent: Schema.String,
+  skills: Schema.Array(SkillInvocation.Snapshot).pipe(optional),
   ...Base,
 }).annotate({ identifier: "Session.Message.Compaction" })
 

@@ -50,10 +50,16 @@ export interface Registration {
 
 export interface Interface {
   readonly load: (sources: ReadonlyArray<Registration>, options?: LoadOptions) => Effect.Effect<Result>
+  readonly read: (entry: Entry) => Effect.Effect<Entry, ReadError>
   readonly invalidate: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SkillRegistry") {}
+
+export class ReadError extends Schema.TaggedErrorClass<ReadError>()("SkillRegistry.ReadError", {
+  skillID: Skill.ID,
+  kind: Schema.Literals(["unavailable", "stale-catalog", "malformed"]),
+}) {}
 
 type SourceResult = {
   readonly entries: ReadonlyArray<Entry>
@@ -127,6 +133,28 @@ const layer = Layer.effect(
           entries,
           snapshot: Skill.RegistrySnapshot.make({ revision: digest, skills, diagnostics, digest }),
         }
+      }),
+      read: Effect.fn("SkillRegistry.read")(function* (entry) {
+        if (entry.source.kind === "built-in") return entry
+        const content = yield* fs
+          .readFileStringSafe(entry.location)
+          .pipe(Effect.mapError(() => new ReadError({ skillID: entry.metadata.id, kind: "unavailable" })))
+        if (content === undefined) return yield* new ReadError({ skillID: entry.metadata.id, kind: "unavailable" })
+        const markdown = ConfigMarkdown.parseOption(content)
+        if (!markdown) return yield* new ReadError({ skillID: entry.metadata.id, kind: "malformed" })
+        const frontmatter = decodeFrontmatter(markdown.data).valueOrUndefined
+        if (!frontmatter) return yield* new ReadError({ skillID: entry.metadata.id, kind: "malformed" })
+        const name =
+          frontmatter.name ??
+          (path.basename(entry.location) === "SKILL.md" ? undefined : path.basename(entry.location, ".md"))
+        if (
+          name !== entry.metadata.name ||
+          frontmatter.description !== entry.metadata.description ||
+          frontmatter.slash !== entry.slash ||
+          makeDigest(markdown.content) !== entry.metadata.digest
+        )
+          return yield* new ReadError({ skillID: entry.metadata.id, kind: "stale-catalog" })
+        return { ...entry, content: markdown.content }
       }),
     })
   }),

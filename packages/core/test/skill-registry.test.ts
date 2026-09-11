@@ -168,4 +168,32 @@ describe("SkillRegistry", () => {
       ),
     ),
   )
+
+  it.live("re-reads the selected package and rejects stale, missing, or malformed content", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const root = path.join(tmp.path, "skills")
+          const file = path.join(root, "review", "SKILL.md")
+          yield* Effect.promise(() => writeSkill(root, "review", "review", "Review $ARGUMENTS and $1 literally"))
+
+          const registry = yield* SkillRegistry.Service
+          const entry = (yield* registry.load([source(root)])).entries[0]!
+          expect((yield* registry.read(entry)).content).toBe("Review $ARGUMENTS and $1 literally")
+
+          yield* Effect.promise(() => writeSkill(root, "review", "review", "Changed body"))
+          expect((yield* Effect.flip(registry.read(entry))).kind).toBe("stale-catalog")
+
+          yield* Effect.promise(() => fs.unlink(file))
+          expect((yield* Effect.flip(registry.read(entry))).kind).toBe("unavailable")
+
+          yield* Effect.promise(() => fs.writeFile(file, "---\nname: review\nslash: not-a-boolean\n---\nBroken"))
+          expect((yield* Effect.flip(registry.read(entry))).kind).toBe("malformed")
+        }),
+      ),
+    ),
+  )
 })

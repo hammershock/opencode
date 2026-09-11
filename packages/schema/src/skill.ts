@@ -136,6 +136,16 @@ export const Activation = Schema.Struct({
   diagnostics: Schema.Array(ActivationDiagnostic),
 }).annotate({ identifier: "Skill.Activation" })
 
+export const InvocationFailureKind = Schema.Literals([
+  "invalid-mention",
+  "unavailable",
+  "target-inapplicable",
+  "permission-denied",
+  "stale-catalog",
+  "malformed",
+])
+export type InvocationFailureKind = typeof InvocationFailureKind.Type
+
 export interface DiscoveryUpdate extends Schema.Schema.Type<typeof DiscoveryUpdate> {}
 export const DiscoveryUpdate = Schema.Struct({
   paths: Schema.Array(Schema.String),

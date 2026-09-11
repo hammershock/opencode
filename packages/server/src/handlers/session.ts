@@ -11,6 +11,7 @@ import {
   ServiceUnavailableError,
   SessionNotFoundError,
   UnknownError,
+  SkillMentionError,
 } from "@opencode-ai/protocol/errors"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Location } from "@opencode-ai/core/location"
@@ -237,6 +238,16 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                     new InvalidRequestError({
                       message: `Session ${error.operation} is not available`,
                       kind: `session_${error.operation}`,
+                    }),
+                  ),
+                ),
+                Effect.catchTag("SkillAdmission.Error", (error) =>
+                  Effect.fail(
+                    new SkillMentionError({
+                      message: `Skill mention could not be admitted: ${error.name}`,
+                      kind: error.kind,
+                      skillID: error.skillID,
+                      name: error.name,
                     }),
                   ),
                 ),

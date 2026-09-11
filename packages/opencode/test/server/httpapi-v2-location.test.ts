@@ -246,6 +246,102 @@ describe("v2 location HttpApi", () => {
     expect(await advances()).toHaveLength(1)
   })
 
+  test("admits portable Skill snapshots atomically and reuses them for exact retries", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./explicit-skills"] } },
+    })
+    const skillFile = path.join(tmp.path, "explicit-skills", "review", "SKILL.md")
+    await fs.mkdir(path.dirname(skillFile), { recursive: true })
+    await fs.writeFile(
+      skillFile,
+      "---\nname: review\ndescription: Review a patch\n---\nKeep $ARGUMENTS and $1 literal.",
+    )
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: tmp.path } }),
+    })
+    expect(created.status, await created.clone().text()).toBe(200)
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activated = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+    expect(activated.status, await activated.clone().text()).toBe(200)
+
+    const catalogResponse = await request("/api/skill/catalog?forceReload=false", tmp.path)
+    expect(catalogResponse.status, await catalogResponse.clone().text()).toBe(200)
+    const catalog = (await catalogResponse.json()) as {
+      data: { skills: Array<{ id: string; name: string }> }
+    }
+    const skill = catalog.data.skills.find((item) => item.name === "review")!
+    const prompt = {
+      text: "$review $review inspect the patch",
+      skills: [
+        { id: skill.id, name: skill.name, source: { start: 0, end: 7, text: "$review" } },
+        { id: skill.id, name: skill.name, source: { start: 8, end: 15, text: "$review" } },
+      ],
+    }
+    const admit = (id: string, value = prompt) =>
+      request(`/api/session/${sessionID}/prompt`, tmp.path, {
+        method: "POST",
+        body: JSON.stringify({ id, prompt: value, resume: false }),
+      })
+
+    const [first, concurrent] = await Promise.all([admit("msg_skill_snapshot"), admit("msg_skill_snapshot")])
+    expect(first.status, await first.clone().text()).toBe(200)
+    expect(concurrent.status, await concurrent.clone().text()).toBe(200)
+    const admitted = (await first.json()) as {
+      data: {
+        prompt: {
+          text: string
+          invocations: Array<{
+            source: { start: number; end: number; text: string }
+            snapshot: { id: string; name: string; digest: string; source: { label: string }; content: string }
+          }>
+        }
+      }
+    }
+    expect(admitted.data.prompt.text).toBe(prompt.text)
+    expect(admitted.data.prompt.invocations).toHaveLength(1)
+    expect(admitted.data.prompt.invocations[0]).toMatchObject({
+      source: prompt.skills[0]!.source,
+      snapshot: {
+        id: expect.stringMatching(/^ski_/),
+        name: "review",
+        source: { label: "Imported" },
+        content: "Keep $ARGUMENTS and $1 literal.",
+      },
+    })
+    expect(JSON.stringify(admitted)).not.toContain("skl_")
+    expect(JSON.stringify(admitted)).not.toContain(tmp.path)
+    expect(await concurrent.json()).toEqual(admitted)
+
+    await fs.writeFile(skillFile, "---\nname: review\ndescription: Review a patch\n---\nChanged body")
+    await disposeAllInstances()
+    const retried = await admit("msg_skill_snapshot")
+    expect(retried.status, await retried.clone().text()).toBe(200)
+    expect(await retried.json()).toEqual(admitted)
+
+    const stale = await admit("msg_skill_stale")
+    expect(stale.status).toBe(400)
+    expect(await stale.json()).toMatchObject({ _tag: "SkillMentionError", kind: "stale-catalog", name: "review" })
+
+    await fs.unlink(skillFile)
+    const missing = await admit("msg_skill_missing")
+    expect(missing.status).toBe(400)
+    expect(await missing.json()).toMatchObject({ _tag: "SkillMentionError", kind: "unavailable", name: "review" })
+
+    const invalid = await admit("msg_skill_invalid", {
+      text: "$review inspect",
+      skills: [{ id: skill.id, name: skill.name, source: { start: 1, end: 7, text: "$review" } }],
+    })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({ _tag: "SkillMentionError", kind: "invalid-mention", name: "review" })
+
+    const history = await request(`/api/session/${sessionID}/history?limit=100`, tmp.path)
+    const events = (await history.json()) as { data: Array<{ type: string }> }
+    expect(events.data.filter((event) => event.type === "session.next.prompt.admitted")).toHaveLength(1)
+  })
+
   test("streams native EventV2 payloads across locations", async () => {
     await using subscriber = await tmpdir({ git: true })
     await using publisher = await tmpdir({ git: true })

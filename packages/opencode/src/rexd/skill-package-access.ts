@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
+import { EventV2 } from "@opencode-ai/core/event"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SkillPackageAccess } from "@opencode-ai/core/skill/package-access"
 import { SkillPackageSnapshot } from "@opencode-ai/core/skill/package-snapshot"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Effect, Layer } from "effect"
 import { RexdLocationSession } from "./location-session"
 import { RexdSkillMaterializer } from "./skill-materializer"
@@ -33,6 +35,17 @@ export function rexdSkillPackageAccessNode(
           ? dependencies.makeMaterializer(targetID, lease, appID)
           : new RexdSkillMaterializer.Materializer(targetID, lease, appID)
         const prepared = new Map<string, Promise<RexdSkillMaterializer.Attachment>>()
+        const release = async (sessionID: string) => {
+          const attachments = [...prepared.entries()].filter(([key]) => key.startsWith(`${sessionID}\0`))
+          attachments.forEach(([key]) => prepared.delete(key))
+          await Promise.allSettled(attachments.map(([, attachment]) => attachment.then((value) => value.release())))
+        }
+        const events = yield* EventV2.Service
+        const unsubscribe = yield* events.listen((event) => {
+          if (!isSessionDeleted(event)) return Effect.void
+          return Effect.promise(() => release(event.data.sessionID))
+        })
+        yield* Effect.addFinalizer(() => unsubscribe)
         yield* Effect.addFinalizer(() => Effect.promise(() => materializer.close()))
 
         return SkillPackageAccess.Service.of({
@@ -74,6 +87,10 @@ export function rexdSkillPackageAccessNode(
         })
       }),
     ),
-    deps: [session, SkillPackageSnapshot.node],
+    deps: [session, SkillPackageSnapshot.node, EventV2.node],
   })
+}
+
+function isSessionDeleted(event: EventV2.Payload): event is EventV2.Payload<typeof SessionV1.Event.Deleted> {
+  return event.type === SessionV1.Event.Deleted.type
 }

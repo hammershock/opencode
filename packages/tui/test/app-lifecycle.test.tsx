@@ -228,6 +228,127 @@ test.each([
   }
 })
 
+test("Ctrl+P opens the production Skill Manager without a model turn", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 34, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/target")
+      return json({
+        path: "/tmp/opencode/targets.jsonc",
+        revision: "target",
+        targets: [],
+        diagnostics: [],
+        valid: true,
+      })
+    if (url.pathname === "/api/skill/settings")
+      return json({
+        path: "/tmp/opencode/opencode.jsonc",
+        revision: "settings",
+        roots: [
+          {
+            kind: "opencode-global",
+            value: "/tmp/opencode/skills",
+            resolved: "/tmp/opencode/skills",
+            default: true,
+            status: "ready",
+          },
+        ],
+        targets: {},
+        diagnostics: [],
+        valid: true,
+      })
+    if (url.pathname === "/api/skill/catalog")
+      return json({
+        location: { target: { type: "local" }, directory: "/tmp/opencode", project: { id: "test", directory } },
+        data: {
+          revision: "catalog",
+          digest: "catalog",
+          skills: [
+            {
+              id: `skl_${"1".repeat(64)}`,
+              name: "review",
+              description: "Review changes",
+              sourceLabel: "OpenCode config",
+              digest: "digest",
+            },
+          ],
+          diagnostics: [],
+        },
+      })
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [{ id: "test", name: "Test", source: "custom", env: [], options: {}, models: {} }],
+        default: {},
+      })
+  })
+  let started!: () => void
+  let api: TuiPluginApi | undefined
+  let disposeSlots = () => {}
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: {},
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            disposeSlots = input.runtime.setupSlots(input.api).dispose
+            started()
+          },
+          async dispose() {
+            disposeSlots()
+          },
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    await setup.waitForVisualIdle()
+    await waitForEditor(setup, 5_000)
+    expect(
+      api?.keymap
+        .getCommandEntries({ visibility: "reachable", namespace: "palette" })
+        .map((entry) => entry.command.name),
+    ).toContain("fork.skill.manage")
+    const { getActiveCommandHost } = await import("../src/command-toolkit/host")
+    expect(
+      getActiveCommandHost(api!.keymap)
+        ?.commands()
+        .map((command) => command.identity),
+    ).toContain("fork.skill.manage")
+    const sessionRequests = calls.session.length
+    setup.mockInput.pressKey("p", { ctrl: true })
+    await waitForFrame(setup, "Commands")
+    await waitForEditor(setup)
+    "Manage skills".split("").forEach((key) => setup.mockInput.pressKey(key))
+    await waitForFrame(setup, "Manage local discovery paths")
+    setup.mockInput.pressEnter()
+    await waitForFrame(setup, "Discovery paths")
+
+    const frame = setup.captureCharFrame()
+    expect(frame).toContain("OpenCode config")
+    expect(frame).toContain("1 paths · 1 Skills")
+    expect(calls.session).toHaveLength(sessionRequests)
+
+    process.emit("SIGHUP")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+}, 10_000)
+
 test("QuickStart accepts and renders keyboard input without starving the keymap", async () => {
   const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
   const core = await import("@opentui/core")

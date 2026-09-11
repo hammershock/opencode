@@ -663,11 +663,10 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Skills",
-        desc: "Browse available skills",
+        title: "Insert skill mention",
+        desc: "Open Skill autocomplete in the prompt",
         name: "prompt.skills",
         category: "Prompt",
-        slashName: "skills",
         run: () => {
           dialog.clear()
           setTimeout(() => {

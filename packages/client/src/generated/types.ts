@@ -485,6 +485,8 @@ export type SessionsActivateOutput = {
         | "read-failed"
         | "invalid-frontmatter"
         | "invalid-name"
+        | "invalid-description"
+        | "legacy-layout"
         | "name-mismatch"
         | "duplicate-name"
         | "invalid-settings"
@@ -3791,6 +3793,8 @@ export type SkillsCatalogOutput = {
         | "read-failed"
         | "invalid-frontmatter"
         | "invalid-name"
+        | "invalid-description"
+        | "legacy-layout"
         | "name-mismatch"
         | "duplicate-name"
         | "invalid-settings"
@@ -3843,6 +3847,8 @@ export type SkillsReloadOutput = {
         | "read-failed"
         | "invalid-frontmatter"
         | "invalid-name"
+        | "invalid-description"
+        | "legacy-layout"
         | "name-mismatch"
         | "duplicate-name"
         | "invalid-settings"
@@ -4409,6 +4415,7 @@ export type TargetsListOutput = {
     readonly defaultDirectory?: string | undefined
     readonly workspaceRoots: ReadonlyArray<string>
     readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    readonly skillStagingRoot?: string | undefined
   }>
   readonly diagnostics: ReadonlyArray<{
     readonly severity: "error" | "warning"
@@ -4464,6 +4471,7 @@ export type TargetsResolveSessionOutput =
         readonly defaultDirectory?: string | null
         readonly workspaceRoots: ReadonlyArray<string>
         readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | null
+        readonly skillStagingRoot?: string | null
       } | null
     }
   | {
@@ -4526,6 +4534,7 @@ export type TargetsResolveSessionOutput =
         readonly defaultDirectory?: string | null
         readonly workspaceRoots: ReadonlyArray<string>
         readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | null
+        readonly skillStagingRoot?: string | null
       }
       readonly stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       readonly message: string
@@ -4625,6 +4634,7 @@ export type TargetsInspectInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
   }["input"]
 }
@@ -4648,6 +4658,7 @@ export type TargetsCompleteInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly value: string
     readonly cursor: number
@@ -4669,6 +4680,7 @@ export type TargetsCompleteInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly value: string
     readonly cursor: number
@@ -4690,6 +4702,7 @@ export type TargetsCompleteInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly value: string
     readonly cursor: number
@@ -4711,6 +4724,7 @@ export type TargetsCompleteInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly value: string
     readonly cursor: number
@@ -4741,6 +4755,7 @@ export type TargetsCreateInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly expectedRevision: string
   }["input"]
@@ -4760,6 +4775,7 @@ export type TargetsCreateInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly expectedRevision: string
   }["expectedRevision"]
@@ -4798,6 +4814,7 @@ export type TargetsCreateOutput = {
     readonly defaultDirectory?: string | undefined
     readonly workspaceRoots: ReadonlyArray<string>
     readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    readonly skillStagingRoot?: string | undefined
   }
   readonly snapshot: {
     readonly path: string
@@ -4836,6 +4853,7 @@ export type TargetsCreateOutput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }>
     readonly diagnostics: ReadonlyArray<{
       readonly severity: "error" | "warning"
@@ -4865,6 +4883,7 @@ export type TargetsUpdateInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly expectedRevision: string
   }["input"]
@@ -4884,6 +4903,7 @@ export type TargetsUpdateInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly expectedRevision: string
   }["expectedRevision"]
@@ -4922,6 +4942,7 @@ export type TargetsUpdateOutput = {
     readonly defaultDirectory?: string | undefined
     readonly workspaceRoots: ReadonlyArray<string>
     readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    readonly skillStagingRoot?: string | undefined
   }
   readonly snapshot: {
     readonly path: string
@@ -4960,6 +4981,7 @@ export type TargetsUpdateOutput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }>
     readonly diagnostics: ReadonlyArray<{
       readonly severity: "error" | "warning"
@@ -5011,6 +5033,7 @@ export type TargetsRemoveOutput = {
     readonly defaultDirectory?: string | undefined
     readonly workspaceRoots: ReadonlyArray<string>
     readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    readonly skillStagingRoot?: string | undefined
   }>
   readonly diagnostics: ReadonlyArray<{
     readonly severity: "error" | "warning"
@@ -5039,6 +5062,7 @@ export type TargetsRestoreInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly referencedSessionIDs: ReadonlyArray<string>
     readonly expectedRevision: string
@@ -5059,6 +5083,7 @@ export type TargetsRestoreInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly referencedSessionIDs: ReadonlyArray<string>
     readonly expectedRevision: string
@@ -5079,6 +5104,7 @@ export type TargetsRestoreInput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }
     readonly referencedSessionIDs: ReadonlyArray<string>
     readonly expectedRevision: string
@@ -5118,6 +5144,7 @@ export type TargetsRestoreOutput = {
     readonly defaultDirectory?: string | undefined
     readonly workspaceRoots: ReadonlyArray<string>
     readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    readonly skillStagingRoot?: string | undefined
   }
   readonly snapshot: {
     readonly path: string
@@ -5156,6 +5183,7 @@ export type TargetsRestoreOutput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }>
     readonly diagnostics: ReadonlyArray<{
       readonly severity: "error" | "warning"
@@ -5255,6 +5283,7 @@ export type TargetsPreviewLegacyImportOutput = {
     readonly defaultDirectory?: string | undefined
     readonly workspaceRoots: ReadonlyArray<string>
     readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    readonly skillStagingRoot?: string | undefined
   }>
   readonly diagnostics: ReadonlyArray<{
     readonly severity: "error" | "warning"
@@ -5302,6 +5331,7 @@ export type TargetsImportLegacyOutput = {
     readonly defaultDirectory?: string | undefined
     readonly workspaceRoots: ReadonlyArray<string>
     readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+    readonly skillStagingRoot?: string | undefined
   }>
   readonly snapshot: {
     readonly path: string
@@ -5340,6 +5370,7 @@ export type TargetsImportLegacyOutput = {
       readonly defaultDirectory?: string | undefined
       readonly workspaceRoots: ReadonlyArray<string>
       readonly command?: { readonly program: string; readonly args: ReadonlyArray<string> } | undefined
+      readonly skillStagingRoot?: string | undefined
     }>
     readonly diagnostics: ReadonlyArray<{
       readonly severity: "error" | "warning"

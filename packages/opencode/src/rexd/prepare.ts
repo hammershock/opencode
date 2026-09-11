@@ -3,6 +3,7 @@ import { RexdError } from "./error"
 import { runSshInput, runSshScript, type RexdTarget } from "./ssh"
 
 export const REMOTE_DETECT_TIMEOUT_MS = 8_000
+export const MANAGED_SKILL_STAGING_ROOT = "/tmp/opencode-transit/skills"
 
 export type RemotePlatform = {
   platform: RexdPlatform
@@ -113,7 +114,7 @@ export async function prepareManagedRexd(
       artifact: artifact.name,
       checksum: artifact.sha256,
       url: artifactURL(remote.platform),
-      roots: target.workspaceRoots,
+      roots: [...new Set([...target.workspaceRoots, MANAGED_SKILL_STAGING_ROOT])],
     }),
     signal,
   )
@@ -133,7 +134,7 @@ export async function prepareManagedRexd(
             config,
             artifact: artifact.name,
             checksum: artifact.sha256,
-            roots: target.workspaceRoots,
+            roots: [...new Set([...target.workspaceRoots, MANAGED_SKILL_STAGING_ROOT])],
           }),
         )}`,
         payload,

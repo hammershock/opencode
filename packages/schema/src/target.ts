@@ -64,6 +64,7 @@ export const Input = Schema.Struct({
   defaultDirectory: Schema.optional(Schema.String),
   workspaceRoots: Schema.Array(Schema.String),
   command: Schema.optional(Command),
+  skillStagingRoot: Schema.optional(Schema.String),
 })
 
 export const Definition = Schema.Struct({

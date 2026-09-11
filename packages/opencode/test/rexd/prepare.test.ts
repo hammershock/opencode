@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { RexdError } from "../../src/rexd/error"
 import { REXD_ARTIFACTS, REXD_BASELINE_VERSION } from "../../src/rexd/manifest"
-import { detectRemotePlatform, prepareManagedRexd } from "../../src/rexd/prepare"
+import { MANAGED_SKILL_STAGING_ROOT, detectRemotePlatform, prepareManagedRexd } from "../../src/rexd/prepare"
 import type { RexdTarget } from "../../src/rexd/ssh"
 
 const target: RexdTarget = {
@@ -80,6 +80,7 @@ describe("managed Rexd prepare", () => {
     expect(scripts[1]).not.toContain("sudo")
     expect(scripts[1]).not.toContain("releases/latest")
     expect(scripts[1]).not.toContain("$HOME/.config/rexd")
+    expect(scripts[1]).toContain(`path = "${MANAGED_SKILL_STAGING_ROOT}"`)
     const syntax = Bun.spawn(["sh", "-n"], { stdin: new Blob([scripts[1]!]), stdout: "ignore", stderr: "pipe" })
     expect(await syntax.exited, await new Response(syntax.stderr).text()).toBe(0)
   })

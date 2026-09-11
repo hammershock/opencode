@@ -7584,6 +7584,7 @@ export class Wizard extends HeyApiClient {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }
     },
     options?: Options<never, ThrowOnError>,
@@ -7631,6 +7632,7 @@ export class Wizard extends HeyApiClient {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }
       value?: string
       cursor?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
@@ -7755,6 +7757,7 @@ export class Target extends HeyApiClient {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }
       expectedRevision?: string
     },
@@ -7843,6 +7846,7 @@ export class Target extends HeyApiClient {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }
       expectedRevision?: string
     },
@@ -7899,6 +7903,7 @@ export class Target extends HeyApiClient {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }
       referencedSessionIDs?: Array<string>
       expectedRevision?: string

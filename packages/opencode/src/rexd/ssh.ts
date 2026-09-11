@@ -10,6 +10,7 @@ export type RexdTarget = {
   connection: SshConnection
   workspaceRoots: readonly string[]
   command?: { program: string; args: readonly string[] }
+  skillStagingRoot?: string
 }
 
 export type Transport = {

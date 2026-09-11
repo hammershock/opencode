@@ -149,6 +149,37 @@ describe("TargetRegistry", () => {
     )
   })
 
+  test("accepts a Skill staging root only for a custom Rexd command", async () => {
+    await using root = await tmpdir()
+    const registry = TargetRegistry.make({ directory: root.path })
+    const initial = await registry.load()
+    await expect(
+      registry.create({ ...manual("managed"), skillStagingRoot: "/tmp/skills" }, initial.revision),
+    ).rejects.toMatchObject({
+      _tag: "TargetRegistry.InvalidConfigError",
+      diagnostics: [expect.objectContaining({ path: "$input.skillStagingRoot" })],
+    })
+    await expect(
+      registry.create(
+        { ...manual("root"), command: { program: "/opt/rexd", args: ["--stdio"] }, skillStagingRoot: "/tmp/.." },
+        initial.revision,
+      ),
+    ).rejects.toMatchObject({
+      _tag: "TargetRegistry.InvalidConfigError",
+      diagnostics: [expect.objectContaining({ path: "$input.skillStagingRoot" })],
+    })
+    const custom = await registry.create(
+      {
+        ...manual("custom"),
+        command: { program: "/opt/rexd", args: ["--stdio"] },
+        skillStagingRoot: "/tmp/skills",
+      },
+      initial.revision,
+    )
+    expect(custom.target.skillStagingRoot).toBe("/tmp/skills")
+    expect((await registry.load()).targets[0]?.skillStagingRoot).toBe("/tmp/skills")
+  })
+
   test("removal only changes the registry and restoration requires an explicit affected Session batch", async () => {
     await using root = await tmpdir()
     const registry = TargetRegistry.make({

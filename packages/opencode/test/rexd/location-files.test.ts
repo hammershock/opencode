@@ -51,7 +51,7 @@ describe("Rexd Location filesystem boundary", () => {
     expect(called).toBe(false)
   })
 
-  test("rejects truncated reads without using unsupported offset pagination", async () => {
+  test("rejects truncated whole reads and supports bounded offset reads", async () => {
     const calls: Readonly<Record<string, unknown>>[] = []
     const lease = {
       handshake: { sessionID: "session-1", workspaceRoots: ["/"] },
@@ -63,7 +63,7 @@ describe("Rexd Location filesystem boundary", () => {
             size: 600_000,
             mtime: 1,
             encoding: "base64",
-            content: Buffer.alloc(512 * 1024).toString("base64"),
+            content: Buffer.alloc(Number(params.length ?? 512 * 1024)).toString("base64"),
             truncated: true,
           }
         },
@@ -71,8 +71,10 @@ describe("Rexd Location filesystem boundary", () => {
     } as unknown as RexdLease
 
     await expect(new RexdFiles("gpu", lease).read("/large", "/")).rejects.toThrow("negotiated Rexd read limit")
-    expect(calls).toHaveLength(1)
+    expect((await new RexdFiles("gpu", lease).readRange("/large", "/", 262_144, 262_144)).content).toHaveLength(262_144)
+    expect(calls).toHaveLength(2)
     expect(calls[0]).not.toHaveProperty("offset")
+    expect(calls[1]).toMatchObject({ offset: 262_144, length: 262_144, encoding: "base64" })
   })
 
   test("treats a bounded symlink chain ending in a directory as a directory", async () => {

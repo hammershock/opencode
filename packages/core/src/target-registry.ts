@@ -38,6 +38,7 @@ export type Definition = {
   readonly defaultDirectory?: string
   readonly workspaceRoots: readonly string[]
   readonly command?: { readonly program: string; readonly args: readonly string[] }
+  readonly skillStagingRoot?: string
 }
 
 export type Input = Omit<Definition, "id" | "status" | "health">
@@ -247,7 +248,14 @@ export function make(options: {
         validateInput(input, snapshot.targets, targetID)
         const target = { id: targetID, status: "unverified" as const, ...input } satisfies Definition
         const fields = encode(target)
-        const scalar = ["name", "transport", "defaultDirectory", "workspaceRoots", "command"] as const
+        const scalar = [
+          "name",
+          "transport",
+          "defaultDirectory",
+          "workspaceRoots",
+          "command",
+          "skillStagingRoot",
+        ] as const
         const base = scalar.reduce((current, key) => edit(current, ["targets", targetID, key], fields[key]), text)
         const connectionKeys = ["type", "host", "user", "port", "identityFile"] as const
         const connection =
@@ -432,6 +440,7 @@ function encode(target: Definition) {
     defaultDirectory: target.defaultDirectory,
     workspaceRoots: target.workspaceRoots,
     command: target.command,
+    skillStagingRoot: target.skillStagingRoot,
   }
 }
 
@@ -483,6 +492,10 @@ function decodeTarget(prefix: string, value: unknown, diagnostics: Diagnostic[],
       ? undefined
       : string(value.defaultDirectory, `${prefix}.defaultDirectory`, diagnostics)
   const command = decodeCommand(value.command, `${prefix}.command`, diagnostics)
+  const skillStagingRoot =
+    value.skillStagingRoot === undefined
+      ? undefined
+      : string(value.skillStagingRoot, `${prefix}.skillStagingRoot`, diagnostics)
   roots?.forEach((root, index) => {
     if (!path.posix.isAbsolute(root))
       diagnostics.push(error(`${prefix}.workspaceRoots[${index}]`, "Expected an absolute remote path"))
@@ -491,6 +504,12 @@ function decodeTarget(prefix: string, value: unknown, diagnostics: Diagnostic[],
     diagnostics.push(error(`${prefix}.defaultDirectory`, "Expected an absolute remote path"))
   if (defaultDirectory && roots && !roots.some((root) => within(root, defaultDirectory)))
     diagnostics.push(error(`${prefix}.defaultDirectory`, "Directory must be inside a workspace root"))
+  if (skillStagingRoot && !path.posix.isAbsolute(skillStagingRoot))
+    diagnostics.push(error(`${prefix}.skillStagingRoot`, "Expected an absolute remote path"))
+  if (skillStagingRoot && path.posix.normalize(skillStagingRoot) === "/")
+    diagnostics.push(error(`${prefix}.skillStagingRoot`, "Skill staging root cannot be the remote filesystem root"))
+  if (skillStagingRoot && !command)
+    diagnostics.push(error(`${prefix}.skillStagingRoot`, "Field is only valid for a custom Rexd command"))
   if (
     !name ||
     !connection ||
@@ -507,6 +526,7 @@ function decodeTarget(prefix: string, value: unknown, diagnostics: Diagnostic[],
     defaultDirectory,
     workspaceRoots: roots,
     command,
+    skillStagingRoot,
   }
 }
 
@@ -614,7 +634,15 @@ function structureDiagnostics(root: Node) {
 function allowedKeys(prefix: string) {
   if (prefix === "$.") return new Set(["version", "targets"])
   if (/^\$\.targets\.[^.]+$/.test(prefix))
-    return new Set(["name", "transport", "connection", "defaultDirectory", "workspaceRoots", "command"])
+    return new Set([
+      "name",
+      "transport",
+      "connection",
+      "defaultDirectory",
+      "workspaceRoots",
+      "command",
+      "skillStagingRoot",
+    ])
   if (/^\$\.targets\.[^.]+\.connection$/.test(prefix)) return new Set(["type", "host", "user", "port", "identityFile"])
   if (/^\$\.targets\.[^.]+\.command$/.test(prefix)) return new Set(["program", "args"])
 }

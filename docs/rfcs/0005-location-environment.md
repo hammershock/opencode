@@ -7,7 +7,7 @@ authors:
 created: 2026-09-06
 updated: 2026-09-10
 implemented-by:
-  - https://github.com/hammershock/opencode/pull/86
+  - https://github.com/hammershock/opencode-transit/pull/86
 depends-on:
   - 0001
   - 0003

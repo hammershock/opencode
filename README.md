@@ -1,129 +1,136 @@
 <p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
+  <picture>
+    <source srcset="docs/assets/transit-logo-dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="docs/assets/transit-logo-light.svg" media="(prefers-color-scheme: light)">
+    <img src="docs/assets/transit-logo-light.svg" alt="OpenCode Transit — two connected terminal windows" width="720">
+  </picture>
 </p>
-<p align="center">The open source AI coding agent.</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+
+<p align="center"><strong>Keep the coding session close—even when the workspace is somewhere else.</strong></p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="README.md">English</a> ·
+  <a href="README.zh.md">简体中文</a>
 </p>
 
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
+> [!IMPORTANT]
+> OpenCode Transit is an independent project built on [OpenCode](https://github.com/anomalyco/opencode). It is not developed, endorsed, or maintained by the OpenCode team and is not affiliated with them.
 
----
+<p align="center">
+  <a href="https://github.com/hammershock/opencode-transit/actions/workflows/typecheck.yml"><img alt="Typecheck status" src="https://img.shields.io/github/actions/workflow/status/hammershock/opencode-transit/typecheck.yml?branch=dev&style=flat-square&label=typecheck"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-0f766e?style=flat-square"></a>
+  <a href="#platform-support"><img alt="Supported controllers: macOS arm64 and WSL2 x64" src="https://img.shields.io/badge/controllers-macOS_arm64_%7C_WSL2_x64-6d28d9?style=flat-square"></a>
+  <a href="#feature-status"><img alt="Project status: active development" src="https://img.shields.io/badge/status-active_development-d97706?style=flat-square"></a>
+</p>
 
-### Installation
+<p align="center">
+  <img src="docs/assets/transit-overview.svg" alt="A Mac or WSL2 controller connects a Session to one explicit local or SSH and Rexd Location; optional Baidu Session sync carries sessions between controllers" width="960">
+</p>
 
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
+OpenCode Transit turns the terminal coding agent into a location-aware workflow. Pick a local workspace or an SSH host once; agent tools, shell completion, terminals, project instructions, and Session recovery stay attached to that explicit Location. Optional Baidu Session sync keeps the conversation available across your own Mac and WSL2 controllers.
 
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
-```
+## Why Transit
 
-> [!TIP]
-> Remove versions older than 0.1.x before installing.
+- **One explicit Location, end to end.** QuickStart selects local or SSH, and every workspace-sensitive operation follows the same target and working directory. A remote failure never silently falls back to the controller filesystem.
+- **Managed Rexd over SSH.** Transit verifies the SSH host, prepares or reuses a compatible Rexd runtime, and constrains access to the selected workspace root.
+- **Sessions remember where they belong.** Location identity is durable. If the target disappears, history remains readable and rebinding is an explicit recovery action.
+- **Context you can inspect.** The model receives the actual target platform, project rules, and selected Skills. `/context` shows the frozen context sources for the Session.
+- **A TUI built around real terminal work.** Location-aware bash/zsh completion, continuous shell mode, `target · cwd` visibility, trusted command resolution, and one Skill manager for OpenCode, Codex, Claude, and custom Skills.
+- **Cross-device Session sync — Beta.** Baidu sync carries complete Sessions and attachments between Mac and WSL2, with an offline outbox and remove-wins deletion. It does not sync workspaces, Git repositories, configuration, targets, credentials, or general UI state.
 
-### Desktop App (BETA)
+## Quick start
 
-OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
+Transit currently ships from source. The separate `opencode-transit` entrypoint does not overwrite an installed upstream `opencode` command. Install [Bun](https://bun.sh/docs/installation) and Git first, then use the block for your controller.
 
-| Platform              | Download                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
+### macOS Apple Silicon
 
 ```bash
-# macOS (Homebrew)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
+git clone https://github.com/hammershock/opencode-transit.git
+cd opencode-transit
+bun install --frozen-lockfile
+cd packages/opencode
+bun run script/transit-build.ts --single --skip-install
+./script/install-transit \
+  --binary dist/opencode-darwin-arm64/bin/opencode-transit \
+  --manifest dist/opencode-darwin-arm64/bin/opencode-transit.build.json
+opencode-transit
 ```
 
-#### Installation Directory
+### Windows with WSL2 (Ubuntu x64)
 
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
+Run these commands inside WSL2, not PowerShell or Command Prompt:
 
 ```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
+git clone https://github.com/hammershock/opencode-transit.git
+cd opencode-transit
+bun install --frozen-lockfile
+cd packages/opencode
+bun run script/transit-build.ts --single --skip-install
+./script/install-transit \
+  --binary dist/opencode-linux-x64/bin/opencode-transit \
+  --manifest dist/opencode-linux-x64/bin/opencode-transit.build.json
+opencode-transit
 ```
 
-### Agents
+Start in a project directory, choose **Local** or an **SSH** target in QuickStart, and continue in the TUI. A few useful commands:
 
-OpenCode includes two built-in agents you can switch between with the `Tab` key.
+| Command     | Purpose                                                     |
+| ----------- | ----------------------------------------------------------- |
+| `/target`   | Manage execution targets and test connections               |
+| `/context`  | Inspect the target, instructions, and model context sources |
+| `/skills`   | Discover and control Skills for local or remote use         |
+| `/env list` | Inspect Location-scoped environment sources without values  |
+| `/sync`     | Configure or inspect Baidu Session sync                     |
 
-- **build** - Default, full-access agent for development work
-- **plan** - Read-only agent for analysis and code exploration
-  - Denies file edits by default
-  - Asks permission before running bash commands
-  - Ideal for exploring unfamiliar codebases or planning changes
+See the [developer entrypoint guide](docs/development/opencode-transit.md) for build metadata, custom install directories, signing, and the `opencode-rexd` compatibility launcher.
 
-Also included is a **general** subagent for complex searches and multistep tasks.
-This is used internally and can be invoked using `@general` in messages.
+## Platform support
 
-Learn more about [agents](https://opencode.ai/docs/agents).
+| Controller                            | Local workspace                    | SSH + managed Rexd                 | Status                                               |
+| ------------------------------------- | ---------------------------------- | ---------------------------------- | ---------------------------------------------------- |
+| macOS Apple Silicon (arm64)           | Yes                                | Yes                                | Supported                                            |
+| Windows WSL2, Ubuntu x64              | Yes                                | Yes                                | Supported                                            |
+| Native Windows                        | No                                 | No                                 | Not supported; use WSL2                              |
+| Intel Mac or generic Linux controller | Not in the public support contract | Not in the public support contract | Build paths may exist, but are not release-qualified |
 
-### Documentation
+Remote Rexd workspaces may run on compatible Linux or macOS SSH targets. Transit is not a cloud scheduler and Rexd is not a host sandbox.
 
-For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
+## Feature status
 
-### Contributing
+| Capability                                                    | Status                    | Boundary                                                                     |
+| ------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------- |
+| Local and SSH Locations, managed Rexd                         | Available                 | Requires a reachable, trusted SSH host for remote use                        |
+| Location-aware tools, terminal, context, and Session recovery | Available                 | Rebinding a missing Location is explicit                                     |
+| Skill manager and structured `$skill` invocation              | Available                 | Skill enablement is device-local; packages are not cloud-synced              |
+| Baidu Session sync                                            | **Beta**                  | User-owned Baidu app credentials; no application-level end-to-end encryption |
+| Location `.env` sources and shell `cwd` continuity            | **Experimental**          | Opt-in, device-local settings                                                |
+| Provider usage in the model footer                            | Available where supported | OpenAI Codex OAuth usage is **Experimental**                                 |
 
-If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
+## Know the boundaries
 
-### Building on OpenCode
+- **Remote access is powerful, not isolated.** The agent can use files and shells permitted by the local account or SSH account. Use a container, VM, or restricted account when you need a security boundary.
+- **Workspace-root checks are not a host sandbox.** Managed Rexd constrains the workspace exposed through Transit, but does not turn the remote operating-system account into an isolated tenant.
+- **Sync is not end-to-end encrypted by Transit.** Baidu transports stored Session data. Use your own Baidu application credentials and do not treat sync as a secret vault.
+- **Transit and upstream OpenCode share internal namespaces.** Configuration and data formats remain closely related; do not assume the two installations are fully isolated just because their executable names differ.
+- **Durability has a defined edge.** Admitted inputs and Location binding are durable, but provider work interrupted by a process crash is not automatically retried.
 
-If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
+## Documentation and help
 
----
+- [OpenCode Transit development and installation](docs/development/opencode-transit.md)
+- [Release artifacts and provenance](docs/development/transit-release.md)
+- [Development workflow](docs/development-workflow.md) and [testing workflow](docs/testing-workflow.md)
+- [Architecture RFC index](docs/rfcs/README.md)
+- [Issue tracker](https://github.com/hammershock/opencode-transit/issues) for bugs and focused feature requests
+- [Upstream OpenCode documentation](https://opencode.ai/docs) for the shared base agent and configuration model
 
-**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request. Fork work targets `dev`, uses focused issue-backed branches, and keeps device verification explicit.
+
+## Security
+
+Please report vulnerabilities through the private route in [SECURITY.md](SECURITY.md), not a public issue.
+
+## Upstream and license
+
+Transit exists because of the work of the [OpenCode project](https://github.com/anomalyco/opencode) and its contributors. We retain their copyright and the [MIT License](LICENSE). Fork-specific changes are maintained independently by the OpenCode Transit project.

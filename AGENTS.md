@@ -12,7 +12,7 @@
 ## GitHub Repository Targeting
 
 - Treat `upstream` (`anomalyco/opencode`) as read-only. Do not create, edit, comment on, close, reopen, label, or otherwise mutate upstream issues or pull requests unless the user explicitly authorizes that exact upstream write in the current request.
-- Create and manage this fork's issues and pull requests only in `origin` (`hammershock/opencode`). Before any GitHub write, verify the `origin` remote and pass `-R hammershock/opencode` (or the equivalent explicit repository argument); never rely on the `gh` CLI default repository.
+- Create and manage this fork's issues and pull requests only in `origin` (`hammershock/opencode-transit`). Before any GitHub write, verify the `origin` remote and pass `-R hammershock/opencode-transit` (or the equivalent explicit repository argument); never rely on the `gh` CLI default repository.
 - Read-only upstream operations such as fetching refs and inspecting issues or pull requests remain allowed.
 
 ## Branch Names

@@ -10,6 +10,13 @@ From `packages/opencode`, build the current platform with:
 bun run script/transit-build.ts --single --skip-install
 ```
 
+Release and cross-device acceptance can select one supported target without
+building the full upstream matrix:
+
+```bash
+bun run script/transit-build.ts --target=linux-x64 --skip-install
+```
+
 The artifact is written below `dist/opencode-<platform>/bin/` as:
 
 - `opencode-transit` — the executable;

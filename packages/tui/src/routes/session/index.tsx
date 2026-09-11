@@ -116,6 +116,7 @@ import {
 import { showModelContext } from "../../component/dialog-model-context"
 import { useData } from "../../context/data"
 import { SkillInvocationRow } from "../../component/skill-invocation"
+import { projectCanonicalSessionMessages } from "../../util/session-message"
 
 addDefaultParsers(parsers.parsers)
 
@@ -257,7 +258,27 @@ export function Session() {
       .filter((x) => x.parentID === parentID || x.id === parentID)
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
-  const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
+  const canonicalProjection = createMemo(() =>
+    projectCanonicalSessionMessages({
+      sessionID: route.sessionID,
+      directory: data.session.get(route.sessionID)?.location.directory ?? session()?.directory ?? "",
+      agent: data.session.get(route.sessionID)?.agent ?? "build",
+      model: data.session.get(route.sessionID)?.model,
+      messages: data.session.message.list(route.sessionID) ?? [],
+    }),
+  )
+  const canonicalParts = createMemo(
+    () => new Map(canonicalProjection().map((item) => [item.message.id, item.parts] as const)),
+  )
+  const messages = createMemo(() => {
+    const legacy = sync.data.message[route.sessionID] ?? []
+    const ids = new Set(legacy.map((message) => message.id))
+    return [
+      ...legacy,
+      ...canonicalProjection().flatMap((item) => (ids.has(item.message.id) ? [] : [item.message])),
+    ].toSorted((a, b) => a.time.created - b.time.created)
+  })
+  const messageParts = (messageID: string) => sync.data.part[messageID] ?? canonicalParts().get(messageID) ?? []
   const durableUsers = createMemo(
     () =>
       new Map(
@@ -1572,7 +1593,7 @@ export function Session() {
                             ))
                           }}
                           message={message as UserMessage}
-                          parts={sync.data.part[message.id] ?? []}
+                          parts={messageParts(message.id)}
                           skills={durableUsers().get(message.id)?.skills}
                           pending={pending()}
                         />
@@ -1581,7 +1602,7 @@ export function Session() {
                         <AssistantMessage
                           last={lastAssistant()?.id === message.id}
                           message={message as AssistantMessage}
-                          parts={sync.data.part[message.id] ?? []}
+                          parts={messageParts(message.id)}
                         />
                       </Match>
                     </Switch>

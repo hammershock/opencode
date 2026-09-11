@@ -25,6 +25,8 @@ import { targetCommand, type TargetCommandContext } from "../command-toolkit/tar
 import { useTargetManager } from "../component/target-manager"
 import { adaptKeymapCommands, adaptServerCommands } from "../command-toolkit/upstream"
 import { useKV } from "../context/kv"
+import { skillCommand, type SkillCommandContext } from "../command-toolkit/skill"
+import { useSkillManager } from "../component/skill-manager"
 
 let once = false
 const placeholder = {
@@ -52,6 +54,7 @@ export function Home() {
   const syncSettings = useSyncSettings()
   const { theme } = useTheme()
   const targetManager = useTargetManager()
+  const skillManager = useSkillManager()
   const keymap = useOpencodeKeymap()
   const upstreamCommandEntries = useKeymapSelector((value) =>
     value.getCommandEntries({ visibility: "reachable", namespace: "palette" }),
@@ -65,10 +68,11 @@ export function Home() {
     return theme.textMuted
   })
   const commandHost = createMemo(() =>
-    createCommandHost<ApprovalModeCommandContext & SyncCommandContext & TargetCommandContext>({
+    createCommandHost<ApprovalModeCommandContext & SyncCommandContext & TargetCommandContext & SkillCommandContext>({
       register: (registry) => {
         registry.register(approvalModeCommand)
         registry.register(targetCommand)
+        registry.register(skillCommand)
         syncCommands.forEach((command) => registry.register(command))
       },
       context: (source) => ({
@@ -89,6 +93,7 @@ export function Home() {
             )),
         },
         openTargetManager: targetManager.open,
+        openSkillManager: skillManager.open,
         openSyncSettings: syncSettings.open,
       }),
       upstream: () => [

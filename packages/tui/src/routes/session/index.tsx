@@ -117,6 +117,8 @@ import { showModelContext } from "../../component/dialog-model-context"
 import { useData } from "../../context/data"
 import { SkillInvocationRow } from "../../component/skill-invocation"
 import { projectCanonicalSessionMessages } from "../../util/session-message"
+import { skillCommand, type SkillCommandContext } from "../../command-toolkit/skill"
+import { useSkillManager } from "../../component/skill-manager"
 
 addDefaultParsers(parsers.parsers)
 
@@ -604,6 +606,7 @@ export function Session() {
   const local = useLocal()
   const syncSettings = useSyncSettings()
   const targetManager = useTargetManager()
+  const skillManager = useSkillManager()
   const coreCommandHost = createMemo(() =>
     createCommandHost<
       EnvironmentCommandContext &
@@ -611,11 +614,13 @@ export function Session() {
         SessionControlCommandContext &
         SyncCommandContext &
         ApprovalModeCommandContext &
-        ModelContextCommandContext
+        ModelContextCommandContext &
+        SkillCommandContext
     >({
       register: (registry) => {
         environmentCommands.forEach((command) => registry.register(command))
         registry.register(targetCommand)
+        registry.register(skillCommand)
         sessionControlCommands.forEach((command) => registry.register(command))
         registry.register(approvalModeCommand)
         syncCommands.forEach((command) => registry.register(command))
@@ -651,6 +656,7 @@ export function Session() {
           location: current,
           abortSignal: new AbortController().signal,
           openTargetManager: targetManager.open,
+          openSkillManager: skillManager.open,
           sessionControls: {
             outputExpansion: setOutputExpansion,
             delete: async () => {

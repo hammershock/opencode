@@ -45,6 +45,8 @@ type Config<
   readonly description: string
   readonly input: Input
   readonly output: Output
+  /** Keep false for controller-owned data that must never spill into Location storage. */
+  readonly retainOverflow?: boolean
   readonly structured?: Structured
   readonly toStructuredOutput?: (input: {
     readonly input: Schema.Schema.Type<Input>
@@ -62,6 +64,7 @@ type Config<
 
 type Runtime = {
   readonly permission?: string
+  readonly retainOverflow: boolean
   readonly definition: (name: string) => ToolDefinition
   readonly settle: (call: ToolCall, context: Context) => Effect.Effect<ToolOutput, ToolFailure>
 }
@@ -76,6 +79,7 @@ export function make<
   const tool = Object.freeze({}) as Definition<Input, Structured>
   const definitions = new Map<string, ToolDefinition>()
   runtimes.set(tool, {
+    retainOverflow: config.retainOverflow ?? true,
     definition: (name) => {
       const cached = definitions.get(name)
       if (cached) return cached
@@ -146,6 +150,7 @@ export const withPermission = <Input extends SchemaType<any>, Output extends Sch
 }
 
 export const permission = (tool: AnyTool, name: string) => runtimeOf(tool).permission ?? name
+export const retainsOverflow = (tool: AnyTool) => runtimeOf(tool).retainOverflow
 export const definition = (name: string, tool: AnyTool) => runtimeOf(tool).definition(name)
 export const settle = (tool: AnyTool, call: ToolCall, context: Context) => runtimeOf(tool).settle(call, context)
 

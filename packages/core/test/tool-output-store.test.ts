@@ -144,6 +144,27 @@ describe("ToolOutputStore", () => {
     ),
   )
 
+  it.live("bounds sensitive output without retaining it or exposing a managed path", () =>
+    withStore(({ root, store, fs }) =>
+      Effect.gen(function* () {
+        const result = yield* store.bound({
+          sessionID,
+          toolCallID: "call-sensitive",
+          retain: false,
+          output: {
+            structured: { kind: "controller-resource" },
+            content: [{ type: "text", text: "x".repeat(ToolOutputStore.MAX_BYTES + 1) }],
+          },
+        })
+        expect(result.output.structured).toEqual({ kind: "controller-resource" })
+        expect(result.outputPaths).toEqual([])
+        expect(JSON.stringify(result.output.content)).toContain("full content was not retained")
+        expect(JSON.stringify(result.output.content)).not.toContain(root)
+        expect(yield* fs.exists(path.join(root, ToolOutputStore.MANAGED_DIRECTORY))).toBe(false)
+      }),
+    ),
+  )
+
   it.live("fails oversized settlement when complete retention cannot be written", () =>
     withStore(({ root, store, fs }) =>
       Effect.gen(function* () {

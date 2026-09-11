@@ -21,7 +21,7 @@ const media = (file: FileAttachment): ContentPart => ({
 
 const skill = (snapshot: SkillInvocation.Snapshot): ContentPart => ({
   type: "text",
-  text: `<skill_instructions name="${snapshot.name}">\n${snapshot.content}\n</skill_instructions>`,
+  text: `<skill_instructions name="${snapshot.name}" invocation="${snapshot.id}">\n${snapshot.content}\n</skill_instructions>`,
   metadata: {
     hidden: true,
     type: "skill-invocation",

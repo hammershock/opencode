@@ -264,6 +264,24 @@ describe("ToolRegistry", () => {
         outputPaths: ["/managed/generic"],
       })
       expect(bounds).toHaveLength(1)
+      expect(bounds[0]?.retain).toBe(true)
+
+      yield* service.register({
+        sensitive: Tool.make({
+          description: "Sensitive",
+          input: Schema.Struct({ text: Schema.String }),
+          output: Schema.Struct({ text: Schema.String }),
+          retainOverflow: false,
+          execute: ({ text }) => Effect.succeed({ text }),
+          toModelOutput: ({ output }) => [{ type: "text", text: output.text }],
+        }),
+      })
+      yield* settleTool(service, {
+        sessionID,
+        ...identity,
+        call: { type: "tool-call", id: "call-sensitive", name: "sensitive", input: { text: "private" } },
+      })
+      expect(bounds.at(-1)?.retain).toBe(false)
     }),
   )
 

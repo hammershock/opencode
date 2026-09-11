@@ -17,7 +17,7 @@ import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
-import { Cause, Effect, Option, Schema, Scope } from "effect"
+import { Cause, DateTime, Effect, Option, Schema, Scope } from "effect"
 import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -42,6 +42,11 @@ import { PermissionNotFoundError } from "../errors"
 import * as SessionError from "./session-errors"
 import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { Provider } from "@/provider/provider"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -65,6 +70,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const events = yield* EventV2Bridge.Service
     const locationAccess = yield* SessionLocationAccess.Service
     const activity = yield* SessionActivity.Service
+    const sessionV2 = yield* SessionV2.Service
+    const commandSvc = yield* Command.Service
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
@@ -385,10 +392,67 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           ctx.params.sessionID,
           Effect.gen(function* () {
             yield* requireWritableLocation(ctx.params.sessionID)
-            yield* requireSession(ctx.params.sessionID)
-            return yield* promptSvc
-              .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
+            const current = yield* requireSession(ctx.params.sessionID)
+            if (yield* commandSvc.get(ctx.payload.command))
+              return yield* promptSvc
+                .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
+                .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+
+            const admitted = yield* sessionV2
+              .skillSlash({
+                id: ctx.payload.messageID ? SessionMessage.ID.make(ctx.payload.messageID) : undefined,
+                sessionID: SessionV2.ID.make(ctx.params.sessionID),
+                name: ctx.payload.command,
+                arguments: ctx.payload.arguments,
+                files: ctx.payload.parts?.map((part) => ({
+                  uri: part.url,
+                  name: part.filename,
+                  source: part.source
+                    ? {
+                        start: part.source.text.start,
+                        end: part.source.text.end,
+                        text: part.source.text.value,
+                      }
+                    : undefined,
+                })),
+              })
               .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+            yield* events.publish(Command.Event.Executed, {
+              name: ctx.payload.command,
+              sessionID: ctx.params.sessionID,
+              arguments: ctx.payload.arguments,
+              messageID: MessageID.make(admitted.id),
+            })
+            const fallback = ctx.payload.model ? Provider.parseModel(ctx.payload.model) : undefined
+            return {
+              info: SessionV1.User.make({
+                id: MessageID.make(admitted.id),
+                role: "user",
+                sessionID: ctx.params.sessionID,
+                time: { created: DateTime.toEpochMillis(admitted.timeCreated) },
+                agent: current.agent ?? ctx.payload.agent ?? "build",
+                model: current.model
+                  ? {
+                      providerID: ProviderV2.ID.make(current.model.providerID),
+                      modelID: ModelV2.ID.make(current.model.id),
+                      variant: current.model.variant,
+                    }
+                  : {
+                      providerID: fallback?.providerID ?? ProviderV2.ID.make("unknown"),
+                      modelID: fallback?.modelID ?? ModelV2.ID.make("unknown"),
+                      variant: ctx.payload.variant,
+                    },
+              }),
+              parts: [
+                SessionV1.TextPart.make({
+                  id: PartID.make(`prt_${admitted.id.slice(4)}`),
+                  messageID: MessageID.make(admitted.id),
+                  sessionID: ctx.params.sessionID,
+                  type: "text",
+                  text: admitted.prompt.text,
+                }),
+              ],
+            }
           }),
         ),
     )

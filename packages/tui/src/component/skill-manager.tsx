@@ -172,7 +172,6 @@ export function useSkillManager() {
   const toast = useToast()
   const [model, setModel] = createSignal<SkillManagerModel>()
   const [loading, setLoading] = createSignal(false)
-  const [selected, setSelected] = createSignal<string>()
   const home = process.env.HOME
 
   const read = async (force: boolean) => {
@@ -457,12 +456,13 @@ export function useSkillManager() {
   }
 
   function open(load = true) {
+    // DialogSelect owns navigation state. A controlled current/onMove pair recenters after
+    // every key repeat and makes long Skill catalogs jump between queued scroll positions.
     dialog.replace(() => (
       <DialogSelect
         title="Manage skills"
         locked={loading()}
         preserveSelection
-        current={selected()}
         options={options()}
         emptyView={<text>{loading() ? "Loading local Skill settings…" : "No Skill settings available"}</text>}
         footer={
@@ -477,7 +477,6 @@ export function useSkillManager() {
             </text>
           ) : undefined
         }
-        onMove={(option) => setSelected(option.value)}
         onSelect={(option) => select(option.value)}
       />
     ))

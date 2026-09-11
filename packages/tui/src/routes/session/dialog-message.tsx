@@ -59,6 +59,7 @@ export function DialogMessage(props: {
                   })
                   return
                 }
+                await sdk.client.v2.session.interrupt({ sessionID: props.sessionID }, { throwOnError: true })
                 await sdk.client.v2.session.revert.stage(
                   { sessionID: props.sessionID, messageID: current.id },
                   { throwOnError: true },

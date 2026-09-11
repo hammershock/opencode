@@ -1,9 +1,11 @@
 export * as SyncSetup from "./setup"
 
 import { Context, Effect, Layer, Schema } from "effect"
+import { Auth } from "../auth"
 import { Global } from "../global"
 import { makeGlobalNode } from "../effect/app-node"
 import { BaiduAuth } from "./baidu-auth"
+import { BaiduCredential } from "./baidu-credential"
 import { BaiduSyncProvider } from "./baidu-provider"
 import { SyncCrypto } from "./crypto"
 import { SyncProvider } from "./provider"
@@ -17,6 +19,16 @@ import { SyncRoot } from "./root"
 export const BeginInput = Schema.Struct({
   redirectURI: Schema.NonEmptyString,
   completion: Schema.Literals(["loopback", "manual"]),
+  application: Schema.optional(
+    Schema.Union([
+      Schema.Struct({
+        type: Schema.Literal("credentials"),
+        appKey: Schema.NonEmptyString,
+        secretKey: Schema.NonEmptyString,
+      }),
+      Schema.Struct({ type: Schema.Literal("legacy") }),
+    ]),
+  ),
 })
 export type BeginInput = typeof BeginInput.Type
 export const CompleteInput = Schema.Struct({
@@ -49,6 +61,7 @@ export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetup
     "invalid",
     "oauth",
     "missing-app",
+    "missing-legacy",
     "incompatible-local-state",
     "remote",
     "storage",
@@ -99,6 +112,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Sy
 export function make(input: {
   readonly configDirectory: string
   readonly store: SyncSecureStore.Store
+  readonly credentials?: BaiduCredential.Store
   readonly request?: BaiduSyncProvider.Request
   readonly now?: () => number
   readonly randomUUID?: () => string
@@ -107,6 +121,7 @@ export function make(input: {
   readonly provider?: SyncProvider.Adapter
 }) {
   const states = SyncState.make(input.configDirectory)
+  const credentials = input.credentials ?? BaiduCredential.legacy(input.store)
   const now = input.now ?? Date.now
   const state = () => effect("storage", () => states.read())
   const config = Effect.fn("SyncSetup.config")(function* () {
@@ -116,7 +131,7 @@ export function make(input: {
   const authenticated = Effect.fn("SyncSetup.authenticated")(function* () {
     const current = yield* state()
     if (!current?.account) return false
-    const account = yield* effect("storage", () => BaiduAuth.account(input.store, current.deviceID))
+    const account = yield* effect("storage", () => BaiduAuth.account(credentials, current.deviceID))
     return account?.id === current.account.id
   })
   const initialize = Effect.fn("SyncSetup.initialize")((deviceName: string) =>
@@ -130,10 +145,12 @@ export function make(input: {
     const current = yield* requireState(state)
     return yield* authEffect(() =>
       BaiduAuth.begin({
-        store: input.store,
+        store: credentials,
+        legacyStore: input.store,
         deviceID: current.deviceID,
         redirectURI: values.redirectURI,
         completion: values.completion,
+        application: values.application,
         now,
         randomUUID: input.randomUUID,
       }),
@@ -144,7 +161,7 @@ export function make(input: {
       const current = yield* requireState(state)
       const account = yield* authEffect(() =>
         (switching ? BaiduAuth.switchAccount : BaiduAuth.complete)({
-          store: input.store,
+          store: credentials,
           deviceID: current.deviceID,
           attemptID: values.attemptID,
           response: values.response,
@@ -170,10 +187,9 @@ export function make(input: {
   const logout = Effect.fn("SyncSetup.logout")(function* () {
     const current = yield* requireState(state)
     yield* effect("storage", () =>
-      Promise.all([
-        input.store.remove(BaiduSyncProvider.credentialAccount(current.deviceID)),
-        input.store.remove(BaiduAuth.pendingAccount(current.deviceID)),
-      ]).then(() => undefined),
+      Promise.all([credentials.remove(current.deviceID), credentials.removePending(current.deviceID)]).then(
+        () => undefined,
+      ),
     )
     return yield* effect("storage", () =>
       states.write({ ...current, enabled: false, activeSpaceID: undefined }, current.revision),
@@ -183,13 +199,13 @@ export function make(input: {
     const current = await states.read()
     if (!current) throw new SetupError({ kind: "uninitialized" })
     if (!current.account) throw new SetupError({ kind: "unauthenticated" })
-    const credentialAccount = await BaiduAuth.account(input.store, current.deviceID)
+    const credentialAccount = await BaiduAuth.account(credentials, current.deviceID)
     if (!credentialAccount) throw new SetupError({ kind: "unauthenticated" })
     if (credentialAccount.id !== current.account.id) throw new SetupError({ kind: "account-mismatch" })
     const provider =
       input.provider ??
       BaiduSyncProvider.adapter({
-        store: input.store,
+        store: credentials,
         deviceID: current.deviceID,
         root: SyncRoot.REMOTE_ROOT,
         request: input.request,
@@ -433,8 +449,8 @@ export function make(input: {
       if (!current) return []
       const ids = current.spaces.map((item) => item.descriptor.namespaceID)
       await Promise.all([
-        input.store.remove(BaiduSyncProvider.credentialAccount(current.deviceID)),
-        input.store.remove(BaiduAuth.pendingAccount(current.deviceID)),
+        credentials.remove(current.deviceID),
+        credentials.removePending(current.deviceID),
         ...current.spaces
           .filter((item) => item.descriptor.encryption === "aes-256-gcm")
           .map((item) => input.store.remove(rootAccount(item.descriptor.namespaceID))),
@@ -521,9 +537,11 @@ function authEffect<A>(run: () => Promise<A>) {
       const kind =
         cause instanceof BaiduAuth.AuthError && cause.kind === "account-mismatch"
           ? "account-mismatch"
-          : cause instanceof BaiduAuth.AuthError && cause.kind === "missing-app"
-            ? "missing-app"
-            : "oauth"
+          : cause instanceof BaiduAuth.AuthError && cause.kind === "missing-legacy"
+            ? "missing-legacy"
+            : cause instanceof BaiduAuth.AuthError && cause.kind === "missing-app"
+              ? "missing-app"
+              : "oauth"
       return new SetupError({ kind })
     },
   })
@@ -533,7 +551,12 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const global = yield* Global.Service
-    return make({ configDirectory: global.config, store: lazyStore(() => SyncSecureStore.detect()) })
+    const auth = yield* Auth.Service
+    return make({
+      configDirectory: global.config,
+      store: lazyStore(() => SyncSecureStore.detect()),
+      credentials: BaiduCredential.auth(auth),
+    })
   }),
 )
 function lazyStore(load: () => Promise<SyncSecureStore.Store>): SyncSecureStore.Store {
@@ -544,4 +567,4 @@ function lazyStore(load: () => Promise<SyncSecureStore.Store>): SyncSecureStore.
     remove: async (account) => (await load()).remove(account),
   }
 }
-export const node = makeGlobalNode({ service: Service, layer, deps: [Global.node] })
+export const node = makeGlobalNode({ service: Service, layer, deps: [Global.node, Auth.node] })

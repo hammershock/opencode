@@ -1509,6 +1509,15 @@ export class Global extends HeyApiClient {
     parameters?: {
       redirectURI?: string
       completion?: "loopback" | "manual"
+      application?:
+        | {
+            type: "credentials"
+            appKey: string
+            secretKey: string
+          }
+        | {
+            type: "legacy"
+          }
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -1519,6 +1528,7 @@ export class Global extends HeyApiClient {
           args: [
             { in: "body", key: "redirectURI" },
             { in: "body", key: "completion" },
+            { in: "body", key: "application" },
           ],
         },
       ],

@@ -1,12 +1,13 @@
 export * as BaiduAuth from "./baidu-auth"
 
 import { BaiduSyncProvider } from "./baidu-provider"
+import { BaiduCredential } from "./baidu-credential"
 import { SyncSecureStore } from "./secure-store"
 
 const ACCOUNT_API = "https://pan.baidu.com/rest/2.0/xpan/nas"
 const MAX_ATTEMPT_AGE = 15 * 60 * 1_000
 export const MISSING_APP_MESSAGE =
-  "Baidu Netdisk is not enabled in this build. Connect your Baidu application in OpenCode Transit Sync settings."
+  "Baidu application credentials are missing. Enter your AppKey and SecretKey in OpenCode Transit Sync settings."
 
 export type Attempt = {
   readonly id: string
@@ -35,6 +36,7 @@ export class AuthError extends Error {
   constructor(
     readonly kind:
       | "missing-app"
+      | "missing-legacy"
       | "missing-attempt"
       | "expired-attempt"
       | "invalid-callback"
@@ -52,15 +54,32 @@ export function pendingAccount(deviceID: string) {
 }
 
 export async function begin(input: {
-  readonly store: SyncSecureStore.Store
+  readonly store: BaiduCredential.Store
+  readonly legacyStore?: SyncSecureStore.Store
   readonly deviceID: string
   readonly redirectURI: string
   readonly completion: Attempt["completion"]
+  readonly application?:
+    | { readonly type: "credentials"; readonly appKey: string; readonly secretKey: string }
+    | { readonly type: "legacy" }
   readonly now?: () => number
   readonly randomUUID?: () => string
 }) {
   validateRedirect(input.redirectURI, input.completion)
-  const app = await SyncSecureStore.readProvisionedBaiduApp(input.store).catch(() => {
+  if (input.application?.type === "credentials")
+    await input.store
+      .saveApplication({ appKey: input.application.appKey, secretKey: input.application.secretKey })
+      .catch(() => {
+        throw new AuthError("storage")
+      })
+  if (input.application?.type === "legacy") {
+    if (!input.legacyStore) throw new AuthError("missing-legacy")
+    const migrated = await BaiduCredential.importLegacy(input.store, input.legacyStore, input.deviceID).catch(() => {
+      throw new AuthError("storage")
+    })
+    if (!migrated) throw new AuthError("missing-legacy")
+  }
+  const app = await input.store.application().catch(() => {
     throw new AuthError("storage")
   })
   if (!app) throw new AuthError("missing-app")
@@ -73,7 +92,7 @@ export async function begin(input: {
     completion: input.completion,
     createdAt: (input.now ?? Date.now)(),
   }
-  await input.store.set(pendingAccount(input.deviceID), JSON.stringify(attempt)).catch(() => {
+  await input.store.savePending(input.deviceID, JSON.stringify(attempt)).catch(() => {
     throw new AuthError("storage")
   })
   return {
@@ -113,18 +132,18 @@ export function manualCode(value: string) {
   return trimmed
 }
 
-export async function pending(store: SyncSecureStore.Store, deviceID: string, now: () => number = Date.now) {
-  const value = await store.get(pendingAccount(deviceID)).catch(() => {
+export async function pending(store: BaiduCredential.Store, deviceID: string, now: () => number = Date.now) {
+  const value = await store.pending(deviceID).catch(() => {
     throw new AuthError("storage")
   })
   if (!value) return
   const attempt = parseAttempt(value, deviceID)
   if (now() - attempt.createdAt <= MAX_ATTEMPT_AGE) return attempt
-  await store.remove(pendingAccount(deviceID)).catch(() => undefined)
+  await store.removePending(deviceID).catch(() => undefined)
   throw new AuthError("expired-attempt")
 }
 
-export async function account(store: SyncSecureStore.Store, deviceID: string) {
+export async function account(store: BaiduCredential.Store, deviceID: string) {
   const credential = await BaiduSyncProvider.readCredential(store, deviceID).catch(() => {
     throw new AuthError("storage")
   })
@@ -132,7 +151,7 @@ export async function account(store: SyncSecureStore.Store, deviceID: string) {
 }
 
 type CompletionInput = {
-  readonly store: SyncSecureStore.Store
+  readonly store: BaiduCredential.Store
   readonly deviceID: string
   readonly attemptID: string
   readonly response:
@@ -149,7 +168,7 @@ async function finish(input: CompletionInput, allowSwitch: boolean) {
   const attempt = await pending(input.store, input.deviceID, now)
   if (!attempt || attempt.id !== input.attemptID) throw new AuthError("missing-attempt")
   if (input.response.type !== attempt.completion) throw new AuthError("invalid-callback")
-  const app = await SyncSecureStore.readProvisionedBaiduApp(input.store).catch(() => {
+  const app = await input.store.application().catch(() => {
     throw new AuthError("storage")
   })
   if (!app) throw new AuthError("missing-app")
@@ -182,7 +201,7 @@ async function finish(input: CompletionInput, allowSwitch: boolean) {
       throw new AuthError("storage")
     },
   )
-  await input.store.remove(pendingAccount(input.deviceID)).catch(() => {
+  await input.store.removePending(input.deviceID).catch(() => {
     throw new AuthError("storage")
   })
   return identity

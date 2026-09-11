@@ -16,6 +16,7 @@ import { syncTransferSummary } from "../component/sync-transfer-summary"
 import {
   confirmInitializeCloud,
   confirmJoinCloud,
+  promptBaiduApplication,
   showPostLoginSyncChoice,
   showSyncDevices,
   showSyncSettings,
@@ -455,10 +456,13 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     const beginOAuth = async (mode: "connect" | "switch" = "connect") => {
       let owner = dialog.stack.at(-1)?.element
       await sdk.client.global.syncInitialize({ deviceName: hostname() }, { throwOnError: true })
+      const application = mode === "connect" ? await promptBaiduApplication(dialog) : undefined
+      if (mode === "connect" && !application) return
+      owner = dialog.stack.at(-1)?.element
       loopback?.close()
       loopback = createLoopbackCallback()
       const result = await sdk.client.global.syncOAuthBegin(
-        { redirectURI: loopback.redirectURI, completion: "loopback" },
+        { redirectURI: loopback.redirectURI, completion: "loopback", application },
         { throwOnError: true },
       )
       oauth = { attemptID: result.data.attemptID, mode, completion: "loopback" }

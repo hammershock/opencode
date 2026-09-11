@@ -9,7 +9,7 @@ import { SyncRoot } from "@opencode-ai/core/sync/root"
 import { tmpdir } from "./fixture/tmpdir"
 
 describe("SyncSetup lifecycle", () => {
-  test("preserves only the deployment-safe missing-app authentication reason", async () => {
+  test("preserves the actionable missing-app authentication reason", async () => {
     await using tmp = await tmpdir()
     const setup = SyncSetup.make({ configDirectory: tmp.path, store: store() })
     await run(setup.initialize("Mac"))

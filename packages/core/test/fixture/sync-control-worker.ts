@@ -13,6 +13,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
+import { BaiduCredential } from "@opencode-ai/core/sync/baidu-credential"
 import { SyncControl } from "@opencode-ai/core/sync/control"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { SyncEvent } from "@opencode-ai/core/sync/event"
@@ -226,7 +227,11 @@ const setupLayer = Layer.mock(SyncSetup.Service, {
 })
 const controlNode = {
   ...SyncControl.node,
-  implementation: SyncControl.layerWith({ secureStore: async () => secureStore, provider: filesystemProvider }),
+  implementation: SyncControl.layerWith({
+    credentialStore: async () => BaiduCredential.legacy(secureStore),
+    secureStore: async () => secureStore,
+    provider: filesystemProvider,
+  }),
 }
 const globalRoot = {
   home: input.deviceRoot,

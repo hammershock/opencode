@@ -57,7 +57,7 @@ describe("Sync Settings presentation", () => {
     )
   })
 
-  test("shows OAuth progress and manual fallback without client credentials", () => {
+  test("shows OAuth progress and manual fallback without redisplaying application credentials", () => {
     const rows = buildSyncOverviewRows({
       ...connected,
       account: {

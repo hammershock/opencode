@@ -368,11 +368,22 @@ export class Materializer {
           }
         } catch {}
       }
+      if (!record) {
+        const stat = await this.#files.stat(lock, "/", signal).catch(() => undefined)
+        if (typeof stat?.mtime === "number" && stat.mtime <= this.#now() - this.#ttlMs) {
+          await this.#remove(lock, snapshot.skillID, signal).catch(() => undefined)
+          continue
+        }
+      }
       if (Date.now() >= deadline) throw new Failure(snapshot.skillID, "transfer")
       await Bun.sleep(50)
     }
     await this.#files
-      .write(owner, "/", Buffer.from(JSON.stringify({ expiresAt: this.#now() + this.#ttlMs * 3 })))
+      .write(
+        owner,
+        "/",
+        Buffer.from(JSON.stringify({ expiresAt: this.#now() + Math.max(this.#ttlMs * 3, 60 * 60_000) })),
+      )
       .catch(async () => {
         await this.#remove(lock, snapshot.skillID, signal).catch(() => undefined)
         throw new Failure(snapshot.skillID, "transfer")

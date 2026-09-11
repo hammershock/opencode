@@ -49,6 +49,15 @@ async function waitForSessionRequests(requests: URL[], count: number, timeout = 
   throw new Error(`Timed out waiting for ${count} Session list requests; observed ${requests.length}`)
 }
 
+async function waitForRequestCount(paths: string[], path: string, count: number, timeout = 2_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (paths.filter((item) => item === path).length >= count) return
+    await Bun.sleep(10)
+  }
+  throw new Error(`Timed out waiting for ${count} requests to ${path}`)
+}
+
 test("SIGHUP clears title and disposes scoped resources once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
@@ -538,6 +547,12 @@ test("session.undo restores a canonical Skill prompt and session.redo clears its
       },
     ],
   }
+  const previous = {
+    ...message,
+    id: "msg_previous_skill",
+    text: "$review inspect earlier",
+    time: { created: 5 },
+  }
   const paths: string[] = []
   const calls = createFetch((url) => {
     paths.push(url.pathname)
@@ -546,7 +561,7 @@ test("session.undo restores a canonical Skill prompt and session.redo clears its
     if (url.pathname === "/session/dummy") return json(legacySession)
     if (url.pathname === "/session/dummy/message") return json([])
     if (url.pathname === "/api/session/dummy") return json({ data: canonicalSession })
-    if (url.pathname === "/api/session/dummy/message") return json({ data: [message], cursor: {} })
+    if (url.pathname === "/api/session/dummy/message") return json({ data: [message, previous], cursor: {} })
     if (url.pathname === "/api/session/dummy/target-resolution")
       return json({ status: "resolved", location: { directory } })
     if (url.pathname === "/api/session/dummy/activate") return json({ data: { status: "unchanged", diagnostics: [] } })
@@ -604,7 +619,7 @@ test("session.undo restores a canonical Skill prompt and session.redo clears its
     )
 
     await ready
-    await waitForFrame(setup, message.text, 5_000)
+    await waitForFrame(setup, previous.text, 5_000)
     await waitForEditor(setup)
     api?.keymap.dispatchCommand("session.undo")
     const editor = await waitForEditorText(setup, message.text).catch((error) => {
@@ -623,6 +638,36 @@ test("session.undo restores a canonical Skill prompt and session.redo clears its
         id: "evt_revert",
         type: "session.next.revert.staged",
         properties: { timestamp: 20, sessionID: "dummy", revert: { messageID: message.id } },
+      },
+    })
+    await setup.renderOnce()
+    api?.keymap.dispatchCommand("session.undo")
+    const earlier = await waitForEditorText(setup, previous.text)
+
+    expect(earlier.plainText).toBe(previous.text)
+    expect(paths.filter((path) => path === "/api/session/dummy/interrupt")).toHaveLength(2)
+    expect(paths.filter((path) => path === "/api/session/dummy/revert/stage")).toHaveLength(2)
+
+    events.emit({
+      directory,
+      project: "project",
+      payload: {
+        id: "evt_previous_revert",
+        type: "session.next.revert.staged",
+        properties: { timestamp: 30, sessionID: "dummy", revert: { messageID: previous.id } },
+      },
+    })
+    await setup.renderOnce()
+    api?.keymap.dispatchCommand("session.redo")
+    await waitForRequestCount(paths, "/api/session/dummy/revert/stage", 3)
+
+    events.emit({
+      directory,
+      project: "project",
+      payload: {
+        id: "evt_latest_revert",
+        type: "session.next.revert.staged",
+        properties: { timestamp: 40, sessionID: "dummy", revert: { messageID: message.id } },
       },
     })
     await setup.renderOnce()

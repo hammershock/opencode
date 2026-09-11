@@ -54,6 +54,8 @@ import { SessionContextEpoch } from "./session/context-epoch"
 import { ModelContextAssembler } from "./model-context-assembler"
 import { SkillCatalogContextService } from "./skill/catalog-context-service"
 import { Skill } from "@opencode-ai/schema/skill"
+import { SkillSlashCompatibility } from "./skill/slash-compatibility"
+import { SkillV2 } from "./skill"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -195,6 +197,21 @@ export interface Interface {
   }) => Effect.Effect<
     SessionInput.Admitted,
     NotFoundError | PromptConflictError | OperationUnavailableError | SkillCatalogContextService.AdmissionError
+  >
+  readonly skillSlash: (input: {
+    id?: SessionMessage.ID
+    sessionID: SessionSchema.ID
+    name: string
+    arguments: string
+    files?: ReadonlyArray<PromptInput.FileAttachment>
+    resume?: boolean
+  }) => Effect.Effect<
+    SessionInput.Admitted,
+    | NotFoundError
+    | PromptConflictError
+    | OperationUnavailableError
+    | SkillCatalogContextService.AdmissionError
+    | SkillSlashCompatibility.Error
   >
   /** Admits one queued prompt and resolves only from that exact input's durable terminal settlement. */
   readonly promptTurn: (input: {
@@ -471,6 +488,60 @@ const layer = Layer.effect(
         ),
     )
 
+    const skillSlash = Effect.fn("V2Session.skillSlash")(
+      (input: {
+        id?: SessionMessage.ID
+        sessionID: SessionSchema.ID
+        name: string
+        arguments: string
+        files?: ReadonlyArray<PromptInput.FileAttachment>
+        resume?: boolean
+      }) =>
+        activity.withActivity(
+          input.sessionID,
+          "session_mutation",
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              const location = yield* requireLocation(input.sessionID)
+              const session = yield* result.get(input.sessionID)
+              const messageID = input.id ?? SessionMessage.ID.create()
+              const request = SkillSlashCompatibility.request(input)
+              const expected = resolvePrompt(request)
+              const recorded = input.id === undefined ? undefined : yield* SessionInput.find(db, messageID)
+              if (recorded) {
+                if (
+                  recorded.sessionID !== input.sessionID ||
+                  recorded.delivery !== "steer" ||
+                  !SkillSlashCompatibility.retryEquivalent(recorded.prompt, expected, input.name)
+                )
+                  return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+                if (input.resume !== false) yield* execution.wake(recorded.sessionID)
+                return recorded
+              }
+
+              yield* ensureContextForAdmission(session, location)
+              const catalog = yield* SessionContextEpoch.inspect(db, input.sessionID).pipe(
+                Effect.catch(() => new OperationUnavailableError({ operation: "modelContext" })),
+              )
+              if (!catalog) return yield* new OperationUnavailableError({ operation: "modelContext" })
+              const resolved = yield* Effect.gen(function* () {
+                const skills = yield* SkillV2.Service
+                const current = yield* skills.catalog()
+                const resolved = SkillSlashCompatibility.resolve(input, current.snapshot.skills)
+                if (resolved instanceof SkillSlashCompatibility.Error) return yield* resolved
+                return resolved
+              }).pipe(Effect.provide(locations.get(location)))
+              return yield* prompt({
+                id: messageID,
+                sessionID: input.sessionID,
+                prompt: resolved,
+                resume: input.resume,
+              })
+            }),
+          ),
+        ),
+    )
+
     const result = Service.of({
       create: Effect.fn("V2Session.create")((input) =>
         locationMutation.withLock(
@@ -738,6 +809,7 @@ const layer = Layer.effect(
         })
       }),
       prompt,
+      skillSlash,
       promptTurn: Effect.fn("V2Session.promptTurn")((input) =>
         Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {

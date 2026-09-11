@@ -6,10 +6,16 @@ import { Global } from "@opencode-ai/core/global"
 import { LSP } from "@/lsp/lsp"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
+import { Location } from "@opencode-ai/core/location"
+import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { SkillCatalogContextService } from "@opencode-ai/core/skill/catalog-context-service"
 import { Effect } from "effect"
+import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ApiVcsApplyError } from "../groups/instance"
+import { WorkspaceRouteContext } from "../middleware/workspace-routing"
 import { markInstanceForDisposal } from "../lifecycle"
 
 export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance", (handlers) =>
@@ -19,6 +25,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     const format = yield* Format.Service
     const lsp = yield* LSP.Service
     const skill = yield* Skill.Service
+    const locations = yield* LocationServiceMap.Service
     const vcs = yield* Vcs.Service
 
     const dispose = Effect.fn("InstanceHttpApi.dispose")(function* () {
@@ -74,7 +81,30 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     })
 
     const getCommand = Effect.fn("InstanceHttpApi.command")(function* () {
-      return yield* command.list()
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const route = yield* WorkspaceRouteContext
+      const targetID = request.headers["x-opencode-target"]
+      const url = new URL(request.url, "http://localhost")
+      const directory = targetID
+        ? (url.searchParams.get("directory") ?? request.headers["x-opencode-directory"] ?? route.directory)
+        : route.directory
+      const catalog = yield* SkillCatalogContextService.Service.use((skills) =>
+        skills.load({ forceReload: false }),
+      ).pipe(
+        Effect.provide(
+          locations.get(
+            Location.Ref.make({
+              target: targetID
+                ? Location.RexdTarget.make({ type: "rexd", targetID: Location.TargetID.make(targetID) })
+                : Location.LocalTarget.make({ type: "local" }),
+              directory: AbsolutePath.make(directory),
+              workspaceID: route.workspaceID,
+            }),
+          ),
+        ),
+      )
+      const commands = yield* command.list()
+      return Command.withSkillCompatibility(commands, catalog.snapshot.skills)
     })
 
     const getAgent = Effect.fn("InstanceHttpApi.agent")(function* () {

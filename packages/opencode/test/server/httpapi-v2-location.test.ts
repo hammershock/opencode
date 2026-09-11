@@ -342,6 +342,128 @@ describe("v2 location HttpApi", () => {
     expect(events.data.filter((event) => event.type === "session.next.prompt.admitted")).toHaveLength(1)
   })
 
+  test("adapts legacy Skill slash commands to canonical durable admission", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./explicit-skills"] } },
+    })
+    const skillFile = path.join(tmp.path, "explicit-skills", "slash-review", "SKILL.md")
+    await fs.mkdir(path.dirname(skillFile), { recursive: true })
+    await fs.writeFile(
+      skillFile,
+      "---\nname: slash-review\ndescription: Review through slash compatibility\n---\nKeep $ARGUMENTS and $1 literal.",
+    )
+    await fs.mkdir(path.join(tmp.path, "explicit-skills", "review"), { recursive: true })
+    await fs.writeFile(
+      path.join(tmp.path, "explicit-skills", "review", "SKILL.md"),
+      "---\nname: review\ndescription: Must not shadow the built-in command\n---\nCOLLIDING SKILL BODY",
+    )
+
+    const commands = await request("/command", tmp.path)
+    expect(commands.status, await commands.clone().text()).toBe(200)
+    const commandList = (await commands.json()) as Array<{ name: string; source: string; template: string }>
+    expect(commandList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "slash-review", source: "skill", template: "", hints: [] }),
+      ]),
+    )
+    expect(commandList.filter((command) => command.name === "review")).toEqual([
+      expect.objectContaining({ name: "review", source: "command" }),
+    ])
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({
+        agent: "build",
+        model: { providerID: "unknown", id: "unknown" },
+        location: { target: { type: "local" }, directory: tmp.path },
+      }),
+    })
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activated = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+    expect(activated.status, await activated.clone().text()).toBe(200)
+    const invoke = (messageID: string) =>
+      request(`/session/${sessionID}/command`, tmp.path, {
+        method: "POST",
+        body: JSON.stringify({
+          messageID,
+          command: "slash-review",
+          arguments: "inspect $ARGUMENTS and $1",
+          agent: "build",
+          model: "unknown/unknown",
+        }),
+      })
+
+    const first = await invoke("msg_slash_compatibility")
+    expect(first.status, await first.clone().text()).toBe(200)
+    const response = (await first.json()) as { parts: Array<{ type: string; text?: string }> }
+    expect(response.parts).toEqual([
+      expect.objectContaining({ type: "text", text: "$slash-review inspect $ARGUMENTS and $1" }),
+    ])
+    expect(JSON.stringify(response)).not.toContain("Keep $ARGUMENTS")
+
+    const catalogResponse = await request("/api/skill/catalog?forceReload=false", tmp.path)
+    const catalog = (await catalogResponse.json()) as {
+      data: { skills: Array<{ id: string; name: string }> }
+    }
+    const skill = catalog.data.skills.find((item) => item.name === "slash-review")!
+    const canonical = await request(`/api/session/${sessionID}/prompt`, tmp.path, {
+      method: "POST",
+      body: JSON.stringify({
+        id: "msg_slash_canonical",
+        prompt: {
+          text: "$slash-review inspect $ARGUMENTS and $1",
+          skills: [
+            {
+              id: skill.id,
+              name: skill.name,
+              source: { start: 0, end: 13, text: "$slash-review" },
+            },
+          ],
+        },
+        resume: false,
+      }),
+    })
+    expect(canonical.status, await canonical.clone().text()).toBe(200)
+    const canonicalPrompt = (await canonical.json()) as {
+      data: {
+        prompt: { invocations: Array<{ snapshot: { id: string; name: string; digest: string; content: string } }> }
+      }
+    }
+
+    await fs.unlink(skillFile)
+    await disposeAllInstances()
+    const retried = await invoke("msg_slash_compatibility")
+    expect(retried.status, await retried.clone().text()).toBe(200)
+    expect(await retried.json()).toEqual(response)
+
+    const missing = await invoke("msg_slash_missing")
+    expect(missing.status).toBe(400)
+    const history = await request(`/api/session/${sessionID}/history?limit=100`, tmp.path)
+    const events = (await history.json()) as {
+      data: Array<{
+        type: string
+        data: {
+          prompt?: {
+            text: string
+            invocations?: Array<{ snapshot: { name: string; digest: string; content: string } }>
+          }
+        }
+      }>
+    }
+    const admitted = events.data.filter((event) => event.type === "session.next.prompt.admitted")
+    expect(admitted).toHaveLength(2)
+    expect(admitted[0]?.data.prompt).toMatchObject({
+      text: "$slash-review inspect $ARGUMENTS and $1",
+      invocations: [{ snapshot: { content: "Keep $ARGUMENTS and $1 literal." } }],
+    })
+    expect(admitted[0]?.data.prompt?.invocations?.[0]?.snapshot).toMatchObject({
+      name: canonicalPrompt.data.prompt.invocations[0]!.snapshot.name,
+      digest: canonicalPrompt.data.prompt.invocations[0]!.snapshot.digest,
+      content: canonicalPrompt.data.prompt.invocations[0]!.snapshot.content,
+    })
+  })
+
   test("streams native EventV2 payloads across locations", async () => {
     await using subscriber = await tmpdir({ git: true })
     await using publisher = await tmpdir({ git: true })

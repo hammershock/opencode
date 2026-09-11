@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import path from "path"
 import { Effect, Layer, Record, Result, Schema, Context } from "effect"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
@@ -92,6 +92,6 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [FSUtil.node] })
+export const node = makeGlobalNode({ service: Service, layer: layer, deps: [FSUtil.node] })
 
 export * as Auth from "."

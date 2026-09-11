@@ -419,6 +419,14 @@ Skill reload 不修改 RFC-0011 的原始 baseline，不增加 Location `generat
 
 unresolved/read-only Session 可以刷新 TUI 的 device-local preview catalog，但不能写 ContextAdvanced。Location 恢复并准备提交下一条 prompt 时再执行正常 activation admission。
 
+### Model-visible catalog 量化预算
+
+`core/skill-guidance` 使用与 provider tokenizer 无关的确定性预算：一个 admitted catalog 最多保留 64 个 Skill；每条 description 最多保留 256 个 Unicode code point，末尾省略号计入限制；包含固定说明、标记、name、description、source 与省略提示在内的最终 baseline 最多为 16,384 UTF-8 bytes。字节上限同时给出最保守的 16,384 token 上界，不依赖特定 provider 的 tokenizer。
+
+预算在 target scope 与 Agent permission 过滤之后应用。候选沿既有的 name、脱敏 source label、digest 稳定顺序处理；先缩短 description，再因 64 项或总字节限制省略条目。name 不得截断；如果一个条目的完整 name 与结构标记无法放入剩余预算，该条目整体省略，后续较短条目仍可继续尝试。相同输入必须产生相同保留项、description、omitted count 与 catalog digest。
+
+structured snapshot 与 rendered guidance 都记录准确的 omitted count，使模型和查看 model context 的用户知道还有未展示项。省略只影响 model-visible admitted guidance；完整 device-local registry metadata 继续供 Skill manager、picker 与显式选择使用。实现由 [#345](https://github.com/hammershock/opencode-transit/issues/345) 跟踪。
+
 ## Transcript 与模型可见内容
 
 用户时间线只渲染真实 `Prompt.text` 与 `$skill` mention token。每个 invocation 额外显示一行默认折叠的 typed context item：

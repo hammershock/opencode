@@ -280,6 +280,9 @@ export function Session() {
       ...canonicalProjection().flatMap((item) => (ids.has(item.message.id) ? [] : [item.message])),
     ].toSorted((a, b) => a.time.created - b.time.created)
   })
+  // Canonical projection creates fresh adapters per delta; stable IDs keep Solid from remounting the transcript.
+  const messageIDs = createMemo(() => messages().map((message) => message.id))
+  const messagesByID = createMemo(() => new Map(messages().map((message) => [message.id, message] as const)))
   const messageParts = (messageID: string) => sync.data.part[messageID] ?? canonicalParts().get(messageID) ?? []
   const durableUsers = createMemo(
     () =>
@@ -1614,104 +1617,113 @@ export function Session() {
                 scrollAcceleration={scrollAcceleration()}
               >
                 <box height={1} />
-                <For each={messages()}>
-                  {(message, index) => (
-                    <Switch>
-                      <Match when={message.id === revert()?.messageID}>
-                        {(function () {
-                          const redoShortcut = useCommandShortcut("session.redo")
-                          const [hover, setHover] = createSignal(false)
-                          const dialog = useDialog()
+                <For each={messageIDs()}>
+                  {(messageID, index) => {
+                    const message = createMemo(() => messagesByID().get(messageID))
+                    return (
+                      <Show when={message()}>
+                        {(message) => (
+                          <Switch>
+                            <Match when={messageID === revert()?.messageID}>
+                              {(function () {
+                                const redoShortcut = useCommandShortcut("session.redo")
+                                const [hover, setHover] = createSignal(false)
+                                const dialog = useDialog()
 
-                          const handleUnrevert = async () => {
-                            const confirmed = await DialogConfirm.show(
-                              dialog,
-                              "Confirm Redo",
-                              "Are you sure you want to restore the reverted messages?",
-                            )
-                            if (confirmed) {
-                              keymap.dispatchCommand("session.redo")
-                            }
-                          }
+                                const handleUnrevert = async () => {
+                                  const confirmed = await DialogConfirm.show(
+                                    dialog,
+                                    "Confirm Redo",
+                                    "Are you sure you want to restore the reverted messages?",
+                                  )
+                                  if (confirmed) {
+                                    keymap.dispatchCommand("session.redo")
+                                  }
+                                }
 
-                          return (
-                            <box
-                              onMouseOver={() => setHover(true)}
-                              onMouseOut={() => setHover(false)}
-                              onMouseUp={handleUnrevert}
-                              marginTop={1}
-                              flexShrink={0}
-                              border={["left"]}
-                              customBorderChars={SplitBorder.customBorderChars}
-                              borderColor={theme.backgroundPanel}
-                            >
-                              <box
-                                paddingTop={1}
-                                paddingBottom={1}
-                                paddingLeft={2}
-                                backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
-                              >
-                                <text fg={theme.textMuted}>{revert()!.reverted.length} message reverted</text>
-                                <text fg={theme.textMuted}>
-                                  <span style={{ fg: theme.text }}>{redoShortcut()}</span> or /redo to restore
-                                </text>
-                                <Show when={revert()!.diffFiles?.length}>
-                                  <box marginTop={1}>
-                                    <For each={revert()!.diffFiles}>
-                                      {(file) => (
-                                        <text fg={theme.text}>
-                                          {file.filename}
-                                          <Show when={file.additions > 0}>
-                                            <span style={{ fg: theme.diffAdded }}> +{file.additions}</span>
-                                          </Show>
-                                          <Show when={file.deletions > 0}>
-                                            <span style={{ fg: theme.diffRemoved }}> -{file.deletions}</span>
-                                          </Show>
-                                        </text>
-                                      )}
-                                    </For>
+                                return (
+                                  <box
+                                    onMouseOver={() => setHover(true)}
+                                    onMouseOut={() => setHover(false)}
+                                    onMouseUp={handleUnrevert}
+                                    marginTop={1}
+                                    flexShrink={0}
+                                    border={["left"]}
+                                    customBorderChars={SplitBorder.customBorderChars}
+                                    borderColor={theme.backgroundPanel}
+                                  >
+                                    <box
+                                      paddingTop={1}
+                                      paddingBottom={1}
+                                      paddingLeft={2}
+                                      backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
+                                    >
+                                      <text fg={theme.textMuted}>{revert()!.reverted.length} message reverted</text>
+                                      <text fg={theme.textMuted}>
+                                        <span style={{ fg: theme.text }}>{redoShortcut()}</span> or /redo to restore
+                                      </text>
+                                      <Show when={revert()!.diffFiles?.length}>
+                                        <box marginTop={1}>
+                                          <For each={revert()!.diffFiles}>
+                                            {(file) => (
+                                              <text fg={theme.text}>
+                                                {file.filename}
+                                                <Show when={file.additions > 0}>
+                                                  <span style={{ fg: theme.diffAdded }}> +{file.additions}</span>
+                                                </Show>
+                                                <Show when={file.deletions > 0}>
+                                                  <span style={{ fg: theme.diffRemoved }}> -{file.deletions}</span>
+                                                </Show>
+                                              </text>
+                                            )}
+                                          </For>
+                                        </box>
+                                      </Show>
+                                    </box>
                                   </box>
-                                </Show>
-                              </box>
-                            </box>
-                          )
-                        })()}
-                      </Match>
-                      <Match
-                        when={revert()?.messageID && revertMessageIndex() !== -1 && index() >= revertMessageIndex()}
-                      >
-                        <></>
-                      </Match>
-                      <Match when={message.role === "user"}>
-                        <UserMessage
-                          index={index()}
-                          onMouseUp={() => {
-                            if (renderer.getSelection()?.getSelectedText()) return
-                            dialog.replace(() => (
-                              <DialogMessage
-                                messageID={message.id}
-                                sessionID={route.sessionID}
-                                setPrompt={(promptInfo) => prompt?.set(promptInfo)}
+                                )
+                              })()}
+                            </Match>
+                            <Match
+                              when={
+                                revert()?.messageID && revertMessageIndex() !== -1 && index() >= revertMessageIndex()
+                              }
+                            >
+                              <></>
+                            </Match>
+                            <Match when={message().role === "user"}>
+                              <UserMessage
+                                index={index()}
+                                onMouseUp={() => {
+                                  if (renderer.getSelection()?.getSelectedText()) return
+                                  dialog.replace(() => (
+                                    <DialogMessage
+                                      messageID={messageID}
+                                      sessionID={route.sessionID}
+                                      setPrompt={(promptInfo) => prompt?.set(promptInfo)}
+                                    />
+                                  ))
+                                }}
+                                message={message() as UserMessage}
+                                parts={messageParts(messageID)}
+                                skills={durableUsers().get(messageID)?.skills}
+                                expandedSkills={expandedSkills()}
+                                onSkillToggle={toggleSkill}
+                                pending={pending()}
                               />
-                            ))
-                          }}
-                          message={message as UserMessage}
-                          parts={messageParts(message.id)}
-                          skills={durableUsers().get(message.id)?.skills}
-                          expandedSkills={expandedSkills()}
-                          onSkillToggle={toggleSkill}
-                          pending={pending()}
-                        />
-                      </Match>
-                      <Match when={message.role === "assistant"}>
-                        <AssistantMessage
-                          last={lastAssistant()?.id === message.id}
-                          message={message as AssistantMessage}
-                          parts={messageParts(message.id)}
-                        />
-                      </Match>
-                    </Switch>
-                  )}
+                            </Match>
+                            <Match when={message().role === "assistant"}>
+                              <AssistantMessage
+                                last={lastAssistant()?.id === messageID}
+                                message={message() as AssistantMessage}
+                                parts={messageParts(messageID)}
+                              />
+                            </Match>
+                          </Switch>
+                        )}
+                      </Show>
+                    )
+                  }}
                 </For>
               </scrollbox>
               <box flexShrink={0}>
@@ -1964,20 +1976,32 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
 
   const childShortcut = useCommandShortcut("session.child.first")
   const backgroundShortcut = useCommandShortcut("session.background")
+  // Preserve Markdown and tool renderables while their projected part adapters update.
+  const partIDs = createMemo(() => props.parts.map((part) => part.id))
+  const partsByID = createMemo(() => new Map(props.parts.map((part) => [part.id, part] as const)))
 
   return (
     <>
-      <For each={props.parts}>
-        {(part, index) => {
-          const component = createMemo(() => PART_MAPPING[part.type as keyof typeof PART_MAPPING])
+      <For each={partIDs()}>
+        {(partID, index) => {
+          const part = createMemo(() => partsByID().get(partID))
+          const component = createMemo(() => {
+            const current = part()
+            if (!current) return
+            return PART_MAPPING[current.type as keyof typeof PART_MAPPING]
+          })
           return (
-            <Show when={component()}>
-              <Dynamic
-                last={index() === props.parts.length - 1}
-                component={component()}
-                part={part as any}
-                message={props.message}
-              />
+            <Show when={part()}>
+              {(part) => (
+                <Show when={component()}>
+                  <Dynamic
+                    last={index() === props.parts.length - 1}
+                    component={component()}
+                    part={part() as any}
+                    message={props.message}
+                  />
+                </Show>
+              )}
             </Show>
           )
         }}

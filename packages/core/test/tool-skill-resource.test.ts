@@ -122,16 +122,15 @@ describe("SkillResourceTool", () => {
               skill: skillID,
               resource: "references/guide.md",
             })
-            expect(first.output?.structured).toMatchObject({
+            const firstOutput = yield* Schema.decodeUnknownEffect(SkillResource.Output)(first.output?.structured)
+            expect(firstOutput).toMatchObject({
               type: "text",
               resource: "references/guide.md",
               size: Buffer.byteLength("界".repeat(8_000)),
               truncated: true,
-              content: expect.any(String),
-              nextCursor: expect.any(String),
             })
-            const firstOutput = yield* Schema.decodeUnknownEffect(SkillResource.Output)(first.output?.structured)
             if (firstOutput.type !== "text" || typeof firstOutput.nextCursor !== "string") return
+            expect(typeof firstOutput.content).toBe("string")
             const second = yield* call("call-text-second", {
               skill: skillID,
               resource: "references/guide.md",

@@ -398,6 +398,21 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
     expect(catalogRequests.at(-1)?.searchParams.get("includeInactive")).toBe("true")
     expect(calls.session).toHaveLength(sessionRequests)
 
+    // Skill Manager is owned by the route, so option models outlive this dialog.
+    // Repainting a later dialog used to update the destroyed header TextBuffer.
+    api!.ui.dialog.clear()
+    await setup.waitForVisualIdle()
+    await Bun.sleep(20)
+    api!.keymap.dispatchCommand("theme.switch")
+    await waitForFrame(setup, "Themes")
+    api!.theme.set(api!.theme.selected === "aura" ? "ayu" : "aura")
+    await setup.waitForVisualIdle()
+    expect(setup.captureCharFrame()).not.toContain("TextBuffer is destroyed")
+    api!.ui.dialog.clear()
+    api!.keymap.dispatchCommand("fork.skill.manage")
+    await waitForFrame(setup, "Discovery paths")
+    expect(setup.captureCharFrame()).toContain("State")
+
     await waitForEditor(setup)
     await setup.mockInput.typeText("review")
     await waitForFrame(setup, "review")

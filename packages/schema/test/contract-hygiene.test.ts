@@ -45,6 +45,14 @@ describe("contract hygiene", () => {
     expect(() => decodeID(`skill_${digest}` as unknown)).toThrow()
   })
 
+  test("skill guidance exports the accepted deterministic budget", () => {
+    expect({
+      entries: Skill.MAX_GUIDANCE_ENTRIES,
+      descriptionCharacters: Skill.MAX_GUIDANCE_DESCRIPTION_CHARACTERS,
+      bytes: Skill.MAX_GUIDANCE_BYTES,
+    }).toEqual({ entries: 64, descriptionCharacters: 256, bytes: 16_384 })
+  })
+
   test("skill target scopes use stable target identities and preserve explicit disabled state", () => {
     const decode = Schema.decodeUnknownSync(Skill.TargetScope)
     const targetID = "9a858c60-01c7-4a3d-a137-f5df09560d42"

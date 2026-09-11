@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
+import { Skill } from "@opencode-ai/schema/skill"
 import { Context, Schema } from "effect"
 import fs from "fs/promises"
 import path from "path"
@@ -263,6 +264,59 @@ describe("v2 location HttpApi", () => {
     })
     expect((await modelContext()).data.sources["core/skill-guidance"]).toEqual(advanced.sources["core/skill-guidance"])
     expect(await advances()).toHaveLength(1)
+  })
+
+  test("bounds model Skill guidance without trimming the device-local catalog", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./many-skills"] } },
+    })
+    await Promise.all(
+      Array.from({ length: 70 }, async (_, index) => {
+        const name = `bounded-${index.toString().padStart(3, "0")}`
+        const directory = path.join(tmp.path, "many-skills", name)
+        await fs.mkdir(directory, { recursive: true })
+        await fs.writeFile(
+          path.join(directory, "SKILL.md"),
+          `---\nname: ${name}\ndescription: ${"界".repeat(Skill.MAX_DESCRIPTION_CHARACTERS)}\n---\nBody`,
+        )
+      }),
+    )
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: tmp.path } }),
+    })
+    expect(created.status, await created.clone().text()).toBe(200)
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activated = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+    expect(activated.status, await activated.clone().text()).toBe(200)
+
+    const localResponse = await request("/api/skill/catalog", tmp.path)
+    expect(localResponse.status, await localResponse.clone().text()).toBe(200)
+    const local = (await localResponse.json()) as { data: { skills: Array<{ name: string; description?: string }> } }
+    expect(local.data.skills.filter((skill) => skill.name.startsWith("bounded-"))).toHaveLength(70)
+    expect(
+      local.data.skills
+        .filter((skill) => skill.name.startsWith("bounded-"))
+        .every((skill) => [...(skill.description ?? "")].length === Skill.MAX_DESCRIPTION_CHARACTERS),
+    ).toBe(true)
+
+    const contextResponse = await request(`/api/session/${sessionID}/model-context`, tmp.path)
+    expect(contextResponse.status, await contextResponse.clone().text()).toBe(200)
+    const context = (await contextResponse.json()) as {
+      data: {
+        sources: Record<
+          string,
+          { baseline: string; value: { skills: Array<{ name: string; description?: string }>; omitted?: number } }
+        >
+      }
+    }
+    const guidance = context.data.sources["core/skill-guidance"]!
+    expect(new TextEncoder().encode(guidance.baseline).byteLength).toBeLessThanOrEqual(Skill.MAX_GUIDANCE_BYTES)
+    expect(guidance.value.skills.length).toBeLessThanOrEqual(Skill.MAX_GUIDANCE_ENTRIES)
+    expect(guidance.value.omitted).toBe(local.data.skills.length - guidance.value.skills.length)
+    expect(guidance.baseline).toContain(`<omitted count="${guidance.value.omitted}">`)
   })
 
   test("admits portable Skill snapshots atomically and reuses them for exact retries", async () => {

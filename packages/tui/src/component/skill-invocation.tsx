@@ -3,11 +3,17 @@ import { createMemo, createSignal, Show } from "solid-js"
 import { useTheme } from "../context/theme"
 import { Locale } from "../util/locale"
 
-export function SkillInvocationRow(props: { snapshot: SessionSkillInvocationSnapshot; width: number }) {
+export function SkillInvocationRow(props: {
+  snapshot: SessionSkillInvocationSnapshot
+  width: number
+  expanded?: boolean
+  onToggle?: () => void
+}) {
   const { theme } = useTheme()
-  const [expanded, setExpanded] = createSignal(false)
+  const [localExpanded, setLocalExpanded] = createSignal(false)
+  const expanded = () => props.expanded ?? localExpanded()
   const name = createMemo(() => Locale.truncateMiddle(props.snapshot.name, Math.max(8, props.width - 28)))
-  const toggle = () => setExpanded((current) => !current)
+  const toggle = () => (props.onToggle ? props.onToggle() : setLocalExpanded((current) => !current))
 
   return (
     <box

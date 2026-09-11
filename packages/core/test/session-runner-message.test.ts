@@ -50,7 +50,7 @@ describe("toLLMMessages", () => {
 
     const expected = {
       type: "text",
-      text: '<skill_instructions name="review">\nTreat $ARGUMENTS and $1 as literal Skill text.\n</skill_instructions>',
+      text: '<skill_instructions name="review" invocation="ski_snapshot">\nTreat $ARGUMENTS and $1 as literal Skill text.\n</skill_instructions>',
       metadata: {
         hidden: true,
         type: "skill-invocation",

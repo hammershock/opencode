@@ -1,27 +1,31 @@
 export * as SkillTool from "./skill"
 
-import path from "path"
 import { ToolFailure } from "@opencode-ai/llm"
+import { Skill } from "@opencode-ai/schema/skill"
+import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
-import { FSUtil } from "../fs-util"
-import { SkillV2 } from "../skill"
 import { PermissionV2 } from "../permission"
+import { SkillGuidanceSnapshot } from "../skill/guidance-snapshot"
+import { SkillResolver } from "../skill/resolver"
+import { Hash } from "../util/hash"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 
 export const name = "skill"
-const FILE_LIMIT = 10
 
 export const Input = Schema.Struct({
   name: Schema.String.annotate({ description: "The name of the skill from the available skills list" }),
 })
 
 export const Output = Schema.Struct({
-  name: Schema.String,
-  directory: Schema.String,
+  snapshot: SkillInvocation.Snapshot,
   output: Schema.String,
+})
+
+export const Structured = Schema.Struct({
+  snapshot: SkillInvocation.Snapshot,
 })
 
 export const description = [
@@ -32,21 +36,14 @@ export const description = [
   "The skill name must match one of the available skills in the system context.",
 ].join("\n")
 
-export const toModelOutput = (skill: SkillV2.Info, files: ReadonlyArray<string>) => {
-  const directory = path.dirname(skill.location)
+export const toModelOutput = (snapshot: SkillInvocation.Snapshot) => {
   return [
-    `<skill_content name="${skill.name}">`,
-    `# Skill: ${skill.name}`,
+    `<skill_content name="${snapshot.name}" invocation="${snapshot.id}">`,
+    `# Skill: ${snapshot.name}`,
     "",
-    skill.content.trim(),
+    snapshot.content.trim(),
     "",
-    `Base directory for this skill: ${directory}`,
-    "Relative paths in this skill (e.g., scripts/, reference/) are relative to this base directory.",
-    "Note: file list is sampled.",
-    "",
-    "<skill_files>",
-    ...files.map((file) => `<file>${file}</file>`),
-    "</skill_files>",
+    `Use skill_resource with skill "${snapshot.id}" to list or read auxiliary files from this Skill package.`,
     "</skill_content>",
   ].join("\n")
 }
@@ -57,45 +54,53 @@ const unableToLoad = (name: string, error?: unknown) =>
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
-    const fs = yield* FSUtil.Service
-    const skills = yield* SkillV2.Service
     const permission = yield* PermissionV2.Service
+    const resolver = yield* SkillResolver.Service
     yield* tools
       .register({
         [name]: Tool.make({
           description,
           input: Input,
           output: Output,
+          structured: Structured,
+          toStructuredOutput: ({ output }) => ({
+            snapshot: SkillInvocation.Snapshot.make({
+              ...output.snapshot,
+              id: SkillInvocation.ID.make(output.snapshot.id),
+              digest: Skill.Digest.make(output.snapshot.digest),
+            }),
+          }),
           toModelOutput: ({ output }) => [{ type: "text", text: output.output }],
           execute: (input, context) =>
             Effect.gen(function* () {
-              const current = yield* skills.list()
-              const skill = current.find((skill) => skill.name === input.name)
-              if (!skill) return yield* unableToLoad(input.name)
-              return yield* Effect.gen(function* () {
-                yield* permission.assert({
-                  action: name,
-                  resources: [skill.name],
-                  save: [skill.name],
-                  sessionID: context.sessionID,
-                  agent: context.agent,
-                  source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-                })
-                const directory = path.dirname(skill.location)
-                const files =
-                  path.basename(skill.location) === "SKILL.md"
-                    ? (yield* fs.glob("**/*", { cwd: directory, absolute: true, include: "file", dot: true }))
-                        .filter((file) => path.basename(file) !== "SKILL.md")
-                        .toSorted()
-                        .slice(0, FILE_LIMIT)
-                    : []
-                return {
-                  name: skill.name,
-                  directory,
-                  output: toModelOutput(skill, files),
-                }
-              }).pipe(Effect.mapError((error) => unableToLoad(input.name, error)))
-            }),
+              const candidate = yield* resolver.resolveName({ agent: context.agent, name: input.name })
+              yield* permission.assert({
+                action: name,
+                resources: [candidate.entry.metadata.name],
+                save: [candidate.entry.metadata.name],
+                sessionID: context.sessionID,
+                agent: context.agent,
+                source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+              })
+              const resolved = yield* resolver.read(candidate)
+              const snapshot = SkillInvocation.Snapshot.make({
+                id: SkillInvocation.ID.make(
+                  `ski_${Hash.sha256(
+                    `${context.sessionID}\0${context.assistantMessageID}\0${context.toolCallID}\0${resolved.entry.metadata.name}\0${resolved.entry.metadata.digest}`,
+                  )}`,
+                ),
+                name: resolved.entry.metadata.name,
+                description: resolved.entry.metadata.description,
+                digest: resolved.entry.metadata.digest,
+                source: {
+                  kind: resolved.entry.source.kind,
+                  label: SkillGuidanceSnapshot.sourceLabel(resolved.entry.source.label),
+                },
+                content: resolved.entry.content,
+                status: "loaded",
+              })
+              return { snapshot, output: toModelOutput(snapshot) }
+            }).pipe(Effect.mapError((error) => unableToLoad(input.name, error))),
         }),
       })
       .pipe(Effect.orDie)
@@ -105,5 +110,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/skill",
   layer,
-  deps: [ToolRegistry.node, FSUtil.locationNode, SkillV2.node, PermissionV2.node],
+  deps: [ToolRegistry.node, SkillResolver.node, PermissionV2.node],
 })

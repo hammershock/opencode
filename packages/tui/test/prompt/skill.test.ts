@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { admittedSkills, skillDisplayLabel, structuredSkillMentions } from "../../src/prompt/skill"
+import { admittedSkills, skillCatalogInput, skillDisplayLabel, structuredSkillMentions } from "../../src/prompt/skill"
 
 const catalog = [
   { id: "one", name: "review", sourceLabel: "OpenCode", digest: "a" },
@@ -10,6 +10,18 @@ describe("skillDisplayLabel", () => {
   test("only adds source labels when names collide", () => {
     expect(skillDisplayLabel(catalog[1]!, catalog)).toBe("$deploy")
     expect(skillDisplayLabel(catalog[0]!, [...catalog, { ...catalog[0]!, id: "duplicate" }])).toBe("$review · OpenCode")
+  })
+})
+
+describe("skillCatalogInput", () => {
+  test("waits for a QuickStart Agent and includes it in the reactive request input", () => {
+    expect(skillCatalogInput(false, { agent: "build" })).toBeUndefined()
+    expect(skillCatalogInput(true, {})).toBeUndefined()
+    expect(skillCatalogInput(true, { agent: "build", location: { directory: "/project" } })).toEqual({
+      agent: "build",
+      location: { directory: "/project" },
+    })
+    expect(skillCatalogInput(true, { sessionID: "ses_test" })).toEqual({ sessionID: "ses_test" })
   })
 })
 

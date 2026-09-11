@@ -10,6 +10,15 @@ export function skillDisplayLabel(skill: SkillCatalogEntry, catalog: readonly Sk
   return `$${skill.name}${catalog.filter((candidate) => candidate.name === skill.name).length > 1 ? ` · ${skill.sourceLabel}` : ""}`
 }
 
+export function skillCatalogInput<T extends { readonly sessionID?: string; readonly agent?: string }>(
+  visible: boolean,
+  input: T,
+) {
+  if (!visible) return
+  if (!input.sessionID && !input.agent) return
+  return input
+}
+
 export function admittedSkills(
   catalog: readonly SkillCatalogEntry[],
   admitted: { readonly skills: readonly SkillCatalogEntry[] } | null | undefined,

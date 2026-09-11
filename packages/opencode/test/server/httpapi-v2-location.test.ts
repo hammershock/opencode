@@ -108,6 +108,23 @@ describe("v2 location HttpApi", () => {
     }
   })
 
+  test("keeps the legacy Skill list equal to the canonical catalog projection", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./explicit-skills"] } },
+    })
+    await Bun.write(
+      path.join(tmp.path, "explicit-skills", "review", "SKILL.md"),
+      "---\nname: review\ndescription: Review a patch\n---\n\n# Review\n",
+    )
+
+    const legacy = await request("/skill", tmp.path)
+    const canonical = await request("/api/skill", tmp.path)
+    expect(legacy.status, await legacy.clone().text()).toBe(200)
+    expect(canonical.status, await canonical.clone().text()).toBe(200)
+    expect(await legacy.json()).toEqual(((await canonical.json()) as { data: unknown }).data)
+  })
+
   test("completes User Shell input at a Location without creating a Session", async () => {
     await using tmp = await tmpdir({ git: true })
     await Bun.write(path.join(tmp.path, "shell-completion-marker"), "")

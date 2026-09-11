@@ -17,7 +17,6 @@ import { Provider } from "@/provider/provider"
 import { ProviderAuth } from "@/provider/auth"
 import { Agent } from "@/agent/agent"
 import { Skill } from "@/skill"
-import { Discovery } from "@/skill/discovery"
 import { Question } from "@/question"
 import { Permission } from "@/permission"
 import { Todo } from "@/session/todo"
@@ -52,6 +51,7 @@ import { BackgroundJob } from "@/background/job"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { makeGlobalNode } from "@opencode-ai/core/effect/app-node"
 import { AppNodeBuilderV1 } from "./app-node-builder-v1"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { ProviderUsage } from "@/provider/usage"
@@ -59,6 +59,13 @@ import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SessionSync } from "@opencode-ai/core/sync/session"
 import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
 import { SyncControl } from "@opencode-ai/core/sync/control"
+import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
+
+const localLocationServiceMapNode = makeGlobalNode({
+  service: LocationServiceMap.Service,
+  layer: locationServiceMapLayer,
+  deps: [],
+})
 
 export const AppLayer = AppNodeBuilderV1.build(
   LayerNode.group([
@@ -82,7 +89,6 @@ export const AppLayer = AppNodeBuilderV1.build(
     ProviderAuth.node,
     Agent.node,
     Skill.node,
-    Discovery.node,
     Question.node,
     Permission.node,
     Todo.node,
@@ -115,7 +121,9 @@ export const AppLayer = AppNodeBuilderV1.build(
     Installation.node,
     ShareNext.node,
     SessionShare.node,
+    LocationServiceMap.node,
   ]),
+  [[LocationServiceMap.node, localLocationServiceMapNode]],
 ).pipe(Layer.provideMerge(AppNodeBuilderV1.build(Ripgrep.node)), Layer.provideMerge(Observability.layer))
 
 const rt = ManagedRuntime.make(AppLayer, { memoMap })

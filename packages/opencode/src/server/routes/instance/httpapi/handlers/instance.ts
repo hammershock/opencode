@@ -5,11 +5,12 @@ import { Format } from "@/format"
 import { Global } from "@opencode-ai/core/global"
 import { LSP } from "@/lsp/lsp"
 import { Vcs } from "@/project/vcs"
-import { Skill } from "@/skill"
 import { Location } from "@opencode-ai/core/location"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SkillCatalogContextService } from "@opencode-ai/core/skill/catalog-context-service"
+import { SkillV2 } from "@opencode-ai/core/skill"
+import { PluginV2 } from "@opencode-ai/core/plugin"
 import { Effect } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -24,7 +25,6 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     const command = yield* Command.Service
     const format = yield* Format.Service
     const lsp = yield* LSP.Service
-    const skill = yield* Skill.Service
     const locations = yield* LocationServiceMap.Service
     const vcs = yield* Vcs.Service
 
@@ -112,7 +112,30 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     })
 
     const getSkill = Effect.fn("InstanceHttpApi.skill")(function* () {
-      return yield* skill.all()
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const route = yield* WorkspaceRouteContext
+      const targetID = request.headers["x-opencode-target"]
+      const url = new URL(request.url, "http://localhost")
+      const directory = targetID
+        ? (url.searchParams.get("directory") ?? request.headers["x-opencode-directory"] ?? route.directory)
+        : route.directory
+      return yield* Effect.gen(function* () {
+        const plugin = yield* PluginV2.Service
+        yield* plugin.wait(PluginV2.ID.make("config-skill"))
+        return yield* (yield* SkillV2.Service).list()
+      }).pipe(
+        Effect.provide(
+          locations.get(
+            Location.Ref.make({
+              target: targetID
+                ? Location.RexdTarget.make({ type: "rexd", targetID: Location.TargetID.make(targetID) })
+                : Location.LocalTarget.make({ type: "local" }),
+              directory: AbsolutePath.make(directory),
+              workspaceID: route.workspaceID,
+            }),
+          ),
+        ),
+      )
     })
 
     const getLsp = Effect.fn("InstanceHttpApi.lsp")(function* () {

@@ -27,7 +27,6 @@ import type { LspTool } from "@/tool/lsp"
 import type { PlanExitTool } from "@/tool/plan"
 import type { QuestionTool } from "@/tool/question"
 import type { ReadTool } from "@/tool/read"
-import type { SkillTool } from "@/tool/skill"
 import type { TaskTool } from "@/tool/task"
 import type { TodoWriteTool } from "@/tool/todo"
 import type { WebFetchTool } from "@/tool/webfetch"
@@ -108,7 +107,7 @@ type ToolDefs = {
   lsp: typeof LspTool
   webfetch: typeof WebFetchTool
   websearch: typeof WebSearchTool
-  skill: typeof SkillTool
+  skill: Tool.Info
   plan_exit: typeof PlanExitTool
 }
 
@@ -393,10 +392,10 @@ function runTodo(p: ToolProps<typeof TodoWriteTool>): ToolInline {
   }
 }
 
-function runSkill(p: ToolProps<typeof SkillTool>): ToolInline {
+function runSkill(p: ToolProps): ToolInline {
   return {
     icon: "→",
-    title: `Skill "${p.input.name ?? ""}"`,
+    title: `Skill "${text(p.frame.input.name)}"`,
   }
 }
 
@@ -859,8 +858,8 @@ function scrollLspStart(p: ToolProps<typeof LspTool>): string {
   return `→ ${lspTitle(p.input)}`
 }
 
-function scrollSkillStart(p: ToolProps<typeof SkillTool>): string {
-  return `→ Skill "${p.input.name ?? ""}"`
+function scrollSkillStart(p: ToolProps): string {
+  return `→ Skill "${text(p.frame.input.name)}"`
 }
 
 function scrollGlobStart(p: ToolProps<typeof GlobTool>): string {

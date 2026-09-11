@@ -23,16 +23,48 @@ describe("Session target resolution", () => {
     expect(result).toMatchObject({ status: "missing_local_target", missingTargetID: targetID })
   })
 
-  test("portable labels require an explicit local binding", async () => {
+  test("portable labels resolve an exact-name local target and validate the Session directory", async () => {
+    const directories: string[] = []
     const result = await SessionLocationRebinding.resolve({
       sessionID,
       portable: { label: "lab-gpu", directory: "/work" },
       targets: [definition(targetID, "lab-gpu")],
       bindings: new Map(),
       referencedSessions: async () => [sessionID],
+      probe: async (_target, directory) => {
+        directories.push(directory)
+        return { status: "ready", stages: [] }
+      },
+    })
+    expect(result).toMatchObject({
+      status: "resolved",
+      location: { target: { type: "rexd", targetID }, directory: "/work" },
+    })
+    expect(directories).toEqual(["/work"])
+  })
+
+  test("keeps unmatched portable labels unresolved", async () => {
+    const result = await SessionLocationRebinding.resolve({
+      sessionID,
+      portable: { label: "lab-gpu", directory: "/work" },
+      targets: [definition(targetID, "another-gpu")],
+      bindings: new Map(),
+      referencedSessions: async () => [sessionID],
       probe: async () => ({ status: "ready", stages: [] }),
     })
     expect(result).toMatchObject({ status: "unbound_portable_target", portableTargetLabel: "lab-gpu" })
+  })
+
+  test("prefers an explicit binding over an exact-name local target", async () => {
+    const result = await SessionLocationRebinding.resolve({
+      sessionID,
+      portable: { label: "lab-gpu", directory: "/work" },
+      targets: [definition(targetID, "lab-gpu"), definition(otherTargetID, "bound-elsewhere")],
+      bindings: new Map([["lab-gpu", otherTargetID]]),
+      referencedSessions: async () => [sessionID],
+      probe: async () => ({ status: "ready", stages: [] }),
+    })
+    expect(result).toMatchObject({ status: "resolved", location: { target: { targetID: otherTargetID } } })
   })
 
   test("reports a configured but unavailable target separately", async () => {

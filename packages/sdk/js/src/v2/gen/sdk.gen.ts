@@ -289,6 +289,9 @@ import type {
   SessionUnshareResponses,
   SessionUpdateErrors,
   SessionUpdateResponses,
+  SkillDiscoveryUpdate,
+  SkillRevisionInput,
+  SkillTargetScopeUpdate,
   SubtaskPartInput,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
@@ -413,6 +416,8 @@ import type {
   V2QuestionRequestListResponses,
   V2ReferenceListErrors,
   V2ReferenceListResponses,
+  V2SessionActivateErrors,
+  V2SessionActivateResponses,
   V2SessionActiveErrors,
   V2SessionActiveResponses,
   V2SessionCompactErrors,
@@ -471,8 +476,20 @@ import type {
   V2SessionWaitResponses,
   V2ShellCompleteErrors,
   V2ShellCompleteResponses,
+  V2SkillCatalogErrors,
+  V2SkillCatalogResponses,
+  V2SkillDiscoveryResetErrors,
+  V2SkillDiscoveryResetResponses,
+  V2SkillDiscoveryUpdateErrors,
+  V2SkillDiscoveryUpdateResponses,
   V2SkillListErrors,
   V2SkillListResponses,
+  V2SkillReloadErrors,
+  V2SkillReloadResponses,
+  V2SkillSettingsErrors,
+  V2SkillSettingsResponses,
+  V2SkillTargetScopeUpdateErrors,
+  V2SkillTargetScopeUpdateResponses,
   V2TargetBindingBindErrors,
   V2TargetBindingBindResponses,
   V2TargetBindingListErrors,
@@ -5716,6 +5733,25 @@ export class Session3 extends HeyApiClient {
   }
 
   /**
+   * Activate session model context
+   *
+   * Reload activation-scoped context sources before entering or resuming a session.
+   */
+  public activate<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "sessionID" }] }])
+    return (options?.client ?? this.client).post<V2SessionActivateResponses, V2SessionActivateErrors, ThrowOnError>({
+      url: "/api/session/{sessionID}/activate",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Switch session agent
    *
    * Switch the agent used by subsequent provider turns.
@@ -6819,6 +6855,99 @@ export class Command2 extends HeyApiClient {
   }
 }
 
+export class Discovery extends HeyApiClient {
+  /**
+   * Replace imported Skill sources
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      skillDiscoveryUpdate: SkillDiscoveryUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "skillDiscoveryUpdate", map: "body" }] }])
+    return (options?.client ?? this.client).put<
+      V2SkillDiscoveryUpdateResponses,
+      V2SkillDiscoveryUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/api/skill/settings/discovery",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Reset to OpenCode Skill roots
+   */
+  public reset<ThrowOnError extends boolean = false>(
+    parameters: {
+      skillRevisionInput: SkillRevisionInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ key: "skillRevisionInput", map: "body" }] }])
+    return (options?.client ?? this.client).post<
+      V2SkillDiscoveryResetResponses,
+      V2SkillDiscoveryResetErrors,
+      ThrowOnError
+    >({
+      url: "/api/skill/settings/discovery/reset",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class TargetScope extends HeyApiClient {
+  /**
+   * Set Skill target availability
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      skillID: string
+      skillTargetScopeUpdate: SkillTargetScopeUpdate
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "skillID" },
+            { key: "skillTargetScopeUpdate", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      V2SkillTargetScopeUpdateResponses,
+      V2SkillTargetScopeUpdateErrors,
+      ThrowOnError
+    >({
+      url: "/api/skill/settings/{skillID}/target-scope",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Skill extends HeyApiClient {
   /**
    * List skills
@@ -6841,6 +6970,81 @@ export class Skill extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  /**
+   * List controller Skill catalog metadata
+   *
+   * Returns metadata and diagnostics without Skill bodies.
+   */
+  public catalog<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+        target?: string
+      }
+      forceReload?: "true" | "false"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "query", key: "forceReload" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2SkillCatalogResponses, V2SkillCatalogErrors, ThrowOnError>({
+      url: "/api/skill/catalog",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Reload controller Skill discovery
+   */
+  public reload<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string
+        workspace?: string
+        target?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "location" }] }])
+    return (options?.client ?? this.client).post<V2SkillReloadResponses, V2SkillReloadErrors, ThrowOnError>({
+      url: "/api/skill/reload",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read device-local Skill settings
+   */
+  public settings<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<V2SkillSettingsResponses, V2SkillSettingsErrors, ThrowOnError>({
+      url: "/api/skill/settings",
+      ...options,
+    })
+  }
+
+  private _discovery?: Discovery
+  get discovery(): Discovery {
+    return (this._discovery ??= new Discovery({ client: this.client }))
+  }
+
+  private _targetScope?: TargetScope
+  get targetScope(): TargetScope {
+    return (this._targetScope ??= new TargetScope({ client: this.client }))
   }
 }
 

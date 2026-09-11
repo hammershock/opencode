@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { Context, Schema } from "effect"
+import fs from "fs/promises"
 import path from "path"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { resetDatabase } from "../fixture/db"
@@ -144,6 +145,323 @@ describe("v2 location HttpApi", () => {
       data: { status: "failed", template: "created" },
     })
     expect(await Bun.file(`${tmp.path}/.env`).text()).toStartWith("# Project environment variables for OpenCode.")
+  })
+
+  test("reloads Skill catalog context only on activation and retains the last good snapshot", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./external-skills"] } },
+    })
+    const root = path.join(tmp.path, "external-skills")
+    const skillFile = path.join(root, "activation-review", "SKILL.md")
+    await fs.mkdir(path.dirname(skillFile), { recursive: true })
+    await fs.writeFile(
+      skillFile,
+      "---\nname: activation-review\ndescription: Review the first catalog\n---\nPRIVATE ACTIVATION BODY",
+    )
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: tmp.path } }),
+    })
+    expect(created.status, await created.clone().text()).toBe(200)
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activate = async () => {
+      const response = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+      expect(response.status, await response.clone().text()).toBe(200)
+      return (await response.json()) as {
+        data: {
+          status: string
+          diagnostics: Array<{ kind: string; severity: string; sourceLabel: string }>
+        }
+      }
+    }
+    const modelContext = async () => {
+      const response = await request(`/api/session/${sessionID}/model-context`, tmp.path)
+      expect(response.status, await response.clone().text()).toBe(200)
+      return (await response.json()) as {
+        data: {
+          generation: number
+          locationRevision: number
+          baseline: string
+          sources: Record<string, { value: unknown; refresh?: string }>
+        }
+      }
+    }
+    const advances = async () => {
+      const response = await request(`/api/session/${sessionID}/history?limit=100`, tmp.path)
+      expect(response.status, await response.clone().text()).toBe(200)
+      const body = (await response.json()) as { data: Array<{ data: { cause?: string } }> }
+      return body.data.filter((event) => event.data.cause === "skill-catalog-reloaded")
+    }
+
+    expect(await activate()).toMatchObject({ data: { status: "initialized" } })
+    const initial = (await modelContext()).data
+    const initialSkillSource = initial.sources["core/skill-guidance"]
+    expect(initialSkillSource).toMatchObject({
+      refresh: "activation",
+      value: {
+        enabled: true,
+        skills: expect.arrayContaining([
+          expect.objectContaining({ name: "activation-review", description: "Review the first catalog" }),
+        ]),
+      },
+    })
+    expect(JSON.stringify(initialSkillSource)).not.toContain("PRIVATE ACTIVATION BODY")
+    expect(JSON.stringify(initialSkillSource)).not.toContain("skl_")
+    expect(await activate()).toMatchObject({ data: { status: "unchanged" } })
+    expect(await advances()).toHaveLength(0)
+
+    await fs.writeFile(
+      skillFile,
+      "---\nname: activation-review\ndescription: Review the second catalog\n---\nCHANGED PRIVATE BODY",
+    )
+    expect((await modelContext()).data.sources["core/skill-guidance"]).toEqual(initialSkillSource)
+    expect(await activate()).toMatchObject({ data: { status: "advanced" } })
+    const advanced = (await modelContext()).data
+    expect(advanced).toMatchObject({
+      generation: initial.generation,
+      locationRevision: initial.locationRevision,
+      baseline: initial.baseline,
+    })
+    expect(advanced.sources["core/skill-guidance"]).toMatchObject({
+      value: {
+        skills: expect.arrayContaining([
+          expect.objectContaining({ name: "activation-review", description: "Review the second catalog" }),
+        ]),
+      },
+    })
+    expect(await advances()).toHaveLength(1)
+
+    await fs.rename(root, `${root}-offline`)
+    expect(await activate()).toMatchObject({
+      data: {
+        status: "retained",
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ kind: "root-unavailable", sourceLabel: "Imported" }),
+        ]),
+      },
+    })
+    expect((await modelContext()).data.sources["core/skill-guidance"]).toEqual(advanced.sources["core/skill-guidance"])
+    expect(await advances()).toHaveLength(1)
+  })
+
+  test("admits portable Skill snapshots atomically and reuses them for exact retries", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./explicit-skills"] } },
+    })
+    const skillFile = path.join(tmp.path, "explicit-skills", "review", "SKILL.md")
+    await fs.mkdir(path.dirname(skillFile), { recursive: true })
+    await fs.writeFile(
+      skillFile,
+      "---\nname: review\ndescription: Review a patch\n---\nKeep $ARGUMENTS and $1 literal.",
+    )
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: tmp.path } }),
+    })
+    expect(created.status, await created.clone().text()).toBe(200)
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activated = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+    expect(activated.status, await activated.clone().text()).toBe(200)
+
+    const catalogResponse = await request("/api/skill/catalog?forceReload=false", tmp.path)
+    expect(catalogResponse.status, await catalogResponse.clone().text()).toBe(200)
+    const catalog = (await catalogResponse.json()) as {
+      data: { skills: Array<{ id: string; name: string }> }
+    }
+    const skill = catalog.data.skills.find((item) => item.name === "review")!
+    const prompt = {
+      text: "$review $review inspect the patch",
+      skills: [
+        { id: skill.id, name: skill.name, source: { start: 0, end: 7, text: "$review" } },
+        { id: skill.id, name: skill.name, source: { start: 8, end: 15, text: "$review" } },
+      ],
+    }
+    const admit = (id: string, value = prompt) =>
+      request(`/api/session/${sessionID}/prompt`, tmp.path, {
+        method: "POST",
+        body: JSON.stringify({ id, prompt: value, resume: false }),
+      })
+
+    const [first, concurrent] = await Promise.all([admit("msg_skill_snapshot"), admit("msg_skill_snapshot")])
+    expect(first.status, await first.clone().text()).toBe(200)
+    expect(concurrent.status, await concurrent.clone().text()).toBe(200)
+    const admitted = (await first.json()) as {
+      data: {
+        prompt: {
+          text: string
+          invocations: Array<{
+            source: { start: number; end: number; text: string }
+            snapshot: { id: string; name: string; digest: string; source: { label: string }; content: string }
+          }>
+        }
+      }
+    }
+    expect(admitted.data.prompt.text).toBe(prompt.text)
+    expect(admitted.data.prompt.invocations).toHaveLength(1)
+    expect(admitted.data.prompt.invocations[0]).toMatchObject({
+      source: prompt.skills[0]!.source,
+      snapshot: {
+        id: expect.stringMatching(/^ski_/),
+        name: "review",
+        source: { label: "Imported" },
+        content: "Keep $ARGUMENTS and $1 literal.",
+      },
+    })
+    expect(JSON.stringify(admitted)).not.toContain("skl_")
+    expect(JSON.stringify(admitted)).not.toContain(tmp.path)
+    expect(await concurrent.json()).toEqual(admitted)
+
+    await fs.writeFile(skillFile, "---\nname: review\ndescription: Review a patch\n---\nChanged body")
+    await disposeAllInstances()
+    const retried = await admit("msg_skill_snapshot")
+    expect(retried.status, await retried.clone().text()).toBe(200)
+    expect(await retried.json()).toEqual(admitted)
+
+    const stale = await admit("msg_skill_stale")
+    expect(stale.status).toBe(400)
+    expect(await stale.json()).toMatchObject({ _tag: "SkillMentionError", kind: "stale-catalog", name: "review" })
+
+    await fs.unlink(skillFile)
+    const missing = await admit("msg_skill_missing")
+    expect(missing.status).toBe(400)
+    expect(await missing.json()).toMatchObject({ _tag: "SkillMentionError", kind: "unavailable", name: "review" })
+
+    const invalid = await admit("msg_skill_invalid", {
+      text: "$review inspect",
+      skills: [{ id: skill.id, name: skill.name, source: { start: 1, end: 7, text: "$review" } }],
+    })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({ _tag: "SkillMentionError", kind: "invalid-mention", name: "review" })
+
+    const history = await request(`/api/session/${sessionID}/history?limit=100`, tmp.path)
+    const events = (await history.json()) as { data: Array<{ type: string }> }
+    expect(events.data.filter((event) => event.type === "session.next.prompt.admitted")).toHaveLength(1)
+  })
+
+  test("adapts legacy Skill slash commands to canonical durable admission", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./explicit-skills"] } },
+    })
+    const skillFile = path.join(tmp.path, "explicit-skills", "slash-review", "SKILL.md")
+    await fs.mkdir(path.dirname(skillFile), { recursive: true })
+    await fs.writeFile(
+      skillFile,
+      "---\nname: slash-review\ndescription: Review through slash compatibility\n---\nKeep $ARGUMENTS and $1 literal.",
+    )
+    await fs.mkdir(path.join(tmp.path, "explicit-skills", "review"), { recursive: true })
+    await fs.writeFile(
+      path.join(tmp.path, "explicit-skills", "review", "SKILL.md"),
+      "---\nname: review\ndescription: Must not shadow the built-in command\n---\nCOLLIDING SKILL BODY",
+    )
+
+    const commands = await request("/command", tmp.path)
+    expect(commands.status, await commands.clone().text()).toBe(200)
+    const commandList = (await commands.json()) as Array<{ name: string; source: string; template: string }>
+    expect(commandList).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "slash-review", source: "skill", template: "", hints: [] }),
+      ]),
+    )
+    expect(commandList.filter((command) => command.name === "review")).toEqual([
+      expect.objectContaining({ name: "review", source: "command" }),
+    ])
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({
+        agent: "build",
+        model: { providerID: "unknown", id: "unknown" },
+        location: { target: { type: "local" }, directory: tmp.path },
+      }),
+    })
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activated = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+    expect(activated.status, await activated.clone().text()).toBe(200)
+    const invoke = (messageID: string) =>
+      request(`/session/${sessionID}/command`, tmp.path, {
+        method: "POST",
+        body: JSON.stringify({
+          messageID,
+          command: "slash-review",
+          arguments: "inspect $ARGUMENTS and $1",
+          agent: "build",
+          model: "unknown/unknown",
+        }),
+      })
+
+    const first = await invoke("msg_slash_compatibility")
+    expect(first.status, await first.clone().text()).toBe(200)
+    const response = (await first.json()) as { parts: Array<{ type: string; text?: string }> }
+    expect(response.parts).toEqual([
+      expect.objectContaining({ type: "text", text: "$slash-review inspect $ARGUMENTS and $1" }),
+    ])
+    expect(JSON.stringify(response)).not.toContain("Keep $ARGUMENTS")
+
+    const catalogResponse = await request("/api/skill/catalog?forceReload=false", tmp.path)
+    const catalog = (await catalogResponse.json()) as {
+      data: { skills: Array<{ id: string; name: string }> }
+    }
+    const skill = catalog.data.skills.find((item) => item.name === "slash-review")!
+    const canonical = await request(`/api/session/${sessionID}/prompt`, tmp.path, {
+      method: "POST",
+      body: JSON.stringify({
+        id: "msg_slash_canonical",
+        prompt: {
+          text: "$slash-review inspect $ARGUMENTS and $1",
+          skills: [
+            {
+              id: skill.id,
+              name: skill.name,
+              source: { start: 0, end: 13, text: "$slash-review" },
+            },
+          ],
+        },
+        resume: false,
+      }),
+    })
+    expect(canonical.status, await canonical.clone().text()).toBe(200)
+    const canonicalPrompt = (await canonical.json()) as {
+      data: {
+        prompt: { invocations: Array<{ snapshot: { id: string; name: string; digest: string; content: string } }> }
+      }
+    }
+
+    await fs.unlink(skillFile)
+    await disposeAllInstances()
+    const retried = await invoke("msg_slash_compatibility")
+    expect(retried.status, await retried.clone().text()).toBe(200)
+    expect(await retried.json()).toEqual(response)
+
+    const missing = await invoke("msg_slash_missing")
+    expect(missing.status).toBe(400)
+    const history = await request(`/api/session/${sessionID}/history?limit=100`, tmp.path)
+    const events = (await history.json()) as {
+      data: Array<{
+        type: string
+        data: {
+          prompt?: {
+            text: string
+            invocations?: Array<{ snapshot: { name: string; digest: string; content: string } }>
+          }
+        }
+      }>
+    }
+    const admitted = events.data.filter((event) => event.type === "session.next.prompt.admitted")
+    expect(admitted).toHaveLength(2)
+    expect(admitted[0]?.data.prompt).toMatchObject({
+      text: "$slash-review inspect $ARGUMENTS and $1",
+      invocations: [{ snapshot: { content: "Keep $ARGUMENTS and $1 literal." } }],
+    })
+    expect(admitted[0]?.data.prompt?.invocations?.[0]?.snapshot).toMatchObject({
+      name: canonicalPrompt.data.prompt.invocations[0]!.snapshot.name,
+      digest: canonicalPrompt.data.prompt.invocations[0]!.snapshot.digest,
+      content: canonicalPrompt.data.prompt.invocations[0]!.snapshot.content,
+    })
   })
 
   test("streams native EventV2 payloads across locations", async () => {

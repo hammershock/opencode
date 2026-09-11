@@ -69,6 +69,8 @@ export interface DialogSelectOption<T = any> {
   inspectionTitle?: string
   inspectionView?: (offset: number, width: number) => JSX.Element
   inspectFooter?: boolean
+  inspectionFooter?: string
+  footerSuffix?: string
   category?: string
   categoryView?: JSX.Element
   disabled?: boolean
@@ -533,7 +535,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   function FooterAction(action: { item: VisibleAction }) {
     if (!isActionItem(action.item))
       return (
-        <text>
+        <text flexShrink={0} wrapMode="none">
           <span style={{ fg: theme.text }}>
             <b>{action.item.title}</b>{" "}
           </span>
@@ -547,6 +549,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     return (
       <box
         flexDirection="row"
+        flexShrink={0}
         backgroundColor={active() ? theme.primary : RGBA.fromInts(0, 0, 0, 0)}
         onMouseUp={() => triggerAction(item)}
       >
@@ -702,6 +705,8 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                               inspectionTitle={option.inspectionTitle}
                               inspectionView={option.inspectionView}
                               inspectFooter={option.inspectFooter}
+                              inspectionFooter={option.inspectionFooter}
+                              footerSuffix={option.footerSuffix}
                               description={option.description !== category ? option.description : undefined}
                               active={active()}
                               current={current()}
@@ -729,12 +734,20 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         </Show>
       </box>
       <Show when={props.footer || visibleActions().length} fallback={<box flexShrink={0} />}>
-        <box paddingRight={2} paddingLeft={4} flexDirection="row" justifyContent="space-between" flexShrink={0}>
-          <box flexDirection="row" gap={2}>
+        <box
+          paddingRight={2}
+          paddingLeft={4}
+          flexDirection="row"
+          flexWrap="wrap"
+          rowGap={1}
+          justifyContent="space-between"
+          flexShrink={0}
+        >
+          <box flexDirection="row" flexWrap="wrap" gap={2} rowGap={1}>
             {props.footer}
             <For each={left()}>{(item) => <FooterAction item={item} />}</For>
           </box>
-          <box flexDirection="row" gap={2}>
+          <box flexDirection="row" flexWrap="wrap" gap={2} rowGap={1}>
             <For each={right()}>{(item) => <FooterAction item={item} />}</For>
           </box>
         </box>
@@ -758,6 +771,8 @@ function Option(props: {
   inspectionTitle?: string
   inspectionView?: (offset: number, width: number) => JSX.Element
   inspectFooter?: boolean
+  inspectionFooter?: string
+  footerSuffix?: string
   gutter?: () => JSX.Element
   onMouseOver?: () => void
 }) {
@@ -769,7 +784,8 @@ function Option(props: {
     const footer =
       props.inspectFooter &&
       typeof props.footer === "string" &&
-      Bun.stringWidth(props.footer) > (props.footerWidth ?? 0)
+      Bun.stringWidth(props.inspectionFooter ?? props.footer) >
+        Math.max(0, (props.footerWidth ?? 0) - footerSuffixWidth(props.footerSuffix))
     if (!props.active || (!title && !footer)) {
       setInspectionOffset(0)
       return
@@ -783,6 +799,15 @@ function Option(props: {
     if (props.current) return theme.primary
     return theme.text
   })
+  const footerFrame = createMemo(() =>
+    inspectionFooterFrame(
+      props.inspectionFooter ?? (typeof props.footer === "string" ? props.footer : ""),
+      props.footerSuffix,
+      props.footerWidth ?? 0,
+      inspectionOffset(),
+      !!props.active,
+    ),
+  )
 
   return (
     <>
@@ -821,13 +846,32 @@ function Option(props: {
       </text>
       <Show when={props.footer}>
         <box flexShrink={0} width={props.footerWidth}>
-          <text fg={props.active && !props.muted ? fg : theme.textMuted} wrapMode="none" overflow="hidden">
-            {props.inspectFooter && typeof props.footer === "string" && props.footerWidth
-              ? props.active
-                ? inspectionFrame(props.footer, props.footerWidth, inspectionOffset())
-                : displayTruncate(props.footer, props.footerWidth)
-              : props.footer}
-          </text>
+          <Show
+            when={props.inspectFooter && typeof props.footer === "string" && props.footerWidth}
+            fallback={
+              <text fg={props.active && !props.muted ? fg : theme.textMuted} wrapMode="none" overflow="hidden">
+                {props.footer}
+              </text>
+            }
+          >
+            <box flexDirection="row" width="100%">
+              <text
+                flexGrow={1}
+                fg={props.active && !props.muted ? fg : theme.textMuted}
+                wrapMode="none"
+                overflow="hidden"
+              >
+                {footerFrame().detail}
+              </text>
+              <Show when={footerFrame().suffix}>
+                {(suffix) => (
+                  <text flexShrink={0} fg={props.active && !props.muted ? fg : theme.textMuted} wrapMode="none">
+                    {`${footerFrame().separator ? " · " : ""}${suffix()}`}
+                  </text>
+                )}
+              </Show>
+            </box>
+          </Show>
         </box>
       </Show>
     </>
@@ -862,6 +906,27 @@ export function displayTruncate(value: string, width: number) {
       { value: "", done: false },
     ).value + "…"
   )
+}
+
+export function inspectionFooterFrame(
+  value: string,
+  suffix: string | undefined,
+  width: number,
+  offset: number,
+  active: boolean,
+) {
+  const suffixWidth = footerSuffixWidth(suffix)
+  if (suffixWidth >= width) return { detail: "", suffix: displayTruncate(suffix ?? "", width), separator: false }
+  const detailWidth = Math.max(0, width - suffixWidth)
+  return {
+    detail: active ? inspectionFrame(value, detailWidth, offset) : displayTruncate(value, detailWidth),
+    suffix,
+    separator: !!suffix,
+  }
+}
+
+function footerSuffixWidth(suffix: string | undefined) {
+  return suffix ? Bun.stringWidth(suffix) + 3 : 0
 }
 
 export function selectFooter<T>(option: DialogSelectOption<T>, flat: boolean) {

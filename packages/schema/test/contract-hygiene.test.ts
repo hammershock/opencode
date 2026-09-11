@@ -9,6 +9,7 @@ import { Question } from "../src/question"
 import { Session } from "../src/session"
 import { SessionEvent } from "../src/session-event"
 import { SessionTodo } from "../src/session-todo"
+import { Skill } from "../src/skill"
 import { optional } from "../src/schema"
 
 describe("contract hygiene", () => {
@@ -33,6 +34,28 @@ describe("contract hygiene", () => {
     expect(Pty.ID.create()).toStartWith("pty_")
   })
 
+  test("skill IDs and digests enforce their exact opaque format", () => {
+    const decodeID = Schema.decodeUnknownSync(Skill.ID)
+    const decodeDigest = Schema.decodeUnknownSync(Skill.Digest)
+    const digest = "a".repeat(64)
+
+    expect(String(decodeID(`skl_${digest}` as unknown))).toBe(`skl_${digest}`)
+    expect(String(decodeDigest(digest as unknown))).toBe(digest)
+    expect(() => decodeID(`skl_${"a".repeat(63)}` as unknown)).toThrow()
+    expect(() => decodeID(`skill_${digest}` as unknown)).toThrow()
+  })
+
+  test("skill target scopes use stable target identities and preserve explicit disabled state", () => {
+    const decode = Schema.decodeUnknownSync(Skill.TargetScope)
+    const targetID = "9a858c60-01c7-4a3d-a137-f5df09560d42"
+
+    expect(decode("*")).toBe("*")
+    expect(decode([])).toEqual([])
+    const selected = decode(["local", targetID])
+    expect(selected === "*" ? selected : selected.map(String)).toEqual(["local", targetID])
+    expect(() => decode(["mywindows"])).toThrow()
+  })
+
   test("reusable public identifiers are stable and unique", () => {
     const identifiers = [
       Agent.Color,
@@ -47,6 +70,20 @@ describe("contract hygiene", () => {
       Project.Info,
       Pty.Info,
       Session.ListAnchor,
+      Skill.Metadata,
+      Skill.SourceDetail,
+      Skill.Diagnostic,
+      Skill.RegistrySnapshot,
+      Skill.Target,
+      Skill.TargetScope,
+      Skill.DiscoveryRoot,
+      Skill.SettingsDiagnostic,
+      Skill.SettingsSnapshot,
+      Skill.ActivationDiagnostic,
+      Skill.Activation,
+      Skill.DiscoveryUpdate,
+      Skill.TargetScopeUpdate,
+      Skill.RevisionInput,
     ].map((schema) => schema.ast.annotations?.identifier)
 
     expect(identifiers.every((identifier) => typeof identifier === "string")).toBe(true)

@@ -1,5 +1,13 @@
 import { expect, test } from "bun:test"
 import { SessionCompaction } from "@opencode-ai/core/session/compaction"
+import { EventV2 } from "@opencode-ai/core/event"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { LLM, LLMEvent, Model, type LLMRequest } from "@opencode-ai/llm"
+import { route } from "@opencode-ai/llm/protocols/openai-chat"
+import { Skill } from "@opencode-ai/schema/skill"
+import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
+import { DateTime, Effect, Stream } from "effect"
 
 test("compaction prompt preserves detailed work state and relevant files", () => {
   const prompt = SessionCompaction.buildPrompt({ context: ["conversation history"] })
@@ -44,4 +52,65 @@ test("compaction describes tool media without embedding base64", () => {
 
   expect(serialized).toBe("Image read successfully\n[Attached image/png: pixel.png]")
   expect(serialized).not.toContain(base64)
+})
+
+test("compaction carries exact Skill snapshots without re-reading their package", async () => {
+  const published: Array<{ type: string; data: Record<string, unknown> }> = []
+  const requests: LLMRequest[] = []
+  const events = {
+    publish: (type: { type: string }, data: Record<string, unknown>) =>
+      Effect.sync(() => {
+        published.push({ type: type.type, data })
+        return {}
+      }),
+  } as unknown as EventV2.Interface
+  const snapshot = SkillInvocation.Snapshot.make({
+    id: SkillInvocation.ID.make("ski_compacted"),
+    name: "review",
+    digest: Skill.Digest.make("a".repeat(64)),
+    source: { kind: "imported", label: "Imported" },
+    content: "Exact durable Skill body",
+    status: "loaded",
+  })
+  const model = Model.make({
+    id: "compact",
+    provider: "test",
+    route: route.with({ limits: { context: 100_000, output: 100 } }),
+  })
+  const compaction = SessionCompaction.make({
+    events,
+    llm: {
+      stream: (request) => {
+        requests.push(request)
+        return Stream.make(LLMEvent.textDelta({ id: "summary", text: "Preserved summary" }))
+      },
+    },
+    config: [],
+  })
+  const compacted = await Effect.runPromise(
+    compaction.compactAfterOverflow({
+      sessionID: SessionV2.ID.make("ses_compaction_skill"),
+      entries: [
+        {
+          seq: 1,
+          message: SessionMessage.User.make({
+            id: SessionMessage.ID.make("msg_compaction_skill"),
+            type: "user",
+            text: "Large request ".repeat(3_000),
+            skills: [{ source: { start: 0, end: 7, text: "$review" }, snapshot }],
+            time: { created: DateTime.makeUnsafe(1) },
+          }),
+        },
+      ],
+      model,
+      request: LLM.request({ model, prompt: "continue" }),
+    }),
+  )
+
+  expect(compacted).toBe(true)
+  expect(published[1]).toMatchObject({
+    type: "session.next.compaction.ended",
+    data: { skills: [snapshot] },
+  })
+  expect(JSON.stringify(requests[0])).not.toContain(snapshot.content)
 })

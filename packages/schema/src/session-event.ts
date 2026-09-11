@@ -13,6 +13,7 @@ import { Location } from "./location"
 import { SessionMessage } from "./session-message"
 import { Revert } from "./revert"
 import { ModelContext } from "./model-context"
+import { SkillInvocation } from "./skill-invocation"
 
 export { FileAttachment }
 
@@ -159,7 +160,7 @@ export const ContextAdvanced = Event.define({
   schema: {
     ...Base,
     messageID: SessionMessage.ID,
-    cause: Schema.Literals(["dynamic", "nested-instructions"]),
+    cause: Schema.Literals(["dynamic", "nested-instructions", "skill-catalog-reloaded"]),
     text: Schema.String,
     sources: ModelContext.SourceState,
     digest: Schema.NonEmptyString,
@@ -484,6 +485,7 @@ export namespace Compaction {
       reason: Started.data.fields.reason,
       text: Schema.String,
       recent: Schema.String,
+      skills: Schema.Array(SkillInvocation.Snapshot).pipe(optional),
     },
   })
   export type Ended = typeof Ended.Type

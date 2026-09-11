@@ -95,7 +95,9 @@ export const serializeToolContent = (content: SessionMessage.ToolStateCompleted[
 const serialize = (message: SessionMessage.Message) => {
   if (message.type === "user") {
     const files = message.files?.map((file) => `[Attached ${file.mime}: ${file.name ?? file.uri}]`) ?? []
-    return [`[User]: ${message.text}`, ...files].join("\n")
+    const skills =
+      message.skills?.map((skill) => `[Skill invocation · ${skill.snapshot.name} · ${skill.snapshot.digest}]`) ?? []
+    return [...skills, `[User]: ${message.text}`, ...files].join("\n")
   }
   if (message.type === "assistant") {
     return message.content
@@ -119,6 +121,21 @@ const serialize = (message: SessionMessage.Message) => {
   if (message.type === "shell") return `[Shell]: ${message.command}\n${truncate(message.output)}`
   return ""
 }
+
+const skillSnapshots = (entries: readonly Entry[]) =>
+  Array.from(
+    new Map(
+      entries
+        .flatMap((entry) =>
+          entry.message.type === "user"
+            ? (entry.message.skills ?? []).map((skill) => skill.snapshot)
+            : entry.message.type === "compaction"
+              ? (entry.message.skills ?? [])
+              : [],
+        )
+        .map((snapshot) => [snapshot.id, snapshot]),
+    ).values(),
+  )
 
 const settings = (documents: readonly Config.Entry[]) => {
   const configured = documents
@@ -226,6 +243,7 @@ export const make = (dependencies: Dependencies) => {
       reason: "auto",
       text: summary,
       recent: selected.recent,
+      skills: skillSnapshots(input.entries),
     })
     return true
   })

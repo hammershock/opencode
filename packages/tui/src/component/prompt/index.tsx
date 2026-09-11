@@ -55,7 +55,6 @@ import { DialogAlert } from "../../ui/dialog-alert"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
-import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { useArgs } from "../../context/args"
 import {
@@ -76,6 +75,7 @@ import { optimisticPrompt } from "./optimistic"
 import { useLocation } from "../../context/location"
 import { canAdjustVariant } from "../../model-variant"
 import { sessionFooterLocation } from "../session-footer-location"
+import { structuredSkillMentions } from "../../prompt/skill"
 import {
   activateCommandHost,
   createCommandHost,
@@ -312,8 +312,10 @@ export function Prompt(props: PromptProps) {
   }
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
+  const skillStyleId = syntax().getStyleId("extmark.skill")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
+  let suppressAutocompleteInput = false
   const event = useEvent()
 
   event.on("tui.prompt.append", (evt, { workspace }) => {
@@ -601,6 +603,8 @@ export function Prompt(props: PromptProps) {
                 virtualText = part.source.text.value
               } else if (part.type === "agent" && part.source) {
                 virtualText = part.source.value
+              } else if (part.type === "skill") {
+                virtualText = part.source.value
               }
 
               if (!virtualText) return part
@@ -636,6 +640,17 @@ export function Prompt(props: PromptProps) {
                 }
               }
 
+              if (part.type === "skill") {
+                return {
+                  ...part,
+                  source: {
+                    ...part.source,
+                    start: newStart,
+                    end: newEnd,
+                  },
+                }
+              }
+
               return part
             })
             .filter((part) => part !== null)
@@ -651,25 +666,19 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
-        title: "Skills",
-        desc: "Browse available skills",
+        title: "Insert skill mention",
+        desc: "Open Skill autocomplete in the prompt",
         name: "prompt.skills",
         category: "Prompt",
-        slashName: "skills",
         readOnly: false,
         run: () => {
-          dialog.replace(() => (
-            <DialogSkill
-              onSelect={(skill) => {
-                input.setText(`/${skill} `)
-                setStore("prompt", {
-                  input: `/${skill} `,
-                  parts: [],
-                })
-                input.gotoBufferEnd()
-              }}
-            />
-          ))
+          dialog.clear()
+          setTimeout(() => {
+            if (!input || input.isDestroyed) return
+            input.insertText("$")
+            setStore("prompt", "input", input.plainText)
+            auto()?.onInput(input.plainText)
+          }, 0)
         },
       },
       {
@@ -818,6 +827,11 @@ export function Prompt(props: PromptProps) {
         end = part.source.end
         virtualText = part.source.value
         styleId = agentStyleId
+      } else if (part.type === "skill") {
+        start = part.source.start
+        end = part.source.end
+        virtualText = part.source.value
+        styleId = skillStyleId
       } else if (part.type === "text" && part.source?.text) {
         start = part.source.text.start
         end = part.source.text.end
@@ -863,6 +877,9 @@ export function Prompt(props: PromptProps) {
               } else if (part.type === "text" && part.source?.text) {
                 part.source.text.start = extmark.start
                 part.source.text.end = extmark.end
+              } else if (part.type === "skill") {
+                part.source.start = extmark.start
+                part.source.end = extmark.end
               }
               newMap.set(extmark.id, newParts.length)
               newParts.push(part)
@@ -1199,6 +1216,8 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
+    const skillMentions = structuredSkillMentions(store.prompt.input, store.prompt.parts)
+
     const workspaceSession = props.sessionID ? sync.session.get(props.sessionID) : undefined
     const workspaceID = workspaceSession?.workspaceID
     const workspaceStatus = workspaceID ? (project.workspace.status(workspaceID) ?? "error") : undefined
@@ -1339,31 +1358,69 @@ export function Prompt(props: PromptProps) {
             type: "text",
             text: inputText,
           },
-          ...nonTextParts,
+          ...nonTextParts.filter((part) => part.type !== "skill"),
         ],
       })
       if (props.sessionID) sync.message.optimistic.add(optimistic)
-      sdk.client.session
-        .prompt(
-          {
-            sessionID,
-            messageID: optimistic.message.id,
-            ...selectedModel,
-            agent: agent.name,
-            model: selectedModel,
-            variant,
-            parts: optimistic.requestParts,
-          },
-          { throwOnError: true },
-        )
-        .catch((error) => {
-          sync.message.optimistic.remove(sessionID, optimistic.message.id)
-          toast.show({
-            title: "Failed to send prompt",
-            message: errorMessage(error),
-            variant: "error",
+      const request = skillMentions.length
+        ? sdk.client.v2.session.get({ sessionID }, { throwOnError: true }).then(async (current) => {
+            if (current.data.data.agent !== agent.name)
+              await sdk.client.v2.session.switchAgent({ sessionID, agent: agent.name }, { throwOnError: true })
+            if (
+              current.data.data.model?.providerID !== selectedModel.providerID ||
+              current.data.data.model.id !== selectedModel.modelID ||
+              (current.data.data.model.variant ?? "default") !== (variant ?? "default")
+            )
+              await sdk.client.v2.session.switchModel(
+                {
+                  sessionID,
+                  model: { providerID: selectedModel.providerID, id: selectedModel.modelID, variant },
+                },
+                { throwOnError: true },
+              )
+            return sdk.client.v2.session.prompt(
+              {
+                sessionID,
+                id: optimistic.message.id,
+                prompt: {
+                  text: inputText,
+                  files: [
+                    ...nonTextParts
+                      .filter((part) => part.type === "file")
+                      .map((part) => ({ uri: part.url, name: part.filename })),
+                    ...editorParts.map((part) => ({
+                      uri: `data:text/plain;base64,${Buffer.from(part.text).toString("base64")}`,
+                      name: "editor-context.txt",
+                      description: "Current editor selection context",
+                    })),
+                  ],
+                  agents: nonTextParts.filter((part) => part.type === "agent").map((part) => ({ name: part.name })),
+                  skills: skillMentions,
+                },
+              },
+              { throwOnError: true },
+            )
           })
+        : sdk.client.session.prompt(
+            {
+              sessionID,
+              messageID: optimistic.message.id,
+              ...selectedModel,
+              agent: agent.name,
+              model: selectedModel,
+              variant,
+              parts: optimistic.requestParts,
+            },
+            { throwOnError: true },
+          )
+      request.catch((error) => {
+        sync.message.optimistic.remove(sessionID, optimistic.message.id)
+        toast.show({
+          title: "Failed to send prompt",
+          message: errorMessage(error),
+          variant: "error",
         })
+      })
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({
@@ -1461,10 +1518,13 @@ export function Prompt(props: PromptProps) {
       return
     }
 
+    suppressAutocompleteInput = true
+    auto()?.dismiss()
     input.insertText(normalizedText)
 
     setTimeout(() => {
       if (!input || input.isDestroyed) return
+      suppressAutocompleteInput = false
       input.getLayoutNode().markDirty()
       renderer.requestRender()
     }, 0)
@@ -1626,7 +1686,7 @@ export function Prompt(props: PromptProps) {
               onContentChange={() => {
                 const value = input.plainText
                 setStore("prompt", "input", value)
-                auto()?.onInput(value)
+                if (!suppressAutocompleteInput) auto()?.onInput(value)
                 syncExtmarksWithPromptParts()
                 setCursorVersion((value) => value + 1)
               }}
@@ -1964,8 +2024,10 @@ export function Prompt(props: PromptProps) {
           })
         }}
         value={store.prompt.input}
+        parts={() => store.prompt.parts}
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
+        skillStyleId={skillStyleId}
         promptPartTypeId={() => promptPartTypeId}
         shellContextVersion={props.shellCompletionGeneration ?? 0}
         commandSlashes={activeCommandHost().slashes}

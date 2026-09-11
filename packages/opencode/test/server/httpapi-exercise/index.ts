@@ -998,6 +998,14 @@ const scenarios: Scenario[] = [
     }))
     .json(200, data(object)),
   http.protected
+    .post("/api/session/{sessionID}/activate", "v2.session.activate")
+    .seeded((ctx) => ctx.session({ title: "Activate session" }))
+    .at((ctx) => ({
+      path: route("/api/session/{sessionID}/activate", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+    }))
+    .json(200, data(object), "none"),
+  http.protected
     .post("/api/session/{sessionID}/agent", "v2.session.switchAgent")
     .seeded((ctx) => ctx.session({ title: "Switch agent" }))
     .at((ctx) => ({

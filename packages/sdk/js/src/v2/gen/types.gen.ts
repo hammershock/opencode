@@ -657,6 +657,7 @@ export type Prompt = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  invocations?: Array<PromptSkillInvocation>
 }
 
 export type Pty = {
@@ -935,7 +936,7 @@ export type GlobalEvent = {
           timestamp: number
           sessionID: string
           messageID: string
-          cause: "dynamic" | "nested-instructions"
+          cause: "dynamic" | "nested-instructions" | "skill-catalog-reloaded"
           text: string
           sources: ModelContextSourceState
           digest: string
@@ -1223,6 +1224,7 @@ export type GlobalEvent = {
           reason: "auto" | "manual"
           text: string
           recent: string
+          skills?: Array<SessionSkillInvocationSnapshot>
         }
       }
     | {
@@ -2014,6 +2016,9 @@ export type Config = {
   skills?: {
     paths?: Array<string>
     urls?: Array<string>
+    targets?: {
+      [key: string]: unknown | SkillTargetScope
+    }
   }
   references?: {
     [key: string]: string | ConfigV2ReferenceGit | ConfigV2ReferenceLocal
@@ -2945,10 +2950,17 @@ export type SessionNotFoundError = {
   message: string
 }
 
+export type ServiceUnavailableError = {
+  _tag: "ServiceUnavailableError"
+  message: string
+  service?: string
+}
+
 export type PromptInput = {
   text: string
   files?: Array<PromptInputFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  skills?: Array<PromptSkillMention>
 }
 
 export type ConflictError = {
@@ -2957,10 +2969,12 @@ export type ConflictError = {
   resource?: string
 }
 
-export type ServiceUnavailableError = {
-  _tag: "ServiceUnavailableError"
+export type SkillMentionError = {
+  _tag: "SkillMentionError"
   message: string
-  service?: string
+  kind: "invalid-mention" | "unavailable" | "target-inapplicable" | "permission-denied" | "stale-catalog" | "malformed"
+  skillID: string
+  name: string
 }
 
 export type MessageNotFoundError = {
@@ -3346,7 +3360,7 @@ export type ModelContextSourceSnapshot = {
   value: unknown
   baseline?: string
   removed?: string
-  refresh?: "generation"
+  refresh?: "generation" | "activation"
 }
 
 export type ModelContextSourceState = {
@@ -3382,6 +3396,26 @@ export type PromptFileAttachment = {
 export type PromptAgentAttachment = {
   name: string
   source?: PromptSource
+}
+
+export type SessionSkillInvocationSource = {
+  kind: "built-in" | "opencode-global" | "opencode-project" | "imported" | "url"
+  label: string
+}
+
+export type SessionSkillInvocationSnapshot = {
+  id: string
+  name: string
+  description?: string
+  digest: string
+  source: SessionSkillInvocationSource
+  content: string
+  status: "loaded"
+}
+
+export type PromptSkillInvocation = {
+  source: PromptSource
+  snapshot: SessionSkillInvocationSnapshot
 }
 
 export type SessionErrorUnknown = {
@@ -3785,7 +3819,7 @@ export type SyncEventSessionNextContextAdvanced = {
       timestamp: number
       sessionID: string
       messageID: string
-      cause: "dynamic" | "nested-instructions"
+      cause: "dynamic" | "nested-instructions" | "skill-catalog-reloaded"
       text: string
       sources: ModelContextSourceState
       digest: string
@@ -4163,6 +4197,7 @@ export type SyncEventSessionNextCompactionEnded = {
       reason: "auto" | "manual"
       text: string
       recent: string
+      skills?: Array<SessionSkillInvocationSnapshot>
     }
   }
 }
@@ -4213,6 +4248,10 @@ export type SyncEventSessionNextRevertCommitted = {
     }
   }
 }
+
+export type SkillTarget = "local" | string
+
+export type SkillTargetScope = "*" | Array<SkillTarget>
 
 export type ConfigV2ReferenceGit = {
   repository: string
@@ -4326,11 +4365,40 @@ export type SessionV2Info = {
   revert?: RevertState
 }
 
+export type SkillActivationDiagnostic = {
+  kind:
+    | "root-unavailable"
+    | "scan-failed"
+    | "path-escape"
+    | "read-failed"
+    | "invalid-frontmatter"
+    | "invalid-name"
+    | "name-mismatch"
+    | "duplicate-name"
+    | "invalid-settings"
+    | "missing-target"
+    | "project-target-scope-ignored"
+    | "reload-failed"
+  severity: "error" | "warning"
+  sourceLabel: string
+}
+
+export type SkillActivation = {
+  status: "initialized" | "unchanged" | "advanced" | "retained" | "unavailable"
+  diagnostics: Array<SkillActivationDiagnostic>
+}
+
 export type PromptInputFileAttachment = {
   uri: string
   name?: string
   description?: string
   source?: PromptSource
+}
+
+export type PromptSkillMention = {
+  id: string
+  name: string
+  source: PromptSource
 }
 
 export type SessionInputAdmitted = {
@@ -4378,6 +4446,7 @@ export type SessionMessageUser = {
   text: string
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
+  skills?: Array<PromptSkillInvocation>
   type: "user"
 }
 
@@ -4540,6 +4609,7 @@ export type SessionMessageCompaction = {
   reason: "auto" | "manual"
   summary: string
   recent: string
+  skills?: Array<SessionSkillInvocationSnapshot>
   id: string
   metadata?: {
     [key: string]: unknown
@@ -4758,7 +4828,7 @@ export type SessionNextContextAdvanced = {
     timestamp: number
     sessionID: string
     messageID: string
-    cause: "dynamic" | "nested-instructions"
+    cause: "dynamic" | "nested-instructions" | "skill-catalog-reloaded"
     text: string
     sources: ModelContextSourceState
     digest: string
@@ -5193,6 +5263,7 @@ export type SessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    skills?: Array<SessionSkillInvocationSnapshot>
   }
 }
 
@@ -5505,6 +5576,84 @@ export type SkillV2Info = {
   slash?: boolean
   location: string
   content: string
+}
+
+export type SkillMetadata = {
+  id: string
+  name: string
+  description?: string
+  sourceLabel: string
+  digest: string
+}
+
+export type SkillDiagnostic = {
+  kind:
+    | "root-unavailable"
+    | "scan-failed"
+    | "path-escape"
+    | "read-failed"
+    | "invalid-frontmatter"
+    | "invalid-name"
+    | "name-mismatch"
+    | "duplicate-name"
+    | "invalid-settings"
+    | "missing-target"
+    | "project-target-scope-ignored"
+  severity: "error" | "warning"
+  sourceLabel: string
+  message: string
+  path?: string
+  skillID?: string
+}
+
+export type SkillRegistrySnapshot = {
+  revision: string
+  skills: Array<SkillMetadata>
+  diagnostics: Array<SkillDiagnostic>
+  digest: string
+}
+
+export type SkillDiscoveryRoot = {
+  kind: "opencode-global" | "imported" | "url"
+  value: string
+  resolved?: string
+  default: boolean
+  status: "ready" | "unavailable" | "configured"
+}
+
+export type SkillSettingsDiagnostic = {
+  kind: "invalid-config" | "invalid-path" | "invalid-url" | "duplicate-root" | "missing-target"
+  severity: "error" | "warning"
+  field: string
+  message: string
+  skillID?: string
+  targetID?: string
+}
+
+export type SkillSettingsSnapshot = {
+  path: string
+  revision: string
+  roots: Array<SkillDiscoveryRoot>
+  targets: {
+    [key: string]: unknown | SkillTargetScope
+  }
+  diagnostics: Array<SkillSettingsDiagnostic>
+  valid: boolean
+}
+
+export type SkillDiscoveryUpdate = {
+  paths: Array<string>
+  urls: Array<string>
+  expectedRevision: string
+}
+
+export type SkillRevisionInput = {
+  expectedRevision: string
+}
+
+export type SkillTargetScopeUpdate = {
+  scope: SkillTargetScope
+  expectedRevision: string
 }
 
 export type ModelsDevRefreshed = {
@@ -7152,7 +7301,7 @@ export type EventSessionNextContextAdvanced = {
     timestamp: number
     sessionID: string
     messageID: string
-    cause: "dynamic" | "nested-instructions"
+    cause: "dynamic" | "nested-instructions" | "skill-catalog-reloaded"
     text: string
     sources: ModelContextSourceState
     digest: string
@@ -7463,6 +7612,7 @@ export type EventSessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    skills?: Array<SessionSkillInvocationSnapshot>
   }
 }
 
@@ -13927,6 +14077,47 @@ export type V2SessionGetResponses = {
 
 export type V2SessionGetResponse = V2SessionGetResponses[keyof V2SessionGetResponses]
 
+export type V2SessionActivateData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: never
+  url: "/api/session/{sessionID}/activate"
+}
+
+export type V2SessionActivateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SessionNotFoundError
+   */
+  404: SessionNotFoundError
+  /**
+   * ServiceUnavailableError
+   */
+  503: ServiceUnavailableError
+}
+
+export type V2SessionActivateError = V2SessionActivateErrors[keyof V2SessionActivateErrors]
+
+export type V2SessionActivateResponses = {
+  /**
+   * Success
+   */
+  200: {
+    data: SkillActivation
+  }
+}
+
+export type V2SessionActivateResponse = V2SessionActivateResponses[keyof V2SessionActivateResponses]
+
 export type V2SessionSwitchAgentData = {
   body: {
     agent: string
@@ -14017,9 +14208,9 @@ export type V2SessionPromptData = {
 
 export type V2SessionPromptErrors = {
   /**
-   * InvalidRequestError
+   * InvalidRequestError | SkillMentionError
    */
-  400: InvalidRequestError
+  400: InvalidRequestError | SkillMentionError
   /**
    * UnauthorizedError
    */
@@ -15554,6 +15745,238 @@ export type V2SkillListResponses = {
 }
 
 export type V2SkillListResponse = V2SkillListResponses[keyof V2SkillListResponses]
+
+export type V2SkillCatalogData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+    forceReload?: "true" | "false"
+  }
+  url: "/api/skill/catalog"
+}
+
+export type V2SkillCatalogErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SkillCatalogError = V2SkillCatalogErrors[keyof V2SkillCatalogErrors]
+
+export type V2SkillCatalogResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: SkillRegistrySnapshot
+  }
+}
+
+export type V2SkillCatalogResponse = V2SkillCatalogResponses[keyof V2SkillCatalogResponses]
+
+export type V2SkillReloadData = {
+  body?: never
+  path?: never
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+  }
+  url: "/api/skill/reload"
+}
+
+export type V2SkillReloadErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SkillReloadError = V2SkillReloadErrors[keyof V2SkillReloadErrors]
+
+export type V2SkillReloadResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: SkillRegistrySnapshot
+  }
+}
+
+export type V2SkillReloadResponse = V2SkillReloadResponses[keyof V2SkillReloadResponses]
+
+export type V2SkillSettingsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/skill/settings"
+}
+
+export type V2SkillSettingsErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SkillSettingsError = V2SkillSettingsErrors[keyof V2SkillSettingsErrors]
+
+export type V2SkillSettingsResponses = {
+  /**
+   * Skill.SettingsSnapshot
+   */
+  200: SkillSettingsSnapshot
+}
+
+export type V2SkillSettingsResponse = V2SkillSettingsResponses[keyof V2SkillSettingsResponses]
+
+export type V2SkillDiscoveryUpdateData = {
+  body: SkillDiscoveryUpdate
+  path?: never
+  query?: never
+  url: "/api/skill/settings/discovery"
+}
+
+export type V2SkillDiscoveryUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SkillDiscoveryUpdateError = V2SkillDiscoveryUpdateErrors[keyof V2SkillDiscoveryUpdateErrors]
+
+export type V2SkillDiscoveryUpdateResponses = {
+  /**
+   * Skill.SettingsSnapshot
+   */
+  200: SkillSettingsSnapshot
+}
+
+export type V2SkillDiscoveryUpdateResponse = V2SkillDiscoveryUpdateResponses[keyof V2SkillDiscoveryUpdateResponses]
+
+export type V2SkillDiscoveryResetData = {
+  body: SkillRevisionInput
+  path?: never
+  query?: never
+  url: "/api/skill/settings/discovery/reset"
+}
+
+export type V2SkillDiscoveryResetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SkillDiscoveryResetError = V2SkillDiscoveryResetErrors[keyof V2SkillDiscoveryResetErrors]
+
+export type V2SkillDiscoveryResetResponses = {
+  /**
+   * Skill.SettingsSnapshot
+   */
+  200: SkillSettingsSnapshot
+}
+
+export type V2SkillDiscoveryResetResponse = V2SkillDiscoveryResetResponses[keyof V2SkillDiscoveryResetResponses]
+
+export type V2SkillTargetScopeUpdateData = {
+  body: SkillTargetScopeUpdate
+  path: {
+    skillID: string
+  }
+  query?: never
+  url: "/api/skill/settings/{skillID}/target-scope"
+}
+
+export type V2SkillTargetScopeUpdateErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SkillTargetScopeUpdateError = V2SkillTargetScopeUpdateErrors[keyof V2SkillTargetScopeUpdateErrors]
+
+export type V2SkillTargetScopeUpdateResponses = {
+  /**
+   * Skill.SettingsSnapshot
+   */
+  200: SkillSettingsSnapshot
+}
+
+export type V2SkillTargetScopeUpdateResponse =
+  V2SkillTargetScopeUpdateResponses[keyof V2SkillTargetScopeUpdateResponses]
 
 export type V2EventSubscribeData = {
   body?: never

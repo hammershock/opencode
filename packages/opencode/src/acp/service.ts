@@ -727,7 +727,7 @@ function profiledRequest<T>(name: string, fn: () => Promise<T | SdkResponse<T>>,
 
 async function loadDirectorySnapshot(sdk: OpencodeClient, directory: string) {
   return ACPProfile.measure("acp.directory.load", async () => {
-    const [providersResponse, agentsResponse, commandsResponse, skillsResponse, configResponse] = await Promise.all([
+    const [providersResponse, agentsResponse, commandsResponse, configResponse] = await Promise.all([
       ACPProfile.measure("acp.directory.provider.list", () =>
         sdk.config.providers({ directory }, { throwOnError: true }),
       ),
@@ -735,7 +735,6 @@ async function loadDirectorySnapshot(sdk: OpencodeClient, directory: string) {
         sdk.app.agents({ directory }, { throwOnError: true }),
       ),
       ACPProfile.measure("acp.directory.command.list", () => sdk.command.list({ directory }, { throwOnError: true })),
-      ACPProfile.measure("acp.directory.skill.list", () => sdk.app.skills({ directory }, { throwOnError: true })),
       ACPProfile.measure("acp.directory.defaultModel.config", () =>
         sdk.config.get({ directory }, { throwOnError: true }).catch(() => undefined),
       ),
@@ -743,7 +742,6 @@ async function loadDirectorySnapshot(sdk: OpencodeClient, directory: string) {
     const providersData = providersResponse.data!
     const agents = agentsResponse.data!
     const commandsData = commandsResponse.data!
-    const skills = skillsResponse.data!
     const providers = Object.fromEntries(providersData.providers.map((provider) => [provider.id, provider])) as Record<
       ProviderV2.ID,
       Provider.Info
@@ -758,25 +756,12 @@ async function loadDirectorySnapshot(sdk: OpencodeClient, directory: string) {
         name: agent.name,
         ...(agent.description ? { description: agent.description } : {}),
       }))
-    const commands = [
-      ...commandsData,
-      ...skills
-        .filter((skill) => !commandsData.some((command) => command.name === skill.name))
-        .map((skill) => ({
-          name: skill.name,
-          description: skill.description,
-          source: "skill" as const,
-          template: skill.content,
-          hints: [],
-        })),
-    ] as Command.Info[]
-
     return Directory.build({
       directory,
       providers,
       modes,
       defaultModeID: agents.find((agent) => agent.mode === "primary" && agent.hidden !== true)?.name ?? "build",
-      commands: commands.toSorted((a, b) => a.name.localeCompare(b.name)),
+      commands: commandsData.toSorted((a, b) => a.name.localeCompare(b.name)),
       ...(defaultModel ? { defaultModel } : {}),
     })
   })

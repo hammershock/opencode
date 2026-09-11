@@ -21,6 +21,7 @@ import { ConfigMCP } from "./config/mcp"
 import { ConfigPlugin } from "./config/plugin"
 import { ConfigProvider } from "./config/provider"
 import { ConfigReference } from "./config/reference"
+import { ConfigSkill } from "./config/skill"
 import { ConfigToolOutput } from "./config/tool-output"
 import { ConfigWatcher } from "./config/watcher"
 import { ConfigV1 } from "./v1/config/config"
@@ -89,9 +90,11 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   compaction: ConfigCompaction.Info.pipe(Schema.optional).annotate({
     description: "Conversation compaction behavior",
   }),
-  skills: Schema.String.pipe(Schema.Array, Schema.optional).annotate({
-    description: "Additional paths or URLs to discover skills from",
-  }),
+  skills: Schema.Union([Schema.Array(Schema.String), ConfigSkill.Info])
+    .pipe(Schema.optional)
+    .annotate({
+      description: "Additional Skill sources and device-local target availability",
+    }),
   commands: Schema.Record(Schema.String, ConfigCommand.Info).pipe(Schema.optional).annotate({
     description: "Named slash command definitions",
   }),
@@ -149,6 +152,17 @@ const layer = Layer.effect(
     const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
     const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
 
+    const decode = (text: string) => {
+      const errors: ParseError[] = []
+      const input: unknown = parse(text, errors, { allowTrailingComma: true })
+      if (errors.length) return
+      return Option.getOrUndefined(
+        ConfigMigrateV1.isV1(input)
+          ? decodeV1Info(input).pipe(Option.map(ConfigMigrateV1.migrate), Option.flatMap(decodeInfo))
+          : decodeInfo(input),
+      )
+    }
+
     const loadFile = Effect.fnUntraced(function* (
       filepath: string,
       origin: {
@@ -159,16 +173,7 @@ const layer = Layer.effect(
     ) {
       const text = yield* origin.filesystem.readFileStringSafe(filepath)
       if (!text) return
-
-      const errors: ParseError[] = []
-      const input: unknown = parse(text, errors, { allowTrailingComma: true })
-      if (errors.length) return
-
-      const info = Option.getOrUndefined(
-        ConfigMigrateV1.isV1(input)
-          ? decodeV1Info(input).pipe(Option.map(ConfigMigrateV1.migrate), Option.flatMap(decodeInfo))
-          : decodeInfo(input),
-      )
+      const info = decode(text)
       if (!info) return
       return new Document({
         type: "document",
@@ -233,7 +238,13 @@ const layer = Layer.effect(
     ).pipe(Effect.orDie)
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.opencode` files.
-    const configs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
+    const inline = Flag.OPENCODE_CONFIG_CONTENT ? decode(Flag.OPENCODE_CONFIG_CONTENT) : undefined
+    const configs = [
+      ...(supplementary[0] ?? []),
+      ...direct,
+      ...supplementary.slice(1).flat(),
+      ...(inline ? [new Document({ type: "document", scope: "project", filesystem: "controller", info: inline })] : []),
+    ]
     // Rules use the opposite order so a user-global rule can override a
     // repository rule. Statement order inside each file stays unchanged.
     yield* policy.load(

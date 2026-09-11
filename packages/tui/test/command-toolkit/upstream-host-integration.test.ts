@@ -230,4 +230,31 @@ describe("Home and Session command host integration", () => {
       { type: "skill", location: "/skills/review/SKILL.md" },
     ])
   })
+
+  test("keeps hidden Skill compatibility on the upstream session resolver", async () => {
+    const host = createCommandHost({
+      register: () => undefined,
+      context: (source) => ({ ...context, source }),
+      upstream: () =>
+        adaptServerCommands([
+          {
+            name: "review-skill",
+            source: "skill",
+            provenance: { type: "skill", location: "Imported" },
+          },
+        ]),
+      invalid: () => undefined,
+      outcome: () => undefined,
+    })
+
+    expect(host.slashes()).toEqual([])
+    expect(commandPaletteWinners(host.commands()).filter((command) => !command.hidden)).toEqual([])
+    expect(await host("/review-skill keep $ARGUMENTS and $1")).toMatchObject({
+      status: "session",
+      identity: "session.command:review-skill",
+      command: "review-skill",
+      arguments: "keep $ARGUMENTS and $1",
+      provenance: { type: "skill", location: "Imported" },
+    })
+  })
 })

@@ -5,7 +5,7 @@ status: accepted
 authors:
   - hammershock
 created: 2026-09-06
-updated: 2026-09-09
+updated: 2026-09-11
 implemented-by:
   - https://github.com/hammershock/opencode/pull/195
 depends-on:
@@ -24,6 +24,8 @@ OpenCode Core 提供 provider-neutral 的多设备 Session 同步能力，v1 sto
 同步只覆盖完整 Session 事件、标题、关系、可移植 Location metadata 和 Session 内持久化附件。它不覆盖 OpenCode 配置、target、workspace 文件、环境变量、provider credential 或 UI 状态。v1 不提供应用层端到端加密。
 
 同步采用 durable transactional outbox、按设备追加的不可变事件段、per-device head/checkpoint、幂等消费、删除 tombstone 和确定性冲突处理。自动同步关闭只停止队列消费，不丢弃或绕过本地产生的同步事件。
+
+本 RFC 冻结 Session sync 的 v1 contract。后续 [RFC-0012](0012-skill-catalog-and-invocation.md) 复用同一账户和同步基础设施，增加需要单独 opt in、且只覆盖 OpenCode global `skill/` 与 `skills/` package 的 Skill sync；它不改变本 RFC 对配置、target、workspace 与任意目录同步的排除。
 
 ## 产品模型
 

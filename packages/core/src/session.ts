@@ -52,6 +52,10 @@ import { SessionLocationRuntime } from "./session/location-runtime"
 import { SystemContext } from "./system-context/index"
 import { SessionContextEpoch } from "./session/context-epoch"
 import { ModelContextAssembler } from "./model-context-assembler"
+import { SkillCatalogContextService } from "./skill/catalog-context-service"
+import { Skill } from "@opencode-ai/schema/skill"
+import { SkillSlashCompatibility } from "./skill/slash-compatibility"
+import { SkillV2 } from "./skill"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -136,7 +140,12 @@ export class LocationRebindError extends Schema.TaggedErrorClass<LocationRebindE
 export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 
-export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
+export type Error =
+  | NotFoundError
+  | MessageDecodeError
+  | OperationUnavailableError
+  | PromptConflictError
+  | SkillCatalogContextService.AdmissionError
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
@@ -185,7 +194,25 @@ export interface Interface {
     prompt: PromptInput.Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
-  }) => Effect.Effect<SessionInput.Admitted, NotFoundError | PromptConflictError | OperationUnavailableError>
+  }) => Effect.Effect<
+    SessionInput.Admitted,
+    NotFoundError | PromptConflictError | OperationUnavailableError | SkillCatalogContextService.AdmissionError
+  >
+  readonly skillSlash: (input: {
+    id?: SessionMessage.ID
+    sessionID: SessionSchema.ID
+    name: string
+    arguments: string
+    files?: ReadonlyArray<PromptInput.FileAttachment>
+    resume?: boolean
+  }) => Effect.Effect<
+    SessionInput.Admitted,
+    | NotFoundError
+    | PromptConflictError
+    | OperationUnavailableError
+    | SkillCatalogContextService.AdmissionError
+    | SkillSlashCompatibility.Error
+  >
   /** Admits one queued prompt and resolves only from that exact input's durable terminal settlement. */
   readonly promptTurn: (input: {
     id?: SessionMessage.ID
@@ -193,7 +220,11 @@ export interface Interface {
     prompt: PromptInput.Prompt
   }) => Effect.Effect<
     SessionTurn.Outcome,
-    NotFoundError | PromptConflictError | OperationUnavailableError | SessionRunner.RunError
+    | NotFoundError
+    | PromptConflictError
+    | OperationUnavailableError
+    | SkillCatalogContextService.AdmissionError
+    | SessionRunner.RunError
   >
   readonly shell: (input: {
     id?: EventV2.ID
@@ -210,6 +241,9 @@ export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
+  readonly activate: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<Skill.Activation, NotFoundError | OperationUnavailableError>
   readonly locationBlockers: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<string>, NotFoundError>
   readonly resume: (
     sessionID: SessionSchema.ID,
@@ -263,30 +297,66 @@ const layer = Layer.effect(
       )
     })
     const syncSetup = yield* SyncSetup.Service
+    const contextInitialized = Effect.fn("V2Session.contextInitialized")(function* (sessionID: SessionSchema.ID) {
+      return (
+        (yield* db
+          .select({ sessionID: SessionContextEpochTable.session_id })
+          .from(SessionContextEpochTable)
+          .where(eq(SessionContextEpochTable.session_id, sessionID))
+          .get()
+          .pipe(Effect.orDie)) !== undefined
+      )
+    })
+    const activateCatalog = Effect.fn("V2Session.activateCatalog")(function* (
+      session: SessionSchema.Info,
+      location: Location.Ref,
+      forceReload: boolean,
+    ) {
+      const initialized = yield* contextInitialized(session.id)
+      const load = Effect.gen(function* () {
+        const catalog = yield* SkillCatalogContextService.Service
+        const loaded = yield* catalog.load({ forceReload })
+        const assembler = yield* ModelContextAssembler.Service
+        const context = yield* assembler.load(session.agent, {
+          skillCatalog: loaded.snapshot,
+          preserveSkillCatalog: forceReload && loaded.transient && initialized,
+        })
+        return { context, value: loaded }
+      }).pipe(Effect.provide(locations.get(location)))
+      const attempt = yield* SessionContextEpoch.activate(db, events, load, session.id, session.locationRevision).pipe(
+        Effect.exit,
+      )
+      if (Exit.isFailure(attempt)) {
+        yield* Effect.logWarning("Skill catalog activation failed", { sessionID: session.id })
+        return Skill.Activation.make({
+          status: initialized ? "retained" : "unavailable",
+          diagnostics: [
+            Skill.ActivationDiagnostic.make({
+              kind: "reload-failed",
+              severity: "warning",
+              sourceLabel: "Skill catalog",
+            }),
+          ],
+        })
+      }
+      const loaded = attempt.value.value
+      return Skill.Activation.make({
+        status: loaded.transient && initialized ? "retained" : attempt.value.status,
+        diagnostics: loaded.diagnostics,
+      })
+    })
     const ensureContextForAdmission = Effect.fn("V2Session.ensureContextForAdmission")(function* (
       session: SessionSchema.Info,
       location: Location.Ref,
     ) {
-      const assembler = yield* ModelContextAssembler.Service.pipe(Effect.provide(locations.get(location)))
-      const existing = yield* db
-        .select({ id: SessionMessageTable.id })
-        .from(SessionMessageTable)
-        .where(eq(SessionMessageTable.session_id, session.id))
-        .limit(1)
-        .get()
-        .pipe(Effect.orDie)
       const unavailable = () => new OperationUnavailableError({ operation: "modelContext" })
-      if (existing) {
-        yield* SessionContextEpoch.prepare(
-          db,
-          events,
-          assembler.load(session.agent),
-          session.id,
-          session.locationRevision,
-        ).pipe(Effect.catch(unavailable))
+      if (!(yield* contextInitialized(session.id))) {
+        const activation = yield* activateCatalog(session, location, true)
+        if (activation.status === "unavailable") return yield* unavailable()
         return
       }
-      yield* SessionContextEpoch.initialize(
+      const assembler = yield* ModelContextAssembler.Service.pipe(Effect.provide(locations.get(location)))
+      yield* SessionContextEpoch.prepare(
         db,
         events,
         assembler.load(session.agent),
@@ -358,10 +428,44 @@ const layer = Layer.effect(
             Effect.gen(function* () {
               const location = yield* requireLocation(input.sessionID)
               const session = yield* result.get(input.sessionID)
-              yield* ensureContextForAdmission(session, location)
-              const resolved = resolvePrompt(input.prompt)
               const messageID = input.id ?? SessionMessage.ID.create()
               const delivery = input.delivery ?? "steer"
+              const base = resolvePrompt(input.prompt)
+              const recorded = input.id === undefined ? undefined : yield* SessionInput.find(db, messageID)
+              if (recorded) {
+                if (
+                  recorded.sessionID !== input.sessionID ||
+                  recorded.delivery !== delivery ||
+                  !SkillCatalogContextService.retryEquivalent(recorded.prompt, base, input.prompt.skills ?? [])
+                )
+                  return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+                if (input.resume !== false) yield* execution.wake(recorded.sessionID)
+                return recorded
+              }
+              yield* ensureContextForAdmission(session, location)
+              const catalog = yield* SessionContextEpoch.inspect(db, input.sessionID).pipe(
+                Effect.catch(() => new OperationUnavailableError({ operation: "modelContext" })),
+              )
+              if (!catalog) return yield* new OperationUnavailableError({ operation: "modelContext" })
+              const mentions = input.prompt.skills ?? []
+              const skills =
+                mentions.length === 0
+                  ? []
+                  : yield* Effect.gen(function* () {
+                      const admission = yield* SkillCatalogContextService.Service
+                      return yield* admission.resolve({
+                        sessionID: input.sessionID,
+                        messageID,
+                        text: input.prompt.text,
+                        mentions,
+                        agent: session.agent,
+                        catalog: catalog.sources,
+                      })
+                    }).pipe(Effect.provide(locations.get(location)))
+              const resolved = Prompt.make({
+                ...base,
+                ...(skills.length === 0 ? {} : { invocations: skills }),
+              })
               const expected = { sessionID: input.sessionID, messageID, prompt: resolved, delivery }
               const admitted = yield* SessionInput.admit(db, events, {
                 id: messageID,
@@ -379,6 +483,60 @@ const layer = Layer.effect(
                 return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
               if (input.resume !== false) yield* execution.wake(admitted.sessionID)
               return admitted
+            }),
+          ),
+        ),
+    )
+
+    const skillSlash = Effect.fn("V2Session.skillSlash")(
+      (input: {
+        id?: SessionMessage.ID
+        sessionID: SessionSchema.ID
+        name: string
+        arguments: string
+        files?: ReadonlyArray<PromptInput.FileAttachment>
+        resume?: boolean
+      }) =>
+        activity.withActivity(
+          input.sessionID,
+          "session_mutation",
+          Effect.uninterruptible(
+            Effect.gen(function* () {
+              const location = yield* requireLocation(input.sessionID)
+              const session = yield* result.get(input.sessionID)
+              const messageID = input.id ?? SessionMessage.ID.create()
+              const request = SkillSlashCompatibility.request(input)
+              const expected = resolvePrompt(request)
+              const recorded = input.id === undefined ? undefined : yield* SessionInput.find(db, messageID)
+              if (recorded) {
+                if (
+                  recorded.sessionID !== input.sessionID ||
+                  recorded.delivery !== "steer" ||
+                  !SkillSlashCompatibility.retryEquivalent(recorded.prompt, expected, input.name)
+                )
+                  return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+                if (input.resume !== false) yield* execution.wake(recorded.sessionID)
+                return recorded
+              }
+
+              yield* ensureContextForAdmission(session, location)
+              const catalog = yield* SessionContextEpoch.inspect(db, input.sessionID).pipe(
+                Effect.catch(() => new OperationUnavailableError({ operation: "modelContext" })),
+              )
+              if (!catalog) return yield* new OperationUnavailableError({ operation: "modelContext" })
+              const resolved = yield* Effect.gen(function* () {
+                const skills = yield* SkillV2.Service
+                const current = yield* skills.catalog()
+                const resolved = SkillSlashCompatibility.resolve(input, current.snapshot.skills)
+                if (resolved instanceof SkillSlashCompatibility.Error) return yield* resolved
+                return resolved
+              }).pipe(Effect.provide(locations.get(location)))
+              return yield* prompt({
+                id: messageID,
+                sessionID: input.sessionID,
+                prompt: resolved,
+                resume: input.resume,
+              })
             }),
           ),
         ),
@@ -651,6 +809,7 @@ const layer = Layer.effect(
         })
       }),
       prompt,
+      skillSlash,
       promptTurn: Effect.fn("V2Session.promptTurn")((input) =>
         Effect.uninterruptibleMask((restore) =>
           Effect.gen(function* () {
@@ -692,7 +851,7 @@ const layer = Layer.effect(
           input.sessionID,
           "session_mutation",
           Effect.gen(function* () {
-            yield* requireLocation(input.sessionID)
+            const location = yield* requireLocation(input.sessionID)
             yield* result.get(input.sessionID)
             yield* events.publish(SessionEvent.AgentSwitched, {
               sessionID: input.sessionID,
@@ -700,6 +859,8 @@ const layer = Layer.effect(
               timestamp: yield* DateTime.now,
               agent: input.agent,
             })
+            const session = yield* result.get(input.sessionID)
+            yield* activateCatalog(session, location, false)
           }),
         ),
       ),
@@ -734,14 +895,28 @@ const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "wait" })
       }),
       active: execution.active,
+      activate: Effect.fn("V2Session.activate")((sessionID) =>
+        activity.withActivity(
+          sessionID,
+          "session_mutation",
+          Effect.gen(function* () {
+            const location = yield* requireLocation(sessionID)
+            const session = yield* result.get(sessionID)
+            return yield* activateCatalog(session, location, true)
+          }),
+        ),
+      ),
       locationBlockers,
       resume: Effect.fn("V2Session.resume")((sessionID) =>
         activity.withActivity(
           sessionID,
           "session_mutation",
           Effect.gen(function* () {
-            yield* requireLocation(sessionID)
-            yield* result.get(sessionID)
+            const location = yield* requireLocation(sessionID)
+            const session = yield* result.get(sessionID)
+            const activation = yield* activateCatalog(session, location, true)
+            if (activation.status === "unavailable")
+              return yield* new OperationUnavailableError({ operation: "modelContext" })
             yield* execution.resume(sessionID)
           }),
         ),

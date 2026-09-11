@@ -36,4 +36,20 @@ describe("prompt history", () => {
     ])
     expect(isDuplicateEntry(a, b)).toBe(false)
   })
+
+  test("retains structured Skill identity without persisting its body", () => {
+    const value = entry("$review this", [
+      {
+        type: "skill",
+        id: `skl_${"a".repeat(64)}`,
+        name: "review",
+        description: "Review changes",
+        sourceLabel: "OpenCode",
+        digest: "b".repeat(64),
+        source: { start: 0, end: 7, value: "$review" },
+      },
+    ])
+    expect(parsePromptHistory(`${JSON.stringify(value)}\n`)).toEqual([value])
+    expect(value.parts[0]).not.toHaveProperty("content")
+  })
 })

@@ -309,19 +309,20 @@ export async function resolve(input: {
   readonly probe: (target: TargetRegistry.Definition, directory: string) => Promise<TargetRegistry.ProbeResult>
 }): Promise<Resolution> {
   if (input.portable) {
-    const targetID = input.bindings.get(input.portable.label)
+    const label = input.portable.label
+    const targetID = input.bindings.get(label) ?? input.targets.find((item) => item.name === label)?.id
     if (!targetID)
       return {
         status: "unbound_portable_target",
-        portableTargetLabel: input.portable.label,
+        portableTargetLabel: label,
         directory: AbsolutePath.make(input.portable.directory),
-        referencedSessionIDs: await input.referencedSessions({ label: input.portable.label }),
+        referencedSessionIDs: await input.referencedSessions({ label }),
       }
     return resolveLocation(
       Location.Ref.make({
         target: { type: "rexd", targetID },
         directory: AbsolutePath.make(input.portable.directory),
-        lastKnownTargetName: input.portable.label,
+        lastKnownTargetName: label,
       }),
       input,
     )

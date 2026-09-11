@@ -15,7 +15,6 @@ import type {
   SessionMessageAssistantText,
   SessionMessageAssistantTool,
   SessionV2Info,
-  SkillV2Info,
   V2Event,
 } from "@opencode-ai/sdk/v2"
 import { createStore, produce } from "solid-js/store"
@@ -31,7 +30,6 @@ type LocationData = {
   model?: ModelV2Info[]
   provider?: ProviderV2Info[]
   reference?: ReferenceInfo[]
-  skill?: SkillV2Info[]
 }
 
 type Data = {
@@ -157,6 +155,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               text: event.data.prompt.text,
               files: event.data.prompt.files,
               agents: event.data.prompt.agents,
+              skills: event.data.prompt.invocations,
               time: { created: event.data.timestamp },
             })
           })
@@ -547,16 +546,6 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             setStore("location", key, "reference", result.data.data)
           },
         },
-        skill: {
-          list(location?: LocationRef) {
-            return store.location[locationKey(location ?? defaultLocation())]?.skill
-          },
-          async refresh(ref?: LocationRef) {
-            const result = await sdk.client.v2.skill.list({ location: locationQuery(ref) }, { throwOnError: true })
-            const key = locationKey(result.data.location)
-            setStore("location", key, "skill", result.data.data)
-          },
-        },
       },
     }
 
@@ -569,7 +558,6 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         result.location.provider.refresh(),
         result.location.reference.refresh(),
         result.location.command.refresh(),
-        result.location.skill.refresh(),
       ]).then((settled) => {
         for (const failure of settled.filter((item) => item.status === "rejected"))
           console.error("Failed to refresh default location data", failure.reason)

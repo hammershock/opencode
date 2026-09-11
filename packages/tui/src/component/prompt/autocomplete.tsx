@@ -31,11 +31,12 @@ import { Locale } from "../../util/locale"
 import type { PromptInfo } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
 import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
-import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
+import { displayCharAt, mentionTriggerIndex, skillTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 import type { TuiSlashCommand } from "../../command-toolkit/host"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
+import { skillDisplayLabel } from "../../prompt/skill"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -83,7 +84,16 @@ export function shellStringOffset(text: string, width: number) {
 export type AutocompleteRef = {
   onInput: (value: string) => void
   completeShell: () => Promise<void>
-  visible: false | "@" | "/" | "shell"
+  dismiss: () => void
+  visible: false | "@" | "$" | "/" | "shell"
+}
+
+type SkillOption = {
+  id: string
+  name: string
+  description?: string
+  sourceLabel: string
+  digest: string
 }
 
 export type AutocompleteOption = {
@@ -169,6 +179,7 @@ export function autocompleteEnterAction(selected: AutocompleteOption | undefined
 
 export function Autocomplete(props: {
   value: string
+  parts: () => PromptInfo["parts"]
   shell: () => boolean
   sessionID?: string
   readOnly?: boolean
@@ -179,6 +190,7 @@ export function Autocomplete(props: {
   ref: (ref: AutocompleteRef) => void
   fileStyleId: number
   agentStyleId: number
+  skillStyleId: number
   promptPartTypeId: () => number
   shellContextVersion: number
   commandSlashes?: () => readonly TuiSlashCommand[]
@@ -286,7 +298,8 @@ export function Autocomplete(props: {
 
     const charAfterCursor = displayCharAt(props.value, currentCursorOffset)
     const needsSpace = charAfterCursor !== " "
-    const append = "@" + text + (needsSpace ? " " : "")
+    const prefix = part.type === "skill" ? "$" : "@"
+    const append = prefix + text + (needsSpace ? " " : "")
 
     input.cursorOffset = store.index
     const startCursor = input.logicalCursor
@@ -296,11 +309,22 @@ export function Autocomplete(props: {
     input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
     input.insertText(append)
 
-    const virtualText = "@" + text
+    const virtualText = prefix + text
     const extmarkStart = store.index
     const extmarkEnd = extmarkStart + Bun.stringWidth(virtualText)
 
-    const styleId = part.type === "file" ? props.fileStyleId : part.type === "agent" ? props.agentStyleId : undefined
+    if (part.type === "skill" && props.parts().some((item) => item.type === "skill" && item.id === part.id)) {
+      return
+    }
+
+    const styleId =
+      part.type === "file"
+        ? props.fileStyleId
+        : part.type === "agent"
+          ? props.agentStyleId
+          : part.type === "skill"
+            ? props.skillStyleId
+            : undefined
 
     const extmarkId = input.extmarks.create({
       start: extmarkStart,
@@ -336,6 +360,10 @@ export function Autocomplete(props: {
         part.source.text.end = extmarkEnd
         part.source.text.value = virtualText
       } else if (part.type === "agent" && part.source) {
+        part.source.start = extmarkStart
+        part.source.end = extmarkEnd
+        part.source.value = virtualText
+      } else if (part.type === "skill") {
         part.source.start = extmarkStart
         part.source.end = extmarkEnd
         part.source.value = virtualText
@@ -391,7 +419,7 @@ export function Autocomplete(props: {
   const references = createMemo(() => data.location.reference.list() ?? [])
 
   const referenceMatch = createMemo(() => {
-    if (!store.visible || store.visible === "/") return
+    if (store.visible !== "@") return
     const { baseQuery } = extractLineRange(search())
     const slash = baseQuery.indexOf("/")
     const alias = slash === -1 ? baseQuery : baseQuery.slice(0, slash)
@@ -427,8 +455,7 @@ export function Autocomplete(props: {
   const [files] = createResource(
     () => ({ query: search(), location: location() }),
     async (input) => {
-      if (props.readOnly) return []
-      if (!store.visible || store.visible === "/") return []
+      if (props.readOnly || store.visible !== "@") return []
       if (referenceMatch()) return []
       const { lineRange, baseQuery } = extractLineRange(input.query ?? "")
 
@@ -476,7 +503,7 @@ export function Autocomplete(props: {
   )
 
   const mcpResources = createMemo(() => {
-    if (!store.visible || store.visible === "/") return []
+    if (store.visible !== "@") return []
 
     const options: AutocompleteOption[] = []
     const width = props.anchor().width - 4
@@ -532,6 +559,71 @@ export function Autocomplete(props: {
       )
   })
 
+  const [skills] = createResource(
+    () => (store.visible === "$" ? { sessionID: props.sessionID, location: location() } : undefined),
+    (input) =>
+      sdk.client.v2.skill
+        .catalog(
+          {
+            location: {
+              directory: input.location?.directory,
+              workspace: input.location?.workspaceID,
+              ...(input.location?.target?.type === "rexd" ? { target: input.location.target.targetID } : {}),
+            },
+          },
+          { throwOnError: true },
+        )
+        .then(async (result) => {
+          const catalog = result.data.data.skills
+          if (!input.sessionID) return catalog
+
+          const response = await sdk.request(`/api/session/${encodeURIComponent(input.sessionID)}/model-context`)
+          if (!response.ok) throw new Error(`Failed to inspect Skill catalog (HTTP ${response.status})`)
+          const context = (await response.json()) as {
+            data: null | { sources: Record<string, { value: unknown }> }
+          }
+          const value = context.data?.sources["core/skill-guidance"]?.value
+          if (!isSkillGuidanceCatalog(value) || !value.enabled) return []
+          return catalog.filter((skill) =>
+            value.skills.some(
+              (admitted) =>
+                admitted.name === skill.name &&
+                admitted.sourceLabel === skill.sourceLabel.replace(/ · [0-9a-f]{8}$/i, "") &&
+                admitted.digest === skill.digest,
+            ),
+          )
+        })
+        .catch((error) => {
+          toast.show({ title: "Could not load Skills", message: errorMessage(error), variant: "warning" })
+          return []
+        }),
+    { initialValue: [] },
+  )
+
+  const skillOptions = createMemo(() => {
+    const catalog = skills()
+    return catalog.map(
+      (skill): AutocompleteOption => ({
+        display: skillDisplayLabel(skill, catalog),
+        value: skill.name,
+        description: skill.description,
+        onSelect: () => insertSkill(skill),
+      }),
+    )
+  })
+
+  function insertSkill(skill: SkillOption) {
+    insertPart(skill.name, {
+      type: "skill",
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      sourceLabel: skill.sourceLabel,
+      digest: skill.digest,
+      source: { start: 0, end: 0, value: "" },
+    })
+  }
+
   const referenceAliases = createMemo(() =>
     references()
       .filter((reference) => !reference.hidden)
@@ -581,6 +673,7 @@ export function Autocomplete(props: {
     const agentsValue = agents()
     const referenceAliasesValue = referenceAliases()
     const commandsValue = commands()
+    const skillsValue = skillOptions()
     const searchValue = search()
 
     if (store.visible === "@" && referenceMatchValue) {
@@ -591,7 +684,11 @@ export function Autocomplete(props: {
     // it shouldn't be additionally sorted by fuzzysort as it will loose the results
     const fileOptions: AutocompleteOption[] = store.visible === "@" ? filesValue || [] : []
     const nonFileOptions: AutocompleteOption[] =
-      store.visible === "@" ? [...referenceAliasesValue, ...agentsValue, ...mcpResources()] : [...commandsValue]
+      store.visible === "@"
+        ? [...referenceAliasesValue, ...agentsValue, ...mcpResources()]
+        : store.visible === "$"
+          ? skillsValue
+          : [...commandsValue]
 
     if (!searchValue) {
       return [...nonFileOptions, ...fileOptions]
@@ -606,11 +703,11 @@ export function Autocomplete(props: {
         keys: [
           (obj) => removeLineRange((obj.value ?? obj.display).trimEnd()),
           // Match description for slash commands only; for "@" it surfaced unrelated items.
-          ...(store.visible === "/" ? ["description" as const] : []),
+          ...(store.visible === "/" || store.visible === "$" ? ["description" as const] : []),
           (obj) => obj.aliases?.join(" ") ?? "",
         ],
         threshold: store.visible === "@" ? 0.5 : 0,
-        limit: 10,
+        limit: 8,
         scoreFn: (objResults) => {
           const displayResult = objResults[0]
           let score = objResults.score
@@ -752,7 +849,7 @@ export function Autocomplete(props: {
     ]),
   }))
 
-  function show(mode: "@" | "/") {
+  function show(mode: "@" | "$" | "/") {
     setStore({
       visible: mode,
       index: props.input().cursorOffset,
@@ -791,6 +888,7 @@ export function Autocomplete(props: {
       get visible() {
         return store.visible
       },
+      dismiss: close,
       async completeShell() {
         if (props.readOnly) return
         // OpenTUI reports the Tab key through the editor callbacks after the keymap
@@ -908,6 +1006,13 @@ export function Autocomplete(props: {
         if (!props.readOnly && idx !== undefined) {
           show("@")
           setStore("index", idx)
+          return
+        }
+
+        const skillIndex = skillTriggerIndex(value, offset)
+        if (skillIndex !== undefined) {
+          show("$")
+          setStore("index", skillIndex)
         }
       },
     })
@@ -988,5 +1093,25 @@ export function Autocomplete(props: {
         </box>
       </Show>
     </box>
+  )
+}
+
+function isSkillGuidanceCatalog(value: unknown): value is {
+  enabled: boolean
+  skills: { name: string; sourceLabel: string; digest: string }[]
+} {
+  if (!value || typeof value !== "object") return false
+  if (!("enabled" in value) || typeof value.enabled !== "boolean") return false
+  if (!("skills" in value) || !Array.isArray(value.skills)) return false
+  return value.skills.every(
+    (skill) =>
+      skill &&
+      typeof skill === "object" &&
+      "name" in skill &&
+      typeof skill.name === "string" &&
+      "sourceLabel" in skill &&
+      typeof skill.sourceLabel === "string" &&
+      "digest" in skill &&
+      typeof skill.digest === "string",
   )
 }

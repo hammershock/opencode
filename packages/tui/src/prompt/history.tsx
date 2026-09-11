@@ -6,12 +6,27 @@ import { createSimpleContext } from "../context/helper"
 import { useTuiPaths } from "../context/runtime"
 import { appendText, readText, writeText } from "../util/persistence"
 
+export type SkillMentionPart = {
+  type: "skill"
+  id: string
+  name: string
+  description?: string
+  sourceLabel: string
+  digest: string
+  source: {
+    start: number
+    end: number
+    value: string
+  }
+}
+
 export type PromptInfo = {
   input: string
   mode?: "normal" | "shell"
   parts: (
     | Omit<FilePart, "id" | "messageID" | "sessionID">
     | Omit<AgentPart, "id" | "messageID" | "sessionID">
+    | SkillMentionPart
     | (Omit<TextPart, "id" | "messageID" | "sessionID"> & {
         source?: {
           text: {

@@ -189,6 +189,15 @@ export type TuiPromptInfo = {
   parts: (
     | Omit<FilePart, "id" | "messageID" | "sessionID">
     | Omit<AgentPart, "id" | "messageID" | "sessionID">
+    | {
+        type: "skill"
+        id: string
+        name: string
+        description?: string
+        sourceLabel: string
+        digest: string
+        source: { start: number; end: number; value: string }
+      }
     | (Omit<TextPart, "id" | "messageID" | "sessionID"> & {
         source?: {
           text: {

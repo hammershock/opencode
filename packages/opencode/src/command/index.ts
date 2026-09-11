@@ -1,15 +1,14 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import path from "path"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
 import type { InstanceContext } from "@/project/instance-context"
 import { Effect, Layer, Context, Schema } from "effect"
 import { Config } from "@/config/config"
 import { MCP } from "../mcp"
-import { Skill } from "../skill"
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
+import { Skill } from "@opencode-ai/schema/skill"
 
 type State = {
   commands: Record<string, Info>
@@ -51,6 +50,38 @@ export function hints(template: string) {
   return result
 }
 
+export function withSkillCompatibility(commands: ReadonlyArray<Info>, skills: ReadonlyArray<Skill.Metadata>) {
+  const names = new Set(commands.map((command) => command.name))
+  const grouped = Map.groupBy(skills, (skill) => skill.name)
+  return [
+    ...commands,
+    ...[...grouped.entries()]
+      .filter(([name]) => !names.has(name))
+      .map(
+        ([name, matches]): Info => ({
+          name,
+          description:
+            matches.length === 1
+              ? matches[0]!.description
+              : `Ambiguous Skill name (${matches.length} sources; use $ mention to choose)`,
+          source: "skill",
+          provenance: {
+            type: "skill",
+            location:
+              matches.length === 1
+                ? matches[0]!.sourceLabel
+                : matches
+                    .map((skill) => skill.sourceLabel)
+                    .toSorted()
+                    .join(", "),
+          },
+          template: "",
+          hints: [],
+        }),
+      ),
+  ]
+}
+
 export const Default = {
   INIT: "init",
   REVIEW: "review",
@@ -68,7 +99,6 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const config = yield* Config.Service
     const mcp = yield* MCP.Service
-    const skill = yield* Skill.Service
 
     const init = Effect.fn("Command.state")(function* (ctx: InstanceContext) {
       const cfg = yield* config.get()
@@ -143,27 +173,6 @@ const layer = Layer.effect(
         }
       }
 
-      for (const item of yield* skill.all()) {
-        if (commands[item.name]) continue
-        const dir = item.location === "<built-in>" ? undefined : path.dirname(item.location)
-        commands[item.name] = {
-          name: item.name,
-          description: item.description,
-          source: "skill",
-          provenance: { type: "skill", location: item.location },
-          get template() {
-            if (!dir) return item.content
-            return [
-              item.content,
-              "",
-              `Base directory for this skill: ${dir}`,
-              "Relative paths in this skill (e.g., scripts/, references/) are relative to this base directory.",
-            ].join("\n")
-          },
-          hints: [],
-        }
-      }
-
       return {
         commands,
       }
@@ -185,6 +194,6 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node, MCP.node, Skill.node] })
+export const node = LayerNode.make({ service: Service, layer: layer, deps: [Config.node, MCP.node] })
 
 export * as Command from "."

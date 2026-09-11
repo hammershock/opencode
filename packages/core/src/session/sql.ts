@@ -2,7 +2,7 @@ import { sqliteTable, text, integer, index, primaryKey, real, uniqueIndex } from
 import * as DatabasePath from "../database/path"
 import { ProjectTable } from "../project/sql"
 import type { SessionMessage } from "./message"
-import type { Prompt } from "./prompt"
+import { Prompt } from "./prompt"
 import type { SessionInput } from "./input"
 import type { Snapshot } from "../snapshot"
 import { PermissionV1 } from "../v1/permission"
@@ -154,7 +154,7 @@ export const SessionInputTable = sqliteTable(
       .$type<SessionSchema.ID>()
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
-    prompt: text({ mode: "json" }).notNull().$type<Prompt>(),
+    prompt: text({ mode: "json" }).notNull().$type<(typeof Prompt)["Encoded"]>(),
     delivery: text().$type<SessionInput.Delivery>().notNull(),
     admitted_seq: integer().notNull(),
     promoted_seq: integer(),

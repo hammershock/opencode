@@ -9,7 +9,7 @@ export function promptOffsetWidth(value: string) {
   return width
 }
 
-function displayOffsetIndex(value: string, offset: number) {
+export function displayOffsetIndex(value: string, offset: number) {
   if (offset <= 0) return 0
 
   let width = 0
@@ -45,4 +45,20 @@ export function mentionTriggerIndex(value: string, offset = promptOffsetWidth(va
   if ((before === undefined || /\s/.test(before)) && !/\s/.test(query)) {
     return promptOffsetWidth(text.slice(0, index))
   }
+}
+
+export function skillTriggerIndex(value: string, offset = promptOffsetWidth(value)) {
+  const text = displaySlice(value, 0, offset)
+  const index = text.lastIndexOf("$")
+  if (index === -1) return
+
+  const before = index === 0 ? undefined : text[index - 1]
+  const query = text.slice(index)
+  if ((before !== undefined && !/\s/.test(before)) || /\s/.test(query)) return
+  if (before === "\\") return
+  if (/^\$[A-Z_]/.test(query)) return
+
+  const ticks = text.slice(0, index).match(/(?<!\\)`/g)?.length ?? 0
+  if (ticks % 2 === 1) return
+  return promptOffsetWidth(text.slice(0, index))
 }

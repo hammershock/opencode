@@ -13,6 +13,7 @@ import { SessionExecutionLocal } from "@opencode-ai/core/session/execution/local
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { TargetRegistry } from "@opencode-ai/core/target-registry"
 import { TargetBindingRegistry } from "@opencode-ai/core/target-binding-registry"
+import { SkillSettings } from "@opencode-ai/core/skill/settings"
 import { SessionLocationAccess } from "@opencode-ai/core/session/location-access"
 import { SessionLocationMutation } from "@opencode-ai/core/session/location-mutation"
 import { SessionActivity } from "@opencode-ai/core/session/activity"
@@ -42,6 +43,7 @@ const applicationServices = LayerNode.group([
   LocationServiceMap.node,
   TargetRegistry.node,
   TargetBindingRegistry.node,
+  SkillSettings.node,
   SessionLocationAccess.node,
   SessionLocationMutation.node,
   SessionActivity.node,

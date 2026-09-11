@@ -15,6 +15,7 @@ import {
   ServiceUnavailableError,
   SessionNotFoundError,
   UnknownError,
+  SkillMentionError,
 } from "../errors"
 import { Agent } from "@opencode-ai/schema/agent"
 import { Model } from "@opencode-ai/schema/model"
@@ -22,6 +23,7 @@ import { Location } from "@opencode-ai/schema/location"
 import { Revert } from "@opencode-ai/schema/revert"
 import { SessionEvent } from "@opencode-ai/schema/session-event"
 import { ModelContext } from "@opencode-ai/schema/model-context"
+import { Skill } from "@opencode-ai/schema/skill"
 
 const SessionsQueryFields = {
   workspace: Workspace.ID.pipe(Schema.optional),
@@ -170,6 +172,21 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
       ),
     )
     .add(
+      HttpApiEndpoint.post("session.activate", "/api/session/:sessionID/activate", {
+        params: { sessionID: Session.ID },
+        success: Schema.Struct({ data: Skill.Activation }),
+        error: [SessionNotFoundError, ServiceUnavailableError],
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.activate",
+            summary: "Activate session model context",
+            description: "Reload activation-scoped context sources before entering or resuming a session.",
+          }),
+        ),
+    )
+    .add(
       HttpApiEndpoint.post("session.switchAgent", "/api/session/:sessionID/agent", {
         params: { sessionID: Session.ID },
         payload: Schema.Struct({ agent: Agent.ID }),
@@ -211,7 +228,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           resume: Schema.Boolean.pipe(Schema.optional),
         }),
         success: Schema.Struct({ data: SessionInput.Admitted }),
-        error: [ConflictError, SessionNotFoundError],
+        error: [ConflictError, InvalidRequestError, SessionNotFoundError, SkillMentionError],
       })
         .middleware(sessionLocationMiddleware)
         .annotateMerge(

@@ -10,11 +10,17 @@ import { SessionEvent } from "./session-event"
 import { SessionID } from "./session-id"
 import { Revert } from "./revert"
 import { ApprovalMode } from "./approval-mode"
+import { SkillInvocation } from "./skill-invocation"
 
 export const ID = SessionID
 export type ID = SessionID
 
 export const Event = SessionEvent
+
+export const SkillInvocationID = SkillInvocation.ID
+export type SkillInvocationID = SkillInvocation.ID
+export const SkillInvocationSnapshot = SkillInvocation.Snapshot
+export type SkillInvocationSnapshot = SkillInvocation.Snapshot
 
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({

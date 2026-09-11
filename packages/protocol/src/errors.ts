@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { Skill } from "@opencode-ai/schema/skill"
 
 export class InvalidRequestError extends Schema.TaggedErrorClass<InvalidRequestError>()(
   "InvalidRequestError",
@@ -108,6 +109,17 @@ export class ForbiddenError extends Schema.TaggedErrorClass<ForbiddenError>()(
   "ForbiddenError",
   { message: Schema.String },
   { httpApiStatus: 403 },
+) {}
+
+export class SkillMentionError extends Schema.TaggedErrorClass<SkillMentionError>()(
+  "SkillMentionError",
+  {
+    message: Schema.String,
+    kind: Skill.InvocationFailureKind,
+    skillID: Skill.ID,
+    name: Schema.String,
+  },
+  { httpApiStatus: 400 },
 ) {}
 
 export class PtyNotFoundError extends Schema.TaggedErrorClass<PtyNotFoundError>()(

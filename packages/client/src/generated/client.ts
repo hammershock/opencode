@@ -446,7 +446,7 @@ export function make(options: ClientOptions) {
             path: `/api/session/${encodeURIComponent(input.sessionID)}/prompt`,
             body: { id: input["id"], prompt: input["prompt"], delivery: input["delivery"], resume: input["resume"] },
             successStatus: 200,
-            declaredStatuses: [409, 404, 400, 401],
+            declaredStatuses: [409, 400, 404, 401],
             empty: false,
           },
           requestOptions,

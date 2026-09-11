@@ -29,6 +29,7 @@ export interface AdmissionInput {
   readonly mentions: ReadonlyArray<PromptInput.SkillMention>
   readonly agent?: string
   readonly catalog: ModelContext.SourceState
+  readonly admittedCatalog: Skill.AdmittedCatalog | undefined
 }
 
 export class AdmissionError extends Schema.TaggedErrorClass<AdmissionError>()("SkillAdmission.Error", {

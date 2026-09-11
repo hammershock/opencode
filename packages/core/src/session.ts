@@ -56,6 +56,7 @@ import { SkillCatalogContextService } from "./skill/catalog-context-service"
 import { Skill } from "@opencode-ai/schema/skill"
 import { SkillSlashCompatibility } from "./skill/slash-compatibility"
 import { SkillV2 } from "./skill"
+import { SessionSkillCatalog } from "./session/skill-catalog"
 
 export const RevertState = Revert.State
 export type RevertState = Revert.State
@@ -171,6 +172,10 @@ export interface Interface {
   readonly modelContext: (
     sessionID: SessionSchema.ID,
   ) => Effect.Effect<ModelContext.Generation | undefined, NotFoundError | ContextSnapshotDecodeError>
+  /** Inspect the exact device-local Skill identities admitted for this Session. */
+  readonly skillCatalog: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<Skill.AdmittedCatalog | undefined, NotFoundError>
   readonly events: (input: {
     sessionID: SessionSchema.ID
     after?: number
@@ -316,12 +321,18 @@ const layer = Layer.effect(
       const load = Effect.gen(function* () {
         const catalog = yield* SkillCatalogContextService.Service
         const loaded = yield* catalog.load({ forceReload })
+        const agents = yield* AgentV2.Service
+        const selection = yield* agents.select(session.agent)
+        const admitted = SessionSkillCatalog.make(
+          loaded.snapshot.revision,
+          selection.info ? SkillV2.available(loaded.snapshot.skills, selection.info) : [],
+        )
         const assembler = yield* ModelContextAssembler.Service
         const context = yield* assembler.load(session.agent, {
           skillCatalog: loaded.snapshot,
           preserveSkillCatalog: forceReload && loaded.transient && initialized,
         })
-        return { context, value: loaded }
+        return { context, value: { loaded, admitted } }
       }).pipe(Effect.provide(locations.get(location)))
       const attempt = yield* SessionContextEpoch.activate(db, events, load, session.id, session.locationRevision).pipe(
         Effect.exit,
@@ -339,7 +350,8 @@ const layer = Layer.effect(
           ],
         })
       }
-      const loaded = attempt.value.value
+      const loaded = attempt.value.value.loaded
+      yield* SessionSkillCatalog.replace(db, session.id, attempt.value.value.admitted)
       return Skill.Activation.make({
         status: loaded.transient && initialized ? "retained" : attempt.value.status,
         diagnostics: loaded.diagnostics,
@@ -351,6 +363,11 @@ const layer = Layer.effect(
     ) {
       const unavailable = () => new OperationUnavailableError({ operation: "modelContext" })
       if (!(yield* contextInitialized(session.id))) {
+        const activation = yield* activateCatalog(session, location, true)
+        if (activation.status === "unavailable") return yield* unavailable()
+        return
+      }
+      if (!(yield* SessionSkillCatalog.get(db, session.id))) {
         const activation = yield* activateCatalog(session, location, true)
         if (activation.status === "unavailable") return yield* unavailable()
         return
@@ -447,6 +464,7 @@ const layer = Layer.effect(
                 Effect.catch(() => new OperationUnavailableError({ operation: "modelContext" })),
               )
               if (!catalog) return yield* new OperationUnavailableError({ operation: "modelContext" })
+              const admittedCatalog = yield* SessionSkillCatalog.get(db, input.sessionID)
               const mentions = input.prompt.skills ?? []
               const skills =
                 mentions.length === 0
@@ -460,6 +478,7 @@ const layer = Layer.effect(
                         mentions,
                         agent: session.agent,
                         catalog: catalog.sources,
+                        admittedCatalog,
                       })
                     }).pipe(Effect.provide(locations.get(location)))
               const resolved = Prompt.make({
@@ -654,18 +673,28 @@ const layer = Layer.effect(
                   // Listing is the least invasive cross-provider access check and catches
                   // unreadable local directories as well as Rexd filesystem denial.
                   yield* filesystem.list({ path: RelativePath.make(".") })
+                  const catalog = Context.get(context, SkillCatalogContextService.Service)
+                  const loaded = yield* catalog.load({ forceReload: false })
+                  const agents = Context.get(context, AgentV2.Service)
+                  const selection = yield* agents.select(before.agent)
                   const assembler = Context.get(context, ModelContextAssembler.Service)
-                  const assembled = yield* assembler.load(before.agent).pipe(
+                  const assembled = yield* assembler.load(before.agent, { skillCatalog: loaded.snapshot }).pipe(
                     Effect.flatMap(SystemContext.initialize),
                     Effect.mapError(
                       () => new LocationRebindError({ message: "Destination model context is unavailable" }),
                     ),
                   )
-                  return SessionContextEpoch.materialize(assembled, {
-                    generation: (epoch?.generation ?? 0) + 1,
-                    reason: "location-rebound",
-                    locationRevision: revision,
-                  })
+                  return {
+                    context: SessionContextEpoch.materialize(assembled, {
+                      generation: (epoch?.generation ?? 0) + 1,
+                      reason: "location-rebound",
+                      locationRevision: revision,
+                    }),
+                    admitted: SessionSkillCatalog.make(
+                      loaded.snapshot.revision,
+                      selection.info ? SkillV2.available(loaded.snapshot.skills, selection.info) : [],
+                    ),
+                  }
                 }),
               ).pipe(
                 Effect.catchDefect(
@@ -687,8 +716,9 @@ const layer = Layer.effect(
                 previous: current.location,
                 location: input.destination,
                 revision,
-                context: contextGeneration,
+                context: contextGeneration.context,
               })
+              yield* SessionSkillCatalog.replace(db, input.sessionID, contextGeneration.admitted)
               const warnings: string[] = []
               yield* locations.invalidate(current.location).pipe(
                 Effect.catch((cause) =>
@@ -795,6 +825,10 @@ const layer = Layer.effect(
       modelContext: Effect.fn("V2Session.modelContext")(function* (sessionID) {
         yield* result.get(sessionID)
         return yield* SessionContextEpoch.inspect(db, sessionID)
+      }),
+      skillCatalog: Effect.fn("V2Session.skillCatalog")(function* (sessionID) {
+        yield* result.get(sessionID)
+        return yield* SessionSkillCatalog.get(db, sessionID)
       }),
       events: (input) =>
         Stream.unwrap(

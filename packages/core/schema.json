@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "ff021c28-4e29-4684-a1e3-9c268621d4c1",
-  "prevIds": ["d1a99658-23c5-464b-b61b-6b158d199e47"],
+  "id": "56b87987-f9db-45ea-81de-3bfafd4c1f5e",
+  "prevIds": ["ff021c28-4e29-4684-a1e3-9c268621d4c1"],
   "ddl": [
     {
       "name": "workspace",
@@ -66,6 +66,10 @@
     },
     {
       "name": "session_message",
+      "entityType": "tables"
+    },
+    {
+      "name": "session_skill_catalog",
       "entityType": "tables"
     },
     {
@@ -1106,6 +1110,26 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "session_id",
+      "entityType": "columns",
+      "table": "session_skill_catalog"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "catalog",
+      "entityType": "columns",
+      "table": "session_skill_catalog"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "id",
       "entityType": "columns",
       "table": "session"
@@ -1691,6 +1715,17 @@
       "table": "session_message"
     },
     {
+      "columns": ["session_id"],
+      "tableTo": "session",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_session_skill_catalog_session_id_session_id_fk",
+      "entityType": "fks",
+      "table": "session_skill_catalog"
+    },
+    {
       "columns": ["project_id"],
       "tableTo": "project",
       "columnsTo": ["id"],
@@ -1840,6 +1875,13 @@
       "nameExplicit": false,
       "name": "session_message_pk",
       "table": "session_message",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["session_id"],
+      "nameExplicit": false,
+      "name": "session_skill_catalog_pk",
+      "table": "session_skill_catalog",
       "entityType": "pks"
     },
     {

@@ -104,6 +104,18 @@ describe("SkillCatalogContext", () => {
           baseline: "Skill guidance",
         },
       },
+      admittedCatalog: Skill.AdmittedCatalog.make({
+        revision: review.digest,
+        skills: [
+          Skill.AdmittedIdentity.make({
+            id: review.id,
+            name: review.name,
+            sourceLabel: review.sourceLabel,
+            digest: review.digest,
+          }),
+        ],
+        digest: review.digest,
+      }),
     }
 
     return Effect.gen(function* () {
@@ -115,6 +127,23 @@ describe("SkillCatalogContext", () => {
       denied = true
       expect((yield* Effect.flip(catalogs.resolve(input))).kind).toBe("permission-denied")
       expect(reads).toBe(0)
+
+      denied = false
+      const collision = Skill.AdmittedCatalog.make({
+        ...input.admittedCatalog,
+        skills: [
+          Skill.AdmittedIdentity.make({
+            ...input.admittedCatalog.skills[0]!,
+            id: Skill.ID.make(`skl_${"2".repeat(64)}`),
+          }),
+        ],
+      })
+      expect((yield* Effect.flip(catalogs.resolve({ ...input, admittedCatalog: collision }))).kind).toBe(
+        "stale-catalog",
+      )
+      expect(reads).toBe(0)
+      expect(yield* catalogs.resolve(input)).toHaveLength(1)
+      expect(reads).toBe(1)
     }).pipe(Effect.provide(layer))
   })
 

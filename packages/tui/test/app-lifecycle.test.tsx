@@ -640,7 +640,7 @@ test("session.undo restores a canonical Skill prompt and session.redo clears its
         properties: { timestamp: 20, sessionID: "dummy", revert: { messageID: message.id } },
       },
     })
-    await setup.renderOnce()
+    await waitForFrame(setup, "1 message reverted")
     api?.keymap.dispatchCommand("session.undo")
     const earlier = await waitForEditorText(setup, previous.text)
 
@@ -657,7 +657,7 @@ test("session.undo restores a canonical Skill prompt and session.redo clears its
         properties: { timestamp: 30, sessionID: "dummy", revert: { messageID: previous.id } },
       },
     })
-    await setup.renderOnce()
+    await waitForFrame(setup, "2 message reverted")
     api?.keymap.dispatchCommand("session.redo")
     await waitForRequestCount(paths, "/api/session/dummy/revert/stage", 3)
 
@@ -670,7 +670,7 @@ test("session.undo restores a canonical Skill prompt and session.redo clears its
         properties: { timestamp: 40, sessionID: "dummy", revert: { messageID: message.id } },
       },
     })
-    await setup.renderOnce()
+    await waitForFrame(setup, "1 message reverted")
     api?.keymap.dispatchCommand("session.redo")
     const cleared = await waitForEditorText(setup, "")
 

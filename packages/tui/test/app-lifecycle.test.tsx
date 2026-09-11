@@ -29,6 +29,15 @@ async function waitForEditor(setup: Awaited<ReturnType<typeof createTestRenderer
   throw new Error(`Timed out waiting for a focused textarea\n${setup.captureCharFrame()}`)
 }
 
+async function waitForSessionRequests(requests: URL[], count: number, timeout = 2_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (requests.length >= count) return
+    await Bun.sleep(10)
+  }
+  throw new Error(`Timed out waiting for ${count} Session list requests; observed ${requests.length}`)
+}
+
 test("SIGHUP clears title and disposes scoped resources once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
@@ -791,14 +800,26 @@ test("an open Sessions dialog refreshes when another device projects a Session",
     )
 
     await ready
+    await setup.waitForVisualIdle()
     api?.keymap.dispatchCommand("session.list")
-    await waitForFrame(setup, "Existing session")
-    sessions = [first, second]
+    await waitForFrame(setup, "Sessions")
+    await setup.waitForVisualIdle()
+    const initialRequests = calls.session.length
     events.emit({
       directory: "/home/remote",
       project: "proj_test",
-      payload: { id: "evt_projection", type: "sync.projection.updated", properties: { revision: 2 } },
+      payload: { id: "evt_projection_initial", type: "sync.projection.updated", properties: { revision: 1 } },
     })
+    await waitForSessionRequests(calls.session, initialRequests + 1)
+    await waitForFrame(setup, "Existing session")
+    sessions = [first, second]
+    const secondRequests = calls.session.length
+    events.emit({
+      directory: "/home/remote",
+      project: "proj_test",
+      payload: { id: "evt_projection_second", type: "sync.projection.updated", properties: { revision: 2 } },
+    })
+    await waitForSessionRequests(calls.session, secondRequests + 1)
     await waitForFrame(setup, "Created on mywindows")
 
     process.emit("SIGHUP")

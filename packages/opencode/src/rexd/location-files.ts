@@ -86,6 +86,22 @@ export class RexdFiles {
     return { content: Buffer.from(result.content, result.encoding), mtime: result.mtime }
   }
 
+  async readRange(value: string, cwd: string, offset: number, length: number, signal?: AbortSignal) {
+    const target = this.resolve(value, cwd)
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1)
+      throw new Error("Remote read range must use a non-negative offset and positive length")
+    const result = Schema.decodeUnknownSync(Read)(
+      await this.lease.client.request(
+        "fs.read",
+        { session_id: this.lease.handshake.sessionID, path: target, offset, length, encoding: "base64" },
+        { signal },
+      ),
+    )
+    const content = Buffer.from(result.content, result.encoding)
+    if (content.length > length) throw new Error(`Remote file returned more bytes than requested: ${target}`)
+    return { content, mtime: result.mtime, size: result.size, truncated: result.truncated }
+  }
+
   async list(value: string, cwd: string, recursive = false) {
     return Schema.decodeUnknownSync(List)(
       await this.lease.client.request("fs.list", {
@@ -124,6 +140,19 @@ export class RexdFiles {
         mkdir_parents: true,
         atomic: true,
         expected_mtime: options.expectedMtime,
+      },
+      { sideEffect: true },
+    )
+  }
+
+  async delete(value: string, cwd: string) {
+    const target = this.resolve(value, cwd)
+    return this.lease.client.request(
+      "fs.patch",
+      {
+        session_id: this.lease.handshake.sessionID,
+        cwd: path.posix.dirname(target),
+        patch_text: `*** Begin Patch\n*** Delete File: ${path.posix.basename(target)}\n*** End Patch`,
       },
       { sideEffect: true },
     )

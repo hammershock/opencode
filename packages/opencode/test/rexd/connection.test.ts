@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { testRexdConnection } from "../../src/rexd/connection"
+import { connectRexd, testRexdConnection } from "../../src/rexd/connection"
 import { RexdError } from "../../src/rexd/error"
 import { powershellRemoteCommand, type RexdTarget, type Transport } from "../../src/rexd/ssh"
 
@@ -39,8 +39,30 @@ describe("Rexd connection test", () => {
       { connect: () => transport },
     )
     expect(result.handshake.workspaceRoots).toEqual(["/work"])
+    expect(transport.requests[0]?.params.workspace_roots).toEqual(["/work"])
     expect(transport.methods).toEqual(["session.open", "fs.stat", "session.close"])
     expect(transport.closed).toBe(true)
+  })
+
+  test("enables a custom Skill staging root only when the handshake confirms it", async () => {
+    const confirmed = new ScriptedTransport({ workspaceRoots: ["/work", "/tmp/custom-skills"] })
+    const available = await connectRexd(
+      { ...target, skillStagingRoot: "/tmp/custom-skills" },
+      { clientVersion: "test" },
+      { connect: () => confirmed },
+    )
+    expect(confirmed.requests[0]?.params.workspace_roots).toEqual(["/work", "/tmp/custom-skills"])
+    expect(available.skillStagingRoot).toBe("/tmp/custom-skills")
+    await available.close()
+
+    const omitted = new ScriptedTransport({})
+    const unavailable = await connectRexd(
+      { ...target, skillStagingRoot: "/tmp/custom-skills" },
+      { clientVersion: "test" },
+      { connect: () => omitted },
+    )
+    expect(unavailable.skillStagingRoot).toBeUndefined()
+    await unavailable.close()
   })
 
   test("validates a directory reached through a relative symbolic link", async () => {
@@ -94,15 +116,24 @@ describe("Rexd connection test", () => {
 
 class ScriptedTransport implements Transport {
   methods: string[] = []
+  requests: Array<{ method: string; params: Record<string, unknown> }> = []
   dataListeners = new Set<(chunk: string) => void>()
   closeListeners = new Set<(error: RexdError) => void>()
   closed = false
 
-  constructor(readonly options: { protocol?: string; stat?: unknown; stats?: Readonly<Record<string, unknown>> }) {}
+  constructor(
+    readonly options: {
+      protocol?: string
+      stat?: unknown
+      stats?: Readonly<Record<string, unknown>>
+      workspaceRoots?: readonly string[]
+    },
+  ) {}
 
   async write(payload: string) {
     const request = JSON.parse(payload)
     this.methods.push(request.method)
+    this.requests.push(request)
     const result =
       request.method === "session.open"
         ? {
@@ -118,7 +149,7 @@ class ScriptedTransport implements Transport {
               max_processes_per_session: 8,
               max_concurrent_sessions: 16,
             },
-            workspace_roots: ["/work"],
+            workspace_roots: this.options.workspaceRoots ?? ["/work"],
           }
         : request.method === "fs.stat"
           ? (this.options.stats?.[request.params.path] ?? this.options.stat)

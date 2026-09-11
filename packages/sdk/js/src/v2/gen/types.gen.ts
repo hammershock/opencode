@@ -4377,6 +4377,8 @@ export type SkillActivationDiagnostic = {
     | "read-failed"
     | "invalid-frontmatter"
     | "invalid-name"
+    | "invalid-description"
+    | "legacy-layout"
     | "name-mismatch"
     | "duplicate-name"
     | "invalid-settings"
@@ -5598,6 +5600,8 @@ export type SkillDiagnostic = {
     | "read-failed"
     | "invalid-frontmatter"
     | "invalid-name"
+    | "invalid-description"
+    | "legacy-layout"
     | "name-mismatch"
     | "duplicate-name"
     | "invalid-settings"
@@ -6916,6 +6920,7 @@ export type SessionLocationRebindingResolution =
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }
     }
   | {
@@ -6971,6 +6976,7 @@ export type SessionLocationRebindingResolution =
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }
       stage: "ssh" | "environment" | "prepare" | "handshake" | "capabilities" | "directory"
       message: string
@@ -7045,6 +7051,7 @@ export type SessionLocationRebindingRestoreResult = {
       program: string
       args: Array<string>
     }
+    skillStagingRoot?: string
   }
   snapshot: {
     path: string
@@ -7086,6 +7093,7 @@ export type SessionLocationRebindingRestoreResult = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }>
     diagnostics: Array<{
       severity: "error" | "warning"
@@ -16739,6 +16747,7 @@ export type V2TargetListResponses = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }>
     diagnostics: Array<{
       severity: "error" | "warning"
@@ -16775,6 +16784,7 @@ export type V2TargetCreateData = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }
     expectedRevision: string
   }
@@ -16854,6 +16864,7 @@ export type V2TargetCreateResponses = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }
     snapshot: {
       path: string
@@ -16895,6 +16906,7 @@ export type V2TargetCreateResponses = {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }>
       diagnostics: Array<{
         severity: "error" | "warning"
@@ -17173,6 +17185,7 @@ export type V2TargetWizardInspectData = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }
   }
   path?: never
@@ -17243,6 +17256,7 @@ export type V2TargetWizardCompleteData = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }
     value: string
     cursor: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
@@ -17379,6 +17393,7 @@ export type V2TargetRemoveResponses = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }>
     diagnostics: Array<{
       severity: "error" | "warning"
@@ -17415,6 +17430,7 @@ export type V2TargetUpdateData = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }
     expectedRevision: string
   }
@@ -17496,6 +17512,7 @@ export type V2TargetUpdateResponses = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }
     snapshot: {
       path: string
@@ -17537,6 +17554,7 @@ export type V2TargetUpdateResponses = {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }>
       diagnostics: Array<{
         severity: "error" | "warning"
@@ -17574,6 +17592,7 @@ export type V2TargetRestoreData = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }
     referencedSessionIDs: Array<string>
     expectedRevision: string
@@ -17871,6 +17890,7 @@ export type V2TargetLegacyPreviewResponses = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }>
     diagnostics: Array<{
       severity: "error" | "warning"
@@ -17964,6 +17984,7 @@ export type V2TargetLegacyImportResponses = {
         program: string
         args: Array<string>
       }
+      skillStagingRoot?: string
     }>
     snapshot: {
       path: string
@@ -18005,6 +18026,7 @@ export type V2TargetLegacyImportResponses = {
           program: string
           args: Array<string>
         }
+        skillStagingRoot?: string
       }>
       diagnostics: Array<{
         severity: "error" | "warning"

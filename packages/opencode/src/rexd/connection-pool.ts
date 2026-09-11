@@ -139,6 +139,7 @@ function connectionKey(target: RexdTarget, clientVersion: string) {
     connection,
     [...target.workspaceRoots].sort(),
     target.command ? [target.command.program, target.command.args] : null,
+    target.skillStagingRoot ?? null,
     clientVersion,
   ])
 }

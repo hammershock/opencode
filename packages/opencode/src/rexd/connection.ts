@@ -1,7 +1,13 @@
 import path from "node:path"
 import { RexdError } from "./error"
 import { RexdFiles } from "./location-files"
-import { prepareManagedRexd, managedRexdCommand, type PrepareDependencies, type PrepareResult } from "./prepare"
+import {
+  MANAGED_SKILL_STAGING_ROOT,
+  prepareManagedRexd,
+  managedRexdCommand,
+  type PrepareDependencies,
+  type PrepareResult,
+} from "./prepare"
 import { RexdRpcClient, type RexdHandshake } from "./rpc"
 import { connectSsh, posixRemoteCommand, type RexdTarget, type Transport } from "./ssh"
 
@@ -9,6 +15,7 @@ export type RexdLease = {
   client: RexdRpcClient
   handshake: RexdHandshake
   prepared?: PrepareResult
+  skillStagingRoot?: string
   close(): Promise<void>
 }
 
@@ -31,8 +38,13 @@ export async function connectRexd(
     command,
   )
   const client = new RexdRpcClient(transport)
+  const configuredSkillStagingRoot = target.command ? target.skillStagingRoot : MANAGED_SKILL_STAGING_ROOT
+  const skillStagingRoot = configuredSkillStagingRoot ? path.posix.normalize(configuredSkillStagingRoot) : undefined
+  const requestedRoots = skillStagingRoot
+    ? [...new Set([...target.workspaceRoots, skillStagingRoot])]
+    : target.workspaceRoots
   const handshake = await client
-    .open({ clientVersion: options.clientVersion, workspaceRoots: target.workspaceRoots, signal: options.signal })
+    .open({ clientVersion: options.clientVersion, workspaceRoots: requestedRoots, signal: options.signal })
     .catch(async (error) => {
       await client.close()
       if (error instanceof RexdError) throw error
@@ -42,6 +54,9 @@ export async function connectRexd(
     client,
     handshake,
     prepared,
+    skillStagingRoot: handshake.workspaceRoots.some((root) => path.posix.normalize(root) === skillStagingRoot)
+      ? skillStagingRoot
+      : undefined,
     close: () => closeSession(client, handshake.sessionID),
   }
   if (options.directory)

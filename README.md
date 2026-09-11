@@ -32,11 +32,17 @@ OpenCode Transit turns the terminal coding agent into a location-aware workflow.
 ## Why Transit
 
 - **One explicit Location, end to end.** QuickStart selects local or SSH, and every workspace-sensitive operation follows the same target and working directory. A remote failure never silently falls back to the controller filesystem.
-- **Managed Rexd over SSH.** Transit verifies the SSH host, prepares or reuses a compatible Rexd runtime, and constrains access to the selected workspace root.
+- **Managed [Rexd](https://github.com/samiralibabic/rexd) over SSH.** Transit verifies the SSH host, prepares or reuses a compatible Rexd runtime, and constrains access to the selected workspace root.
 - **Sessions remember where they belong.** Location identity is durable. If the target disappears, history remains readable and rebinding is an explicit recovery action.
 - **Context you can inspect.** The model receives the actual target platform, project rules, and selected Skills. `/context` shows the frozen context sources for the Session.
 - **A TUI built around real terminal work.** Location-aware bash/zsh completion, continuous shell mode, `target · cwd` visibility, trusted command resolution, and one Skill manager for OpenCode, Codex, Claude, and custom Skills.
 - **Cross-device Session sync — Beta.** Baidu sync carries complete Sessions and attachments between Mac and WSL2, with an offline outbox and remove-wins deletion. It does not sync workspaces, Git repositories, configuration, targets, credentials, or general UI state.
+
+## Rexd dependency
+
+Local workspaces do not require Rexd. SSH remote Locations use [samiralibabic/rexd](https://github.com/samiralibabic/rexd), a lightweight remote execution and filesystem plane implementing the REXD v1 JSON-RPC protocol. Transit pins a compatible release and verifies its SHA-256 digest before preparing or reusing it over SSH, so users normally do not need to install Rexd manually.
+
+Rexd is an independent project distributed under the [MIT License](https://github.com/samiralibabic/rexd/blob/main/LICENSE). We thank its maintainers and contributors for the remote execution foundation used by Transit.
 
 ## Quick start
 
@@ -131,6 +137,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request.
 
 Please report vulnerabilities through the private route in [SECURITY.md](SECURITY.md), not a public issue.
 
-## Upstream and license
+## Upstream projects and license
 
-Transit exists because of the work of the [OpenCode project](https://github.com/anomalyco/opencode) and its contributors. We retain their copyright and the [MIT License](LICENSE). Fork-specific changes are maintained independently by the OpenCode Transit project.
+Transit exists because of the work of the [OpenCode project](https://github.com/anomalyco/opencode), the [Rexd project](https://github.com/samiralibabic/rexd), and their contributors. We gratefully acknowledge both upstream communities. OpenCode's copyright and the repository's [MIT License](LICENSE) are retained; Rexd remains an independently maintained MIT-licensed dependency. Fork-specific changes are maintained independently by the OpenCode Transit project.

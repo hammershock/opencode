@@ -32,11 +32,17 @@ OpenCode Transit 把终端编码 Agent 变成围绕 Location 工作的工具。�
 ## 为什么选择 Transit
 
 - **从头到尾只有一个明确 Location。** QuickStart 选择本地或 SSH 后，所有与工作区有关的操作都会遵循同一个目标与工作目录。远程失败绝不会静默回退到控制机文件系统。
-- **通过 SSH 托管 Rexd。** Transit 会校验 SSH 主机、准备或复用兼容的 Rexd 运行时，并把访问约束在选定的工作区根目录。
+- **通过 SSH 托管 [Rexd](https://github.com/samiralibabic/rexd)。** Transit 会校验 SSH 主机、准备或复用兼容的 Rexd 运行时，并把访问约束在选定的工作区根目录。
 - **会话记得自己属于哪里。** Location 身份会持久化。目标消失时历史仍然可读，重新绑定则是明确的恢复动作。
 - **上下文可以检查。** 模型会得到真实的目标平台、项目规则和选定 Skills；`/context` 可以查看该会话冻结的上下文来源。
 - **围绕真实终端工作的 TUI。** 包括感知 Location 的 bash/zsh 补全、连续 Shell 模式、清晰的 `target · cwd`、可信命令解析，以及统一管理 OpenCode、Codex、Claude 与自定义 Skills 的入口。
 - **跨设备会话同步——Beta。** 百度同步可在 Mac 与 WSL2 间传递完整会话和附件，支持离线发件箱与 remove-wins 删除；它不负责同步工作区、Git 仓库、配置、目标、凭据或通用 UI 状态。
+
+## Rexd 依赖
+
+本地工作区不依赖 Rexd。SSH 远程 Location 使用 [samiralibabic/rexd](https://github.com/samiralibabic/rexd)：一个实现 REXD v1 JSON-RPC 协议的轻量远程执行与文件系统平面。Transit 会固定兼容版本、验证其 SHA-256 摘要，再通过 SSH 准备或复用它，因此用户通常不需要手动安装 Rexd。
+
+Rexd 是采用 [MIT 许可证](https://github.com/samiralibabic/rexd/blob/main/LICENSE)独立维护的项目。感谢其维护者与贡献者为 Transit 提供远程执行基础。
 
 ## 快速开始
 
@@ -131,6 +137,6 @@ opencode-transit
 
 请通过[中文安全策略](SECURITY.zh.md)中的私密渠道报告漏洞，不要公开提交 Issue。
 
-## 上游与许可证
+## 上游项目与许可证
 
-Transit 得以存在，离不开 [OpenCode 项目](https://github.com/anomalyco/opencode)及其贡献者的工作。我们保留其版权声明与 [MIT 许可证](LICENSE)。Fork 专属改动由 OpenCode Transit 项目独立维护。
+Transit 得以存在，离不开 [OpenCode 项目](https://github.com/anomalyco/opencode)、[Rexd 项目](https://github.com/samiralibabic/rexd)及其贡献者的工作，我们在此感谢两个上游社区。OpenCode 的版权声明与本仓库的 [MIT 许可证](LICENSE)继续保留；Rexd 仍是采用 MIT 许可证独立维护的依赖。Fork 专属改动由 OpenCode Transit 项目独立维护。

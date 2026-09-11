@@ -34,6 +34,7 @@ import type {
   UserMessage,
   TextPart,
   ReasoningPart,
+  SessionMessageUser,
   SessionStatus,
 } from "@opencode-ai/sdk/v2"
 import { useLocal } from "../../context/local"
@@ -113,6 +114,8 @@ import {
   type ModelContextGeneration,
 } from "../../command-toolkit/model-context"
 import { showModelContext } from "../../component/dialog-model-context"
+import { useData } from "../../context/data"
+import { SkillInvocationRow } from "../../component/skill-invocation"
 
 addDefaultParsers(parsers.parsers)
 
@@ -219,6 +222,7 @@ export function Session() {
   const [locationAccessReady, setLocationAccessReady] = createSignal(route.accessMode === "read-only")
   const { navigate } = useRoute()
   const sync = useSync()
+  const data = useData()
   const event = useEvent()
   const project = useProject()
   const paths = useTuiPaths()
@@ -254,6 +258,20 @@ export function Session() {
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
+  const durableUsers = createMemo(
+    () =>
+      new Map(
+        (data.session.message.list(route.sessionID) ?? [])
+          .filter((message): message is SessionMessageUser => message.type === "user")
+          .map((message) => [message.id, message]),
+      ),
+  )
+  createEffect(
+    on(
+      () => route.sessionID,
+      (sessionID) => void data.session.message.refresh(sessionID).catch(() => undefined),
+    ),
+  )
   const messagesBeforeRevert = () => {
     const messageID = session()?.revert?.messageID
     if (!messageID) return messages()
@@ -1555,6 +1573,7 @@ export function Session() {
                           }}
                           message={message as UserMessage}
                           parts={sync.data.part[message.id] ?? []}
+                          skills={durableUsers().get(message.id)?.skills}
                           pending={pending()}
                         />
                       </Match>
@@ -1677,6 +1696,7 @@ export function Session() {
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
+  skills?: SessionMessageUser["skills"]
   onMouseUp: () => void
   index: number
   pending?: number
@@ -1747,6 +1767,9 @@ function UserMessage(props: {
                 </For>
               </box>
             </Show>
+            <For each={props.skills}>
+              {(invocation) => <SkillInvocationRow snapshot={invocation.snapshot} width={ctx.width} />}
+            </For>
             <Show
               when={queued()}
               fallback={

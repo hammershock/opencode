@@ -406,7 +406,22 @@ test("renders admitted prompts only after they become model-visible", async () =
         sessionID: "session-1",
         messageID: "msg_user_1",
         timestamp: 0,
-        prompt: { text: "hello" },
+        prompt: {
+          text: "$review hello",
+          invocations: [
+            {
+              source: { start: 0, end: 7, text: "$review" },
+              snapshot: {
+                id: "ski_test",
+                name: "review",
+                digest: "a".repeat(64),
+                source: { kind: "opencode-global", label: "OpenCode" },
+                content: "Exact admitted instructions",
+                status: "loaded",
+              },
+            },
+          ],
+        },
         delivery: "steer",
       },
     })
@@ -419,7 +434,22 @@ test("renders admitted prompts only after they become model-visible", async () =
         sessionID: "session-1",
         messageID: "msg_user_1",
         timestamp: 0,
-        prompt: { text: "hello" },
+        prompt: {
+          text: "$review hello",
+          invocations: [
+            {
+              source: { start: 0, end: 7, text: "$review" },
+              snapshot: {
+                id: "ski_test",
+                name: "review",
+                digest: "a".repeat(64),
+                source: { kind: "opencode-global", label: "OpenCode" },
+                content: "Exact admitted instructions",
+                status: "loaded",
+              },
+            },
+          ],
+        },
         delivery: "steer",
       },
     })
@@ -428,7 +458,11 @@ test("renders admitted prompts only after they become model-visible", async () =
     const message = sync.session.message.list("session-1")?.[0]
     expect(message?.type).toBe("user")
     if (message?.type !== "user") return
-    expect(message).toMatchObject({ id: "msg_user_1", text: "hello" })
+    expect(message).toMatchObject({
+      id: "msg_user_1",
+      text: "$review hello",
+      skills: [{ snapshot: { id: "ski_test", content: "Exact admitted instructions" } }],
+    })
   } finally {
     app.renderer.destroy()
   }

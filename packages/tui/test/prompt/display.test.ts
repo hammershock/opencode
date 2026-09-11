@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { displayCharAt, displaySlice, mentionTriggerIndex } from "../../src/prompt/display"
+import {
+  displayCharAt,
+  displayOffsetIndex,
+  displaySlice,
+  mentionTriggerIndex,
+  skillTriggerIndex,
+} from "../../src/prompt/display"
 
 describe("prompt display", () => {
   test("uses display-width offsets for mentions", () => {
@@ -29,5 +35,26 @@ describe("prompt display", () => {
     expect(mentionTriggerIndex("hello@")).toBeUndefined()
     expect(mentionTriggerIndex("foo@bar.com")).toBeUndefined()
     expect(mentionTriggerIndex("中文 @src file")).toBeUndefined()
+  })
+})
+
+describe("skillTriggerIndex", () => {
+  test("opens at a token boundary", () => {
+    expect(skillTriggerIndex("$")).toBe(0)
+    expect(skillTriggerIndex("review $image")).toBe(7)
+    expect(skillTriggerIndex("中文 $image")).toBe(5)
+  })
+
+  test("ignores ordinary dollar usage", () => {
+    expect(skillTriggerIndex("price$5")).toBeUndefined()
+    expect(skillTriggerIndex("\\$image")).toBeUndefined()
+    expect(skillTriggerIndex("`$image`")).toBeUndefined()
+    expect(skillTriggerIndex("$HOME")).toBeUndefined()
+    expect(skillTriggerIndex("$PATH/to/bin")).toBeUndefined()
+  })
+
+  test("converts display offsets to string indexes", () => {
+    expect(displayOffsetIndex("中文 $image", 5)).toBe(3)
+    expect(displayOffsetIndex("🙂 $image", 3)).toBe(3)
   })
 })

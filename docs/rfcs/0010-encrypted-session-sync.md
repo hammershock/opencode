@@ -85,15 +85,17 @@ Session transaction / durable event
 <OpenCode user config directory>/sync/sync.db
 ```
 
-`config.json` 只保存 provider、本设备 ID/name、已连接账户摘要、automatic sync、interval 和远端是否已经在本机确认初始化。每次云端初始化生成一个不暴露给用户的随机 instance ID；它同时隔离远端对象前缀和本地 `sync.db` scope。`sync.db` 使用 WAL，保存 outbox、cursor、segment cache、lease、deletion marker 和 acknowledgement。OAuth credential 只进入系统安全存储。
+`config.json` 只保存 provider、本设备 ID/name、已连接账户摘要、automatic sync、interval 和远端是否已经在本机确认初始化。每次云端初始化生成一个不暴露给用户的随机 instance ID；它同时隔离远端对象前缀和本地 `sync.db` scope。`sync.db` 使用 WAL，保存 outbox、cursor、segment cache、lease、deletion marker 和 acknowledgement。百度 AppKey、SecretKey 与 OAuth credential 只进入 OpenCode 的 `Auth.Service`，不得复制到 sync 配置或数据库。
 
 同步目录初始化后，启动恢复扫描全部仍存在的 Session，补齐 capture/ownership；新 Session 创建时自动进入固定内部同步 scope。automatic sync 关闭、网络离线或账号暂时退出时，事件继续进入 outbox 并积压。
 
 ## 百度 OAuth 与登录钩子
 
-百度 v1 使用 OpenCode 产品注册的 OAuth client。TUI 提供产品自有的 OAuth 流程，普通用户不填写 AppKey、SecretKey，不粘贴 access token，也不读取百度客户端、浏览器、CLI 或其他应用的登录态。
+百度 v1 使用用户自己在百度开放平台创建的应用。首次连接时，TUI 请求 AppKey 与 SecretKey，然后启动产品内 OAuth 流程；用户不粘贴 access token，也不读取百度客户端、浏览器、CLI 或其他应用的登录态。OpenCode Transit 不内置共享 client secret，也不依赖产品托管的 token exchange 后端。
 
-macOS credential 存入 Keychain，WSL credential 存入宿主 Windows PasswordVault。运行时可以做进程内 credential read cache/coalescing，避免同一进程反复触发安全存储访问；不得回退明文文件。
+百度 credential 与 model provider credential 使用同一个 OpenCode `Auth.Service` 和 `<OpenCode data directory>/auth.json`。保留 key `opencode-transit/baidu` 对应一条 OAuth credential：access token、refresh token、expiry 和 account ID 使用 OAuth 标准字段，AppKey 与 SecretKey 使用 OAuth metadata 字段。`auth.json` 必须保持 `0600`；运行时可以做进程内 credential read cache/coalescing，且所有诊断必须脱敏。
+
+升级时不得静默把 Keychain 或 PasswordVault credential 降级到文件。只有用户在连接流程中确认迁移后，客户端才读取旧记录、写入并验证 `Auth.Service` 条目。验证失败保留旧记录并报告可恢复错误；验证成功也默认保留旧记录，只有用户明确选择清理时才删除。生产流程不扫描或导入其他应用、浏览器、CLI 或任意 secure-store identity。
 
 OAuth 成功后 automatic sync 必须为关闭状态，并显示一次选择：
 
@@ -109,7 +111,7 @@ Enable and sync now | Enable | Keep disabled
 
 1. 停止 scheduler；
 2. automatic sync 设为关闭；
-3. 清除本设备 OAuth pending state 和百度 credential；
+3. 清除本设备 OAuth pending state 和 `opencode-transit/baidu` credential；
 4. 保留本地 Session、outbox、cursor 和设备 ID，以便以后重新授权恢复。
 
 ## 云端实例与初始化哨兵
@@ -293,9 +295,9 @@ Log out
 
 ## 安全与凭据边界
 
-- 只使用 OpenCode 产品 OAuth credential；
+- 只使用用户为 OpenCode Transit 提供并存入 `Auth.Service` 的百度 AppKey、SecretKey 与 OAuth credential；
 - 不读取浏览器、百度客户端、外部 CLI 或旧应用登录态；
-- 日志、状态栏、Session 和模型上下文不得包含 token、authorization code、client secret、Keychain 内容或私有下载 URL；
+- 日志、状态栏、Session、同步 payload 和模型上下文不得包含 AppKey、SecretKey、token、authorization code、旧 secure-store 内容或私有下载 URL；
 - 清除云端数据必须使用 provider 精确根路径，不能接受用户输入路径、通配符或未解析变量；
 - provider mutation 使用 precondition/idempotency identity，重试不能重复计数或破坏已提交状态。
 

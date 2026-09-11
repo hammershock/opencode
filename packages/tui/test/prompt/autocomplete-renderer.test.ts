@@ -8,7 +8,7 @@ import { Global } from "@opencode-ai/core/global"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "../fixture/tui-sdk"
 
-test("Skill autocomplete keeps pointer motion passive while wheel and keyboard move selection", async () => {
+test("Skill autocomplete separates pointer focus from wheel and keyboard scrolling", async () => {
   const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -76,14 +76,24 @@ test("Skill autocomplete keeps pointer motion passive while wheel and keyboard m
     await setup.mockMouse.moveTo(scroll!.x + 2, scroll!.y + 4)
     await setup.waitForVisualIdle()
     expect(scroll!.scrollTop).toBe(initialScrollTop)
-    expect(setup.captureCharFrame()).toContain("1/10")
-    await setup.mockMouse.scroll(scroll!.x + 2, scroll!.y + 4, "down")
-    await setup.waitForVisualIdle()
-    expect(scroll!.scrollTop).toBeGreaterThan(0)
-    expect(setup.captureCharFrame()).toContain(`${scroll!.scrollTop + 1}/10`)
+    expect(setup.captureCharFrame()).toContain("5/10")
+
+    // Filtering relayouts can synthesize hover transitions under a stationary pointer.
+    // They must not take ownership from the reset selection or move the viewport.
     setup.mockInput.pressKey("x")
     setup.mockInput.pressBackspace()
     await waitForFrame(setup, "1/10")
+    expect(scroll!.scrollTop).toBe(0)
+
+    await setup.mockMouse.scroll(scroll!.x + 2, scroll!.y + 4, "down")
+    await setup.waitForVisualIdle()
+    expect(scroll!.scrollTop).toBeGreaterThan(0)
+    expect(setup.captureCharFrame()).toContain(`${Math.floor(scroll!.scrollTop) + 1}/10`)
+
+    setup.mockInput.pressKey("x")
+    setup.mockInput.pressBackspace()
+    await waitForFrame(setup, "1/10")
+    expect(scroll!.scrollTop).toBe(0)
 
     Array.from({ length: 8 }, () => setup.mockInput.pressArrow("down"))
     await waitForFrame(setup, "9/10")
@@ -101,11 +111,7 @@ test("Skill autocomplete keeps pointer motion passive while wheel and keyboard m
   }
 })
 
-async function waitForFrame(
-  setup: Awaited<ReturnType<typeof createTestRenderer>>,
-  text: string,
-  timeout = 2_000,
-) {
+async function waitForFrame(setup: Awaited<ReturnType<typeof createTestRenderer>>, text: string, timeout = 2_000) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
     await setup.renderOnce()

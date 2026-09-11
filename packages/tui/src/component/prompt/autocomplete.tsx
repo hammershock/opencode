@@ -749,6 +749,12 @@ export function Autocomplete(props: {
     moveTo(next)
   }
 
+  function focusFromPointer(next: number) {
+    // Pointer focus never owns the viewport. The hovered row is already visible,
+    // so revealing it here couples mouse motion back into scroll synchronization.
+    setStore("selected", next)
+  }
+
   function moveTo(next: number) {
     setStore("selected", next)
     if (!scroll) return
@@ -1083,7 +1089,8 @@ export function Autocomplete(props: {
               paddingRight={1}
               backgroundColor={index === store.selected ? theme.primary : undefined}
               flexDirection="row"
-              onMouseDown={() => moveTo(index)}
+              onMouseMove={() => focusFromPointer(index)}
+              onMouseDown={() => focusFromPointer(index)}
               onMouseUp={() => select()}
             >
               <text fg={index === store.selected ? selectedForeground(theme) : theme.text} flexShrink={0}>

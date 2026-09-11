@@ -10,6 +10,20 @@ export function skillDisplayLabel(skill: SkillCatalogEntry, catalog: readonly Sk
   return `$${skill.name}${catalog.filter((candidate) => candidate.name === skill.name).length > 1 ? ` · ${skill.sourceLabel}` : ""}`
 }
 
+export function admittedSkills(
+  catalog: readonly SkillCatalogEntry[],
+  admitted: { readonly skills: readonly SkillCatalogEntry[] } | null | undefined,
+) {
+  if (!admitted) return []
+  const identities = new Map(admitted.skills.map((skill) => [skill.id, skill]))
+  return catalog.filter((skill) => {
+    const expected = identities.get(skill.id)
+    return (
+      expected?.name === skill.name && expected.sourceLabel === skill.sourceLabel && expected.digest === skill.digest
+    )
+  })
+}
+
 export function structuredSkillMentions(input: string, parts: readonly PromptInfo["parts"][number][]) {
   return parts
     .filter((part) => part.type === "skill")

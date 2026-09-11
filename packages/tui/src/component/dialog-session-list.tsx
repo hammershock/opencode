@@ -438,11 +438,9 @@ export function DialogSessionList() {
       if (!x) return undefined
       const location = sessionListLocation(x as typeof x & SessionListLocationRecord)
       const syncStatus = dialogSessionListSyncStatus(x)
-      const footer = sessionListFooter(
-        location,
-        syncStatus,
-        Math.max(12, Math.floor((Math.min(88, dimensions().width - 2) - 8) * 0.6)),
-      )
+      const rowWidth = Math.max(20, Math.min(88, dimensions().width - 2) - 8)
+      const footerWidth = Math.max(12, Math.floor(rowWidth * 0.6))
+      const footer = sessionListFooter(location, syncStatus, footerWidth)
 
       const isDeleting = toDelete() === x.id
       const status = sync.data.session_status?.[x.id]
@@ -458,7 +456,13 @@ export function DialogSessionList() {
         bg: isDeleting ? theme.error : undefined,
         value: x.id,
         category,
-        footer: footer.text,
+        footer: footer.full,
+        footerWidth,
+        inspectFooter: true,
+        inspectionFooter: footer.detail,
+        footerSuffix: footer.status || undefined,
+        titleWidth: Math.max(8, rowWidth - footerWidth - 1),
+        inspectTitle: true,
         gutter,
       }
     }

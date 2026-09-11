@@ -7,30 +7,9 @@ import { AgentV2 } from "../agent"
 import { PermissionV2 } from "../permission"
 import { SkillV2 } from "../skill"
 import { SystemContext } from "../system-context/index"
-import { optional } from "../schema"
+import { SkillGuidanceSnapshot } from "./guidance-snapshot"
 
-const Summary = Schema.Struct({
-  name: Schema.String,
-  description: Schema.String.pipe(optional),
-  sourceLabel: Schema.String,
-  digest: Skill.Digest,
-})
-type Summary = typeof Summary.Type
-
-const Diagnostic = Schema.Struct({
-  kind: Skill.DiagnosticKind,
-  severity: Schema.Literals(["error", "warning"]),
-  sourceLabel: Schema.String,
-})
-
-const Catalog = Schema.Struct({
-  enabled: Schema.Boolean,
-  skills: Schema.Array(Summary),
-  diagnostics: Schema.Array(Diagnostic),
-})
-type Catalog = typeof Catalog.Type
-
-const render = (catalog: Catalog) =>
+const render = (catalog: SkillGuidanceSnapshot.Catalog) =>
   catalog.enabled
     ? [
         "Skills provide specialized instructions and workflows for specific tasks.",
@@ -75,7 +54,7 @@ const layer = Layer.effect(
           key: SystemContext.Key.make("core/skill-guidance"),
           refresh: "activation",
           allowEmpty: true,
-          codec: Schema.toCodecJson(Catalog),
+          codec: Schema.toCodecJson(SkillGuidanceSnapshot.Catalog),
           load: load.pipe(Effect.map((current) => catalog(current, selection.info))),
           baseline: render,
           update: (_previous, current) =>
@@ -97,19 +76,17 @@ export const locationLayer = layer
 export const node = makeLocationNode({ service: Service, layer, deps: [SkillV2.node] })
 
 function catalog(snapshot: Skill.RegistrySnapshot, agent: AgentV2.Info | undefined) {
-  const skills = agent
-    ? SkillV2.available(snapshot.skills, agent).filter((skill) => skill.description !== undefined)
-    : []
-  return Catalog.make({
+  const skills = agent ? SkillV2.available(snapshot.skills, agent) : []
+  return SkillGuidanceSnapshot.Catalog.make({
     enabled:
       agent !== undefined &&
       !(skills.length === 0 && PermissionV2.evaluate("skill", "*", agent.permissions).effect === "deny"),
     skills: skills
       .map((skill) =>
-        Summary.make({
+        SkillGuidanceSnapshot.Summary.make({
           name: skill.name,
           description: skill.description,
-          sourceLabel: portableLabel(skill.sourceLabel),
+          sourceLabel: SkillGuidanceSnapshot.sourceLabel(skill.sourceLabel),
           digest: skill.digest,
         }),
       )
@@ -121,10 +98,10 @@ function catalog(snapshot: Skill.RegistrySnapshot, agent: AgentV2.Info | undefin
       ),
     diagnostics: snapshot.diagnostics
       .map((diagnostic) =>
-        Diagnostic.make({
+        SkillGuidanceSnapshot.Diagnostic.make({
           kind: diagnostic.kind,
           severity: diagnostic.severity,
-          sourceLabel: portableLabel(diagnostic.sourceLabel),
+          sourceLabel: SkillGuidanceSnapshot.sourceLabel(diagnostic.sourceLabel),
         }),
       )
       .toSorted(
@@ -134,8 +111,4 @@ function catalog(snapshot: Skill.RegistrySnapshot, agent: AgentV2.Info | undefin
           a.severity.localeCompare(b.severity),
       ),
   })
-}
-
-function portableLabel(value: string) {
-  return value.replace(/ · [0-9a-f]{8}$/i, "")
 }

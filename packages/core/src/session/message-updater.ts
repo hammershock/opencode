@@ -133,6 +133,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             text: event.data.prompt.text,
             files: event.data.prompt.files,
             agents: event.data.prompt.agents,
+            skills: event.data.prompt.invocations,
             time: { created: event.data.timestamp },
           }),
         )
@@ -397,6 +398,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             reason: event.data.reason,
             summary: event.data.text,
             recent: event.data.recent,
+            skills: event.data.skills,
             time: { created: event.data.timestamp },
           }),
         )

@@ -183,6 +183,13 @@ export default {
         );
       `)
       yield* tx.run(`
+        CREATE TABLE \`session_skill_catalog\` (
+          \`session_id\` text PRIMARY KEY,
+          \`catalog\` text NOT NULL,
+          CONSTRAINT \`fk_session_skill_catalog_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
+      yield* tx.run(`
         CREATE TABLE \`session\` (
           \`id\` text PRIMARY KEY,
           \`project_id\` text NOT NULL,

@@ -78,6 +78,21 @@ export const RegistrySnapshot = Schema.Struct({
   digest: Digest,
 }).annotate({ identifier: "Skill.RegistrySnapshot" })
 
+export interface AdmittedIdentity extends Schema.Schema.Type<typeof AdmittedIdentity> {}
+export const AdmittedIdentity = Schema.Struct({
+  id: ID,
+  name: Schema.String,
+  sourceLabel: Schema.String,
+  digest: Digest,
+}).annotate({ identifier: "Skill.AdmittedIdentity" })
+
+export interface AdmittedCatalog extends Schema.Schema.Type<typeof AdmittedCatalog> {}
+export const AdmittedCatalog = Schema.Struct({
+  revision: Digest,
+  skills: Schema.Array(AdmittedIdentity),
+  digest: Digest,
+}).annotate({ identifier: "Skill.AdmittedCatalog" })
+
 export const DiscoveryRootKind = Schema.Literals(["opencode-global", "imported", "url"])
 export type DiscoveryRootKind = typeof DiscoveryRootKind.Type
 

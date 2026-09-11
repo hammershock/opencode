@@ -153,6 +153,17 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   ),
                 ),
               )) ?? null,
+            skillCatalog:
+              (yield* session.skillCatalog(ctx.params.sessionID).pipe(
+                Effect.catchTag("Session.NotFoundError", (error) =>
+                  Effect.fail(
+                    new SessionNotFoundError({
+                      sessionID: error.sessionID,
+                      message: `Session not found: ${error.sessionID}`,
+                    }),
+                  ),
+                ),
+              )) ?? null,
           }
         }),
       )

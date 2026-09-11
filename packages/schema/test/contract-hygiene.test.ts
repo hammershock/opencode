@@ -74,6 +74,8 @@ describe("contract hygiene", () => {
       Skill.SourceDetail,
       Skill.Diagnostic,
       Skill.RegistrySnapshot,
+      Skill.AdmittedIdentity,
+      Skill.AdmittedCatalog,
       Skill.Target,
       Skill.TargetScope,
       Skill.DiscoveryRoot,

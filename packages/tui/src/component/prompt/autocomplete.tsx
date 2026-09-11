@@ -37,7 +37,7 @@ import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 import type { TuiSlashCommand } from "../../command-toolkit/host"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
-import { skillDisplayLabel } from "../../prompt/skill"
+import { admittedSkills, skillDisplayLabel } from "../../prompt/skill"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -584,18 +584,11 @@ export function Autocomplete(props: {
           const response = await sdk.request(`/api/session/${encodeURIComponent(input.sessionID)}/model-context`)
           if (!response.ok) throw new Error(`Failed to inspect Skill catalog (HTTP ${response.status})`)
           const context = (await response.json()) as {
-            data: null | { sources: Record<string, { value: unknown }> }
+            skillCatalog: null | {
+              skills: { id: string; name: string; sourceLabel: string; digest: string }[]
+            }
           }
-          const value = context.data?.sources["core/skill-guidance"]?.value
-          if (!isSkillGuidanceCatalog(value) || !value.enabled) return []
-          return catalog.filter((skill) =>
-            value.skills.some(
-              (admitted) =>
-                admitted.name === skill.name &&
-                admitted.sourceLabel === skill.sourceLabel.replace(/ · [0-9a-f]{8}$/i, "") &&
-                admitted.digest === skill.digest,
-            ),
-          )
+          return admittedSkills(catalog, context.skillCatalog)
         })
         .catch((error) => {
           toast.show({ title: "Could not load Skills", message: errorMessage(error), variant: "warning" })
@@ -1105,25 +1098,5 @@ export function Autocomplete(props: {
         </box>
       </Show>
     </box>
-  )
-}
-
-function isSkillGuidanceCatalog(value: unknown): value is {
-  enabled: boolean
-  skills: { name: string; sourceLabel: string; digest: string }[]
-} {
-  if (!value || typeof value !== "object") return false
-  if (!("enabled" in value) || typeof value.enabled !== "boolean") return false
-  if (!("skills" in value) || !Array.isArray(value.skills)) return false
-  return value.skills.every(
-    (skill) =>
-      skill &&
-      typeof skill === "object" &&
-      "name" in skill &&
-      typeof skill.name === "string" &&
-      "sourceLabel" in skill &&
-      typeof skill.sourceLabel === "string" &&
-      "digest" in skill &&
-      typeof skill.digest === "string",
   )
 }

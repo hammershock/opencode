@@ -16,6 +16,7 @@ import type { Revert } from "@opencode-ai/schema/revert"
 import type { Location } from "../location"
 import type { ApprovalMode } from "@opencode-ai/schema/approval-mode"
 import type { ModelContext } from "@opencode-ai/schema/model-context"
+import type { Skill } from "@opencode-ai/schema/skill"
 
 type SessionMessageData = Omit<(typeof SessionMessage.Message)["Encoded"], "type" | "id">
 type V1MessageData = Omit<SessionV1.Info, "id" | "sessionID">
@@ -186,4 +187,12 @@ export const SessionContextEpochTable = sqliteTable("session_context_epoch", {
   reason: text().notNull().default("legacy-backfill").$type<ModelContext.GenerationReason>(),
   location_revision: integer().notNull().default(0),
   digest: text().notNull().default(""),
+})
+
+export const SessionSkillCatalogTable = sqliteTable("session_skill_catalog", {
+  session_id: text()
+    .$type<SessionSchema.ID>()
+    .primaryKey()
+    .references(() => SessionTable.id, { onDelete: "cascade" }),
+  catalog: text({ mode: "json" }).notNull().$type<Skill.AdmittedCatalog>(),
 })

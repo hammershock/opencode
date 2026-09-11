@@ -184,10 +184,7 @@ const Endpoint3_13 = (raw: RawClient["server.session"]) => (input: Endpoint3_13I
 type Endpoint3_14Request = Parameters<RawClient["server.session"]["session.modelContext"]>[0]
 type Endpoint3_14Input = { readonly sessionID: Endpoint3_14Request["params"]["sessionID"] }
 const Endpoint3_14 = (raw: RawClient["server.session"]) => (input: Endpoint3_14Input) =>
-  raw["session.modelContext"]({ params: { sessionID: input["sessionID"] } }).pipe(
-    Effect.mapError(mapClientError),
-    Effect.map((value) => value.data),
-  )
+  raw["session.modelContext"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint3_15Request = Parameters<RawClient["server.session"]["session.history"]>[0]
 type Endpoint3_15Input = {

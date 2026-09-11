@@ -11,6 +11,7 @@ import { SkillRegistry } from "./registry"
 import { SkillGuidanceSnapshot } from "./guidance-snapshot"
 import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
 import { Hash } from "../util/hash"
+import { SessionSkillCatalog } from "../session/skill-catalog"
 
 export type { Loaded, Interface } from "./catalog-context-service"
 export { Service } from "./catalog-context-service"
@@ -89,7 +90,10 @@ const layer = Layer.effect(
                 skillID: mention.id,
                 name: mention.name,
               })
-            if (!SkillGuidanceSnapshot.admitted(input.catalog, match.entry.metadata))
+            if (
+              !SessionSkillCatalog.admitted(input.admittedCatalog, match.entry.metadata) ||
+              !SkillGuidanceSnapshot.admitted(input.catalog, match.entry.metadata)
+            )
               return yield* new SkillCatalogContextService.AdmissionError({
                 kind: "stale-catalog",
                 skillID: mention.id,

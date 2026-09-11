@@ -250,7 +250,7 @@ export function useTargetManager() {
           ...(targets()?.targets ?? []).map((target) => ({
             title: target.name,
             description: target.connection.host,
-            footer: <TargetHealth state={() => state(target.id)} />,
+            footer: () => <TargetHealth state={() => state(target.id)} />,
             details: [detail(target.id)].filter((item): item is string => Boolean(item)),
             value: target as TargetDefinition,
             category: "Configured targets",

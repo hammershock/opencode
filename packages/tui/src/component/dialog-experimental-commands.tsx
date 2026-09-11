@@ -51,7 +51,7 @@ export function DialogExperimentalCommands() {
       value: setting.id,
       title: setting.title,
       description: setting.description,
-      footer: <Status setting={setting} />,
+      footer: () => <Status setting={setting} />,
       category: "Experimental commands",
     })),
     {

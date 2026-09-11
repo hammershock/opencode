@@ -68,11 +68,11 @@ export interface DialogSelectProps<T> {
 
 export interface DialogSelectOption<T = any> {
   title: string
-  titleView?: JSX.Element
+  titleView?: () => JSX.Element
   value: T
   description?: string
   details?: string[]
-  footer?: JSX.Element | string
+  footer?: (() => JSX.Element) | string
   flatFooter?: string
   footerWidth?: number
   flatFooterWidth?: number
@@ -85,11 +85,11 @@ export interface DialogSelectOption<T = any> {
   inspectionFooter?: string
   footerSuffix?: string
   category?: string
-  categoryView?: JSX.Element
+  categoryView?: () => JSX.Element
   disabled?: boolean
   bg?: RGBA
   gutter?: () => JSX.Element
-  margin?: JSX.Element
+  margin?: () => JSX.Element
   onSelect?: (ctx: DialogContext) => void
 }
 
@@ -626,7 +626,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                           </text>
                         }
                       >
-                        {options[0]?.categoryView}
+                        {options[0]?.categoryView?.()}
                       </Show>
                     </box>
                   </Show>
@@ -676,7 +676,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                           >
                             <Show when={!current() && option.margin}>
                               <box position="absolute" left={1} flexShrink={0}>
-                                {option.margin}
+                                {option.margin?.()}
                               </box>
                             </Show>
                             <Option
@@ -743,12 +743,12 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
 function Option(props: {
   title: string
-  titleView?: JSX.Element
+  titleView?: () => JSX.Element
   description?: string
   active?: boolean
   current?: boolean
   muted?: boolean
-  footer?: JSX.Element | string
+  footer?: (() => JSX.Element) | string
   footerWidth?: number
   titleWidth?: number
   truncateTitle?: boolean | "left"
@@ -817,7 +817,7 @@ function Option(props: {
         {props.inspectTitle && props.active
           ? (props.inspectionView?.(inspectionOffset(), props.titleWidth ?? 61) ??
             inspectionFrame(props.inspectionTitle ?? props.title, props.titleWidth ?? 61, inspectionOffset()))
-          : (props.titleView ??
+          : (props.titleView?.() ??
             (props.inspectTitle
               ? displayTruncate(props.inspectionTitle ?? props.title, props.titleWidth ?? 61)
               : props.truncateTitle === false
@@ -835,7 +835,7 @@ function Option(props: {
             when={props.inspectFooter && typeof props.footer === "string" && props.footerWidth}
             fallback={
               <text fg={props.active && !props.muted ? fg : theme.textMuted} wrapMode="none" overflow="hidden">
-                {props.footer}
+                {typeof props.footer === "function" ? props.footer() : props.footer}
               </text>
             }
           >

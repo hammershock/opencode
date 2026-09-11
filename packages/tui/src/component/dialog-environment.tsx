@@ -115,7 +115,7 @@ function EnvironmentDialog(props: {
             </For>
           </>
         ),
-        titleView: (
+        titleView: () => (
           <>
             {option.title}
             <span style={{ fg: theme.accent }}>={displayEnvironmentValue(value)}</span>

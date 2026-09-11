@@ -165,7 +165,7 @@ export type TuiDialogSelectOption<Value = unknown> = {
   title: string
   value: Value
   description?: string
-  footer?: JSX.Element | string
+  footer?: (() => JSX.Element) | string
   category?: string
   disabled?: boolean
   onSelect?: () => void

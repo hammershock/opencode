@@ -108,9 +108,11 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
                 message:
                   error.kind === "missing-app"
                     ? SyncMissingAppMessage
-                    : error.kind === "incompatible-local-state"
-                      ? SyncIncompatibleLocalStateMessage
-                      : `Sync setup failed (${error.kind})`,
+                    : error.kind === "missing-legacy"
+                      ? "No previous OpenCode Baidu credential was found on this device"
+                      : error.kind === "incompatible-local-state"
+                        ? SyncIncompatibleLocalStateMessage
+                        : `Sync setup failed (${error.kind})`,
                 ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}),
               },
             }),

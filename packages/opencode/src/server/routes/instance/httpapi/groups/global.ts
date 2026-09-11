@@ -111,6 +111,7 @@ export class SyncSetupApiError extends Schema.ErrorClass<SyncSetupApiError>("Syn
         "invalid",
         "oauth",
         "missing-app",
+        "missing-legacy",
         "incompatible-local-state",
         "remote",
         "storage",

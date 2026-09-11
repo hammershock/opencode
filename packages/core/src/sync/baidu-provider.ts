@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import path from "node:path"
 import { SyncProvider } from "./provider"
-import { SyncSecureStore } from "./secure-store"
+import { BaiduCredential } from "./baidu-credential"
 
 export * as BaiduSyncProvider from "./baidu-provider"
 
@@ -12,18 +12,7 @@ const TOKEN_API = "https://openapi.baidu.com/oauth/2.0/token"
 const PART_SIZE = 4 * 1024 * 1024
 export const REQUEST_TIMEOUT_MS = 30_000
 
-export type Credential = {
-  readonly appKey: string
-  readonly secretKey: string
-  readonly accessToken: string
-  readonly refreshToken: string
-  readonly expiresAt: number
-  readonly account?: {
-    readonly id: string
-    readonly displayName: string
-    readonly maskedDisplay: string
-  }
-}
+export type Credential = BaiduCredential.Credential
 
 export type Request = (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>
 
@@ -32,15 +21,16 @@ export function credentialAccount(deviceID: string) {
   return `baidu:${deviceID}`
 }
 
-export async function saveCredential(store: SyncSecureStore.Store, deviceID: string, credential: Credential) {
+export async function saveCredential(store: BaiduCredential.Store, deviceID: string, credential: Credential) {
   validateCredential(credential)
-  await store.set(credentialAccount(deviceID), JSON.stringify(credential))
+  await store.saveCredential(deviceID, credential)
 }
 
-export async function readCredential(store: SyncSecureStore.Store, deviceID: string) {
-  const value = await store.get(credentialAccount(deviceID))
+export async function readCredential(store: BaiduCredential.Store, deviceID: string) {
+  const value = await store.credential(deviceID)
   if (!value) return
-  return parseCredential(value)
+  validateCredential(value)
+  return value
 }
 
 export async function exchangeCode(input: {
@@ -110,7 +100,7 @@ export function authorizationURL(appKey: string, redirectURI: string, state?: st
 }
 
 export function adapter(input: {
-  readonly store: SyncSecureStore.Store
+  readonly store: BaiduCredential.Store
   readonly deviceID: string
   readonly root: string
   readonly request?: Request
@@ -362,8 +352,7 @@ export function adapter(input: {
           // adds one full Baidu metadata round trip without strengthening the
           // commit boundary. Mutable replacement still needs the best-effort
           // version check because rtype=3 does not expose version CAS.
-          if (precondition.type === "version")
-            checkPrecondition(await stat(object, signal), precondition, "upload")
+          if (precondition.type === "version") checkPrecondition(await stat(object, signal), precondition, "upload")
           const created = await form(
             endpoint(FILE_API, { method: "create", access_token: auth.accessToken }),
             {
@@ -984,12 +973,6 @@ function retryDelay(value: string | null) {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined
 }
 
-function parseCredential(value: string) {
-  const parsed = JSON.parse(value) as Credential
-  validateCredential(parsed)
-  return parsed
-}
-
 function validateCredential(value: Credential) {
   if (
     !value ||
@@ -999,7 +982,7 @@ function validateCredential(value: Credential) {
     !value.refreshToken ||
     !Number.isFinite(value.expiresAt)
   )
-    throw new SyncSecureStore.SecureStoreOperationError("Invalid Baidu credential")
+    throw new Error("Invalid Baidu credential")
 }
 
 function delay(milliseconds: number, signal?: AbortSignal) {

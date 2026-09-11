@@ -88,15 +88,17 @@ const makeApiLayer = (
         begin: (input) =>
           input.redirectURI.endsWith("/missing-app")
             ? Effect.fail(new SyncSetup.SetupError({ kind: "missing-app" }))
-            : input.redirectURI.endsWith("/incompatible-local-state")
-              ? Effect.fail(new SyncSetup.SetupError({ kind: "incompatible-local-state" }))
-              : input.redirectURI.endsWith("/internal-storage-failure")
-                ? Effect.fail(new SyncSetup.SetupError({ kind: "storage" }))
-                : Effect.succeed({
-                    attemptID: "attempt-a",
-                    authorizationURL: input.redirectURI,
-                    completion: input.completion,
-                  }),
+            : input.redirectURI.endsWith("/missing-legacy")
+              ? Effect.fail(new SyncSetup.SetupError({ kind: "missing-legacy" }))
+              : input.redirectURI.endsWith("/incompatible-local-state")
+                ? Effect.fail(new SyncSetup.SetupError({ kind: "incompatible-local-state" }))
+                : input.redirectURI.endsWith("/internal-storage-failure")
+                  ? Effect.fail(new SyncSetup.SetupError({ kind: "storage" }))
+                  : Effect.succeed({
+                      attemptID: "attempt-a",
+                      authorizationURL: input.redirectURI,
+                      completion: input.completion,
+                    }),
         complete: () => Effect.succeed(syncState),
         switchAccount: () => Effect.succeed(syncState),
         logout: () => Effect.succeed(syncState),
@@ -332,6 +334,23 @@ describe("global HttpApi", () => {
       })
       expect(JSON.stringify(cause.body)).not.toContain("secret")
 
+      const missingLegacy = yield* HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
+        HttpClientRequest.bodyJsonUnsafe({
+          redirectURI: "http://127.0.0.1/missing-legacy",
+          completion: "loopback",
+          application: { type: "legacy" },
+        }),
+        HttpClient.execute,
+      )
+      expect(missingLegacy.status).toBe(400)
+      expect(yield* missingLegacy.json).toEqual({
+        name: "SyncSetupError",
+        data: {
+          kind: "missing-legacy",
+          message: "No previous OpenCode Baidu credential was found on this device",
+        },
+      })
+
       const incompatible = yield* HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
         HttpClientRequest.bodyJsonUnsafe({
           redirectURI: "http://127.0.0.1/incompatible-local-state",
@@ -371,7 +390,11 @@ describe("global HttpApi", () => {
           HttpClientRequest.bodyJsonUnsafe({ deviceName: "Mac" }),
         ),
         HttpClientRequest.post(GlobalPaths.syncOAuthBegin).pipe(
-          HttpClientRequest.bodyJsonUnsafe({ redirectURI: "http://127.0.0.1/callback", completion: "loopback" }),
+          HttpClientRequest.bodyJsonUnsafe({
+            redirectURI: "http://127.0.0.1/callback",
+            completion: "loopback",
+            application: { type: "credentials", appKey: "user-app", secretKey: "user-secret" },
+          }),
         ),
         HttpClientRequest.post(GlobalPaths.syncOAuthComplete).pipe(
           HttpClientRequest.bodyJsonUnsafe({ attemptID: "attempt-a", response: { type: "manual", code: "code" } }),

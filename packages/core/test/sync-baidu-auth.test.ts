@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
+import { BaiduCredential } from "@opencode-ai/core/sync/baidu-credential"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
 import { SyncSecureStore } from "@opencode-ai/core/sync/secure-store"
 
 function memoryStore() {
   const values = new Map<string, string>()
-  return {
+  const legacy = {
     platform: "macos-keychain" as const,
     values,
     get: async (account: string) => values.get(account),
     set: async (account: string, secret: string) => void values.set(account, secret),
     remove: async (account: string) => void values.delete(account),
   }
+  return Object.assign(BaiduCredential.legacy(legacy), { values, legacy })
 }
 
 function provision(store: ReturnType<typeof memoryStore>) {
@@ -68,7 +70,7 @@ describe("BaiduAuth", () => {
     expect(await BaiduAuth.pending(store, "device")).toBeDefined()
   })
 
-  test("requires product app credentials provisioned in secure storage", async () => {
+  test("requires user-owned application credentials", async () => {
     const store = memoryStore()
     await expect(
       BaiduAuth.begin({
@@ -80,7 +82,7 @@ describe("BaiduAuth", () => {
     ).rejects.toMatchObject({
       kind: "missing-app",
       message:
-        "Baidu Netdisk is not enabled in this build. Connect your Baidu application in OpenCode Transit Sync settings.",
+        "Baidu application credentials are missing. Enter your AppKey and SecretKey in OpenCode Transit Sync settings.",
     })
     expect(store.values.size).toBe(0)
   })

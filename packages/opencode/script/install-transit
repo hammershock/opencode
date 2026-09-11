@@ -6,21 +6,17 @@ LEGACY_APP=opencode-rexd
 INSTALL_DIR="${OPENCODE_TRANSIT_INSTALL_DIR:-${OPENCODE_REXD_INSTALL_DIR:-${HOME}/.local/bin}}"
 BINARY=""
 MANIFEST=""
-PROVISION_BAIDU_APP=0
 CODESIGN_IDENTITY=""
 usage() {
   cat <<EOF
 Install a local OpenCode Transit build without replacing the upstream opencode command.
 
 Usage:
-  ./script/install-transit --binary <path> [--manifest <path>] [--install-dir <path>] [--codesign-identity <identity>] [--provision-baidu-app]
+  ./script/install-transit --binary <path> [--manifest <path>] [--install-dir <path>] [--codesign-identity <identity>]
 
 An existing opencode-transit build is replaced transactionally. The installer
 also writes a one-minor compatibility launcher named opencode-rexd; it never
 creates or replaces an opencode entrypoint.
-
---provision-baidu-app reads the release credential JSON only from stdin and
-writes it to the platform secure store after validating the candidate.
 
 --codesign-identity signs the macOS candidate as ai.opencode.transit before
 validation and replacement, preserving its Keychain application identity.
@@ -40,10 +36,6 @@ while [[ $# -gt 0 ]]; do
     --install-dir)
       INSTALL_DIR="${2:-}"
       shift 2
-      ;;
-    --provision-baidu-app)
-      PROVISION_BAIDU_APP=1
-      shift
       ;;
     --codesign-identity)
       CODESIGN_IDENTITY="${2:-}"
@@ -146,13 +138,6 @@ if [[ -n "$MANIFEST" ]]; then
   cp "$MANIFEST" "$candidate_manifest"
   if ! "$candidate" __deploy-verify-build-manifest < "$candidate_manifest"; then
     echo "Build manifest is invalid; existing install was not changed" >&2
-    exit 1
-  fi
-fi
-
-if [[ "$PROVISION_BAIDU_APP" -eq 1 ]]; then
-  if ! "$candidate" __deploy-provision-baidu-app; then
-    echo "Baidu OAuth application provisioning failed; existing install was not changed" >&2
     exit 1
   fi
 fi

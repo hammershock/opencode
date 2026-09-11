@@ -254,7 +254,7 @@ describe("SyncSecureStore", () => {
     )
   })
 
-  test("reads deployment-provisioned Baidu app credentials from the secure store", async () => {
+  test("reads legacy Baidu app credentials from the secure store", async () => {
     const values = new Map([
       [SyncSecureStore.BAIDU_APP_ACCOUNT, JSON.stringify({ appKey: "app", secretKey: "secret" })],
     ])
@@ -264,61 +264,8 @@ describe("SyncSecureStore", () => {
       set: async (account, secret) => void values.set(account, secret),
       remove: async (account) => void values.delete(account),
     }
-    expect(await SyncSecureStore.readProvisionedBaiduApp(secure)).toEqual({ appKey: "app", secretKey: "secret" })
+    expect(await SyncSecureStore.readLegacyBaiduApp(secure)).toEqual({ appKey: "app", secretKey: "secret" })
     expect([...values.keys()]).toEqual([SyncSecureStore.BAIDU_APP_ACCOUNT])
-  })
-
-  test("provisions the exact app account and verifies the write", async () => {
-    const values = new Map<string, string>()
-    const secure: SyncSecureStore.Store = {
-      platform: "macos-keychain",
-      get: async (account) => values.get(account),
-      set: async (account, secret) => void values.set(account, secret),
-      remove: async (account) => void values.delete(account),
-    }
-    await SyncSecureStore.provisionBaiduApp(secure, JSON.stringify({ appKey: "app", secretKey: "secret" }))
-    expect(values.get(SyncSecureStore.BAIDU_APP_ACCOUNT)).toBe('{"appKey":"app","secretKey":"secret"}')
-  })
-
-  test("rejects unbounded or expanded deployment envelopes before writing", async () => {
-    let writes = 0
-    const secure: SyncSecureStore.Store = {
-      platform: "macos-keychain",
-      get: async () => undefined,
-      set: async () => void writes++,
-      remove: async () => undefined,
-    }
-    await expect(
-      SyncSecureStore.provisionBaiduApp(
-        secure,
-        JSON.stringify({ appKey: "app", secretKey: "secret", accessToken: "must-not-be-accepted" }),
-      ),
-    ).rejects.toThrow("Invalid Baidu app provisioning input")
-    await expect(
-      SyncSecureStore.provisionBaiduApp(secure, JSON.stringify({ appKey: "a".repeat(513), secretKey: "secret" })),
-    ).rejects.toThrow("Invalid Baidu app provisioning input")
-    expect(writes).toBe(0)
-  })
-
-  test("restores the previous app credential when verification fails", async () => {
-    const previous = '{"appKey":"old","secretKey":"old-secret"}'
-    let value = previous
-    let corruptNextWrite = true
-    const secure: SyncSecureStore.Store = {
-      platform: "macos-keychain",
-      get: async () => value,
-      set: async (_account, secret) => {
-        value = corruptNextWrite ? "corrupt" : secret
-        corruptNextWrite = false
-      },
-      remove: async () => {
-        value = ""
-      },
-    }
-    await expect(
-      SyncSecureStore.provisionBaiduApp(secure, JSON.stringify({ appKey: "new", secretKey: "new-secret" })),
-    ).rejects.toThrow("previous credential was restored")
-    expect(value).toBe(previous)
   })
 
   test.skipIf(process.env.OPENCODE_REAL_SECURE_STORE !== "1")(

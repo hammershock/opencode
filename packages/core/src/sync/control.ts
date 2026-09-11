@@ -2,12 +2,14 @@ export * as SyncControl from "./control"
 
 import { Context, Effect, Layer, Schedule, Schema, Semaphore } from "effect"
 import { and, eq, sql } from "drizzle-orm"
+import { Auth } from "../auth"
 import { makeGlobalNode } from "../effect/app-node"
 import { Database } from "../database/database"
 import { SessionTable } from "../session/sql"
 import { SessionV2 } from "../session"
 import { EventV2 } from "../event"
 import { BaiduSyncProvider } from "./baidu-provider"
+import { BaiduCredential } from "./baidu-credential"
 import { SyncSecureStore } from "./secure-store"
 import { SyncSetup } from "./setup"
 import { SyncEvent } from "./event"
@@ -134,15 +136,16 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/SyncControl") {}
 
 export type LayerOptions = {
+  readonly credentialStore: () => Promise<BaiduCredential.Store>
   readonly secureStore?: () => Promise<SyncSecureStore.Store>
   readonly provider?: (input: {
-    readonly store: SyncSecureStore.Store
+    readonly store: BaiduCredential.Store
     readonly deviceID: string
     readonly remoteRoot: string
   }) => SyncProvider.Adapter
 }
 
-export const layerWith = (input: LayerOptions = {}) => Layer.effect(Service, make(input))
+export const layerWith = (input: LayerOptions) => Layer.effect(Service, make(input))
 
 const make = (input: LayerOptions) =>
   Effect.gen(function* () {
@@ -326,19 +329,25 @@ const make = (input: LayerOptions) =>
       const metadata = metadataStore.scope(config.namespaceID)
       const identity = activeIdentity(config)
       if (engine && engineIdentity === identity) return engine
-      const secure = yield* Effect.tryPromise({
-        try: () => (input.secureStore ?? SyncSecureStore.detect)(),
+      const credentials = yield* Effect.tryPromise({
+        try: input.credentialStore,
         catch: () => new ControlError({ kind: "locked" }),
       })
       const credential = yield* Effect.tryPromise({
-        try: () => BaiduSyncProvider.readCredential(secure, config.deviceID),
+        try: () => BaiduSyncProvider.readCredential(credentials, config.deviceID),
         catch: () => new ControlError({ kind: "locked" }),
       })
       if (!credential) return yield* new ControlError({ kind: "locked" })
-      const codec = yield* codecFor(config, secure)
+      const codec =
+        config.encryption === "none"
+          ? SyncCodec.plaintext()
+          : yield* Effect.tryPromise({
+              try: () => (input.secureStore ?? SyncSecureStore.detect)(),
+              catch: () => new ControlError({ kind: "locked" }),
+            }).pipe(Effect.flatMap((secure) => codecFor(config, secure)))
       const provider = input.provider
-        ? input.provider({ store: secure, deviceID: config.deviceID, remoteRoot: config.remoteRoot })
-        : BaiduSyncProvider.adapter({ store: secure, deviceID: config.deviceID, root: config.remoteRoot })
+        ? input.provider({ store: credentials, deviceID: config.deviceID, remoteRoot: config.remoteRoot })
+        : BaiduSyncProvider.adapter({ store: credentials, deviceID: config.deviceID, root: config.remoteRoot })
       const transfer = SyncTransfer.make((progress) =>
         Effect.runPromise(events.publish(SyncTransferEvent.Updated, { progress })).then(() => undefined),
       )
@@ -1610,7 +1619,13 @@ const make = (input: LayerOptions) =>
     }
   })
 
-const layer = layerWith()
+const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const auth = yield* Auth.Service
+    return yield* make({ credentialStore: async () => BaiduCredential.auth(auth) })
+  }),
+)
 
 export const node = makeGlobalNode({
   service: Service,
@@ -1628,6 +1643,7 @@ export const node = makeGlobalNode({
     TargetRegistry.node,
     SessionActivity.node,
     SessionLocationMutation.node,
+    Auth.node,
   ],
 })
 

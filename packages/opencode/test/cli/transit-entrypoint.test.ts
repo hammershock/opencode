@@ -365,7 +365,9 @@ exec /bin/mv "$@"
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
     await Bun.$`${installer} --binary ${candidate} --install-dir ${install}`
 
-    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe("1.0.0-transit.0+manifest-free\n")
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(
+      "1.0.0-transit.0+manifest-free\n",
+    )
     expect(await Bun.file(path.join(install, "opencode-transit.build.json")).exists()).toBe(false)
   })
 
@@ -380,106 +382,6 @@ exec /bin/mv "$@"
     await Bun.$`${installer} --binary ${candidate} --install-dir ${install}`
     expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe("1.0.0-transit.0+candidate\n")
     expect(await Bun.file(path.join(install, "opencode-transit.previous")).exists()).toBe(false)
-  })
-
-  test("passes deployment credentials only over stdin after candidate validation", async () => {
-    const root = await createFixture()
-    const install = path.join(root, "install")
-    const calls = path.join(root, "calls")
-    const candidate = path.join(root, "candidate")
-    const secret = "dummy-release-secret"
-    const commit = "a".repeat(40)
-    const version = `1.0.0-transit.0+${commit.slice(0, 12)}`
-    const manifest = await fakeManifest(root, "candidate", version, commit)
-    await Bun.write(
-      candidate,
-      `#!/bin/sh
-if [ "\${1:-}" = "--version" ]; then
-  printf '%s\\n' '${version}'
-  exit 0
-fi
-if [ "\${1:-}" = "__deploy-verify-build-manifest" ]; then
-  cat >/dev/null
-  exit 0
-fi
-if [ "\${1:-}" = "__deploy-provision-baidu-app" ]; then
-  printf '%s\\n' "$*" >> '${calls}'
-  payload=$(dd bs=4096 count=2 2>/dev/null)
-  [ "$payload" = '{"appKey":"dummy-app","secretKey":"${secret}"}' ] || exit 9
-  printf '%s\\n' 'provisioned'
-  exit 0
-fi
-exit 8
-`,
-    )
-    await Bun.$`chmod 755 ${candidate}`
-    const child = Bun.spawn(
-      [installer, "--binary", candidate, "--manifest", manifest, "--install-dir", install, "--provision-baidu-app"],
-      {
-        stdin: new Blob([JSON.stringify({ appKey: "dummy-app", secretKey: secret })]),
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    )
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ])
-    expect(exitCode).toBe(0)
-    expect(await Bun.file(calls).text()).toBe("__deploy-provision-baidu-app\n")
-    expect(stdout + stderr).not.toContain(secret)
-    expect(stdout + stderr).not.toContain("dummy-app")
-  })
-
-  test("does not replace the installed build when provisioning fails", async () => {
-    const root = await createFixture()
-    const install = path.join(root, "install")
-    const workingCommit = "a".repeat(40)
-    const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
-    const working = await fakeBinary(root, "working", workingVersion)
-    const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
-    const candidateManifest = await fakeManifest(root, "candidate", candidateVersion, candidateCommit)
-    const broken = path.join(root, "broken-provision")
-    await Bun.write(
-      broken,
-      `#!/bin/sh
-if [ "\${1:-}" = --version ]; then echo ${candidateVersion}; exit 0; fi
-if [ "\${1:-}" = __deploy-verify-build-manifest ]; then cat >/dev/null; exit 0; fi
-cat >/dev/null
-exit 7
-`,
-    )
-    await Bun.$`chmod 755 ${broken}`
-    await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
-    const child = Bun.spawn(
-      [
-        installer,
-        "--binary",
-        broken,
-        "--manifest",
-        candidateManifest,
-        "--install-dir",
-        install,
-        "--provision-baidu-app",
-      ],
-      {
-        stdin: new Blob(['{"appKey":"dummy","secretKey":"not-printed"}']),
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    )
-    const [exitCode, output] = await Promise.all([
-      child.exited,
-      Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]).then((x) => x.join("")),
-    ])
-    expect(exitCode).not.toBe(0)
-    expect(output).not.toContain("not-printed")
-    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
   })
 })
 

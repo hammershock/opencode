@@ -2,19 +2,20 @@ import { describe, expect, test } from "bun:test"
 import { createHash } from "node:crypto"
 import path from "node:path"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
+import { BaiduCredential } from "@opencode-ai/core/sync/baidu-credential"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncSecureStore } from "@opencode-ai/core/sync/secure-store"
 
-function memoryStore(initial?: BaiduSyncProvider.Credential): SyncSecureStore.Store & { values: Map<string, string> } {
+function memoryStore(initial?: BaiduSyncProvider.Credential): BaiduCredential.Store & { values: Map<string, string> } {
   const values = new Map<string, string>()
   if (initial) values.set("baidu:device", JSON.stringify(initial))
-  return {
+  const legacy: SyncSecureStore.Store = {
     platform: "macos-keychain",
-    values,
     get: async (account) => values.get(account),
     set: async (account, secret) => void values.set(account, secret),
     remove: async (account) => void values.delete(account),
   }
+  return Object.assign(BaiduCredential.legacy(legacy), { values })
 }
 
 const credential = {

@@ -7,6 +7,7 @@ import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { Database } from "@opencode-ai/core/database/database"
 import { SyncDatabase } from "@opencode-ai/core/sync/database"
 import { BaiduSyncProvider } from "@opencode-ai/core/sync/baidu-provider"
+import { BaiduCredential } from "@opencode-ai/core/sync/baidu-credential"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncRoot } from "@opencode-ai/core/sync/root"
 import { SyncMembership } from "@opencode-ai/core/sync/membership"
@@ -132,6 +133,7 @@ const unavailableProvider = (): SyncProvider.Adapter => {
 const recoveryControlNode = {
   ...SyncControl.node,
   implementation: SyncControl.layerWith({
+    credentialStore: async () => BaiduCredential.legacy(recoveryStore),
     secureStore: async () => recoveryStore,
     provider: unavailableProvider,
   }),
@@ -225,7 +227,11 @@ const blockedProvider = (): SyncProvider.Adapter => {
 }
 const lifecycleControlNode = {
   ...SyncControl.node,
-  implementation: SyncControl.layerWith({ secureStore: async () => lifecycleStore, provider: blockedProvider }),
+  implementation: SyncControl.layerWith({
+    credentialStore: async () => BaiduCredential.legacy(lifecycleStore),
+    secureStore: async () => lifecycleStore,
+    provider: blockedProvider,
+  }),
 }
 const lifecycleControlIt = testEffect(
   LayerNode.compile(lifecycleControlNode, [
@@ -265,7 +271,11 @@ bootstrapStore.values.set(
 const bootstrapState = { ...lifecycleState, enabled: false }
 const bootstrapControlNode = {
   ...SyncControl.node,
-  implementation: SyncControl.layerWith({ secureStore: async () => bootstrapStore, provider: unavailableProvider }),
+  implementation: SyncControl.layerWith({
+    credentialStore: async () => BaiduCredential.legacy(bootstrapStore),
+    secureStore: async () => bootstrapStore,
+    provider: unavailableProvider,
+  }),
 }
 const bootstrapControlIt = testEffect(
   LayerNode.compile(bootstrapControlNode, [

@@ -121,6 +121,9 @@ export type OAuth = {
   expires: number
   accountId?: string
   enterpriseUrl?: string
+  metadata?: {
+    [key: string]: string
+  }
 }
 
 export type ApiAuth = {
@@ -2159,6 +2162,7 @@ export type SyncSetupApiError = {
       | "invalid"
       | "oauth"
       | "missing-app"
+      | "missing-legacy"
       | "incompatible-local-state"
       | "remote"
       | "storage"
@@ -8494,6 +8498,15 @@ export type GlobalSyncOAuthBeginData = {
   body?: {
     redirectURI: string
     completion: "loopback" | "manual"
+    application?:
+      | {
+          type: "credentials"
+          appKey: string
+          secretKey: string
+        }
+      | {
+          type: "legacy"
+        }
   }
   path?: never
   query?: never

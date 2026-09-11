@@ -1,6 +1,9 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Effect } from "effect"
+import { stat } from "node:fs/promises"
+import path from "node:path"
+import { Global } from "@opencode-ai/core/global"
 import { Auth } from "../../src/auth"
 import { testEffect } from "../lib/effect"
 
@@ -70,6 +73,21 @@ describe("Auth", () => {
       yield* auth.remove("anthropic")
       const after = yield* auth.all()
       expect(after["anthropic"]).toBeUndefined()
+    }),
+  )
+
+  it.instance("writes auth.json with owner-only permissions", () =>
+    Effect.gen(function* () {
+      const auth = yield* Auth.Service
+      yield* auth.set("opencode-transit/baidu", {
+        type: "oauth",
+        access: "access",
+        refresh: "refresh",
+        expires: 1,
+        metadata: { appKey: "app", secretKey: "secret" },
+      })
+      const info = yield* Effect.promise(() => stat(path.join(Global.Path.data, "auth.json")))
+      expect(info.mode & 0o777).toBe(0o600)
     }),
   )
 })

@@ -1,16 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { createLoopbackCallback, syncOperationFailure, withSyncRefreshTimeout } from "../../src/context/sync-settings"
 
-describe("sync settings deployment errors", () => {
-  test("maps a missing product app to an actionable message without credential terminology", () => {
+describe("sync settings credential errors", () => {
+  test("maps missing application credentials to an actionable message", () => {
     const message = syncOperationFailure(
       new Error("request failed", {
         cause: { status: 400, body: { name: "SyncSetupError", data: { kind: "missing-app" } } },
       }),
     )
-    expect(message).toContain("Connect your Baidu application in OpenCode Transit Sync settings")
-    expect(message).not.toContain("AppKey")
-    expect(message).not.toContain("SecretKey")
+    expect(message).toContain("Enter your AppKey and SecretKey in OpenCode Transit Sync settings")
     expect(
       syncOperationFailure({
         cause: {

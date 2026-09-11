@@ -69,6 +69,8 @@ export type SyncSettingsActions = {
   onError: (error: unknown) => void
 }
 
+export type BaiduApplication = { type: "credentials"; appKey: string; secretKey: string } | { type: "legacy" }
+
 type Row = { title: string; description?: string; status?: string; disabled?: boolean; details?: string[] }
 
 export function syncStatus(state: SyncState) {
@@ -215,6 +217,39 @@ export function showPostLoginSyncChoice(dialog: DialogContext) {
             { title: "Keep disabled", value: "disabled" as const },
           ]}
           onSelect={(option) => resolve(option.value)}
+        />
+      ),
+      () => resolve(undefined),
+    ),
+  )
+}
+
+export function promptBaiduApplication(dialog: DialogContext) {
+  return new Promise<BaiduApplication | undefined>((resolve) =>
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title="Connect your Baidu application"
+          options={[
+            {
+              title: "Enter AppKey and SecretKey",
+              description: "Use credentials from your own Baidu Open Platform application",
+              value: "credentials" as const,
+            },
+            {
+              title: "Import previous OpenCode credential",
+              description: "Copy and verify the legacy Keychain or PasswordVault entry; keep the original",
+              value: "legacy" as const,
+            },
+          ]}
+          onSelect={async (option) => {
+            if (option.value === "legacy") return resolve({ type: "legacy" })
+            const appKey = await DialogPrompt.show(dialog, "Baidu AppKey", { placeholder: "AppKey" })
+            if (!appKey?.trim()) return resolve(undefined)
+            const secretKey = await DialogPrompt.show(dialog, "Baidu SecretKey", { placeholder: "SecretKey" })
+            if (!secretKey?.trim()) return resolve(undefined)
+            resolve({ type: "credentials", appKey: appKey.trim(), secretKey: secretKey.trim() })
+          }}
         />
       ),
       () => resolve(undefined),

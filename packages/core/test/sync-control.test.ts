@@ -343,6 +343,12 @@ const migrationControlIt = testEffect(
 )
 
 describe("SyncControl lifecycle policy", () => {
+  test("treats explicit bindings and exact local target names as portable target resolutions", () => {
+    expect(SyncControl.portableTargetResolvable("gpu", new Map(), [{ name: "gpu" }])).toBe(true)
+    expect(SyncControl.portableTargetResolvable("gpu", new Map([["gpu", "target-id"]]), [])).toBe(true)
+    expect(SyncControl.portableTargetResolvable("gpu", new Map(), [{ name: "other" }])).toBe(false)
+  })
+
   test("uses the Rexd target or source device name and preserves foreign ownership", () => {
     expect(
       SyncControl.portableTargetMetadata({

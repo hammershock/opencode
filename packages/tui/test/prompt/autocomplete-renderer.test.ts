@@ -8,7 +8,7 @@ import { Global } from "@opencode-ai/core/global"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "../fixture/tui-sdk"
 
-test("Skill autocomplete keeps keyboard selection and viewport synchronized", async () => {
+test("Skill autocomplete keeps pointer motion passive while wheel and keyboard move selection", async () => {
   const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -72,12 +72,15 @@ test("Skill autocomplete keeps keyboard selection and viewport synchronized", as
     await waitForFrame(setup, "1/10")
     const scroll = findAutocompleteScroll(setup.renderer.root)
     expect(scroll).toBeDefined()
+    const initialScrollTop = scroll!.scrollTop
     await setup.mockMouse.moveTo(scroll!.x + 2, scroll!.y + 4)
-    await waitForFrame(setup, "5/10")
+    await setup.waitForVisualIdle()
+    expect(scroll!.scrollTop).toBe(initialScrollTop)
+    expect(setup.captureCharFrame()).toContain("1/10")
     await setup.mockMouse.scroll(scroll!.x + 2, scroll!.y + 4, "down")
     await setup.waitForVisualIdle()
     expect(scroll!.scrollTop).toBeGreaterThan(0)
-    expect(setup.captureCharFrame()).toContain("5/10")
+    expect(setup.captureCharFrame()).toContain(`${scroll!.scrollTop + 1}/10`)
     setup.mockInput.pressKey("x")
     setup.mockInput.pressBackspace()
     await waitForFrame(setup, "1/10")

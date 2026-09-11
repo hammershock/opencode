@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionMessage } from "@opencode-ai/sdk/v2"
-import { projectCanonicalSessionMessages } from "../../src/util/session-message"
+import type { SessionMessage, SessionMessageUser } from "@opencode-ai/sdk/v2"
+import {
+  canonicalUserText,
+  commitCanonicalRevert,
+  projectCanonicalSessionMessages,
+  restoreCanonicalPrompt,
+} from "../../src/util/session-message"
 
 describe("projectCanonicalSessionMessages", () => {
   test("projects newest-first canonical user and assistant messages for the legacy transcript renderer", () => {
@@ -73,5 +78,90 @@ describe("projectCanonicalSessionMessages", () => {
     expect(projected[0]?.parts).toMatchObject([
       { type: "tool", callID: "call", tool: "read", state: { status: "completed", output: "contents" } },
     ])
+  })
+
+  test("restores a canonical skill mention without exposing its injected content", () => {
+    const message = {
+      id: "user",
+      type: "user",
+      text: "$review inspect this",
+      time: { created: 10 },
+      skills: [
+        {
+          source: { start: 0, end: 7, text: "$review" },
+          snapshot: {
+            id: "ski_invocation",
+            name: "review",
+            digest: "digest",
+            source: { kind: "imported", label: "Codex" },
+            content: "private injected instructions",
+            status: "loaded",
+          },
+        },
+      ],
+    } satisfies SessionMessageUser
+
+    expect(canonicalUserText(message)).toBe("$review inspect this")
+    expect(
+      restoreCanonicalPrompt(message, [
+        { id: "skl_catalog", name: "review", sourceLabel: "Codex · deadbeef", digest: "digest" },
+      ]),
+    ).toEqual({
+      prompt: {
+        input: "$review inspect this",
+        parts: [
+          {
+            type: "skill",
+            id: "skl_catalog",
+            name: "review",
+            description: undefined,
+            sourceLabel: "Codex · deadbeef",
+            digest: "digest",
+            source: { start: 0, end: 7, value: "$review" },
+          },
+        ],
+      },
+    })
+    expect(
+      JSON.stringify(
+        restoreCanonicalPrompt(message, [
+          { id: "skl_catalog", name: "review", sourceLabel: "Codex · deadbeef", digest: "digest" },
+        ]),
+      ),
+    ).not.toContain("private injected instructions")
+  })
+
+  test("refuses to restore a skill mention that is no longer in the catalog", () => {
+    const message = {
+      id: "user",
+      type: "user",
+      text: "$review",
+      time: { created: 10 },
+      skills: [
+        {
+          source: { start: 0, end: 7, text: "$review" },
+          snapshot: {
+            id: "ski_invocation",
+            name: "review",
+            digest: "digest",
+            source: { kind: "imported", label: "Codex" },
+            content: "instructions",
+            status: "loaded",
+          },
+        },
+      ],
+    } satisfies SessionMessageUser
+
+    expect(restoreCanonicalPrompt(message, [])).toEqual({ missing: "review" })
+  })
+
+  test("commits a canonical revert through the boundary in newest-first storage order", () => {
+    const messages = [
+      { id: "later", type: "system", text: "later", time: { created: 3 } },
+      { id: "boundary", type: "user", text: "$review", time: { created: 2 } },
+      { id: "earlier", type: "system", text: "earlier", time: { created: 1 } },
+    ] satisfies SessionMessage[]
+
+    expect(commitCanonicalRevert(messages, "boundary").map((message) => message.id)).toEqual(["earlier"])
   })
 })

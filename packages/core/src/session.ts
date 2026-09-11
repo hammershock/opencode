@@ -466,6 +466,8 @@ const layer = Layer.effect(
                 ...base,
                 ...(skills.length === 0 ? {} : { invocations: skills }),
               })
+              if (session.revert)
+                yield* SessionRevert.commit(session).pipe(Effect.provideService(EventV2.Service, events))
               const expected = { sessionID: input.sessionID, messageID, prompt: resolved, delivery }
               const admitted = yield* SessionInput.admit(db, events, {
                 id: messageID,

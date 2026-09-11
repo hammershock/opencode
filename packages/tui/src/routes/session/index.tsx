@@ -116,7 +116,7 @@ import {
 import { showModelContext } from "../../component/dialog-model-context"
 import { useData } from "../../context/data"
 import { SkillInvocationRow } from "../../component/skill-invocation"
-import { projectCanonicalSessionMessages } from "../../util/session-message"
+import { projectCanonicalSessionMessages, restoreCanonicalPrompt } from "../../util/session-message"
 import { skillCommand, type SkillCommandContext } from "../../command-toolkit/skill"
 import { useSkillManager } from "../../component/skill-manager"
 
@@ -307,14 +307,23 @@ export function Session() {
   createEffect(
     on(
       () => route.sessionID,
-      (sessionID) => void data.session.message.refresh(sessionID).catch(() => undefined),
+      (sessionID) =>
+        void Promise.all([data.session.refresh(sessionID), data.session.message.refresh(sessionID)]).catch(
+          () => undefined,
+        ),
     ),
   )
+  const revertInfo = createMemo(() => data.session.get(route.sessionID)?.revert ?? session()?.revert)
   const messagesBeforeRevert = () => {
-    const messageID = session()?.revert?.messageID
+    const messageID = revertInfo()?.messageID
     if (!messageID) return messages()
     const index = messages().findIndex((message) => message.id === messageID)
-    return index === -1 ? messages() : messages().slice(0, index)
+    if (index === -1) return messages()
+    const canonical = durableUsers().has(messageID)
+    // Legacy and canonical reverts are independent, so never move a staged boundary into the other store.
+    return messages()
+      .slice(0, index)
+      .filter((message) => message.role !== "user" || durableUsers().has(message.id) === canonical)
   }
   const foregroundTasks = createMemo(() =>
     sync.data.capabilities.experimentalBackgroundSubagents
@@ -946,10 +955,46 @@ export function Session() {
         name: "undo",
       },
       run: async () => {
-        const status = sync.data.session_status?.[route.sessionID]
-        if (status?.type !== "idle") await sdk.client.session.abort({ sessionID: route.sessionID }).catch(() => {})
         const message = messagesBeforeRevert().findLast((item) => item.role === "user")
         if (!message) return
+        const canonical = durableUsers().get(message.id)
+        if (canonical) {
+          const current = data.session.get(route.sessionID)
+          if (!current) return
+          try {
+            const catalog = await sdk.client.v2.skill.catalog(
+              {
+                location: {
+                  directory: current.location.directory,
+                  workspace: current.location.workspaceID,
+                  ...(current.location.target?.type === "rexd" ? { target: current.location.target.targetID } : {}),
+                },
+              },
+              { throwOnError: true },
+            )
+            const restored = restoreCanonicalPrompt(canonical, catalog.data.data.skills)
+            if ("missing" in restored) {
+              toast.show({
+                message: `Cannot revert: $${restored.missing} is no longer available. Reload Skills and try again.`,
+                variant: "error",
+              })
+              return
+            }
+            await sdk.client.v2.session.interrupt({ sessionID: route.sessionID }, { throwOnError: true })
+            await sdk.client.v2.session.revert.stage(
+              { sessionID: route.sessionID, messageID: canonical.id },
+              { throwOnError: true },
+            )
+            prompt?.set(restored.prompt)
+            toBottom()
+            dialog.clear()
+          } catch (error) {
+            toast.error(error)
+          }
+          return
+        }
+        const status = sync.data.session_status?.[route.sessionID]
+        if (status?.type !== "idle") await sdk.client.session.abort({ sessionID: route.sessionID }).catch(() => {})
         void sdk.client.session
           .revert({
             sessionID: route.sessionID,
@@ -979,23 +1024,44 @@ export function Session() {
       description: "Restore the next reverted message",
       value: "session.redo",
       category: "Session",
-      enabled: !!session()?.revert?.messageID,
+      enabled: !!revertInfo()?.messageID,
       slash: {
         name: "redo",
       },
-      run: () => {
+      run: async () => {
         dialog.clear()
-        const messageID = session()?.revert?.messageID
+        const messageID = revertInfo()?.messageID
         if (!messageID) return
-        const message = messages().find((x) => x.role === "user" && x.id > messageID)
+        const index = messages().findIndex((message) => message.id === messageID)
+        if (index === -1) return
+        const canonical = durableUsers().has(messageID)
+        const message = messages()
+          .slice(index + 1)
+          .find((message) => message.role === "user" && durableUsers().has(message.id) === canonical)
+        if (canonical) {
+          try {
+            if (!message) {
+              await sdk.client.v2.session.revert.clear({ sessionID: route.sessionID }, { throwOnError: true })
+              prompt?.set({ input: "", parts: [] })
+              return
+            }
+            await sdk.client.v2.session.revert.stage(
+              { sessionID: route.sessionID, messageID: message.id },
+              { throwOnError: true },
+            )
+          } catch (error) {
+            toast.error(error)
+          }
+          return
+        }
         if (!message) {
-          void sdk.client.session.unrevert({
+          await sdk.client.session.unrevert({
             sessionID: route.sessionID,
           })
           prompt?.set({ input: "", parts: [] })
           return
         }
-        void sdk.client.session.revert({
+        await sdk.client.session.revert({
           sessionID: route.sessionID,
           messageID: message.id,
         })
@@ -1471,7 +1537,6 @@ export function Session() {
     bindings: tuiConfig.keybinds.get("session.background"),
   }))
 
-  const revertInfo = createMemo(() => data.session.get(route.sessionID)?.revert ?? session()?.revert)
   const revertMessageID = createMemo(() => revertInfo()?.messageID)
   const revertMessageIndex = createMemo(() => {
     const messageID = revertMessageID()

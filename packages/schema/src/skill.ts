@@ -10,6 +10,9 @@ export type ID = typeof ID.Type
 export const Digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)).pipe(Schema.brand("Skill.Digest"))
 export type Digest = typeof Digest.Type
 
+export const MAX_NAME_CHARACTERS = 64
+export const MAX_DESCRIPTION_CHARACTERS = 1024
+
 export const SourceKind = Schema.Literals(["built-in", "opencode-global", "opencode-project", "imported", "url"])
 export type SourceKind = typeof SourceKind.Type
 
@@ -47,6 +50,8 @@ export const DiagnosticKind = Schema.Literals([
   "read-failed",
   "invalid-frontmatter",
   "invalid-name",
+  "invalid-description",
+  "legacy-layout",
   "name-mismatch",
   "duplicate-name",
   "invalid-settings",

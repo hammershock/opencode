@@ -144,9 +144,9 @@ const layer = Layer.effect(
         if (!markdown) return yield* new ReadError({ skillID: entry.metadata.id, kind: "malformed" })
         const frontmatter = decodeFrontmatter(markdown.data).valueOrUndefined
         if (!frontmatter) return yield* new ReadError({ skillID: entry.metadata.id, kind: "malformed" })
-        const name =
-          frontmatter.name ??
-          (path.basename(entry.location) === "SKILL.md" ? undefined : path.basename(entry.location, ".md"))
+        if (!validDescription(frontmatter.description))
+          return yield* new ReadError({ skillID: entry.metadata.id, kind: "malformed" })
+        const name = frontmatter.name
         if (
           name !== entry.metadata.name ||
           frontmatter.description !== entry.metadata.description ||
@@ -278,11 +278,34 @@ const loadFile = Effect.fnUntraced(function* (
 
   const isPackage = path.basename(location) === "SKILL.md"
   const name = frontmatter.name ?? (isPackage ? undefined : path.basename(location, ".md"))
-  if (!name || name.length > 64 || !namePattern.test(name))
+  if (!isPackage) {
+    if (
+      !name ||
+      name.length > Skill.MAX_NAME_CHARACTERS ||
+      !namePattern.test(name) ||
+      !validDescription(frontmatter.description)
+    )
+      return { entries: [], diagnostics: [] }
+    return sourceFailure(
+      "legacy-layout",
+      sourceLabel,
+      `Single-file Skill "${name}" is not supported; move it to ${name}/SKILL.md`,
+      location,
+    )
+  }
+  if (!name || name.length > Skill.MAX_NAME_CHARACTERS || !namePattern.test(name))
     return sourceFailure(
       "invalid-name",
       sourceLabel,
-      "Skill name must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be at most 64 characters",
+      `Skill name must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be at most ${Skill.MAX_NAME_CHARACTERS} characters`,
+      location,
+    )
+
+  if (!validDescription(frontmatter.description))
+    return sourceFailure(
+      "invalid-description",
+      sourceLabel,
+      `Skill description must be non-empty and at most ${Skill.MAX_DESCRIPTION_CHARACTERS} characters`,
       location,
     )
 
@@ -387,6 +410,10 @@ function normalizeUrl(value: string) {
 
 function normalizeRelative(value: string) {
   return value.split(path.sep).join("/")
+}
+
+function validDescription(value: string | undefined): value is string {
+  return value !== undefined && value.trim().length > 0 && Array.from(value).length <= Skill.MAX_DESCRIPTION_CHARACTERS
 }
 
 function makeID(kind: Skill.SourceKind, root: string, relative: string) {

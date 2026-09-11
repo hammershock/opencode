@@ -125,11 +125,11 @@ opencode-transit
 
 ## 参与贡献
 
-提交 Issue 或 Pull Request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。Fork 开发以 `dev` 为目标分支，使用与 Issue 对应的聚焦分支，并明确记录设备验证情况。
+提交 Issue 或 Pull Request 前请阅读[中文贡献指南](CONTRIBUTING.zh.md)。Fork 开发以 `dev` 为目标分支，使用与 Issue 对应的聚焦分支，并明确记录设备验证情况。
 
 ## 安全
 
-请通过 [SECURITY.md](SECURITY.md) 中的私密渠道报告漏洞，不要公开提交 Issue。
+请通过[中文安全策略](SECURITY.zh.md)中的私密渠道报告漏洞，不要公开提交 Issue。
 
 ## 上游与许可证
 

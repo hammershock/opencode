@@ -1,11 +1,11 @@
-name: Fork Development Task
-description: Track one accepted, reviewable implementation task for this fork
+name: Maintainer implementation task
+description: Turn an accepted outcome into the fork's internal delivery contract
 title: "[TASK]: "
 body:
   - type: markdown
     attributes:
       value: |
-        One task maps to one semantic branch, one dedicated worktree, and one pull request. Read `docs/development-workflow.md` before claiming work.
+        Maintainer planning template. One task maps to one semantic branch, one dedicated worktree, and one pull request. External reporters should use Bug report or Feature request. Read `docs/development-workflow.md` before claiming work.
 
   - type: textarea
     id: outcome

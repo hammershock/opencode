@@ -1,29 +1,37 @@
-### Issue for this PR
+## Issue and outcome
 
 Closes #
 
-### Type of change
+<!-- In a few sentences, explain the observable outcome and why this change produces it. -->
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Refactor / code improvement
-- [ ] Documentation
+## Scope and boundaries
 
-### What does this PR do?
+<!-- Note important compatibility, security, migration, and deliberately unchanged behavior. -->
 
-Please provide a description of the issue, the changes you made to fix it, and why they work. It is expected that you understand why your changes work and if you do not understand why at least say as much so a maintainer knows how much to value the PR.
+## Verification
 
-**If you paste a large clearly AI generated description here your PR may be IGNORED or CLOSED!**
+<!-- List exact commands and results. Do not include secrets or private machine/account data. -->
 
-### How did you verify your code works?
+### Platform coverage
 
-### Screenshots / recordings
+- [ ] macOS Apple Silicon
+- [ ] Windows WSL2 / Ubuntu x64
+- [ ] Not applicable (documentation/templates only)
 
-_If this is a UI change, please include a screenshot or recording._
+Not run or still requiring maintainer verification:
 
-### Checklist
+<!-- Missing device access does not prevent an external contribution. List gaps explicitly. -->
 
-- [ ] I have tested my changes locally
-- [ ] I have not included unrelated changes in this PR
+## UI evidence
 
-_If you do not follow this template your PR will be automatically rejected._
+<!-- For a visible TUI change, attach sanitized before/after screenshots or a short recording. Otherwise write "Not applicable." -->
+
+## Checklist
+
+- [ ] This PR closes exactly one primary issue and targets `dev`.
+- [ ] The title follows `type(scope): summary` or `type: summary`.
+- [ ] The change is focused and contains no unrelated refactor, dependency, or generated churn.
+- [ ] I ran the relevant checks available to me and disclosed every verification gap.
+- [ ] I reviewed the diff for credentials, private hosts, personal paths, account IDs, and real Session content.
+- [ ] I updated generated artifacts and both English/Chinese public docs when required.
+- [ ] I understand the change and can explain its behavior and evidence during review.

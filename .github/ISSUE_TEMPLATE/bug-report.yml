@@ -1,66 +1,94 @@
 name: Bug report
-description: Report an issue that should be fixed (avoid pasting giant AI generated summaries or your issue may be closed/ignored)
+description: Report a reproducible OpenCode Transit defect
+title: "[Bug]: "
 body:
-  - type: textarea
-    id: description
+  - type: markdown
     attributes:
-      label: Description
-      description: Describe the bug you encountered
-      placeholder: What happened?
+      value: |
+        Thanks for reporting a Transit bug. Search existing issues first. For vulnerabilities, stop here and use the private Security Advisory link from the issue chooser.
+
+  - type: input
+    id: version
+    attributes:
+      label: Transit version
+      description: Paste `opencode-transit --version` or the exact source commit.
+      placeholder: 1.x.y-transit.0+abcdef123456
     validations:
       required: true
 
-  - type: input
-    id: plugins
+  - type: dropdown
+    id: controller
     attributes:
-      label: Plugins
-      description: What plugins are you using?
+      label: Controller platform
+      options:
+        - macOS Apple Silicon (arm64)
+        - Windows WSL2 / Ubuntu (x64)
+        - Unsupported or other platform
     validations:
-      required: false
+      required: true
 
-  - type: input
-    id: opencode-version
+  - type: dropdown
+    id: location
     attributes:
-      label: OpenCode version
-      description: What version of OpenCode are you using?
+      label: Location
+      options:
+        - Local workspace
+        - SSH + managed Rexd workspace
+        - Startup or no Session Location
+        - Not related to a Location
     validations:
-      required: false
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Describe the observable behavior and any error shown.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: Describe the result you expected at the same boundary.
+    validations:
+      required: true
 
   - type: textarea
     id: reproduce
     attributes:
-      label: Steps to reproduce
-      description: How can we reproduce this issue?
+      label: Reproduction
+      description: Give the smallest repeatable steps using disposable data. Include target OS/shell when relevant.
       placeholder: |
-        1.
-        2.
-        3.
+        1. Start opencode-transit in...
+        2. Select...
+        3. Run...
     validations:
-      required: false
+      required: true
 
   - type: textarea
-    id: screenshot-or-link
+    id: evidence
     attributes:
-      label: Screenshot and/or share link
-      description: Run `/share` to get a share link, or attach a screenshot
-      placeholder: Paste link or drag and drop screenshot here
+      label: Sanitized evidence
+      description: Add logs, screenshots, or recordings after removing secrets, private hosts, personal paths, account IDs, and real Session content.
     validations:
       required: false
 
   - type: input
-    id: os
+    id: regression
     attributes:
-      label: Operating System
-      description: what OS are you using?
-      placeholder: e.g., macOS 26.0.1, Ubuntu 22.04, Windows 11
+      label: Last known working version
+      description: If this is a regression, provide the last version or commit where it worked.
     validations:
       required: false
 
-  - type: input
-    id: terminal
+  - type: checkboxes
+    id: confirmation
     attributes:
-      label: Terminal
-      description: what terminal are you using?
-      placeholder: e.g., iTerm2, Ghostty, Alacritty, Windows Terminal
-    validations:
-      required: false
+      label: Confirmation
+      options:
+        - label: I searched existing issues and did not find the same report.
+          required: true
+        - label: I removed credentials and private machine or account data from this public report.
+          required: true

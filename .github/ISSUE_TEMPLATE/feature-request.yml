@@ -1,19 +1,70 @@
-name: 🚀 Feature Request
-description: Suggest an idea, feature, or enhancement
-title: "[FEATURE]:"
-
+name: Feature request
+description: Propose one focused OpenCode Transit improvement
+title: "[Feature]: "
 body:
-  - type: checkboxes
-    id: verified
+  - type: markdown
     attributes:
-      label: Feature hasn't been suggested before.
-      options:
-        - label: I have verified this feature I'm about to request hasn't been suggested before.
-          required: true
+      value: |
+        Start with the user problem. A maintainer will confirm whether the proposal needs an RFC before implementation.
 
   - type: textarea
+    id: problem
     attributes:
-      label: Describe the enhancement you want to request
-      description: What do you want to change or add? What are the benefits of implementing this? Try to be detailed so we can understand your request better :)
+      label: Problem
+      description: What is difficult today, for whom, and in which Transit workflow?
     validations:
       required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: State one observable result without prescribing an implementation.
+      placeholder: A user can...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: areas
+    attributes:
+      label: Affected areas
+      multiple: true
+      options:
+        - Local Location
+        - SSH / managed Rexd
+        - Session placement or recovery
+        - TUI or command workflow
+        - Skills
+        - Session sync
+        - Provider usage
+        - Build, install, or release
+        - Documentation
+        - Shared upstream behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Boundaries and alternatives
+      description: What should remain unchanged? What existing workaround or alternative did you try?
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Acceptance idea
+      description: How could a reviewer observe success and failure on macOS or WSL2?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched open and closed issues for the same request.
+          required: true
+        - label: I will wait for scope or RFC confirmation before opening an implementation pull request.
+          required: true

@@ -2,7 +2,7 @@
 import type { ColorInput, RGBA, ScrollBoxRenderable } from "@opentui/core"
 import { Locale } from "../../util/locale"
 import { tint } from "../../context/theme"
-import { createEffect, createMemo, For, Match, Switch } from "solid-js"
+import { createEffect, createMemo, createUniqueId, For, Match, Switch } from "solid-js"
 import { buildFileTree, flattenFileTree, type FileTreeItem, type FileTreeRow } from "./diff-viewer-file-tree-utils"
 import { Panel } from "./diff-viewer-ui"
 
@@ -37,14 +37,14 @@ export type DiffViewerFileTreeProps = {
 export function DiffViewerFileTree(props: DiffViewerFileTreeProps) {
   const tree = createMemo(() => buildFileTree(props.files))
   const rows = createMemo(() => flattenFileTree(tree(), props.expandedNodes))
+  const rowPrefix = createUniqueId()
   let scroll: ScrollBoxRenderable | undefined
 
   createEffect(() => {
     const node = props.highlightedNode
     if (node === undefined) return
-    const selectedIndex = rows().findIndex((row) => row.id === node)
-    if (selectedIndex === -1) return
-    const scrollSelectedIntoView = () => scrollFileTreeRowIntoView(scroll, selectedIndex)
+    if (!rows().some((row) => row.id === node)) return
+    const scrollSelectedIntoView = () => scroll?.scrollChildIntoView(rowID(node))
     scrollSelectedIntoView()
     requestAnimationFrame(scrollSelectedIntoView)
   })
@@ -80,6 +80,7 @@ export function DiffViewerFileTree(props: DiffViewerFileTreeProps) {
                   Locale.truncate(row.name, Math.max(1, props.width - FILE_TREE_STATUS_WIDTH - prefix().length))
                 return (
                   <box
+                    id={rowID(row.id)}
                     flexDirection="row"
                     width="100%"
                     backgroundColor={highlighted() ? props.theme.primary : undefined}
@@ -120,16 +121,9 @@ export function DiffViewerFileTree(props: DiffViewerFileTreeProps) {
       </scrollbox>
     </Panel>
   )
-}
 
-function scrollFileTreeRowIntoView(scroll: ScrollBoxRenderable | undefined, index: number) {
-  if (!scroll) return
-  if (index < scroll.scrollTop) {
-    scroll.scrollTo(index)
-    return
-  }
-  if (index >= scroll.scrollTop + scroll.viewport.height) {
-    scroll.scrollTo(index - scroll.viewport.height + 1)
+  function rowID(node: number) {
+    return `${rowPrefix}-row-${node}`
   }
 }
 

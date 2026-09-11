@@ -95,13 +95,17 @@ test("Skill autocomplete separates pointer focus from wheel and keyboard scrolli
     await waitForFrame(setup, "1/10")
     expect(scroll!.scrollTop).toBe(0)
 
-    Array.from({ length: 8 }, () => setup.mockInput.pressArrow("down"))
-    await waitForFrame(setup, "9/10")
-    expect(scroll?.scrollTop).toBe(1)
+    for (const selected of [2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3]) {
+      setup.mockInput.pressArrow("down")
+      await waitForFrame(setup, `${selected}/10`)
+      expectSelectionVisible(scroll!, selected - 1)
+    }
 
-    await setup.waitForVisualIdle()
-    expect(setup.captureCharFrame()).toContain("9/10")
-    expect(scroll?.scrollTop).toBe(1)
+    for (const selected of [2, 1, 10, 9]) {
+      setup.mockInput.pressArrow("up")
+      await waitForFrame(setup, `${selected}/10`)
+      expectSelectionVisible(scroll!, selected - 1)
+    }
 
     api?.keymap.dispatchCommand("app.exit")
     await task
@@ -124,4 +128,13 @@ async function waitForFrame(setup: Awaited<ReturnType<typeof createTestRenderer>
 function findAutocompleteScroll(root: Renderable): ScrollBoxRenderable | undefined {
   if (root instanceof ScrollBoxRenderable && root.scrollHeight === 10 && root.viewport.height === 8) return root
   return root.getChildren().map(findAutocompleteScroll).find(Boolean)
+}
+
+function expectSelectionVisible(scroll: ScrollBoxRenderable, index: number) {
+  const option = scroll.getChildren()[index]
+  expect(option, `Missing autocomplete option ${index}`).toBeDefined()
+  expect(option!.y, `Option ${index} starts above the viewport`).toBeGreaterThanOrEqual(scroll.viewport.y)
+  expect(option!.y + option!.height, `Option ${index} ends below the viewport`).toBeLessThanOrEqual(
+    scroll.viewport.y + scroll.viewport.height,
+  )
 }

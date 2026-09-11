@@ -60,6 +60,7 @@ test("DialogSelect separates pointer focus from keyboard and wheel scrolling", a
                           options={Array.from({ length: 20 }, (_, index) => ({
                             title: `Option ${String(index).padStart(2, "0")}`,
                             value: index,
+                            details: index >= 6 && index % 2 === 0 ? [`Detail ${index}`] : undefined,
                           }))}
                           onMove={(option) => {
                             moved.push(option.value)
@@ -95,8 +96,13 @@ test("DialogSelect separates pointer focus from keyboard and wheel scrolling", a
     expect(scroll.scrollTop).toBe(initialScrollTop)
 
     const beforeKeyboard = moved.length
-    Array.from({ length: 8 }, () => keymap.dispatchCommand("dialog.select.next"))
-    await app.renderOnce()
+    for (const selected of [6, 7, 8, 9, 10, 11, 12, 13]) {
+      keymap.dispatchCommand("dialog.select.next")
+      await app.renderOnce()
+      expect(app.captureCharFrame(), `Option ${selected} must remain visible`).toContain(
+        `Option ${String(selected).padStart(2, "0")}`,
+      )
+    }
     expect(moved.length).toBe(beforeKeyboard + 8)
     expect(moved.slice(beforeKeyboard)).toEqual([6, 7, 8, 9, 10, 11, 12, 13])
     expect(scroll.scrollTop).toBeGreaterThan(initialScrollTop)
@@ -108,12 +114,27 @@ test("DialogSelect separates pointer focus from keyboard and wheel scrolling", a
     expect(scroll.scrollTop).toBeGreaterThan(beforeWheelOffset)
     expect(moved).toHaveLength(beforeWheel)
 
+    for (const selected of [14, 15, 16, 17, 18, 19, 0]) {
+      keymap.dispatchCommand("dialog.select.next")
+      await app.renderOnce()
+      expect(app.captureCharFrame(), `Wrapped option ${selected} must remain visible`).toContain(
+        `Option ${String(selected).padStart(2, "0")}`,
+      )
+    }
+    keymap.dispatchCommand("dialog.select.prev")
+    await app.renderOnce()
+    expect(app.captureCharFrame(), "Reverse wrap must reveal the final option").toContain("Option 19")
+
     const beforeExternal = moved.length
     setExternalCurrent(2)
+    await Bun.sleep(25)
+    await app.renderOnce()
+    expect(app.captureCharFrame(), "External selection must reveal its actual row").toContain("Option 02")
     setExternalCurrent(19)
     await Bun.sleep(25)
     await app.renderOnce()
-    expect(moved.slice(beforeExternal)).toEqual([19])
+    expect(app.captureCharFrame(), "External selection must reveal its actual row").toContain("Option 19")
+    expect(moved.slice(beforeExternal)).toEqual([2, 19])
     expect(scroll.scrollTop).toBeGreaterThan(beforeWheelOffset)
   } finally {
     app.renderer.destroy()

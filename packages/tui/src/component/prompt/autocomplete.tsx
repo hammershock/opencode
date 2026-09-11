@@ -12,6 +12,7 @@ import {
   Index,
   Show,
   createSignal,
+  createUniqueId,
   untrack,
 } from "solid-js"
 import { createStore } from "solid-js/store"
@@ -177,15 +178,6 @@ export function autocompleteEnterAction(selected: AutocompleteOption | undefined
   return selected === undefined ? ("submit" as const) : ("select" as const)
 }
 
-export function autocompleteScrollOffset(offset: number, input: { count: number; limit: number; selected: number }) {
-  const limit = Math.max(1, Math.min(input.limit, input.count))
-  const maximum = Math.max(0, input.count - limit)
-  const current = Math.max(0, Math.min(offset, maximum))
-  if (input.selected < current) return Math.max(0, input.selected)
-  if (input.selected >= current + limit) return Math.min(maximum, input.selected - limit + 1)
-  return current
-}
-
 export function autocompleteSelectionInWindow(
   selected: number,
   input: { count: number; limit: number; offset: number },
@@ -236,6 +228,7 @@ export function Autocomplete(props: {
     visible: false as AutocompleteRef["visible"],
   })
   const [shellOptions, setShellOptions] = createSignal<AutocompleteOption[]>([])
+  const optionPrefix = createUniqueId()
   const shellGeneration = createShellCompletionGeneration()
   let shellInput = props.value
   let scroll: ScrollBoxRenderable | undefined
@@ -737,7 +730,7 @@ export function Autocomplete(props: {
   createEffect(() => {
     options()
     setStore("selected", 0)
-    scroll?.scrollTo(0)
+    scroll?.scrollChildIntoView(optionID(0))
   })
 
   function move(direction: -1 | 1) {
@@ -757,13 +750,11 @@ export function Autocomplete(props: {
 
   function moveTo(next: number) {
     setStore("selected", next)
-    if (!scroll) return
-    const offset = autocompleteScrollOffset(scroll.scrollTop, {
-      count: options().length,
-      limit: Math.min(height(), options().length),
-      selected: next,
-    })
-    if (offset !== scroll.scrollTop) scroll.scrollTo(offset)
+    scroll?.scrollChildIntoView(optionID(next))
+  }
+
+  function optionID(index: number) {
+    return `${optionPrefix}-option-${index}`
   }
 
   function syncSelectionWindow() {
@@ -1085,6 +1076,7 @@ export function Autocomplete(props: {
         >
           {(option, index) => (
             <box
+              id={optionID(index)}
               paddingLeft={1}
               paddingRight={1}
               backgroundColor={index === store.selected ? theme.primary : undefined}

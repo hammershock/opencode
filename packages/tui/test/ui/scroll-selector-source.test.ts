@@ -36,6 +36,27 @@ test("scrolling selector guard reports the repair path", () => {
   ).toEqual(["broken-selector.tsx:1 onMouseMove -> moveTo"])
 })
 
+// These are the TUI's scrollboxes whose cursor represents a selectable row. Their
+// keyboard reveal path must use OpenTUI's geometry-aware primitive, not duplicated
+// scrollTop/height arithmetic. If this fails, give each row a unique renderable ID
+// and call scrollChildIntoView(id) after changing the keyboard selection.
+test("scrolling selectors delegate keyboard reveal to OpenTUI", async () => {
+  const root = path.resolve(import.meta.dir, "../../src")
+  const selectors = [
+    "component/prompt/autocomplete.tsx",
+    "ui/dialog-select.tsx",
+    "feature-plugins/system/diff-viewer-file-tree.tsx",
+  ]
+
+  for (const file of selectors) {
+    const source = await Bun.file(path.join(root, file)).text()
+    expect(source, `${file} must use OpenTUI scrollChildIntoView`).toContain(".scrollChildIntoView(")
+    expect(source, `${file} must not maintain a parallel keyboard viewport algorithm`).not.toMatch(
+      /\bscroll\?*\.(?:scrollBy|scrollTo)\(/,
+    )
+  }
+})
+
 function pointerRevealCalls(file: string, source: string) {
   const parsed = createSourceFile(file, source, ScriptTarget.Latest, true, ScriptKind.TSX)
   const violations: string[] = []
@@ -45,7 +66,9 @@ function pointerRevealCalls(file: string, source: string) {
       forEachChild(node, function inspect(child) {
         if (isCallExpression(child)) {
           const callee = child.expression.getText(parsed)
-          if (/(?:^|\.)(?:move|moveTo|reveal|recenter|ensureVisible|scrollTo|scrollBy|scrollToSelection)$/.test(callee)) {
+          if (
+            /(?:^|\.)(?:move|moveTo|reveal|recenter|ensureVisible|scrollTo|scrollBy|scrollToSelection)$/.test(callee)
+          ) {
             const position = parsed.getLineAndCharacterOfPosition(child.getStart(parsed))
             violations.push(`${file}:${position.line + 1} ${node.name.getText(parsed)} -> ${callee}`)
           }

@@ -160,16 +160,18 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
       const isRemoving = removing() === item.location
       return {
         title,
-        titleView: isRemoving ? (
-          <span style={{ fg: theme.error }}>Deleting {item.location}</span>
-        ) : deleting ? (
-          <span style={{ fg: theme.text }}>Press {deleteHint()} again to confirm</span>
-        ) : suffix ? (
-          <>
-            {visible.slice(0, split)}
-            <span style={{ fg: theme.textMuted }}>{visible.slice(split)}</span>
-          </>
-        ) : undefined,
+        titleView: isRemoving
+          ? () => <span style={{ fg: theme.error }}>Deleting {item.location}</span>
+          : deleting
+            ? () => <span style={{ fg: theme.text }}>Press {deleteHint()} again to confirm</span>
+            : suffix
+              ? () => (
+                  <>
+                    {visible.slice(0, split)}
+                    <span style={{ fg: theme.textMuted }}>{visible.slice(split)}</span>
+                  </>
+                )
+              : undefined,
         bg: deleting ? theme.error : undefined,
         value: {
           type: "directory",

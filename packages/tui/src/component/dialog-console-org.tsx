@@ -83,7 +83,7 @@ export function DialogConsoleOrg() {
         title: item.orgName,
         value: item,
         category: accountLabel(item),
-        categoryView: (
+        categoryView: () => (
           <box flexDirection="row" gap={2}>
             <text fg={theme.accent}>{item.accountEmail}</text>
             <text fg={theme.textMuted}>{accountHost(item.accountUrl)}</text>

@@ -482,37 +482,38 @@ export function useSkillManager() {
     )
   }
   const options = createMemo(() =>
-    rows().map(
-      (row): DialogSelectOption<string> => ({
-        title: row.skill ? skillTitle(row.title, row.skill) : row.title,
-        titleWidth: row.skill ? skillTitleWidth(dimensions().width) : undefined,
+    rows().map((row): DialogSelectOption<string> => {
+      const skill = row.skill
+      return {
+        title: skill ? skillTitle(row.title, skill) : row.title,
+        titleWidth: skill ? skillTitleWidth(dimensions().width) : undefined,
         description: row.description,
-        footer: row.skill ? (
-          <span
-            style={{
-              fg:
-                row.skill.state === "active"
-                  ? theme.success
-                  : row.skill.state === "undetected"
-                    ? theme.warning
-                    : theme.textMuted,
-            }}
-          >
-            {skillStateLabel(row.skill.state)}
-          </span>
-        ) : (
-          row.footer
-        ),
-        footerWidth: row.skill ? 12 : undefined,
+        footer: skill
+          ? () => (
+              <span
+                style={{
+                  fg:
+                    skill.state === "active"
+                      ? theme.success
+                      : skill.state === "undetected"
+                        ? theme.warning
+                        : theme.textMuted,
+                }}
+              >
+                {skillStateLabel(skill.state)}
+              </span>
+            )
+          : row.footer,
+        footerWidth: skill ? 12 : undefined,
         details: row.details,
         category: row.category,
         categoryView:
-          row.skill && rows().find((item) => item.category === "Skills")?.key === row.key ? skillHeader() : undefined,
+          skill && rows().find((item) => item.category === "Skills")?.key === row.key ? () => skillHeader() : undefined,
         inspectTitle: row.inspectTitle,
         inspectionTitle: row.inspectionTitle,
         value: row.key,
-      }),
-    ),
+      }
+    }),
   )
 
   const select = (key: string) => {

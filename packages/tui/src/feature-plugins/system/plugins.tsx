@@ -138,7 +138,7 @@ function row(api: TuiPluginApi, item: TuiPluginStatus, width: number): DialogSel
     value: item.id,
     category: item.source === "internal" ? "Internal" : "External",
     description: meta(item, width),
-    footer: state(api, item),
+    footer: () => state(api, item),
     disabled: item.id === id,
   }
 }

@@ -234,7 +234,6 @@ export function Autocomplete(props: {
     index: 0,
     selected: 0,
     visible: false as AutocompleteRef["visible"],
-    input: "keyboard" as "keyboard" | "mouse",
   })
   const [shellOptions, setShellOptions] = createSignal<AutocompleteOption[]>([])
   const shellGeneration = createShellCompletionGeneration()
@@ -302,14 +301,6 @@ export function Autocomplete(props: {
   createEffect(() => {
     const next = filter()
     setSearch(next ? next : "")
-  })
-
-  // When the filter changes due to how TUI works, the mousemove might still be triggered
-  // via a synthetic event as the layout moves underneath the cursor. This is a workaround to make sure the input mode remains keyboard so
-  // that the mouseover event doesn't trigger when filtering.
-  createEffect(() => {
-    filter()
-    setStore("input", "keyboard")
   })
 
   function insertPart(text: string, part: PromptInfo["parts"][number]) {
@@ -816,7 +807,6 @@ export function Autocomplete(props: {
         title: "Previous autocomplete item",
         category: "Autocomplete",
         run() {
-          setStore("input", "keyboard")
           move(-1)
         },
       },
@@ -825,7 +815,6 @@ export function Autocomplete(props: {
         title: "Next autocomplete item",
         category: "Autocomplete",
         run() {
-          setStore("input", "keyboard")
           move(1)
         },
       },
@@ -992,7 +981,7 @@ export function Autocomplete(props: {
             onSelect: () => apply(candidate),
           })),
         )
-        setStore({ visible: result.candidates.length ? "shell" : false, selected: 0, input: "keyboard" })
+        setStore({ visible: result.candidates.length ? "shell" : false, selected: 0 })
       },
       onInput(value) {
         const shellInputChanged = shellInput !== value
@@ -1094,17 +1083,8 @@ export function Autocomplete(props: {
               paddingRight={1}
               backgroundColor={index === store.selected ? theme.primary : undefined}
               flexDirection="row"
-              onMouseMove={() => {
-                setStore("input", "mouse")
-              }}
-              onMouseOver={() => {
-                if (store.input !== "mouse") return
-                moveTo(index)
-              }}
-              onMouseDown={() => {
-                setStore("input", "mouse")
-                moveTo(index)
-              }}
+              onMouseMove={() => moveTo(index)}
+              onMouseDown={() => moveTo(index)}
               onMouseUp={() => select()}
             >
               <text fg={index === store.selected ? selectedForeground(theme) : theme.text} flexShrink={0}>

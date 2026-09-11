@@ -177,6 +177,25 @@ export function autocompleteEnterAction(selected: AutocompleteOption | undefined
   return selected === undefined ? ("submit" as const) : ("select" as const)
 }
 
+export function autocompleteScrollOffset(offset: number, input: { count: number; limit: number; selected: number }) {
+  const limit = Math.max(1, Math.min(input.limit, input.count))
+  const maximum = Math.max(0, input.count - limit)
+  const current = Math.max(0, Math.min(offset, maximum))
+  if (input.selected < current) return Math.max(0, input.selected)
+  if (input.selected >= current + limit) return Math.min(maximum, input.selected - limit + 1)
+  return current
+}
+
+export function autocompleteSelectionInWindow(
+  selected: number,
+  input: { count: number; limit: number; offset: number },
+) {
+  if (input.count <= 0) return 0
+  const first = Math.max(0, Math.min(Math.floor(input.offset), input.count - 1))
+  const last = Math.min(input.count - 1, first + Math.max(1, input.limit) - 1)
+  return Math.max(first, Math.min(last, selected))
+}
+
 export function Autocomplete(props: {
   value: string
   parts: () => PromptInfo["parts"]
@@ -220,6 +239,7 @@ export function Autocomplete(props: {
   const [shellOptions, setShellOptions] = createSignal<AutocompleteOption[]>([])
   const shellGeneration = createShellCompletionGeneration()
   let shellInput = props.value
+  let scroll: ScrollBoxRenderable | undefined
 
   createEffect(() => {
     props.shellContextVersion
@@ -724,8 +744,9 @@ export function Autocomplete(props: {
   })
 
   createEffect(() => {
-    filter()
+    options()
     setStore("selected", 0)
+    scroll?.scrollTo(0)
   })
 
   function move(direction: -1 | 1) {
@@ -740,13 +761,22 @@ export function Autocomplete(props: {
   function moveTo(next: number) {
     setStore("selected", next)
     if (!scroll) return
-    const viewportHeight = Math.min(height(), options().length)
-    const scrollBottom = scroll.scrollTop + viewportHeight
-    if (next < scroll.scrollTop) {
-      scroll.scrollBy(next - scroll.scrollTop)
-    } else if (next + 1 > scrollBottom) {
-      scroll.scrollBy(next + 1 - scrollBottom)
-    }
+    const offset = autocompleteScrollOffset(scroll.scrollTop, {
+      count: options().length,
+      limit: Math.min(height(), options().length),
+      selected: next,
+    })
+    if (offset !== scroll.scrollTop) scroll.scrollTo(offset)
+  }
+
+  function syncSelectionWindow() {
+    if (!scroll) return
+    const selected = autocompleteSelectionInWindow(store.selected, {
+      count: options().length,
+      limit: Math.min(height(), options().length),
+      offset: scroll.scrollTop,
+    })
+    if (selected !== store.selected) setStore("selected", selected)
   }
 
   function select() {
@@ -1025,8 +1055,8 @@ export function Autocomplete(props: {
     return Math.min(8, count, Math.max(1, props.anchor().y))
   })
 
-  let scroll: ScrollBoxRenderable
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
+  onCleanup(() => scroll?.verticalScrollBar.off("change", syncSelectionWindow))
 
   return (
     <box
@@ -1040,7 +1070,11 @@ export function Autocomplete(props: {
       borderColor={theme.border}
     >
       <scrollbox
-        ref={(r: ScrollBoxRenderable) => (scroll = r)}
+        ref={(r: ScrollBoxRenderable) => {
+          scroll?.verticalScrollBar.off("change", syncSelectionWindow)
+          scroll = r
+          scroll.verticalScrollBar.on("change", syncSelectionWindow)
+        }}
         backgroundColor={theme.backgroundMenu}
         height={height()}
         scrollbarOptions={{ visible: false }}

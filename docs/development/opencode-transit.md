@@ -68,3 +68,5 @@ OpenCode Auth service as model-provider credentials; they never enter build
 manifests, arguments, environment variables, or repository files.
 
 For `mywindows`, copy or build the Linux artifact inside WSL2 and run the installer from the Linux environment. Do not install into or use `/mnt/c/Users/Mickey` as its HOME or workspace.
+
+Fork release automation, artifact provenance, and the fail-closed stable macOS signing gate are documented in [OpenCode Transit releases](transit-release.md).

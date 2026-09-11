@@ -2,32 +2,41 @@ import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
 
 const temporary: string[] = []
-const installer = path.resolve(import.meta.dir, "../../script/install-rexd")
+const installer = path.resolve(import.meta.dir, "../../script/install-transit")
 
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((directory) => Bun.$`rm -rf ${directory}`.quiet()))
 })
 
-describe("opencode-rexd installer", () => {
+describe("opencode-transit installer", () => {
   test("installs independently and directly replaces the previous build", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")
-    const first = await fakeBinary(root, "first", "1.0.0-rexd.first")
-    const second = await fakeBinary(root, "second", "1.0.0-rexd.second")
+    const first = await fakeBinary(root, "first", "1.0.0-transit.0+first")
+    const second = await fakeBinary(root, "second", "1.0.0-transit.0+second")
 
     await Bun.$`${installer} --binary ${first} --install-dir ${install}`
     await Bun.$`${installer} --binary ${second} --install-dir ${install}`
 
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.second\n")
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe("1.0.0-transit.0+second\n")
     expect(await Bun.file(path.join(install, "opencode")).exists()).toBe(false)
-    expect(await Bun.file(path.join(install, "opencode-rexd.previous")).exists()).toBe(false)
+    expect(await Bun.file(path.join(install, "opencode-transit.previous")).exists()).toBe(false)
+    const legacy = Bun.spawn([path.join(install, "opencode-rexd"), "--version"], { stdout: "pipe", stderr: "pipe" })
+    const [legacyExit, legacyStdout, legacyStderr] = await Promise.all([
+      legacy.exited,
+      new Response(legacy.stdout).text(),
+      new Response(legacy.stderr).text(),
+    ])
+    expect(legacyExit).toBe(0)
+    expect(legacyStdout).toBe("1.0.0-transit.0+second\n")
+    expect(legacyStderr).toContain("opencode-rexd is deprecated; use opencode-transit")
   })
 
   test("signs a macOS candidate before replacing the installed build", async () => {
     if (process.platform !== "darwin") return
     const root = await createFixture()
     const install = path.join(root, "install")
-    const candidate = await fakeBinary(root, "signed", "1.0.0-rexd.signed")
+    const candidate = await fakeBinary(root, "signed", "1.0.0-transit.0+signed")
     const commands = path.join(root, "commands")
     const calls = path.join(root, "codesign-calls")
     await Bun.$`mkdir -p ${commands}`
@@ -50,15 +59,15 @@ exit 0
     )
     expect(await result.exited).toBe(0)
     const signed = await Bun.file(calls).text()
-    expect(signed).toContain("--force --sign Test Identity --identifier ai.opencode.rexd --timestamp=none")
+    expect(signed).toContain("--force --sign Test Identity --identifier ai.opencode.transit --timestamp=none")
     expect(signed).toContain("--verify --strict")
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.signed\n")
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe("1.0.0-transit.0+signed\n")
   })
 
   test("rejects a broken candidate without changing the installed build", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")
-    const working = await fakeBinary(root, "working", "1.0.0-rexd.working")
+    const working = await fakeBinary(root, "working", "1.0.0-transit.0+working")
     const broken = path.join(root, "broken")
     await Bun.write(broken, "#!/bin/sh\nexit 1\n")
     await Bun.$`chmod 755 ${broken}`
@@ -67,7 +76,7 @@ exit 0
     const result = await Bun.$`${installer} --binary ${broken} --install-dir ${install}`.nothrow().quiet()
 
     expect(result.exitCode).not.toBe(0)
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.working\n")
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe("1.0.0-transit.0+working\n")
   })
 
   test("installs a paired binary and build manifest", async () => {
@@ -75,8 +84,8 @@ exit 0
     const install = path.join(root, "install")
     const firstCommit = "a".repeat(40)
     const secondCommit = "b".repeat(40)
-    const firstVersion = `1.0.0-rexd.${firstCommit.slice(0, 12)}`
-    const secondVersion = `1.0.0-rexd.${secondCommit.slice(0, 12)}`
+    const firstVersion = `1.0.0-transit.0+${firstCommit.slice(0, 12)}`
+    const secondVersion = `1.0.0-transit.0+${secondCommit.slice(0, 12)}`
     const first = await fakeBinary(root, "first", firstVersion)
     const second = await fakeBinary(root, "second", secondVersion)
     const firstManifest = await fakeManifest(root, "first", firstVersion, firstCommit)
@@ -85,12 +94,16 @@ exit 0
     await Bun.$`${installer} --binary ${first} --manifest ${firstManifest} --install-dir ${install}`
     await Bun.$`${installer} --binary ${second} --manifest ${secondManifest} --install-dir ${install}`
 
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${secondVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).json()).toEqual({
-      entrypoint: "opencode-rexd",
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${secondVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).json()).toEqual({
+      product: "OpenCode Transit",
+      entrypoint: "opencode-transit",
       version: secondVersion,
+      upstreamVersion: "1.0.0",
       commit: secondCommit,
       dirty: false,
+      target: "opencode-darwin-arm64",
+      builtAt: "2026-09-11T00:00:00.000Z",
     })
   })
 
@@ -99,15 +112,15 @@ exit 0
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
     const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-rexd.${candidateCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
+    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const candidate = await fakeBinary(root, "candidate", candidateVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
-    const mismatchedManifest = await fakeManifest(root, "mismatch", "1.0.0-rexd.cccccccccccc", candidateCommit)
+    const mismatchedManifest = await fakeManifest(root, "mismatch", "1.0.0-transit.0+cccccccccccc", candidateCommit)
 
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-rexd.build.json")).text()
+    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
     const result =
       await Bun.$`${installer} --binary ${candidate} --manifest ${mismatchedManifest} --install-dir ${install}`
         .nothrow()
@@ -115,8 +128,8 @@ exit 0
 
     expect(result.exitCode).not.toBe(0)
     expect(result.stderr.toString()).toContain("Build manifest is invalid")
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).text()).toBe(installedManifest)
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
   })
 
   test("rejects a mismatched manifest commit without changing the installed pair", async () => {
@@ -124,15 +137,15 @@ exit 0
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
     const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-rexd.${candidateCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
+    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const candidate = await fakeBinary(root, "candidate", candidateVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
     const mismatchedManifest = await fakeManifest(root, "mismatch", candidateVersion, "c".repeat(40))
 
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-rexd.build.json")).text()
+    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
     const result =
       await Bun.$`${installer} --binary ${candidate} --manifest ${mismatchedManifest} --install-dir ${install}`
         .nothrow()
@@ -140,8 +153,8 @@ exit 0
 
     expect(result.exitCode).not.toBe(0)
     expect(result.stderr.toString()).toContain("Build manifest is invalid")
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).text()).toBe(installedManifest)
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
   })
 
   test("keeps entrypoint validation before replacing the installed pair", async () => {
@@ -149,8 +162,8 @@ exit 0
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
     const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-rexd.${candidateCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
+    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const candidate = await fakeBinary(root, "candidate", candidateVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
@@ -164,7 +177,7 @@ exit 0
     )
 
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-rexd.build.json")).text()
+    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
     const result =
       await Bun.$`${installer} --binary ${candidate} --manifest ${wrongEntrypoint} --install-dir ${install}`
         .nothrow()
@@ -172,15 +185,15 @@ exit 0
 
     expect(result.exitCode).not.toBe(0)
     expect(result.stderr.toString()).toContain("Build manifest is invalid")
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).text()).toBe(installedManifest)
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
   })
 
   test("rejects malformed and dirty-state mismatched manifests through the candidate validator", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")
     const commit = "a".repeat(40)
-    const version = `1.0.0-rexd.${commit.slice(0, 12)}`
+    const version = `1.0.0-transit.0+${commit.slice(0, 12)}`
     const candidate = await fakeBinary(root, "candidate", version)
     const malformed = path.join(root, "malformed.build.json")
     const wrongDirty = await fakeManifest(root, "wrong-dirty", version, commit, true)
@@ -195,8 +208,8 @@ exit 0
 
     expect(malformedResult.exitCode).not.toBe(0)
     expect(dirtyResult.exitCode).not.toBe(0)
-    expect(await Bun.file(path.join(install, "opencode-rexd")).exists()).toBe(false)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).exists()).toBe(false)
+    expect(await Bun.file(path.join(install, "opencode-transit")).exists()).toBe(false)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).exists()).toBe(false)
   })
 
   test("restores the previous pair when the installed candidate smoke check fails", async () => {
@@ -204,8 +217,8 @@ exit 0
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
     const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-rexd.${candidateCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
+    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
     const candidateManifest = await fakeManifest(root, "candidate", candidateVersion, candidateCommit)
@@ -229,16 +242,16 @@ exit 8
     await Bun.$`chmod 755 ${candidate}`
 
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-rexd.build.json")).text()
+    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
     const result =
       await Bun.$`${installer} --binary ${candidate} --manifest ${candidateManifest} --install-dir ${install}`
         .nothrow()
         .quiet()
 
     expect(result.exitCode).not.toBe(0)
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).text()).toBe(installedManifest)
-    expect(await Array.fromAsync(new Bun.Glob(".opencode-rexd.backup*").scan({ cwd: install }))).toEqual([])
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
+    expect(await Array.fromAsync(new Bun.Glob(".opencode-transit.backup*").scan({ cwd: install }))).toEqual([])
   })
 
   test("restores the previous pair when the installed manifest smoke check fails", async () => {
@@ -246,8 +259,8 @@ exit 8
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
     const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-rexd.${candidateCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
+    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
     const candidateManifest = await fakeManifest(root, "candidate", candidateVersion, candidateCommit)
@@ -279,7 +292,7 @@ process.exit(1)
     await Bun.$`chmod 755 ${candidate}`
 
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-rexd.build.json")).text()
+    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
     const result =
       await Bun.$`${installer} --binary ${candidate} --manifest ${candidateManifest} --install-dir ${install}`
         .nothrow()
@@ -287,9 +300,9 @@ process.exit(1)
 
     expect(result.exitCode).not.toBe(0)
     expect(result.stderr.toString()).toContain("Installed manifest smoke check failed")
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).text()).toBe(installedManifest)
-    expect(await Array.fromAsync(new Bun.Glob(".opencode-rexd.backup*").scan({ cwd: install }))).toEqual([])
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
+    expect(await Array.fromAsync(new Bun.Glob(".opencode-transit.backup*").scan({ cwd: install }))).toEqual([])
   })
 
   test("restores the previous pair when manifest replacement fails", async () => {
@@ -297,8 +310,8 @@ process.exit(1)
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
     const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-rexd.${candidateCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
+    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const candidate = await fakeBinary(root, "candidate", candidateVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
@@ -319,7 +332,7 @@ exec /bin/mv "$@"
     await Bun.$`chmod 755 ${path.join(commandDirectory, "mv")}`
 
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-rexd.build.json")).text()
+    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
     const child = Bun.spawn(
       [installer, "--binary", candidate, "--manifest", candidateManifest, "--install-dir", install],
       {
@@ -335,38 +348,38 @@ exec /bin/mv "$@"
     const exitCode = await child.exited
 
     expect(exitCode).not.toBe(0)
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).text()).toBe(installedManifest)
-    expect(await Array.fromAsync(new Bun.Glob(".opencode-rexd.backup*").scan({ cwd: install }))).toEqual([])
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
+    expect(await Array.fromAsync(new Bun.Glob(".opencode-transit.backup*").scan({ cwd: install }))).toEqual([])
   })
 
   test("removes an old manifest after a successful manifest-free install", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
-    const candidate = await fakeBinary(root, "candidate", "1.0.0-rexd.manifest-free")
+    const candidate = await fakeBinary(root, "candidate", "1.0.0-transit.0+manifest-free")
 
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
     await Bun.$`${installer} --binary ${candidate} --install-dir ${install}`
 
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.manifest-free\n")
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).exists()).toBe(false)
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe("1.0.0-transit.0+manifest-free\n")
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).exists()).toBe(false)
   })
 
   test("replaces an existing symlink entrypoint without retaining it", async () => {
     const root = await createFixture()
     const install = path.join(root, "install")
-    const legacy = await fakeBinary(root, "legacy", "1.0.0-rexd.legacy")
-    const candidate = await fakeBinary(root, "candidate", "1.0.0-rexd.candidate")
+    const legacy = await fakeBinary(root, "legacy", "1.0.0-transit.0+legacy")
+    const candidate = await fakeBinary(root, "candidate", "1.0.0-transit.0+candidate")
     await Bun.$`mkdir -p ${install}`
-    await Bun.$`ln -s ${legacy} ${path.join(install, "opencode-rexd")}`
+    await Bun.$`ln -s ${legacy} ${path.join(install, "opencode-transit")}`
 
     await Bun.$`${installer} --binary ${candidate} --install-dir ${install}`
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe("1.0.0-rexd.candidate\n")
-    expect(await Bun.file(path.join(install, "opencode-rexd.previous")).exists()).toBe(false)
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe("1.0.0-transit.0+candidate\n")
+    expect(await Bun.file(path.join(install, "opencode-transit.previous")).exists()).toBe(false)
   })
 
   test("passes deployment credentials only over stdin after candidate validation", async () => {
@@ -376,7 +389,7 @@ exec /bin/mv "$@"
     const candidate = path.join(root, "candidate")
     const secret = "dummy-release-secret"
     const commit = "a".repeat(40)
-    const version = `1.0.0-rexd.${commit.slice(0, 12)}`
+    const version = `1.0.0-transit.0+${commit.slice(0, 12)}`
     const manifest = await fakeManifest(root, "candidate", version, commit)
     await Bun.write(
       candidate,
@@ -424,8 +437,8 @@ exit 8
     const install = path.join(root, "install")
     const workingCommit = "a".repeat(40)
     const candidateCommit = "b".repeat(40)
-    const workingVersion = `1.0.0-rexd.${workingCommit.slice(0, 12)}`
-    const candidateVersion = `1.0.0-rexd.${candidateCommit.slice(0, 12)}`
+    const workingVersion = `1.0.0-transit.0+${workingCommit.slice(0, 12)}`
+    const candidateVersion = `1.0.0-transit.0+${candidateCommit.slice(0, 12)}`
     const working = await fakeBinary(root, "working", workingVersion)
     const workingManifest = await fakeManifest(root, "working", workingVersion, workingCommit)
     const candidateManifest = await fakeManifest(root, "candidate", candidateVersion, candidateCommit)
@@ -441,7 +454,7 @@ exit 7
     )
     await Bun.$`chmod 755 ${broken}`
     await Bun.$`${installer} --binary ${working} --manifest ${workingManifest} --install-dir ${install}`
-    const installedManifest = await Bun.file(path.join(install, "opencode-rexd.build.json")).text()
+    const installedManifest = await Bun.file(path.join(install, "opencode-transit.build.json")).text()
     const child = Bun.spawn(
       [
         installer,
@@ -465,8 +478,8 @@ exit 7
     ])
     expect(exitCode).not.toBe(0)
     expect(output).not.toContain("not-printed")
-    expect(await Bun.$`${path.join(install, "opencode-rexd")} --version`.text()).toBe(`${workingVersion}\n`)
-    expect(await Bun.file(path.join(install, "opencode-rexd.build.json")).text()).toBe(installedManifest)
+    expect(await Bun.$`${path.join(install, "opencode-transit")} --version`.text()).toBe(`${workingVersion}\n`)
+    expect(await Bun.file(path.join(install, "opencode-transit.build.json")).text()).toBe(installedManifest)
   })
 })
 
@@ -506,16 +519,20 @@ async function fakeManifest(
   version: string,
   commit: string,
   dirty = false,
-  entrypoint = "opencode-rexd",
+  entrypoint = "opencode-transit",
 ) {
   const manifest = path.join(root, `${name}.build.json`)
   await Bun.write(
     manifest,
     JSON.stringify({
+      product: "OpenCode Transit",
       entrypoint,
       version,
+      upstreamVersion: version.slice(0, version.indexOf("-transit.")),
       commit,
       dirty,
+      target: "opencode-darwin-arm64",
+      builtAt: "2026-09-11T00:00:00.000Z",
     }),
   )
   return manifest

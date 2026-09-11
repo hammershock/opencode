@@ -24,8 +24,8 @@ export const SourceState = Schema.Record(Key, SourceSnapshot).annotate({ identif
 export type SourceState = Readonly<Record<string, SourceSnapshot>>
 
 export const Environment = Schema.Struct({
-  harness: Schema.Literal("OpenCode REXD"),
-  entrypoint: Schema.Literal("opencode-rexd"),
+  harness: Schema.Literal("OpenCode Transit"),
+  entrypoint: Schema.Literal("opencode-transit"),
   targetKind: Schema.Literals(["local", "rexd"]),
   targetName: Schema.NonEmptyString,
   directory: Schema.NonEmptyString,

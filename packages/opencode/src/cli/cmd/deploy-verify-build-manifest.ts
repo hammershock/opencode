@@ -18,14 +18,18 @@ export async function verifyBuildManifestFromStream(
   if (!size) throw invalid("input")
 
   const manifest = parseManifest(Buffer.concat(chunks).toString("utf8"))
-  if (manifest.entrypoint !== "opencode-rexd") throw invalid("entrypoint")
+  if (manifest.product !== "OpenCode Transit") throw invalid("product")
+  if (manifest.entrypoint !== "opencode-transit") throw invalid("entrypoint")
   if (manifest.version !== version) throw invalid("version")
 
-  const identity = version.match(/-rexd\.([0-9a-f]{12})(\.dirty)?$/)
+  const identity = version.match(/^(.+)-transit\.\d+\+([0-9a-f]{12})(\.dirty)?$/)
   if (!identity) throw invalid("identity")
+  if (manifest.upstreamVersion !== identity[1]) throw invalid("upstreamVersion")
   if (!/^[0-9a-f]{40}$/.test(manifest.commit)) throw invalid("commit")
-  if (!manifest.commit.startsWith(identity[1])) throw invalid("commit")
-  if (manifest.dirty !== Boolean(identity[2])) throw invalid("dirty")
+  if (!manifest.commit.startsWith(identity[2])) throw invalid("commit")
+  if (manifest.dirty !== Boolean(identity[3])) throw invalid("dirty")
+  if (!manifest.target.trim()) throw invalid("target")
+  if (!Number.isFinite(Date.parse(manifest.builtAt))) throw invalid("builtAt")
 }
 
 function parseManifest(value: string) {
@@ -37,15 +41,23 @@ function parseManifest(value: string) {
     }
   })()
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw invalid("shape")
+  if (!("product" in manifest) || typeof manifest.product !== "string") throw invalid("shape")
   if (!("entrypoint" in manifest) || typeof manifest.entrypoint !== "string") throw invalid("shape")
   if (!("version" in manifest) || typeof manifest.version !== "string") throw invalid("shape")
+  if (!("upstreamVersion" in manifest) || typeof manifest.upstreamVersion !== "string") throw invalid("shape")
   if (!("commit" in manifest) || typeof manifest.commit !== "string") throw invalid("shape")
   if (!("dirty" in manifest) || typeof manifest.dirty !== "boolean") throw invalid("shape")
+  if (!("target" in manifest) || typeof manifest.target !== "string") throw invalid("shape")
+  if (!("builtAt" in manifest) || typeof manifest.builtAt !== "string") throw invalid("shape")
   return {
+    product: manifest.product,
     entrypoint: manifest.entrypoint,
     version: manifest.version,
+    upstreamVersion: manifest.upstreamVersion,
     commit: manifest.commit,
     dirty: manifest.dirty,
+    target: manifest.target,
+    builtAt: manifest.builtAt,
   }
 }
 

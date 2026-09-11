@@ -2,7 +2,7 @@
 - Every implementation task uses one GitHub issue, one semantic branch, one dedicated worktree, and one PR. Do not put developer or Agent names in branch/worktree names.
 - The primary checkout is for integration, RFCs, and repository administration. Implement features and fixes in dedicated worktrees unless the change is an explicitly approved trivial repository-maintenance edit.
 - Do not begin implementation for a feature governed by an RFC until the RFC is accepted and the task meets the Ready criteria in the fork workflow.
-- Functional work is not complete with unit tests alone. Follow [`docs/testing-workflow.md`](docs/testing-workflow.md) and complete relevant real-device acceptance on both the Mac and `mywindows` using the `opencode-rexd` entrypoint.
+- Functional work is not complete with unit tests alone. Follow [`docs/testing-workflow.md`](docs/testing-workflow.md) and complete relevant real-device acceptance on both the Mac and `mywindows` using the `opencode-transit` entrypoint.
 - To regenerate the legacy JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit `src/generated` or `src/generated-effect` directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk-next` composes Client, Core, and Server.

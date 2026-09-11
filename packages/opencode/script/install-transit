@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP=opencode-transit
+LEGACY_APP=opencode-rexd
+INSTALL_DIR="${OPENCODE_TRANSIT_INSTALL_DIR:-${OPENCODE_REXD_INSTALL_DIR:-${HOME}/.local/bin}}"
+BINARY=""
+MANIFEST=""
+PROVISION_BAIDU_APP=0
+CODESIGN_IDENTITY=""
+usage() {
+  cat <<EOF
+Install a local OpenCode Transit build without replacing the upstream opencode command.
+
+Usage:
+  ./script/install-transit --binary <path> [--manifest <path>] [--install-dir <path>] [--codesign-identity <identity>] [--provision-baidu-app]
+
+An existing opencode-transit build is replaced transactionally. The installer
+also writes a one-minor compatibility launcher named opencode-rexd; it never
+creates or replaces an opencode entrypoint.
+
+--provision-baidu-app reads the release credential JSON only from stdin and
+writes it to the platform secure store after validating the candidate.
+
+--codesign-identity signs the macOS candidate as ai.opencode.transit before
+validation and replacement, preserving its Keychain application identity.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --binary)
+      BINARY="${2:-}"
+      shift 2
+      ;;
+    --manifest)
+      MANIFEST="${2:-}"
+      shift 2
+      ;;
+    --install-dir)
+      INSTALL_DIR="${2:-}"
+      shift 2
+      ;;
+    --provision-baidu-app)
+      PROVISION_BAIDU_APP=1
+      shift
+      ;;
+    --codesign-identity)
+      CODESIGN_IDENTITY="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+mkdir -p "$INSTALL_DIR"
+CURRENT="$INSTALL_DIR/$APP"
+CURRENT_MANIFEST="$INSTALL_DIR/$APP.build.json"
+LEGACY="$INSTALL_DIR/$LEGACY_APP"
+
+if [[ -z "$BINARY" || ! -f "$BINARY" ]]; then
+  echo "--binary must name an existing build" >&2
+  exit 2
+fi
+if [[ -n "$MANIFEST" && ! -f "$MANIFEST" ]]; then
+  echo "--manifest must name an existing file" >&2
+  exit 2
+fi
+
+candidate="$INSTALL_DIR/.$APP.candidate.$$"
+candidate_manifest="$INSTALL_DIR/.$APP.candidate-manifest.$$"
+backup="$INSTALL_DIR/.$APP.backup.$$"
+backup_manifest="$INSTALL_DIR/.$APP.backup-manifest.$$"
+candidate_legacy="$INSTALL_DIR/.$LEGACY_APP.candidate.$$"
+backup_legacy="$INSTALL_DIR/.$LEGACY_APP.backup.$$"
+had_current=0
+had_current_manifest=0
+had_legacy=0
+commit_started=0
+commit_complete=0
+
+cleanup() {
+  exit_code=$?
+  if [[ "$commit_started" -eq 1 && "$commit_complete" -eq 0 ]]; then
+    rollback_failed=0
+    if [[ "$had_current" -eq 1 ]]; then
+      mv -f "$backup" "$CURRENT" || rollback_failed=1
+    else
+      rm -f "$CURRENT" || rollback_failed=1
+    fi
+    if [[ "$had_current_manifest" -eq 1 ]]; then
+      mv -f "$backup_manifest" "$CURRENT_MANIFEST" || rollback_failed=1
+    else
+      rm -f "$CURRENT_MANIFEST" || rollback_failed=1
+    fi
+    if [[ "$had_legacy" -eq 1 ]]; then
+      mv -f "$backup_legacy" "$LEGACY" || rollback_failed=1
+    else
+      rm -f "$LEGACY" || rollback_failed=1
+    fi
+    if [[ "$rollback_failed" -ne 0 ]]; then
+      echo "Installation rollback failed; preserved backup paths: $backup $backup_manifest $backup_legacy" >&2
+      exit_code=1
+    fi
+  fi
+  rm -f "$candidate" "$candidate_manifest" "$candidate_legacy"
+  if [[ "$commit_complete" -eq 1 || "$commit_started" -eq 0 ]]; then
+    rm -f "$backup" "$backup_manifest" "$backup_legacy"
+  fi
+  trap - EXIT
+  exit "$exit_code"
+}
+trap cleanup EXIT
+
+cp "$BINARY" "$candidate"
+chmod 755 "$candidate"
+cat > "$candidate_legacy" <<'EOF'
+#!/usr/bin/env sh
+echo "opencode-rexd is deprecated; use opencode-transit" >&2
+directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$directory/opencode-transit" "$@"
+EOF
+chmod 755 "$candidate_legacy"
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+  if [[ "$(uname -s)" != "Darwin" ]] || ! command -v codesign >/dev/null 2>&1; then
+    echo "--codesign-identity requires macOS codesign" >&2
+    exit 2
+  fi
+  codesign --force --sign "$CODESIGN_IDENTITY" --identifier ai.opencode.transit --timestamp=none "$candidate"
+  codesign --verify --strict "$candidate"
+fi
+candidate_version=$("$candidate" --version)
+if [[ -z "$candidate_version" ]]; then
+  echo "Candidate did not report a version; existing install was not changed" >&2
+  exit 1
+fi
+if [[ -n "$MANIFEST" ]]; then
+  cp "$MANIFEST" "$candidate_manifest"
+  if ! "$candidate" __deploy-verify-build-manifest < "$candidate_manifest"; then
+    echo "Build manifest is invalid; existing install was not changed" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$PROVISION_BAIDU_APP" -eq 1 ]]; then
+  if ! "$candidate" __deploy-provision-baidu-app; then
+    echo "Baidu OAuth application provisioning failed; existing install was not changed" >&2
+    exit 1
+  fi
+fi
+
+if [[ -e "$CURRENT" || -L "$CURRENT" ]]; then
+  cp -p "$CURRENT" "$backup"
+  had_current=1
+fi
+if [[ -e "$CURRENT_MANIFEST" || -L "$CURRENT_MANIFEST" ]]; then
+  cp -p "$CURRENT_MANIFEST" "$backup_manifest"
+  had_current_manifest=1
+fi
+if [[ -e "$LEGACY" || -L "$LEGACY" ]]; then
+  cp -p "$LEGACY" "$backup_legacy"
+  had_legacy=1
+fi
+
+commit_started=1
+mv "$candidate" "$CURRENT"
+if [[ -e "$candidate_manifest" ]]; then
+  mv "$candidate_manifest" "$CURRENT_MANIFEST"
+else
+  rm -f "$CURRENT_MANIFEST"
+fi
+mv "$candidate_legacy" "$LEGACY"
+installed_version=$("$CURRENT" --version)
+if [[ "$installed_version" != "$candidate_version" ]]; then
+  echo "Installed candidate smoke check failed; restoring previous install" >&2
+  exit 1
+fi
+if [[ -n "$MANIFEST" ]] && ! "$CURRENT" __deploy-verify-build-manifest < "$CURRENT_MANIFEST"; then
+  echo "Installed manifest smoke check failed; restoring previous install" >&2
+  exit 1
+fi
+legacy_version=$("$LEGACY" --version 2>/dev/null)
+if [[ "$legacy_version" != "$candidate_version" ]]; then
+  echo "Legacy compatibility launcher smoke check failed; restoring previous install" >&2
+  exit 1
+fi
+commit_complete=1
+
+echo "Installed $CURRENT ($candidate_version)"
+echo "Add $INSTALL_DIR to PATH if it is not already present."

@@ -561,7 +561,7 @@ legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一
 22. Skill sync 成功 materialize 后 registry cache 失效；活跃 Session catalog 保持冻结，退出重进后发现同步到的新 Skill 或版本。
 23. cloud reset 的确认与清理同时覆盖 Session 和 Skill namespaces，本地 Skill 保留；logout、disable 与旧客户端兼容不删除本地 package。
 24. registry、admission、Context Epoch、sync 与 TUI failure states 有 unit/contract/integration coverage；公共 API generation 与 package-local typecheck 通过。
-25. Mac 与 `mywindows` 使用同一提交构建的 `opencode-rexd` 完成 local 与 Rexd 的 import、target filter、`$` mention、re-enter reload、fold/expand、resource read、OpenCode Skill 双向同步、并发冲突、删除防复活和跨设备 resume 实测，并附 TUI 截图或录屏。
+25. Mac 与 `mywindows` 使用同一提交构建的 `opencode-transit` 完成 local 与 Rexd 的 import、target filter、`$` mention、re-enter reload、fold/expand、resource read、OpenCode Skill 双向同步、并发冲突、删除防复活和跨设备 resume 实测，并附 TUI 截图或录屏。
 
 ## 参考
 

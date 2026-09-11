@@ -19,7 +19,7 @@ superseded-by: []
 
 ## 摘要
 
-OpenCode REXD 必须根据 Session 的实际 Location 构造模型所见的工作环境，而不能从运行 OpenCode 的控制设备隐式读取 cwd、项目根、平台或项目规则。远程 Session 的 `AGENTS.md`、兼容规则文件和项目级 `instructions` 必须从 target 文件系统发现和读取；控制端用户级规则仍代表启动 OpenCode 的用户要求。
+OpenCode Transit 必须根据 Session 的实际 Location 构造模型所见的工作环境，而不能从运行 OpenCode 的控制设备隐式读取 cwd、项目根、平台或项目规则。远程 Session 的 `AGENTS.md`、兼容规则文件和项目级 `instructions` 必须从 target 文件系统发现和读取；控制端用户级规则仍代表启动 OpenCode 的用户要求。
 
 Location 派生的环境身份和工作规则形成 Session 持久化的 `ModelContextSnapshot`。它是隐藏的系统状态，不显示成普通聊天消息，但与完整 Session 一起同步。普通 turn 不热重载已经接纳的规则；Location rebind、成功的 `/init` 和旧 Session 首次迁移可以显式产生新的上下文代际。Agent 首次进入更深目录时仍保留 OpenCode 按需追加嵌套规则的能力。
 
@@ -62,7 +62,7 @@ Codex 的成熟实现把 `AGENTS.md` 和 environment 作为 Session 的持久 Wo
 
 ```text
 provider / agent base prompt                    (model-scoped, not durable here)
-  -> OpenCode REXD harness identity              (Session context)
+  -> OpenCode Transit harness identity              (Session context)
   -> Location environment identity               (Session context)
   -> controller date and timezone                (dynamic Session context)
   -> controller-global ambient instructions      (Session context)
@@ -91,7 +91,7 @@ ModelContextSnapshot {
 
 `environment` 至少包含：
 
-- harness 名称 `OpenCode REXD` 和入口 `opencode-rexd`；
+- harness 名称 `OpenCode Transit` 和入口 `opencode-transit`；
 - Location provider kind：`local` 或 `rexd`；
 - local portable device name 或 Rexd target 的非敏感显示名称；
 - Location directory；
@@ -137,7 +137,7 @@ Location rebind 必须重新执行项目发现，并把结果写入新 generatio
 
 ## 环境身份与时间
 
-模型环境块明确声明当前 harness 是 OpenCode REXD，而不是未修改的 upstream OpenCode。远程 Location 还必须明确声明 execution target kind 和 target name，使模型理解 Shell、文件和 Agent tools 在目标机器执行。
+模型环境块明确声明当前 harness 是 OpenCode Transit，而不是未修改的 upstream OpenCode。远程 Location 还必须明确声明 execution target kind 和 target name，使模型理解 Shell、文件和 Agent tools 在目标机器执行。
 
 自然语言日期和时区看齐 Codex：每个 provider turn 从控制端系统取得当前日期和 IANA timezone。它们不暴露控制端设备身份，也不读取或显示 target timezone。日期或控制端时区变化时产生独立的有界 environment context update，不重新读取 Location 或 instruction sources。
 
@@ -275,7 +275,7 @@ TUI 面板使用本 fork 的视觉规范，默认展示：
 10. target identity 只包含允许字段；SSH 连接信息、credential、`.env` 和控制端设备身份不进入模型上下文或同步 payload。
 11. 控制端日期与 IANA timezone 每轮可用，跨日只产生 time context update，不触发规则重载；target timezone 不注入。
 12. Rexd contract test 证明 initial discovery 复用现有 lease，ancestor/read 请求并发且没有逐文件 SSH handshake。
-13. package-local typecheck、unit/contract/integration tests 通过；Mac 和 `mywindows` 使用同一提交构建的 `opencode-rexd` 完成 local、Mac→Linux target、mywindows→Mac target 和跨设备 resume 实测。
+13. package-local typecheck、unit/contract/integration tests 通过；Mac 和 `mywindows` 使用同一提交构建的 `opencode-transit` 完成 local、Mac→Linux target、mywindows→Mac target 和跨设备 resume 实测。
 
 ## 参考
 

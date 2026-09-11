@@ -94,7 +94,7 @@ export class RexdRpcClient {
     const value = await this.request(
       "session.open",
       {
-        client_name: "opencode-rexd",
+        client_name: "opencode-transit",
         client_version: input.clientVersion,
         workspace_roots: input.workspaceRoots,
         requested_capabilities: REQUIRED_CAPABILITIES,

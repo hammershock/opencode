@@ -6,7 +6,7 @@ import { SyncSecureStore } from "./secure-store"
 const ACCOUNT_API = "https://pan.baidu.com/rest/2.0/xpan/nas"
 const MAX_ATTEMPT_AGE = 15 * 60 * 1_000
 export const MISSING_APP_MESSAGE =
-  "Baidu Netdisk is not enabled in this build. Reinstall an official opencode-rexd build or contact its distributor."
+  "Baidu Netdisk is not enabled in this build. Connect your Baidu application in OpenCode Transit Sync settings."
 
 export type Attempt = {
   readonly id: string

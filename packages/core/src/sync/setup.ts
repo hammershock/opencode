@@ -39,7 +39,7 @@ export const JoinInput = Schema.Struct({
 export type JoinInput = typeof JoinInput.Type
 
 export const INCOMPATIBLE_LOCAL_STATE_MESSAGE =
-  "Local sync state is incompatible. Archive the local sync folder and restart opencode-rexd."
+  "Local sync state is incompatible. Archive the local sync folder and restart opencode-transit."
 
 export class SetupError extends Schema.TaggedErrorClass<SetupError>()("SyncSetupError", {
   kind: Schema.Literals([

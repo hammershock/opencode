@@ -8,7 +8,7 @@ describe("sync settings deployment errors", () => {
         cause: { status: 400, body: { name: "SyncSetupError", data: { kind: "missing-app" } } },
       }),
     )
-    expect(message).toContain("Reinstall an official opencode-rexd build")
+    expect(message).toContain("Connect your Baidu application in OpenCode Transit Sync settings")
     expect(message).not.toContain("AppKey")
     expect(message).not.toContain("SecretKey")
     expect(
@@ -18,7 +18,7 @@ describe("sync settings deployment errors", () => {
           body: { name: "SyncSetupError", data: { kind: "incompatible-local-state" } },
         },
       }),
-    ).toBe("Local sync state is incompatible. Archive the local sync folder and restart opencode-rexd.")
+    ).toBe("Local sync state is incompatible. Archive the local sync folder and restart opencode-transit.")
     expect(syncOperationFailure({ message: "incompatible-local-state" })).toBe("Sync operation failed")
     expect(syncOperationFailure({ data: { kind: "unconfigured" } })).toBe("Cloud sync is not initialized")
     expect(syncOperationFailure({ data: { kind: "remote-uninitialized" } })).toBe("Cloud sync is not initialized")

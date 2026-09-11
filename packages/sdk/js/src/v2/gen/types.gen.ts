@@ -3332,8 +3332,8 @@ export type LocationRef = {
 }
 
 export type ModelContextEnvironment = {
-  harness: "OpenCode REXD"
-  entrypoint: "opencode-rexd"
+  harness: "OpenCode Transit"
+  entrypoint: "opencode-transit"
   targetKind: "local" | "rexd"
   targetName: string
   directory: string

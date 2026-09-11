@@ -2,6 +2,8 @@
 
 This document defines how this fork turns accepted RFCs into maintainable work when multiple people or Agents develop in parallel. It supplements the upstream `AGENTS.md` and `CONTRIBUTING.md`; package-local `AGENTS.md` files still apply to files below their directories.
 
+User-facing README, contribution, security, release and visual documentation follows [the human-facing documentation standard](development/human-documentation.md). Its [Simplified Chinese version](development/human-documentation.zh.md) is maintained alongside the English canonical document.
+
 ## Principles
 
 1. Plan by behavior and contract, not by package or developer.

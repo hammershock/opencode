@@ -45,6 +45,10 @@ This document defines the normative interaction and presentation rules for fork-
 - Unique completion may fill the input directly but still must not submit it.
 - Input, cursor, scope or generation changes invalidate pending results. Late asynchronous results never steal focus or replace newer text.
 - Modal focus, autocomplete and confirmation take precedence over global shortcuts. Closing a child surface returns focus to the element that opened it when that element still exists.
+- A scrollable selector has one navigation-state owner. Keep its highlighted row, filter and viewport together inside the selector; `current` represents a committed domain value or an explicit initial anchor, not a cursor mirrored on every move.
+- Never feed `onMove` into reactive state and pass that state back as `current`. That controlled-selection loop can queue stale asynchronous recenter operations during key repeat or wheel input, making a long list jump between old positions after the user has already moved on.
+- Preserve a selection across option reloads by stable value inside the selector. If an external workflow must position the list, apply it once for the relevant data generation and cancel or supersede older scheduled scroll work; do not continuously recenter ordinary navigation.
+- Exercise every scrollable dialog with more rows than its viewport. Rapid Up/Down, Page Up/Page Down and wheel input must remain monotonic while moving, then leave the viewport completely stationary after input stops; synthetic mouse movement caused by layout changes must not take over keyboard selection.
 - Every key-driven action exposed in a footer must use the configured keybinding label rather than a hard-coded key name, except when an RFC intentionally fixes the interaction.
 - Input whose first character is `/` is an explicit slash-command attempt. If no registered command matches, keep the input for correction, show `Slash command does not exist`, and stop before Session creation, prompt history, optimistic rendering or model-context admission. A slash elsewhere in ordinary text keeps its normal prompt meaning.
 
@@ -80,3 +84,4 @@ This document defines the normative interaction and presentation rules for fork-
 - Is every destructive scope explicit, while normal reversible actions avoid redundant confirmation?
 - Does the TUI consume typed domain state without owning credentials, transport or synchronization logic?
 - Do all entry points reuse the owning workflow and its confirmation semantics rather than duplicate a feature-specific panel?
+- Does each scrollable selector have exactly one cursor/viewport owner, with no `onMove` → reactive `current` feedback or stale recenter work under rapid input?

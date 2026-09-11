@@ -9,7 +9,18 @@ import {
 import type { Binding } from "@opentui/keymap"
 import { useTheme, selectedForeground } from "../context/theme"
 import { entries, filter, flatMap, groupBy, pipe } from "remeda"
-import { batch, createEffect, createMemo, createSignal, For, Show, type JSX, on, onCleanup } from "solid-js"
+import {
+  batch,
+  createEffect,
+  createMemo,
+  createSignal,
+  createUniqueId,
+  For,
+  Show,
+  type JSX,
+  on,
+  onCleanup,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { useTerminalDimensions } from "@opentui/solid"
 import * as fuzzysort from "fuzzysort"
@@ -103,6 +114,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     filter: "",
   })
   const [focusedAction, setFocusedAction] = createSignal<number>()
+  const optionPrefix = createUniqueId()
   const actionFocused = createMemo(() => focusedAction() !== undefined)
   let selection: { value: T; category?: string } | undefined
   let resetSelection = false
@@ -247,7 +259,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               if (generation !== visibilityGeneration) return
               if (!props.preserveSelection || store.filter.length > 0) return
               if (!isDeepEqual(selected()?.value, value)) return
-              scrollToSelection(false)
+              scrollToSelection()
             })
           })
           return
@@ -271,7 +283,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       setTimeout(() => {
         if (generation !== positionGeneration) return
         if (filter.length > 0) {
-          moveTo(0, true, false)
+          moveTo(0, false)
           return
         }
         // `onMove` consumers may mirror the cursor into `current`. Treat an equal
@@ -279,7 +291,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
         // key repeat feed back into asynchronous recentering.
         if (current === undefined || isDeepEqual(selected()?.value, current)) return
         const currentIndex = flat().findIndex((opt) => isDeepEqual(opt.value, current))
-        if (currentIndex >= 0) moveTo(currentIndex, true)
+        if (currentIndex >= 0) moveTo(currentIndex)
       }, 0)
     }),
   )
@@ -290,12 +302,12 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     let next = store.selected + direction
     if (next < 0) next = flat().length - 1
     if (next >= flat().length) next = 0
-    moveTo(next, true)
+    moveTo(next)
   }
 
-  function moveTo(next: number, center = false, preserve = true) {
+  function moveTo(next: number, preserve = true) {
     focus(next, preserve)
-    scrollToSelection(center)
+    scrollToSelection()
   }
 
   function focus(next: number, preserve = true) {
@@ -309,37 +321,12 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     if (option) props.onMove?.(option)
   }
 
-  function scrollToSelection(center: boolean) {
-    if (!scroll) return
-    let remaining = store.selected
-    let index = 0
-    // Locate the row by position because a unique renderable ID cannot currently be ensured.
-    for (const [category, options] of grouped()) {
-      if (category) index++
-      if (remaining < options.length) {
-        index += remaining
-        break
-      }
-      index += options.length
-      remaining -= options.length
-    }
-    const target = scroll.getChildren()[index]
-    if (!target) return
-    const y = target.y - scroll.y
-    if (center) {
-      const centerOffset = Math.floor(scroll.height / 2)
-      scroll.scrollBy(y - centerOffset)
-    } else {
-      if (y >= scroll.height) {
-        scroll.scrollBy(y - scroll.height + 1)
-      }
-      if (y < 0) {
-        scroll.scrollBy(y)
-        if (isDeepEqual(flat()[0].value, selected()?.value)) {
-          scroll.scrollTo(0)
-        }
-      }
-    }
+  function scrollToSelection() {
+    scroll?.scrollChildIntoView(optionID(store.selected))
+  }
+
+  function optionID(index: number) {
+    return `${optionPrefix}-option-${index}`
   }
 
   function submit() {
@@ -503,7 +490,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
     },
     moveTo(value) {
       const index = flat().findIndex((option) => isDeepEqual(option.value, value))
-      if (index >= 0) moveTo(index, true)
+      if (index >= 0) moveTo(index)
     },
   }
   props.ref?.(ref)
@@ -651,6 +638,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
                       const footerWidth = createMemo(() => selectFooterWidth(option, !!flatten()))
                       return (
                         <box
+                          id={optionID(flat().findIndex((item) => isDeepEqual(item.value, option.value)))}
                           flexDirection="column"
                           position="relative"
                           onMouseMove={() => {

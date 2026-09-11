@@ -2,12 +2,13 @@
 import { describe, expect, test } from "bun:test"
 import { RGBA } from "@opentui/core"
 import { testRender } from "@opentui/solid"
-import type { JSX } from "solid-js"
+import { createSignal, type JSX } from "solid-js"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import { KVProvider } from "../../../src/context/kv"
 import { ThemeProvider } from "../../../src/context/theme"
 import { TuiConfigProvider } from "../../../src/config"
 import { DiffViewerFileTree } from "../../../src/feature-plugins/system/diff-viewer-file-tree"
+import { PanelGroup } from "../../../src/feature-plugins/system/diff-viewer-ui"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import {
   allExpandedFileTreeDirectories,
@@ -149,6 +150,49 @@ describe("DiffViewerFileTree", () => {
         )),
       ),
     ).toEqual(["▾ src/config", "│  └─ tui.ts                 ?"])
+  })
+
+  test("keeps highlighted rows visible across distant navigation", async () => {
+    const files = Array.from({ length: 30 }, (_, index) => ({ file: `file-${String(index).padStart(2, "0")}.ts` }))
+    const rows = buildFileTree(files).nodes
+    let setHighlighted!: (value: number) => void
+
+    const app = await testRender(
+      () =>
+        withTheme(() => {
+          const [highlighted, setValue] = createSignal(rows[0]!.id)
+          setHighlighted = setValue
+          return (
+            <PanelGroup axis="x" height={8}>
+              <DiffViewerFileTree
+                width={32}
+                files={files}
+                loading={false}
+                error={undefined}
+                theme={theme}
+                focused
+                highlightedNode={highlighted()}
+              />
+            </PanelGroup>
+          )
+        }),
+      { width: 40, height: 8 },
+    )
+
+    try {
+      await renderOnceSettled(app)
+      setHighlighted(rows.at(-1)!.id)
+      await renderOnceSettled(app)
+      await renderOnceSettled(app)
+      expect(app.captureCharFrame()).toContain("file-29.ts")
+
+      setHighlighted(rows[0]!.id)
+      await renderOnceSettled(app)
+      await renderOnceSettled(app)
+      expect(app.captureCharFrame()).toContain("file-00.ts")
+    } finally {
+      app.renderer.destroy()
+    }
   })
 })
 

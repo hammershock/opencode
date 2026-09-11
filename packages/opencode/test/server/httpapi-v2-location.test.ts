@@ -128,6 +128,52 @@ describe("v2 location HttpApi", () => {
     expect(legacyData).toEqual(((await canonical.json()) as { data: Array<{ name: string }> }).data)
   })
 
+  test("previews the canonical Skill catalog through the selected Agent without creating a Session", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: {
+        formatter: false,
+        lsp: false,
+        skills: { paths: ["./preview-skills"] },
+        agent: {
+          unrestricted: {},
+          restricted: { permission: { skill: { review: "deny" } } },
+        },
+      },
+    })
+    await Promise.all(
+      (
+        [
+          ["review", "Review a patch"],
+          ["verify", "Verify a patch"],
+        ] as const
+      ).map(async ([name, description]) => {
+        const directory = path.join(tmp.path, "preview-skills", name)
+        await fs.mkdir(directory, { recursive: true })
+        await fs.writeFile(
+          path.join(directory, "SKILL.md"),
+          `---\nname: ${name}\ndescription: ${description}\n---\nBody`,
+        )
+      }),
+    )
+    const catalog = async (agent?: string) => {
+      const response = await request(`/api/skill/catalog${agent ? `?agent=${agent}` : ""}`, tmp.path)
+      expect(response.status, await response.clone().text()).toBe(200)
+      return ((await response.json()) as { data: Skill.RegistrySnapshot }).data
+    }
+
+    expect(await (await request("/api/session", tmp.path)).json()).toMatchObject({ data: [] })
+    const complete = await catalog()
+    const expected = complete.skills.filter((skill) => ["review", "verify"].includes(skill.name))
+    expect(expected).toHaveLength(2)
+    expect((await catalog("unrestricted")).skills).toEqual(complete.skills)
+    expect((await catalog("restricted")).skills.filter((skill) => ["review", "verify"].includes(skill.name))).toEqual(
+      expected.filter((skill) => skill.name === "verify"),
+    )
+    expect((await catalog("missing-agent")).skills).toEqual([])
+    expect(await (await request("/api/session", tmp.path)).json()).toMatchObject({ data: [] })
+  })
+
   test("completes User Shell input at a Location without creating a Session", async () => {
     await using tmp = await tmpdir({ git: true })
     await Bun.write(path.join(tmp.path, "shell-completion-marker"), "")

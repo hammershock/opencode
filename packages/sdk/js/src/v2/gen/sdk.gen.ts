@@ -5940,7 +5940,7 @@ export class Session3 extends HeyApiClient {
   /**
    * Inspect session model context
    *
-   * Return the frozen canonical model-context generation without connecting to or reading from the Session target.
+   * Return the frozen canonical model-context generation and device-local admitted Skill identities without connecting to or reading from the Session target.
    */
   public modelContext<ThrowOnError extends boolean = false>(
     parameters: {
@@ -6985,7 +6985,7 @@ export class Skill extends HeyApiClient {
   /**
    * List controller Skill catalog metadata
    *
-   * Returns metadata and diagnostics without Skill bodies.
+   * Returns metadata and diagnostics without Skill bodies. When agent is present, skills are filtered by that Location-scoped Agent without creating a Session.
    */
   public catalog<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -6996,6 +6996,7 @@ export class Skill extends HeyApiClient {
       }
       forceReload?: "true" | "false"
       includeInactive?: "true" | "false"
+      agent?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -7007,6 +7008,7 @@ export class Skill extends HeyApiClient {
             { in: "query", key: "location" },
             { in: "query", key: "forceReload" },
             { in: "query", key: "includeInactive" },
+            { in: "query", key: "agent" },
           ],
         },
       ],

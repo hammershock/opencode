@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Skill } from "@opencode-ai/schema/skill"
 import { Effect, Layer } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -31,6 +31,25 @@ const entry = (id: string): SkillRegistry.Entry => ({
 })
 
 describe("SkillResolver", () => {
+  test("projects exact identities through the selected Agent permissions", () => {
+    const allowed = entry("1").metadata
+    const denied = { ...entry("2").metadata, name: "denied" }
+    const snapshot = Skill.RegistrySnapshot.make({
+      revision: Skill.Digest.make("a".repeat(64)),
+      digest: Skill.Digest.make("a".repeat(64)),
+      skills: [allowed, denied],
+      diagnostics: [],
+    })
+    const agent = AgentV2.Info.make({
+      ...AgentV2.Info.empty(AgentV2.ID.make("restricted")),
+      permissions: [{ action: "skill", resource: "denied", effect: "deny" }],
+    })
+
+    expect(SkillV2.preview(snapshot, agent)).toMatchObject({ revision: snapshot.revision, skills: [allowed] })
+    expect(SkillV2.preview(snapshot, undefined).skills).toEqual([])
+    expect(SkillV2.preview(snapshot, agent).digest).toBe(SkillV2.preview(snapshot, agent).digest)
+  })
+
   it.effect("resolves only one permitted canonical name and reads through the registry", () => {
     const first = entry("1")
     let catalog = [first]

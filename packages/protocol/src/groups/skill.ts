@@ -10,6 +10,7 @@ const catalogQuery = Schema.Struct({
   ...LocationQuery.fields,
   forceReload: Schema.Literals(["true", "false"]).pipe(Schema.optional),
   includeInactive: Schema.Literals(["true", "false"]).pipe(Schema.optional),
+  agent: Schema.String.pipe(Schema.optional),
 }).annotate({ identifier: "Skill.CatalogQuery" })
 
 export const SkillGroup = HttpApiGroup.make("server.skill")
@@ -38,7 +39,8 @@ export const SkillGroup = HttpApiGroup.make("server.skill")
         OpenApi.annotations({
           identifier: "v2.skill.catalog",
           summary: "List controller Skill catalog metadata",
-          description: "Returns metadata and diagnostics without Skill bodies.",
+          description:
+            "Returns metadata and diagnostics without Skill bodies. When agent is present, skills are filtered by that Location-scoped Agent without creating a Session.",
         }),
       ),
   )

@@ -4635,6 +4635,19 @@ export type SessionMessage =
   | SessionMessageAssistant
   | SessionMessageCompaction
 
+export type SkillAdmittedIdentity = {
+  id: string
+  name: string
+  sourceLabel: string
+  digest: string
+}
+
+export type SkillAdmittedCatalog = {
+  revision: string
+  skills: Array<SkillAdmittedIdentity>
+  digest: string
+}
+
 export type SessionNextAgentSwitched = {
   id: string
   metadata?: {
@@ -14532,6 +14545,7 @@ export type V2SessionModelContextResponses = {
    */
   200: {
     data: ModelContextGeneration
+    skillCatalog: SkillAdmittedCatalog
   }
 }
 
@@ -15778,6 +15792,7 @@ export type V2SkillCatalogData = {
     }
     forceReload?: "true" | "false"
     includeInactive?: "true" | "false"
+    agent?: string
   }
   url: "/api/skill/catalog"
 }

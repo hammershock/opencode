@@ -2,6 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { describe, expect } from "bun:test"
 import { Skill } from "@opencode-ai/schema/skill"
+import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
 import { SkillResource } from "@opencode-ai/schema/skill-resource"
 import { Effect, Layer, Schema } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -21,6 +22,7 @@ import { settleTool, toolIdentity, toolDefinitions } from "./lib/tool"
 
 const sessionID = SessionV2.ID.make("ses_skill_resource_test")
 const skillID = Skill.ID.make(`skl_${"1".repeat(64)}`)
+const invocationID = SkillInvocation.ID.make("ski_skillresource")
 
 describe("SkillResourceTool", () => {
   it.live("lists and pages controller resources without disclosing controller paths", () =>
@@ -36,6 +38,7 @@ describe("SkillResourceTool", () => {
             Promise.all([
               fs.mkdir(path.join(directory, "references"), { recursive: true }),
               fs.mkdir(path.join(directory, "many"), { recursive: true }),
+              fs.mkdir(path.join(directory, "nested"), { recursive: true }),
             ]),
           )
           yield* Effect.promise(() =>
@@ -44,6 +47,8 @@ describe("SkillResourceTool", () => {
               fs.writeFile(path.join(directory, "references", "guide.md"), "界".repeat(8_000)),
               fs.writeFile(path.join(directory, "binary.dat"), new Uint8Array([0, 1, 2, 3])),
               fs.writeFile(path.join(directory, "large.txt"), new Uint8Array(1024 * 1024 + 1)),
+              fs.writeFile(path.join(directory, "nested", "SKILL.md"), "---\nname: nested\n---\nNested"),
+              fs.writeFile(path.join(directory, "nested", "secret.txt"), "nested package resource"),
               fs.writeFile(outside, "outside"),
               ...Array.from({ length: 103 }, (_, index) =>
                 fs.writeFile(path.join(directory, "many", `${index.toString().padStart(3, "0")}.txt`), "resource"),
@@ -97,7 +102,8 @@ describe("SkillResourceTool", () => {
           const resolver = Layer.succeed(
             SkillResolver.Service,
             SkillResolver.Service.of({
-              resolve: () => Effect.succeed({ entry }),
+              resolve: ({ reference }) =>
+                Effect.succeed({ entry, ...(reference === invocationID ? { invocationID } : {}) }),
               resolveName: () => Effect.die("unused"),
               read: (resolved) =>
                 Effect.sync(() => {
@@ -138,20 +144,21 @@ describe("SkillResourceTool", () => {
               name: "skill_resource",
               description: SkillResourceTool.description,
             })
-            const call = (id: string, input: { skill: Skill.ID; resource?: string; cursor?: string }) =>
+            const call = (id: string, input: { skill: SkillResource.Reference; resource?: string; cursor?: string }) =>
               settleTool(registry, {
                 sessionID,
                 ...toolIdentity,
                 call: { type: "tool-call", id, name: "skill_resource", input },
               })
 
-            const listed = yield* call("call-manifest", { skill: skillID })
+            const listed = yield* call("call-manifest", { skill: invocationID })
             const listedOutput = yield* Schema.decodeUnknownEffect(SkillResource.Output)(listed.output?.structured)
             expect(listedOutput).toMatchObject({
               type: "manifest",
-              skill: { skillID, name: "review", digest: "2".repeat(64) },
+              skill: { invocationID, name: "review", digest: "2".repeat(64) },
               truncated: true,
             })
+            expect(JSON.stringify(listedOutput)).not.toContain(skillID)
             if (listedOutput.type !== "manifest" || typeof listedOutput.nextCursor !== "string") return
             expect(listedOutput.entries.length).toBeLessThan(SkillResource.MAX_MANIFEST_ENTRIES)
             expect(Buffer.byteLength(JSON.stringify(listedOutput))).toBeLessThanOrEqual(
@@ -163,7 +170,7 @@ describe("SkillResourceTool", () => {
             let nextCursor: string | undefined = listedOutput.nextCursor
             while (nextCursor) {
               const settlement: ToolRegistry.Settlement = yield* call(`call-manifest-${pages.length}`, {
-                skill: skillID,
+                skill: invocationID,
                 cursor: nextCursor,
               })
               const output: SkillResource.Output = yield* Schema.decodeUnknownEffect(SkillResource.Output)(
@@ -181,16 +188,17 @@ describe("SkillResourceTool", () => {
               mime: "text/markdown",
             })
             expect(resources.map((entry) => entry.resource)).toEqual(
-              resources.map((entry) => entry.resource).toSorted((a, b) => a.localeCompare(b)),
+              resources.map((entry) => entry.resource).toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
             )
             expect(listed.outputPaths).toBeUndefined()
             expect(JSON.stringify(listed)).not.toContain(tmp.path)
             expect(JSON.stringify(listed)).not.toContain("SKILL.md")
             expect(JSON.stringify(listed)).not.toContain("escape.txt")
             expect(JSON.stringify(listed)).not.toContain("hardlink.txt")
+            expect(JSON.stringify(pages)).not.toContain("nested/secret.txt")
 
             const first = yield* call("call-text-first", {
-              skill: skillID,
+              skill: invocationID,
               resource: "references/guide.md",
             })
             const firstOutput = yield* Schema.decodeUnknownEffect(SkillResource.Output)(first.output?.structured)
@@ -203,7 +211,7 @@ describe("SkillResourceTool", () => {
             if (firstOutput.type !== "text" || typeof firstOutput.nextCursor !== "string") return
             expect(typeof firstOutput.content).toBe("string")
             const second = yield* call("call-text-second", {
-              skill: skillID,
+              skill: invocationID,
               resource: "references/guide.md",
               cursor: firstOutput.nextCursor,
             })
@@ -217,7 +225,7 @@ describe("SkillResourceTool", () => {
               expect(firstOutput.content + secondOutput.content).toBe("界".repeat(8_000))
 
             expect(
-              (yield* call("call-binary", { skill: skillID, resource: "binary.dat" })).output?.structured,
+              (yield* call("call-binary", { skill: invocationID, resource: "binary.dat" })).output?.structured,
             ).toMatchObject({
               type: "unsupported",
               resource: "binary.dat",
@@ -225,44 +233,56 @@ describe("SkillResourceTool", () => {
               digest: expect.any(String),
             })
             expect(
-              (yield* call("call-large", { skill: skillID, resource: "large.txt" })).output?.structured,
+              (yield* call("call-large", { skill: invocationID, resource: "large.txt" })).output?.structured,
             ).toMatchObject({ type: "unsupported", resource: "large.txt", diagnostic: "resource_too_large" })
-            expect((yield* call("call-traversal", { skill: skillID, resource: "../outside.txt" })).result).toEqual({
+            expect((yield* call("call-traversal", { skill: invocationID, resource: "../outside.txt" })).result).toEqual(
+              {
+                type: "error",
+                value: "skill_resource failed: invalid_resource_path",
+              },
+            )
+            expect(
+              (yield* call("call-encoded", { skill: invocationID, resource: "%2e%2e/outside.txt" })).result,
+            ).toEqual({
               type: "error",
               value: "skill_resource failed: invalid_resource_path",
             })
-            expect((yield* call("call-encoded", { skill: skillID, resource: "%2e%2e/outside.txt" })).result).toEqual({
+            expect((yield* call("call-root", { skill: invocationID, resource: "SKILL.md" })).result).toEqual({
               type: "error",
               value: "skill_resource failed: invalid_resource_path",
             })
-            expect((yield* call("call-root", { skill: skillID, resource: "SKILL.md" })).result).toEqual({
-              type: "error",
-              value: "skill_resource failed: invalid_resource_path",
-            })
-            expect((yield* call("call-directory", { skill: skillID, resource: "references" })).result).toEqual({
+            expect((yield* call("call-directory", { skill: invocationID, resource: "references" })).result).toEqual({
               type: "error",
               value: "skill_resource failed: unsupported_resource_type",
             })
-            expect((yield* call("call-missing", { skill: skillID, resource: "missing.txt" })).result).toEqual({
+            expect((yield* call("call-missing", { skill: invocationID, resource: "missing.txt" })).result).toEqual({
               type: "error",
               value: "skill_resource failed: resource_not_found",
             })
-            expect((yield* call("call-hardlink", { skill: skillID, resource: "hardlink.txt" })).result).toEqual({
+            expect((yield* call("call-hardlink", { skill: invocationID, resource: "hardlink.txt" })).result).toEqual({
               type: "error",
               value: "skill_resource failed: resource_outside_package",
             })
-            expect((yield* call("call-cursor", { skill: skillID, cursor: "invalid!" })).result).toEqual({
+            expect((yield* call("call-nested", { skill: invocationID, resource: "nested/secret.txt" })).result).toEqual(
+              {
+                type: "error",
+                value: "skill_resource failed: resource_outside_package",
+              },
+            )
+            expect((yield* call("call-cursor", { skill: invocationID, cursor: "invalid!" })).result).toEqual({
               type: "error",
               value: "skill_resource failed: invalid_cursor",
             })
             if (process.platform !== "win32")
-              expect((yield* call("call-symlink", { skill: skillID, resource: "escape.txt" })).result).toEqual({
+              expect((yield* call("call-symlink", { skill: invocationID, resource: "escape.txt" })).result).toEqual({
                 type: "error",
                 value: "skill_resource failed: resource_outside_package",
               })
             const readsBeforeDenied = reads
             deny = true
-            expect((yield* call("call-denied", { skill: skillID, resource: "references/guide.md" })).result).toEqual({
+            expect(
+              (yield* call("call-denied", { skill: invocationID, resource: "references/guide.md" })).result,
+            ).toEqual({
               type: "error",
               value: "skill_resource failed: permission_denied",
             })

@@ -20,7 +20,7 @@ export const name = "skill_resource"
 
 export const description = [
   "Read auxiliary files from a previously admitted Skill package.",
-  "Pass the invocation ID shown on the loaded skill instructions, or a local Skill ID returned by the skill tool.",
+  "Pass the invocation ID shown on the loaded skill instructions.",
   "Omit resource to list a bounded manifest. File reads support UTF-8 text only and return an opaque cursor when another page is available.",
   "This tool never exposes controller paths, executes files, or falls back to the Session filesystem.",
 ].join("\n")
@@ -78,7 +78,6 @@ const layer = Layer.effectDiscard(
                 )
                 const identity = SkillResource.Identity.make({
                   ...(resolved.invocationID === undefined ? {} : { invocationID: resolved.invocationID }),
-                  skillID: resolved.entry.metadata.id,
                   name: resolved.entry.metadata.name,
                   digest: resolved.entry.metadata.digest,
                 })
@@ -139,7 +138,8 @@ const manifest = Effect.fn("SkillResource.manifest")(function* (
     const children = yield* fs
       .readDirectoryEntries(absolute)
       .pipe(Effect.mapError(() => new AccessError({ kind: "resource_unavailable_on_device" })))
-    for (const child of children.toSorted((a, b) => a.name.localeCompare(b.name))) {
+    if (directory !== "" && children.some((child) => child.name === "SKILL.md" && child.type === "file")) continue
+    for (const child of children.toSorted((a, b) => compareText(a.name, b.name))) {
       scanned++
       if (scanned > SkillResource.MAX_MANIFEST_SCAN_ENTRIES) {
         limited = true
@@ -167,7 +167,7 @@ const manifest = Effect.fn("SkillResource.manifest")(function* (
       )
     }
   }
-  entries.sort((a, b) => a.resource.localeCompare(b.resource))
+  entries.sort((a, b) => compareText(a.resource, b.resource))
   const digest = Skill.Digest.make(
     Hash.sha256(JSON.stringify(entries.map((entry) => [entry.resource, entry.size, entry.mime]))),
   )
@@ -215,6 +215,7 @@ const read = Effect.fn("SkillResource.read")(function* (
 ) {
   const resource = validateResource(requested)
   if (!resource) return yield* new AccessError({ kind: "invalid_resource_path" })
+  if (yield* nestedPackage(fs, root, resource)) return yield* new AccessError({ kind: "resource_outside_package" })
   const target = nativePath(root, resource)
   const real = yield* fs.realPath(target).pipe(Effect.mapError(() => new AccessError({ kind: "resource_not_found" })))
   if (!samePath(real, target) || !FSUtil.contains(root, real))
@@ -338,6 +339,30 @@ function validateResource(value: string) {
 
 function nativePath(root: string, resource: string) {
   return path.join(root, ...resource.split("/"))
+}
+
+const nestedPackage = Effect.fn("SkillResource.nestedPackage")(function* (
+  fs: FSUtil.Interface,
+  root: AbsolutePath,
+  resource: string,
+) {
+  const segments = resource.split("/")
+  const markers = segments
+    .slice(0, -1)
+    .map((_, index) => nativePath(root, `${segments.slice(0, index + 1).join("/")}/SKILL.md`))
+  const matches = yield* Effect.forEach(markers, (marker) =>
+    Effect.gen(function* () {
+      const real = yield* fs.realPath(marker).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!real || !samePath(real, marker) || !FSUtil.contains(root, real)) return false
+      const info = yield* fs.stat(real).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      return info?.type === "File"
+    }),
+  )
+  return matches.some(Boolean)
+})
+
+function compareText(a: string, b: string) {
+  return a < b ? -1 : a > b ? 1 : 0
 }
 
 function samePath(a: string, b: string) {

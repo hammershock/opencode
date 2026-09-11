@@ -28,7 +28,6 @@ export type Input = typeof Input.Type
 export interface Identity extends Schema.Schema.Type<typeof Identity> {}
 export const Identity = Schema.Struct({
   invocationID: SkillInvocation.ID.pipe(optional),
-  skillID: Skill.ID,
   name: Schema.String,
   digest: Skill.Digest,
 }).annotate({ identifier: "SkillResource.Identity" })

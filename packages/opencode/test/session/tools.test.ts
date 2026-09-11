@@ -168,7 +168,7 @@ it.effect("preserves running tool start time across metadata updates", () =>
   }),
 )
 
-it.effect("remote location materialization replaces every location-bound search tool", () =>
+it.effect("remote location materialization replaces every location-bound tool including Skill", () =>
   Effect.gen(function* () {
     const calls: Array<{ name: string; input: unknown }> = []
     const processor = {
@@ -201,6 +201,11 @@ it.effect("remote location materialization replaces every location-bound search 
           description: "remote glob",
           inputSchema: { type: "object", properties: { pattern: { type: "string" } }, required: ["pattern"] },
         }),
+        ToolDefinition.make({
+          name: "skill",
+          description: "canonical Skill",
+          inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+        }),
       ],
       settle: (input) =>
         Effect.sync(() => {
@@ -230,11 +235,18 @@ it.effect("remote location materialization replaces every location-bound search 
     const globOutput = yield* Effect.promise(() =>
       glob({ pattern: "*.ts" }, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }),
     )
+    const skill = tools.skill.execute
+    if (!skill) throw new Error("skill tool is missing execute")
+    const skillOutput = yield* Effect.promise(() =>
+      skill({ name: "review" }, { toolCallId: callID, abortSignal: new AbortController().signal, messages: [] }),
+    )
     expect(calls).toEqual([
       { name: "bash", input: { command: "pwd" } },
       { name: "glob", input: { pattern: "*.ts" } },
+      { name: "skill", input: { name: "review" } },
     ])
     expect(output).toMatchObject({ output: "remote-bash-output", metadata: { locationBound: true } })
     expect(globOutput).toMatchObject({ output: "remote-glob-output", metadata: { locationBound: true } })
+    expect(skillOutput).toMatchObject({ output: "remote-skill-output", metadata: { locationBound: true } })
   }),
 )

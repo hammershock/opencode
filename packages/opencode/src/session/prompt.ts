@@ -1191,7 +1191,9 @@ const layer = Layer.effect(
             ? materializedLocationTools
             : {
                 ...materializedLocationTools,
-                definitions: materializedLocationTools.definitions.filter((definition) => definition.name === "read"),
+                definitions: materializedLocationTools.definitions.filter((definition) =>
+                  ["read", "skill"].includes(definition.name),
+                ),
               }
         const locationRegistry = yield* ToolRegistry.Service.pipe(
           Effect.provide(locationLayer),

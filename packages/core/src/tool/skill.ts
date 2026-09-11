@@ -7,6 +7,7 @@ import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { SkillGuidanceSnapshot } from "../skill/guidance-snapshot"
+import { SkillPackageAccess } from "../skill/package-access"
 import { SkillResolver } from "../skill/resolver"
 import { Hash } from "../util/hash"
 import { ToolRegistry } from "./registry"
@@ -36,14 +37,27 @@ export const description = [
   "The skill name must match one of the available skills in the system context.",
 ].join("\n")
 
-export const toModelOutput = (snapshot: SkillInvocation.Snapshot) => {
+export const toModelOutput = (snapshot: SkillInvocation.Snapshot, prepared?: SkillPackageAccess.Prepared) => {
   return [
     `<skill_content name="${snapshot.name}" invocation="${snapshot.id}">`,
     `# Skill: ${snapshot.name}`,
     "",
     snapshot.content.trim(),
     "",
-    `Use skill_resource with skill "${snapshot.id}" to list or read auxiliary files from this Skill package.`,
+    ...(prepared?.path === undefined
+      ? ["This Skill has no filesystem package directory."]
+      : prepared.temporary
+        ? [
+            `Temporary package directory on this execution target: ${prepared.path}`,
+            "This is a shared, mutable runtime copy and can be reclaimed when the Session disconnects or expires.",
+            "Before starting persistent background work, copy every required file into a persistent target directory.",
+            "Use the ordinary filesystem and shell tools to read, modify, or execute files in this directory.",
+          ]
+        : [
+            `Package directory: ${prepared.path}`,
+            "Relative paths in this Skill are relative to this directory.",
+            "Use the ordinary filesystem and shell tools to read, modify, or execute files in this directory.",
+          ]),
     "</skill_content>",
   ].join("\n")
 }
@@ -56,6 +70,7 @@ const layer = Layer.effectDiscard(
     const tools = yield* Tools.Service
     const permission = yield* PermissionV2.Service
     const resolver = yield* SkillResolver.Service
+    const packages = yield* SkillPackageAccess.Service
     yield* tools
       .register({
         [name]: Tool.make({
@@ -83,6 +98,10 @@ const layer = Layer.effectDiscard(
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
               const resolved = yield* resolver.read(candidate)
+              const prepared = yield* packages.prepare({
+                entry: resolved.entry,
+                sessionID: context.sessionID,
+              })
               const snapshot = SkillInvocation.Snapshot.make({
                 id: SkillInvocation.ID.make(
                   `ski_${Hash.sha256(
@@ -99,7 +118,7 @@ const layer = Layer.effectDiscard(
                 content: resolved.entry.content,
                 status: "loaded",
               })
-              return { snapshot, output: toModelOutput(snapshot) }
+              return { snapshot, output: toModelOutput(snapshot, prepared) }
             }).pipe(Effect.mapError((error) => unableToLoad(input.name, error))),
         }),
       })
@@ -110,5 +129,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/skill",
   layer,
-  deps: [ToolRegistry.node, SkillResolver.node, PermissionV2.node],
+  deps: [ToolRegistry.node, SkillResolver.node, SkillPackageAccess.node, PermissionV2.node],
 })

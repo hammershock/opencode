@@ -19,6 +19,7 @@ import { State } from "./state"
 export const ID = Plugin.ID
 export type ID = typeof ID.Type
 export const Event = Plugin.Event
+export const INTERNAL_READY_ID = ID.make("opencode-internal-ready")
 
 export interface Interface {
   readonly add: (id: ID, effect: PluginRuntime["effect"]) => Effect.Effect<void>

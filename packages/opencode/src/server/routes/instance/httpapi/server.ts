@@ -44,7 +44,6 @@ import { Todo } from "@/session/todo"
 import { SessionShare } from "@/share/session"
 import { ShareNext } from "@/share/share-next"
 import { Skill } from "@/skill"
-import { Discovery } from "@/skill/discovery"
 import { Snapshot } from "@/snapshot"
 import { Storage } from "@/storage/storage"
 import { ToolRegistry } from "@/tool/registry"
@@ -250,7 +249,6 @@ export const app = LayerNode.group([
   ProviderAuth.node,
   Agent.node,
   Skill.node,
-  Discovery.node,
   Question.node,
   Permission.node,
   PermissionSaved.node,

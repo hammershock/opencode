@@ -122,7 +122,6 @@ const layer = Layer.effect(
     })
 
     const list = Effect.fn("SkillV2.list")(function* () {
-      const skills = new Map<string, Info>()
       const priority = new Map(
         state.get().registrations.map((registration, index) => [SkillRegistry.key(registration), index]),
       )
@@ -131,16 +130,15 @@ const layer = Layer.effect(
           (priority.get(a.sourceKey) ?? 0) - (priority.get(b.sourceKey) ?? 0) ||
           a.metadata.id.localeCompare(b.metadata.id),
       )
-      for (const entry of entries) {
-        skills.set(entry.metadata.name, {
+      return entries
+        .map((entry) => ({
           name: entry.metadata.name,
           ...(entry.metadata.description === undefined ? {} : { description: entry.metadata.description }),
           ...(entry.slash === undefined ? {} : { slash: entry.slash }),
           location: entry.location,
           content: entry.content,
-        })
-      }
-      return Array.from(skills.values()).toSorted((a, b) => a.name.localeCompare(b.name))
+        }))
+        .toSorted((a, b) => a.name.localeCompare(b.name) || a.location.localeCompare(b.location))
     })
 
     return Service.of({

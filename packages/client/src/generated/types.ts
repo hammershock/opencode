@@ -912,7 +912,17 @@ export type SessionsModelContextOutput = {
       }
     }
   } | null
-}["data"]
+  readonly skillCatalog: {
+    readonly revision: string
+    readonly skills: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly sourceLabel: string
+      readonly digest: string
+    }>
+    readonly digest: string
+  } | null
+}
 
 export type SessionsHistoryInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]

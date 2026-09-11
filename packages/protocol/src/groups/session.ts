@@ -321,14 +321,17 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
     .add(
       HttpApiEndpoint.get("session.modelContext", "/api/session/:sessionID/model-context", {
         params: { sessionID: Session.ID },
-        success: Schema.Struct({ data: Schema.NullOr(ModelContext.Generation) }),
+        success: Schema.Struct({
+          data: Schema.NullOr(ModelContext.Generation),
+          skillCatalog: Schema.NullOr(Skill.AdmittedCatalog),
+        }),
         error: [SessionNotFoundError, UnknownError],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.modelContext",
           summary: "Inspect session model context",
           description:
-            "Return the frozen canonical model-context generation without connecting to or reading from the Session target.",
+            "Return the frozen canonical model-context generation and device-local admitted Skill identities without connecting to or reading from the Session target.",
         }),
       ),
     )

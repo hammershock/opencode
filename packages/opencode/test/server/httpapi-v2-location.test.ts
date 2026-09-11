@@ -361,6 +361,76 @@ describe("v2 location HttpApi", () => {
     expect(events.data.filter((event) => event.type === "session.next.prompt.admitted")).toHaveLength(1)
   })
 
+  test("keeps exact admitted Skill identities device-local when portable metadata collides", async () => {
+    await using tmp = await tmpdir({
+      git: true,
+      config: { formatter: false, lsp: false, skills: { paths: ["./skills-one", "./skills-two"] } },
+    })
+    const content = "---\nname: review\ndescription: Review a patch\n---\nSame portable Skill body"
+    await fs.mkdir(path.join(tmp.path, "skills-one", "review"), { recursive: true })
+    await fs.mkdir(path.join(tmp.path, "skills-two", "review"), { recursive: true })
+    await fs.writeFile(path.join(tmp.path, "skills-one", "review", "SKILL.md"), content)
+    await fs.writeFile(path.join(tmp.path, "skills-two", "review", "SKILL.md"), content)
+
+    const created = await request("/api/session", tmp.path, {
+      method: "POST",
+      body: JSON.stringify({ location: { target: { type: "local" }, directory: tmp.path } }),
+    })
+    expect(created.status, await created.clone().text()).toBe(200)
+    const sessionID = ((await created.json()) as { data: { id: string } }).data.id
+    const activated = await request(`/api/session/${sessionID}/activate`, tmp.path, { method: "POST" })
+    expect(activated.status, await activated.clone().text()).toBe(200)
+
+    const currentResponse = await request("/api/skill/catalog", tmp.path)
+    expect(currentResponse.status, await currentResponse.clone().text()).toBe(200)
+    const current = (await currentResponse.json()) as {
+      data: { skills: Array<{ id: string; name: string; digest: string; sourceLabel: string }> }
+    }
+    const collisions = current.data.skills.filter((skill) => skill.name === "review")
+    expect(collisions).toHaveLength(2)
+    expect(new Set(collisions.map((skill) => skill.digest)).size).toBe(1)
+    expect(new Set(collisions.map((skill) => skill.sourceLabel.replace(/ · [0-9a-f]{8}$/i, "")))).toEqual(
+      new Set(["Imported"]),
+    )
+
+    const contextResponse = await request(`/api/session/${sessionID}/model-context`, tmp.path)
+    expect(contextResponse.status, await contextResponse.clone().text()).toBe(200)
+    const context = (await contextResponse.json()) as {
+      data: unknown
+      skillCatalog: { skills: Array<{ id: string; name: string }> }
+    }
+    expect(
+      context.skillCatalog.skills
+        .filter((skill) => skill.name === "review")
+        .map((skill) => skill.id)
+        .toSorted(),
+    ).toEqual(collisions.map((skill) => skill.id).toSorted())
+    expect(JSON.stringify(context.data)).not.toContain("skl_")
+
+    const admitted = await request(`/api/session/${sessionID}/prompt`, tmp.path, {
+      method: "POST",
+      body: JSON.stringify({
+        id: "msg_skill_identity_collision",
+        prompt: {
+          text: "$review $review",
+          skills: [
+            { id: collisions[0]!.id, name: "review", source: { start: 0, end: 7, text: "$review" } },
+            { id: collisions[1]!.id, name: "review", source: { start: 8, end: 15, text: "$review" } },
+          ],
+        },
+        resume: false,
+      }),
+    })
+    expect(admitted.status, await admitted.clone().text()).toBe(200)
+    const admittedBody = await admitted.json()
+    expect(JSON.stringify(admittedBody)).not.toContain("skl_")
+    expect((admittedBody as { data: { prompt: { invocations: unknown[] } } }).data.prompt.invocations).toHaveLength(2)
+
+    const history = await request(`/api/session/${sessionID}/history?limit=100`, tmp.path)
+    expect(history.status, await history.clone().text()).toBe(200)
+    expect(JSON.stringify(await history.json())).not.toContain("skl_")
+  })
+
   test("adapts legacy Skill slash commands to canonical durable admission", async () => {
     await using tmp = await tmpdir({
       git: true,

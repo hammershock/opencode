@@ -519,7 +519,7 @@ export function make(options: ClientOptions) {
           requestOptions,
         ).then((value) => value.data),
       modelContext: (input: SessionsModelContextInput, requestOptions?: RequestOptions) =>
-        request<{ readonly data: SessionsModelContextOutput }>(
+        request<SessionsModelContextOutput>(
           {
             method: "GET",
             path: `/api/session/${encodeURIComponent(input.sessionID)}/model-context`,
@@ -528,7 +528,7 @@ export function make(options: ClientOptions) {
             empty: false,
           },
           requestOptions,
-        ).then((value) => value.data),
+        ),
       history: (input: SessionsHistoryInput, requestOptions?: RequestOptions) =>
         request<SessionsHistoryOutput>(
           {

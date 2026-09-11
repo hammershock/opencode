@@ -159,6 +159,15 @@ describe("TargetRegistry", () => {
       _tag: "TargetRegistry.InvalidConfigError",
       diagnostics: [expect.objectContaining({ path: "$input.skillStagingRoot" })],
     })
+    await expect(
+      registry.create(
+        { ...manual("root"), command: { program: "/opt/rexd", args: ["--stdio"] }, skillStagingRoot: "/tmp/.." },
+        initial.revision,
+      ),
+    ).rejects.toMatchObject({
+      _tag: "TargetRegistry.InvalidConfigError",
+      diagnostics: [expect.objectContaining({ path: "$input.skillStagingRoot" })],
+    })
     const custom = await registry.create(
       {
         ...manual("custom"),

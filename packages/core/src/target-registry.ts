@@ -506,6 +506,8 @@ function decodeTarget(prefix: string, value: unknown, diagnostics: Diagnostic[],
     diagnostics.push(error(`${prefix}.defaultDirectory`, "Directory must be inside a workspace root"))
   if (skillStagingRoot && !path.posix.isAbsolute(skillStagingRoot))
     diagnostics.push(error(`${prefix}.skillStagingRoot`, "Expected an absolute remote path"))
+  if (skillStagingRoot && path.posix.normalize(skillStagingRoot) === "/")
+    diagnostics.push(error(`${prefix}.skillStagingRoot`, "Skill staging root cannot be the remote filesystem root"))
   if (skillStagingRoot && !command)
     diagnostics.push(error(`${prefix}.skillStagingRoot`, "Field is only valid for a custom Rexd command"))
   if (

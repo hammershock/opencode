@@ -75,7 +75,7 @@ import { optimisticPrompt } from "./optimistic"
 import { useLocation } from "../../context/location"
 import { canAdjustVariant } from "../../model-variant"
 import { sessionFooterLocation } from "../session-footer-location"
-import { structuredSkillMentions } from "../../prompt/skill"
+import { resolveSubmittedSkillMentions } from "../../prompt/skill"
 import {
   activateCommandHost,
   createCommandHost,
@@ -1216,7 +1216,14 @@ export function Prompt(props: PromptProps) {
       return false
     }
 
-    const skillMentions = structuredSkillMentions(store.prompt.input, store.prompt.parts)
+    const skillMentions = await resolveSubmittedSkillMentions({
+      text: store.prompt.input,
+      parts: store.prompt.parts,
+      shell: store.mode === "shell",
+      load: async () => auto()?.loadSkills(),
+      show: (source) => auto()?.showSkill(source),
+    })
+    if (!skillMentions) return false
 
     const workspaceSession = props.sessionID ? sync.session.get(props.sessionID) : undefined
     const workspaceID = workspaceSession?.workspaceID

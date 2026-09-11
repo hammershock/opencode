@@ -32,12 +32,12 @@ import { Locale } from "../../util/locale"
 import type { PromptInfo } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
 import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
-import { displayCharAt, mentionTriggerIndex, skillTriggerIndex } from "../../prompt/display"
+import { displayCharAt, mentionTriggerIndex, promptOffsetWidth, skillTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 import type { TuiSlashCommand } from "../../command-toolkit/host"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
-import { admittedSkills, skillCatalogInput, skillDisplayLabel } from "../../prompt/skill"
+import { admittedSkills, skillCatalogInput, skillDisplayLabel, type SkillCatalogEntry } from "../../prompt/skill"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -85,6 +85,8 @@ export function shellStringOffset(text: string, width: number) {
 export type AutocompleteRef = {
   onInput: (value: string) => void
   completeShell: () => Promise<void>
+  loadSkills: () => Promise<SkillCatalogEntry[] | undefined>
+  showSkill: (source: { start: number; end: number }) => void
   dismiss: () => void
   visible: false | "@" | "$" | "/" | "shell"
 }
@@ -317,6 +319,7 @@ export function Autocomplete(props: {
     const virtualText = prefix + text
     const extmarkStart = store.index
     const extmarkEnd = extmarkStart + Bun.stringWidth(virtualText)
+    if (part.type === "skill" && !needsSpace) input.cursorOffset = extmarkEnd + 1
 
     if (part.type === "skill" && props.parts().some((item) => item.type === "skill" && item.id === part.id)) {
       return
@@ -564,43 +567,50 @@ export function Autocomplete(props: {
       )
   })
 
-  const [skills] = createResource(
-    () =>
-      skillCatalogInput(store.visible === "$", {
-        sessionID: props.sessionID,
-        location: location(),
-        agent: props.agent(),
-      }),
-    (input) =>
-      sdk.client.v2.skill
-        .catalog(
-          {
-            agent: input.agent,
-            location: {
-              directory: input.location?.directory,
-              workspace: input.location?.workspaceID,
-              ...(input.location?.target?.type === "rexd" ? { target: input.location.target.targetID } : {}),
-            },
-          },
-          { throwOnError: true },
-        )
-        .then(async (result) => {
-          const catalog = result.data.data.skills
-          if (!input.sessionID) return catalog
+  const skillInput = () => ({
+    sessionID: props.sessionID,
+    location: location(),
+    agent: props.agent(),
+  })
 
-          const response = await sdk.request(`/api/session/${encodeURIComponent(input.sessionID)}/model-context`)
-          if (!response.ok) throw new Error(`Failed to inspect Skill catalog (HTTP ${response.status})`)
-          const context = (await response.json()) as {
-            skillCatalog: null | {
-              skills: { id: string; name: string; sourceLabel: string; digest: string }[]
-            }
+  async function fetchSkills(input: ReturnType<typeof skillInput>) {
+    return sdk.client.v2.skill
+      .catalog(
+        {
+          agent: input.agent,
+          location: {
+            directory: input.location?.directory,
+            workspace: input.location?.workspaceID,
+            ...(input.location?.target?.type === "rexd" ? { target: input.location.target.targetID } : {}),
+          },
+        },
+        { throwOnError: true },
+      )
+      .then(async (result) => {
+        const catalog = result.data.data.skills
+        if (!input.sessionID) return catalog
+
+        const response = await sdk.request(`/api/session/${encodeURIComponent(input.sessionID)}/model-context`)
+        if (!response.ok) throw new Error(`Failed to inspect Skill catalog (HTTP ${response.status})`)
+        const context = (await response.json()) as {
+          skillCatalog: null | {
+            skills: { id: string; name: string; sourceLabel: string; digest: string }[]
           }
-          return admittedSkills(catalog, context.skillCatalog)
-        })
-        .catch((error) => {
-          toast.show({ title: "Could not load Skills", message: errorMessage(error), variant: "warning" })
-          return []
-        }),
+        }
+        return admittedSkills(catalog, context.skillCatalog)
+      })
+  }
+
+  function loadSkills(input: ReturnType<typeof skillInput>) {
+    return fetchSkills(input).catch((error) => {
+      toast.show({ title: "Could not load Skills", message: errorMessage(error), variant: "warning" })
+      return undefined
+    })
+  }
+
+  const [skills] = createResource(
+    () => skillCatalogInput(store.visible === "$", skillInput()),
+    (input) => loadSkills(input).then((result) => result ?? []),
     { initialValue: [] },
   )
 
@@ -905,6 +915,15 @@ export function Autocomplete(props: {
         return store.visible
       },
       dismiss: close,
+      loadSkills() {
+        return loadSkills(skillInput())
+      },
+      showSkill(source) {
+        const input = props.input()
+        input.cursorOffset = promptOffsetWidth(props.value.slice(0, source.end))
+        show("$")
+        setStore("index", promptOffsetWidth(props.value.slice(0, source.start)))
+      },
       async completeShell() {
         if (props.readOnly) return
         // OpenTUI reports the Tab key through the editor callbacks after the keymap

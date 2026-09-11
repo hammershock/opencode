@@ -21,6 +21,8 @@ test("Skill autocomplete separates pointer focus from wheel and keyboard scrolli
     digest: `digest-${index}`,
   }))
   const calls = createFetch((url) => {
+    if (url.pathname === "/agent")
+      return json([{ name: "build", mode: "primary", hidden: false, permission: [], options: {} }])
     if (url.pathname === "/api/target")
       return json({ path: "/tmp/opencode/targets.jsonc", revision: "test", targets: [], diagnostics: [], valid: true })
     if (url.pathname === "/config/providers")
@@ -33,6 +35,7 @@ test("Skill autocomplete separates pointer focus from wheel and keyboard scrolli
         location: { target: { type: "local" }, directory: "/tmp/opencode", project: { id: "test", directory } },
         data: { revision: "catalog", digest: "catalog", skills, diagnostics: [] },
       })
+    return undefined
   })
   let started!: () => void
   const ready = new Promise<void>((resolve) => {

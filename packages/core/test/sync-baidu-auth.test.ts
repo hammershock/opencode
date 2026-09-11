@@ -80,7 +80,7 @@ describe("BaiduAuth", () => {
     ).rejects.toMatchObject({
       kind: "missing-app",
       message:
-        "Baidu Netdisk is not enabled in this build. Reinstall an official opencode-rexd build or contact its distributor.",
+        "Baidu Netdisk is not enabled in this build. Connect your Baidu application in OpenCode Transit Sync settings.",
     })
     expect(store.values.size).toBe(0)
   })

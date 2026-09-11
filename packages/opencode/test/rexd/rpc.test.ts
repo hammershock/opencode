@@ -31,7 +31,7 @@ describe("Rexd handshake", () => {
       id: 1,
       method: "session.open",
       params: {
-        client_name: "opencode-rexd",
+        client_name: "opencode-transit",
         client_version: "1.2.3",
         workspace_roots: ["/work"],
         requested_capabilities: ["exec", "fs", "events", "pty"],

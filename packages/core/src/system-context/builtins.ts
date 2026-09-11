@@ -15,8 +15,8 @@ const builtIns = Layer.effectDiscard(
     const location = yield* Location.Service
     const registry = yield* SystemContextRegistry.Service
     const environment = ModelContext.Environment.make({
-      harness: "OpenCode REXD",
-      entrypoint: "opencode-rexd",
+      harness: "OpenCode Transit",
+      entrypoint: "opencode-transit",
       targetKind: location.target.type,
       targetName:
         location.targetName ?? location.lastKnownTargetName ?? (location.target.type === "local" ? "local" : "remote"),

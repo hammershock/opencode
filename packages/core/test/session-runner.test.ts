@@ -172,8 +172,8 @@ const environmentContext = SystemContext.make({
   codec: Schema.toCodecJson(ModelContext.Environment),
   load: Effect.succeed(
     ModelContext.Environment.make({
-      harness: "OpenCode REXD",
-      entrypoint: "opencode-rexd",
+      harness: "OpenCode Transit",
+      entrypoint: "opencode-transit",
       targetKind: "local",
       targetName: "test",
       directory: "/project",

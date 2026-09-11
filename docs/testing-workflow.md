@@ -10,7 +10,7 @@ Run tests in this order:
 2. **Unit tests:** parsers, state transitions, reducers, cryptographic envelopes, conflict rules and failure classification.
 3. **Contract tests:** boundaries between Core, Location providers, Rexd protocol, command toolkit, provider adapters and sync adapters.
 4. **Integration tests:** real process/database/filesystem behavior in temporary isolated state, including cancellation, crash recovery and retries.
-5. **Real-device acceptance:** execute the built `opencode-rexd` on both the Mac and `mywindows`/WSL2 and exercise the scenarios affected by the task.
+5. **Real-device acceptance:** execute the built `opencode-transit` on both the Mac and `mywindows`/WSL2 and exercise the scenarios affected by the task.
 6. **Milestone regression:** before merging a complete RFC milestone, run the full cross-device matrix rather than only the task-specific rows.
 
 A lower layer cannot waive a higher layer. When a scenario is genuinely platform-specific, the issue and PR must explain why one device is not applicable and add an equivalent negative or compatibility check on that device. Convenience or temporary device unavailability is not a waiver; the task remains incomplete until the required device run succeeds.
@@ -20,16 +20,16 @@ A lower layer cannot waive a higher layer. When a scenario is genuinely platform
 All fork acceptance uses the command name:
 
 ```text
-opencode-rexd
+opencode-transit
 ```
 
-Do not replace or overwrite the upstream `opencode` command. Installation directly replaces the existing `opencode-rexd` build after validating the candidate; it does not retain an old-build compatibility or rollback copy.
+Do not replace or overwrite the upstream `opencode` command. Installation transactionally replaces the existing `opencode-transit` build after validating the candidate and maintains the temporary `opencode-rexd` compatibility launcher required by RFC-0013.
 
 Canonical environments:
 
 | Device      | Environment                               | Required invocation boundary                                                                                                                                                      |
 | ----------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mac         | macOS on Apple Silicon                    | Run the locally built/installed `opencode-rexd` directly                                                                                                                          |
+| Mac         | macOS on Apple Silicon                    | Run the locally built/installed `opencode-transit` directly                                                                                                                          |
 | `mywindows` | WSL2 distribution `Ubuntu`, user `hammer` | Connect with `ssh mywindows`, then explicitly invoke `wsl.exe -d Ubuntu -u hammer`; set a Linux HOME/cwd explicitly and never inherit `/mnt/c/Users/Mickey` as the test workspace |
 
 Record the actual hostname, OS/architecture, Git commit, executable path, `--version` output and executable hash for every real-device run. Both devices must test binaries built from the same accepted commit; platform-specific build artifacts may differ.
@@ -46,7 +46,7 @@ Record the actual hostname, OS/architecture, Git commit, executable path, `--ver
 
 ## Task-level real-device gate
 
-Every functional task issue names the relevant rows below. After automated checks pass, its owner installs the exact candidate build as `opencode-rexd` on both devices and records evidence in the PR.
+Every functional task issue names the relevant rows below. After automated checks pass, its owner installs the exact candidate build as `opencode-transit` on both devices and records evidence in the PR.
 
 Minimum evidence:
 
@@ -198,4 +198,4 @@ In particular, preserve regression coverage for the legacy sync resurrection fai
 - A task that passes locally but fails on one canonical device remains open.
 - Flaky real-device behavior is a defect to diagnose, not a passing retry.
 - A milestone release requires the complete matrix for all RFCs included in that milestone.
-- The tester records cleanup and confirms `opencode-rexd` still points to the intended build on both devices.
+- The tester records cleanup and confirms `opencode-transit` still points to the intended build on both devices.

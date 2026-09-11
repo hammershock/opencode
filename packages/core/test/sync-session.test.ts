@@ -442,8 +442,8 @@ describe("SessionSync", () => {
     ])
     const sessionID = Session.ID.make("ses_context_hydrate")
     const environment = ModelContext.Environment.make({
-      harness: "OpenCode REXD",
-      entrypoint: "opencode-rexd",
+      harness: "OpenCode Transit",
+      entrypoint: "opencode-transit",
       targetKind: "rexd",
       targetName: "mywindows",
       directory: "/home/hammer/project",

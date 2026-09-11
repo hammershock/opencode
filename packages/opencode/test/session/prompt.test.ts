@@ -580,7 +580,7 @@ it.instance("legacy loop consumes the canonical Location context and project ins
     const hits = yield* llm.hits
     expect(hits).toHaveLength(1)
     const body = JSON.stringify(hits[0]?.body)
-    expect(body).toContain("Execution harness: OpenCode REXD (opencode-rexd)")
+    expect(body).toContain("Execution harness: OpenCode Transit (opencode-transit)")
     expect(body).toContain(`Working directory: ${dir}`)
     expect(body).toContain(`Project root: ${dir}`)
     expect(body).toContain("REMOTE-SAFE PROJECT RULE")

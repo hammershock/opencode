@@ -64,7 +64,7 @@ describe("SystemContextBuiltIns", () => {
 
       expect(initialized.baseline).toBe(
         [
-          "Execution harness: OpenCode REXD (opencode-rexd)",
+          "Execution harness: OpenCode Transit (opencode-transit)",
           "<environment>",
           "  Target: local (local)",
           `  Working directory: ${directory}`,
@@ -117,7 +117,7 @@ describe("SystemContextBuiltIns", () => {
 
       expect((yield* SystemContext.initialize(yield* context.load())).baseline).toBe(
         [
-          "Execution harness: OpenCode REXD (opencode-rexd)",
+          "Execution harness: OpenCode Transit (opencode-transit)",
           "<environment>",
           "  Target: local (local)",
           `  Working directory: ${directory}`,

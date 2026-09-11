@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { verifyBuildManifestFromStream } from "@/cli/cmd/deploy-verify-build-manifest"
 
 const commit = "a".repeat(40)
-const version = `1.18.29-rexd.${commit.slice(0, 12)}`
+const version = `1.18.29-transit.0+${commit.slice(0, 12)}`
 
 describe("release build manifest verification", () => {
   test("accepts a clean manifest paired with the running build", async () => {
@@ -16,11 +16,15 @@ describe("release build manifest verification", () => {
   })
 
   test.each([
+    ["product", { product: "OpenCode" }],
     ["entrypoint", { entrypoint: "opencode" }],
-    ["version", { version: `1.18.29-rexd.${"b".repeat(12)}` }],
+    ["version", { version: `1.18.29-transit.0+${"b".repeat(12)}` }],
+    ["upstream version", { upstreamVersion: "1.18.28" }],
     ["commit", { commit: "b".repeat(40) }],
     ["commit shape", { commit: "a".repeat(12) }],
     ["dirty state", { dirty: true }],
+    ["target", { target: "" }],
+    ["built at", { builtAt: "not-a-date" }],
   ])("rejects mismatched %s", async (_name, patch) => {
     await expect(verifyBuildManifestFromStream(stream(manifest(patch)), version)).rejects.toThrow(
       "Invalid build manifest",
@@ -37,10 +41,14 @@ describe("release build manifest verification", () => {
 
 function manifest(patch: Record<string, unknown> = {}) {
   return JSON.stringify({
-    entrypoint: "opencode-rexd",
+    product: "OpenCode Transit",
+    entrypoint: "opencode-transit",
     version,
+    upstreamVersion: "1.18.29",
     commit,
     dirty: false,
+    target: "opencode-darwin-arm64",
+    builtAt: "2026-09-11T00:00:00.000Z",
     ...patch,
   })
 }

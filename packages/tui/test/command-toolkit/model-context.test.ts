@@ -13,8 +13,8 @@ const generation: ModelContextGeneration = {
   reason: "init",
   locationRevision: 1,
   environment: {
-    harness: "OpenCode REXD",
-    entrypoint: "opencode-rexd",
+    harness: "OpenCode Transit",
+    entrypoint: "opencode-transit",
     targetKind: "rexd",
     targetName: "mywindows",
     directory: "/workspace/project",

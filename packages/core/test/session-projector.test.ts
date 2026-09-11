@@ -85,8 +85,8 @@ describe("SessionProjector", () => {
             reason: "created",
             locationRevision: 0,
             environment: ModelContext.Environment.make({
-              harness: "OpenCode REXD",
-              entrypoint: "opencode-rexd",
+              harness: "OpenCode Transit",
+              entrypoint: "opencode-transit",
               targetKind: "local",
               targetName: "test",
               directory: "/project",
@@ -116,8 +116,8 @@ describe("SessionProjector", () => {
             reason: "init",
             locationRevision: 0,
             environment: ModelContext.Environment.make({
-              harness: "OpenCode REXD",
-              entrypoint: "opencode-rexd",
+              harness: "OpenCode Transit",
+              entrypoint: "opencode-transit",
               targetKind: "local",
               targetName: "test",
               directory: "/project",
@@ -163,8 +163,8 @@ describe("SessionProjector", () => {
             reason: "legacy-backfill",
             locationRevision: 0,
             environment: ModelContext.Environment.make({
-              harness: "OpenCode REXD",
-              entrypoint: "opencode-rexd",
+              harness: "OpenCode Transit",
+              entrypoint: "opencode-transit",
               targetKind: "local",
               targetName: "stale",
               directory: "/stale",

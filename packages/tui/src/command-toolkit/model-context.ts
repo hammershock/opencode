@@ -6,8 +6,8 @@ export type ModelContextGeneration = {
   reason: "created" | "legacy-backfill" | "location-rebound" | "init"
   locationRevision: number
   environment: {
-    harness: "OpenCode REXD"
-    entrypoint: "opencode-rexd"
+    harness: "OpenCode Transit"
+    entrypoint: "opencode-transit"
     targetKind: "local" | "rexd"
     targetName: string
     directory: string

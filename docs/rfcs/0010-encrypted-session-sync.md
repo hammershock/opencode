@@ -337,7 +337,7 @@ Log out
 12. `/sync`、`/devices`、QuickStart 和 command palette 使用同一个状态机；
 13. 所有远端等待进入共享右上角状态栏，失败提供脱敏的阶段和原因；
 14. 不同步 workspace 文件、target/SSH 配置、`.env`、provider credential 或 UI state；
-15. Mac 与 mywindows 使用同一 commit 的 `opencode-rexd` 完成双向真实验收。
+15. Mac 与 mywindows 使用同一 commit 的 `opencode-transit` 完成双向真实验收。
 16. 百度一次 list 漏项、path metadata/dlink/content 短暂 404 不删除已知状态；恢复后无需手动同步即可收敛；
 17. segment、head、deletion acknowledgement 与 local outbox 严格遵守提交顺序，任一步失败均可从 durable pending 状态恢复；
 18. 同设备多个 TUI 只有一个 provider worker；leader 退出后 15 秒内接管，旧 worker 续租失败后停止；

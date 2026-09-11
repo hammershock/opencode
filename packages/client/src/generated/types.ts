@@ -879,8 +879,8 @@ export type SessionsModelContextOutput = {
     readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
     readonly locationRevision: number
     readonly environment: {
-      readonly harness: "OpenCode REXD"
-      readonly entrypoint: "opencode-rexd"
+      readonly harness: "OpenCode Transit"
+      readonly entrypoint: "opencode-transit"
       readonly targetKind: "local" | "rexd"
       readonly targetName: string
       readonly directory: string
@@ -1012,8 +1012,8 @@ export type SessionsHistoryOutput = {
             readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
             readonly locationRevision: number
             readonly environment: {
-              readonly harness: "OpenCode REXD"
-              readonly entrypoint: "opencode-rexd"
+              readonly harness: "OpenCode Transit"
+              readonly entrypoint: "opencode-transit"
               readonly targetKind: "local" | "rexd"
               readonly targetName: string
               readonly directory: string
@@ -1195,8 +1195,8 @@ export type SessionsHistoryOutput = {
             readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
             readonly locationRevision: number
             readonly environment: {
-              readonly harness: "OpenCode REXD"
-              readonly entrypoint: "opencode-rexd"
+              readonly harness: "OpenCode Transit"
+              readonly entrypoint: "opencode-transit"
               readonly targetKind: "local" | "rexd"
               readonly targetName: string
               readonly directory: string
@@ -1822,8 +1822,8 @@ export type SessionsEventsOutput =
           readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
           readonly locationRevision: number
           readonly environment: {
-            readonly harness: "OpenCode REXD"
-            readonly entrypoint: "opencode-rexd"
+            readonly harness: "OpenCode Transit"
+            readonly entrypoint: "opencode-transit"
             readonly targetKind: "local" | "rexd"
             readonly targetName: string
             readonly directory: string
@@ -2005,8 +2005,8 @@ export type SessionsEventsOutput =
           readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
           readonly locationRevision: number
           readonly environment: {
-            readonly harness: "OpenCode REXD"
-            readonly entrypoint: "opencode-rexd"
+            readonly harness: "OpenCode Transit"
+            readonly entrypoint: "opencode-transit"
             readonly targetKind: "local" | "rexd"
             readonly targetName: string
             readonly directory: string

@@ -26,7 +26,7 @@ const layer = Layer.effect(
 
     return SkillCatalogContextService.Service.of({
       load: Effect.fn("SkillCatalogContext.load")(function* (input) {
-        yield* plugin.wait(PluginV2.ID.make("config-skill"))
+        yield* plugin.wait(PluginV2.INTERNAL_READY_ID)
         if (input.includeInactive) {
           const snapshot = yield* skills.reload().pipe(
             Effect.andThen(skills.catalog({ forceReload: input.forceReload, includeInactive: true })),

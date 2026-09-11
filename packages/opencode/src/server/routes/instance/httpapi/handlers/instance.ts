@@ -121,7 +121,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
         : route.directory
       return yield* Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
-        yield* plugin.wait(PluginV2.ID.make("config-skill"))
+        yield* plugin.wait(PluginV2.INTERNAL_READY_ID)
         return yield* (yield* SkillV2.Service).list()
       }).pipe(
         Effect.provide(

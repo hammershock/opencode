@@ -31,7 +31,7 @@ const read = <A>(operation: () => Promise<A>) =>
 
 const useSkill = <A>(operation: (skill: SkillV2.Interface) => Effect.Effect<A>) =>
   PluginV2.Service.use((plugin) =>
-    plugin.wait(PluginV2.ID.make("config-skill")).pipe(Effect.andThen(SkillV2.Service.use(operation))),
+    plugin.wait(PluginV2.INTERNAL_READY_ID).pipe(Effect.andThen(SkillV2.Service.use(operation))),
   )
 
 const loadCatalog = (forceReload: boolean) =>

@@ -78,7 +78,7 @@ const layer = Layer.effect(
       const workspaceID = yield* InstanceState.workspaceID
       return yield* Effect.gen(function* () {
         const plugin = yield* PluginV2.Service
-        yield* plugin.wait(PluginV2.ID.make("config-skill"))
+        yield* plugin.wait(PluginV2.INTERNAL_READY_ID)
         return yield* (yield* SkillV2.Service).catalog()
       }).pipe(
         Effect.provide(

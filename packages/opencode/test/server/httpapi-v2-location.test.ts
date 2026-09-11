@@ -122,7 +122,9 @@ describe("v2 location HttpApi", () => {
     const canonical = await request("/api/skill", tmp.path)
     expect(legacy.status, await legacy.clone().text()).toBe(200)
     expect(canonical.status, await canonical.clone().text()).toBe(200)
-    expect(await legacy.json()).toEqual(((await canonical.json()) as { data: unknown }).data)
+    const legacyData = (await legacy.json()) as Array<{ name: string }>
+    expect(legacyData.some((item) => item.name === "review")).toBe(true)
+    expect(legacyData).toEqual(((await canonical.json()) as { data: Array<{ name: string }> }).data)
   })
 
   test("completes User Shell input at a Location without creating a Session", async () => {

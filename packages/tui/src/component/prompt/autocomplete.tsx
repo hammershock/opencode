@@ -37,7 +37,7 @@ import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 import type { TuiSlashCommand } from "../../command-toolkit/host"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
-import { admittedSkills, skillDisplayLabel } from "../../prompt/skill"
+import { admittedSkills, skillCatalogInput, skillDisplayLabel } from "../../prompt/skill"
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -192,6 +192,7 @@ export function Autocomplete(props: {
   value: string
   parts: () => PromptInfo["parts"]
   shell: () => boolean
+  agent: () => string | undefined
   sessionID?: string
   readOnly?: boolean
   setPrompt: (input: (prompt: PromptInfo) => void) => void
@@ -564,11 +565,17 @@ export function Autocomplete(props: {
   })
 
   const [skills] = createResource(
-    () => (store.visible === "$" ? { sessionID: props.sessionID, location: location() } : undefined),
+    () =>
+      skillCatalogInput(store.visible === "$", {
+        sessionID: props.sessionID,
+        location: location(),
+        agent: props.agent(),
+      }),
     (input) =>
       sdk.client.v2.skill
         .catalog(
           {
+            agent: input.agent,
             location: {
               directory: input.location?.directory,
               workspace: input.location?.workspaceID,

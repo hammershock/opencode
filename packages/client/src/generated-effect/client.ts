@@ -558,6 +558,7 @@ type Endpoint12_1Input = {
   readonly location?: Endpoint12_1Request["query"]["location"]
   readonly forceReload?: Endpoint12_1Request["query"]["forceReload"]
   readonly includeInactive?: Endpoint12_1Request["query"]["includeInactive"]
+  readonly agent?: Endpoint12_1Request["query"]["agent"]
 }
 const Endpoint12_1 = (raw: RawClient["server.skill"]) => (input?: Endpoint12_1Input) =>
   raw["skill.catalog"]({
@@ -565,6 +566,7 @@ const Endpoint12_1 = (raw: RawClient["server.skill"]) => (input?: Endpoint12_1In
       location: input?.["location"],
       forceReload: input?.["forceReload"],
       includeInactive: input?.["includeInactive"],
+      agent: input?.["agent"],
     },
   }).pipe(Effect.mapError(mapClientError))
 

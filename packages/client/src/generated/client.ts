@@ -925,6 +925,7 @@ export function make(options: ClientOptions) {
               location: input?.["location"],
               forceReload: input?.["forceReload"],
               includeInactive: input?.["includeInactive"],
+              agent: input?.["agent"],
             },
             successStatus: 200,
             declaredStatuses: [500, 401, 400],

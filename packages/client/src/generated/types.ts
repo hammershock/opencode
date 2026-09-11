@@ -3753,6 +3753,7 @@ export type SkillsCatalogInput = {
       | undefined
     readonly forceReload?: "true" | "false" | undefined
     readonly includeInactive?: "true" | "false" | undefined
+    readonly agent?: string | undefined
   }["location"]
   readonly forceReload?: {
     readonly location?:
@@ -3764,6 +3765,7 @@ export type SkillsCatalogInput = {
       | undefined
     readonly forceReload?: "true" | "false" | undefined
     readonly includeInactive?: "true" | "false" | undefined
+    readonly agent?: string | undefined
   }["forceReload"]
   readonly includeInactive?: {
     readonly location?:
@@ -3775,7 +3777,20 @@ export type SkillsCatalogInput = {
       | undefined
     readonly forceReload?: "true" | "false" | undefined
     readonly includeInactive?: "true" | "false" | undefined
+    readonly agent?: string | undefined
   }["includeInactive"]
+  readonly agent?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+    readonly forceReload?: "true" | "false" | undefined
+    readonly includeInactive?: "true" | "false" | undefined
+    readonly agent?: string | undefined
+  }["agent"]
 }
 
 export type SkillsCatalogOutput = {

@@ -2005,6 +2005,7 @@ export function Prompt(props: PromptProps) {
         </box>
       </box>
       <Autocomplete
+        agent={() => local.agent.current()?.name}
         sessionID={props.sessionID}
         readOnly={props.readOnly}
         shell={() => store.mode === "shell"}

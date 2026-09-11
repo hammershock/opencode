@@ -2,6 +2,7 @@ import { SkillV2 } from "@opencode-ai/core/skill"
 import { SkillSettings } from "@opencode-ai/core/skill/settings"
 import { PluginV2 } from "@opencode-ai/core/plugin"
 import { SkillCatalogContextService } from "@opencode-ai/core/skill/catalog-context-service"
+import { AgentV2 } from "@opencode-ai/core/agent"
 import { ConflictError, InvalidRequestError, UnknownError } from "@opencode-ai/protocol/errors"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -34,9 +35,15 @@ const useSkill = <A>(operation: (skill: SkillV2.Interface) => Effect.Effect<A>) 
     plugin.wait(PluginV2.INTERNAL_READY_ID).pipe(Effect.andThen(SkillV2.Service.use(operation))),
   )
 
-const loadCatalog = (forceReload: boolean) =>
+const loadCatalog = (forceReload: boolean, agent?: string) =>
   SkillCatalogContextService.Service.use((catalog) => catalog.load({ forceReload })).pipe(
     Effect.map((value) => value.snapshot),
+    Effect.flatMap((snapshot) => {
+      if (agent === undefined) return Effect.succeed(snapshot)
+      return AgentV2.Service.use((agents) => agents.select(agent)).pipe(
+        Effect.map((selection) => SkillV2.preview(snapshot, selection.info)),
+      )
+    }),
   )
 
 const loadManagementCatalog = (forceReload: boolean) =>
@@ -52,7 +59,7 @@ export const SkillHandler = HttpApiBuilder.group(Api, "server.skill", (handlers)
       .handle("skill.catalog", (ctx) => {
         if (ctx.query.includeInactive === "true")
           return response(loadManagementCatalog(ctx.query.forceReload === "true"))
-        return response(loadCatalog(ctx.query.forceReload === "true"))
+        return response(loadCatalog(ctx.query.forceReload === "true", ctx.query.agent))
       })
       .handle("skill.reload", () => response(loadCatalog(true)))
       .handle("skill.settings", () => read(settings.load))

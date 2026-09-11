@@ -28,6 +28,17 @@ export type Info = Skill.Info
 export const available = <A extends { readonly name: string }>(skills: ReadonlyArray<A>, agent: AgentV2.Info) =>
   skills.filter((skill) => PermissionV2.evaluate("skill", skill.name, agent.permissions).effect !== "deny")
 
+export function preview(snapshot: Skill.RegistrySnapshot, agent: AgentV2.Info | undefined) {
+  const skills = agent ? available(snapshot.skills, agent) : []
+  const digest = Skill.Digest.make(Hash.sha256(JSON.stringify({ skills, diagnostics: snapshot.diagnostics })))
+  return Skill.RegistrySnapshot.make({
+    revision: snapshot.revision,
+    skills,
+    diagnostics: snapshot.diagnostics,
+    digest,
+  })
+}
+
 export type Data = {
   registrations: Types.DeepMutable<SkillRegistry.Registration>[]
   diagnostics: Types.DeepMutable<Skill.Diagnostic>[]

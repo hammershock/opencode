@@ -9,6 +9,12 @@
 - The default branch in this repo is `dev`.
 - Local `main` ref may not exist; use `dev` or `origin/dev` for diffs.
 
+## GitHub Repository Targeting
+
+- Treat `upstream` (`anomalyco/opencode`) as read-only. Do not create, edit, comment on, close, reopen, label, or otherwise mutate upstream issues or pull requests unless the user explicitly authorizes that exact upstream write in the current request.
+- Create and manage this fork's issues and pull requests only in `origin` (`hammershock/opencode`). Before any GitHub write, verify the `origin` remote and pass `-R hammershock/opencode` (or the equivalent explicit repository argument); never rely on the `gh` CLI default repository.
+- Read-only upstream operations such as fetching refs and inspecting issues or pull requests remain allowed.
+
 ## Branch Names
 
 Use a short branch name of at most three words, separated by hyphens. Do not use slashes or type prefixes such as `feat/` or `fix/`.

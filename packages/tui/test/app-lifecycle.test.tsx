@@ -29,6 +29,17 @@ async function waitForEditor(setup: Awaited<ReturnType<typeof createTestRenderer
   throw new Error(`Timed out waiting for a focused textarea\n${setup.captureCharFrame()}`)
 }
 
+async function waitForEditorText(setup: Awaited<ReturnType<typeof createTestRenderer>>, text: string, timeout = 2_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    await setup.renderOnce()
+    const editor = setup.renderer.currentFocusedEditor
+    if (editor instanceof TextareaRenderable && editor.plainText === text) return editor
+    await Bun.sleep(10)
+  }
+  throw new Error(`Timed out waiting for editor text ${JSON.stringify(text)}`)
+}
+
 async function waitForSessionRequests(requests: URL[], count: number, timeout = 2_000) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
@@ -36,6 +47,15 @@ async function waitForSessionRequests(requests: URL[], count: number, timeout = 
     await Bun.sleep(10)
   }
   throw new Error(`Timed out waiting for ${count} Session list requests; observed ${requests.length}`)
+}
+
+async function waitForRequestCount(paths: string[], path: string, count: number, timeout = 2_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (paths.filter((item) => item === path).length >= count) return
+    await Bun.sleep(10)
+  }
+  throw new Error(`Timed out waiting for ${count} requests to ${path}`)
 }
 
 test("SIGHUP clears title and disposes scoped resources once", async () => {
@@ -476,6 +496,187 @@ test("QuickStart accepts and renders keyboard input without starving the keymap"
     await waitForFrame(setup, "Commands", 2_000)
 
     expect(keymapErrors).not.toContain("state-change-feedback-loop")
+
+    process.emit("SIGHUP")
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    mock.restore()
+  }
+}, 10_000)
+
+test("session.undo restores a canonical Skill prompt and session.redo clears its V2 revert", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventSource()
+  const legacySession = {
+    id: "dummy",
+    title: "Skill undo",
+    slug: "dummy",
+    projectID: "project",
+    directory,
+    version: "0.0.0-test",
+    time: { created: 0, updated: 10 },
+  }
+  const canonicalSession = {
+    id: "dummy",
+    projectID: "project",
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 0, updated: 10 },
+    title: "Skill undo",
+    location: { directory },
+  }
+  const message = {
+    id: "msg_skill",
+    type: "user",
+    text: "$review inspect this",
+    time: { created: 10 },
+    skills: [
+      {
+        source: { start: 0, end: 7, text: "$review" },
+        snapshot: {
+          id: "ski_snapshot",
+          name: "review",
+          digest: "a".repeat(64),
+          source: { kind: "opencode-global", label: "OpenCode" },
+          content: "private instructions",
+          status: "loaded",
+        },
+      },
+    ],
+  }
+  const previous = {
+    ...message,
+    id: "msg_previous_skill",
+    text: "$review inspect earlier",
+    time: { created: 5 },
+  }
+  const paths: string[] = []
+  const calls = createFetch((url) => {
+    paths.push(url.pathname)
+    if (url.pathname === "/api/target")
+      return json({ path: "/tmp/opencode/targets.jsonc", revision: "test", targets: [], diagnostics: [], valid: true })
+    if (url.pathname === "/session/dummy") return json(legacySession)
+    if (url.pathname === "/session/dummy/message") return json([])
+    if (url.pathname === "/api/session/dummy") return json({ data: canonicalSession })
+    if (url.pathname === "/api/session/dummy/message") return json({ data: [message, previous], cursor: {} })
+    if (url.pathname === "/api/session/dummy/target-resolution")
+      return json({ status: "resolved", location: { directory } })
+    if (url.pathname === "/api/session/dummy/activate") return json({ data: { status: "unchanged", diagnostics: [] } })
+    if (url.pathname === "/api/skill/catalog")
+      return json({
+        location: { directory, project: { id: "project", directory } },
+        data: {
+          revision: "catalog",
+          digest: "catalog",
+          skills: [
+            {
+              id: "skl_review",
+              name: "review",
+              description: "Review changes",
+              sourceLabel: "OpenCode · deadbeef",
+              digest: "a".repeat(64),
+            },
+          ],
+          diagnostics: [],
+        },
+      })
+    if (url.pathname === "/api/session/dummy/interrupt") return new Response(null, { status: 204 })
+    if (url.pathname === "/api/session/dummy/revert/stage") return json({ data: { messageID: message.id } })
+    if (url.pathname === "/api/session/dummy/revert/clear") return new Response(null, { status: 204 })
+    if (url.pathname === "/session") return json([legacySession])
+  })
+  let api: TuiPluginApi | undefined
+  let disposeSlots = () => {}
+  let started!: () => void
+  const ready = new Promise<void>((resolve) => {
+    started = resolve
+  })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        url: "http://test",
+        directory,
+        config: createTuiResolvedConfig({ plugin_enabled: {} }),
+        fetch: calls.fetch,
+        events: events.source,
+        args: { continue: true },
+        pluginHost: {
+          async start(input) {
+            api = input.api
+            disposeSlots = input.runtime.setupSlots(input.api).dispose
+            started()
+          },
+          async dispose() {
+            disposeSlots()
+          },
+        },
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node))),
+    )
+
+    await ready
+    await waitForFrame(setup, previous.text, 5_000)
+    await waitForEditor(setup)
+    api?.keymap.dispatchCommand("session.undo")
+    const editor = await waitForEditorText(setup, message.text).catch((error) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\nRequests: ${paths.join(", ")}`)
+    })
+
+    expect(editor.plainText).toBe(message.text)
+    expect(paths).toContain("/api/session/dummy/interrupt")
+    expect(paths).toContain("/api/session/dummy/revert/stage")
+    expect(paths).not.toContain("/session/dummy/revert")
+
+    events.emit({
+      directory,
+      project: "project",
+      payload: {
+        id: "evt_revert",
+        type: "session.next.revert.staged",
+        properties: { timestamp: 20, sessionID: "dummy", revert: { messageID: message.id } },
+      },
+    })
+    await setup.renderOnce()
+    api?.keymap.dispatchCommand("session.undo")
+    const earlier = await waitForEditorText(setup, previous.text)
+
+    expect(earlier.plainText).toBe(previous.text)
+    expect(paths.filter((path) => path === "/api/session/dummy/interrupt")).toHaveLength(2)
+    expect(paths.filter((path) => path === "/api/session/dummy/revert/stage")).toHaveLength(2)
+
+    events.emit({
+      directory,
+      project: "project",
+      payload: {
+        id: "evt_previous_revert",
+        type: "session.next.revert.staged",
+        properties: { timestamp: 30, sessionID: "dummy", revert: { messageID: previous.id } },
+      },
+    })
+    await setup.renderOnce()
+    api?.keymap.dispatchCommand("session.redo")
+    await waitForRequestCount(paths, "/api/session/dummy/revert/stage", 3)
+
+    events.emit({
+      directory,
+      project: "project",
+      payload: {
+        id: "evt_latest_revert",
+        type: "session.next.revert.staged",
+        properties: { timestamp: 40, sessionID: "dummy", revert: { messageID: message.id } },
+      },
+    })
+    await setup.renderOnce()
+    api?.keymap.dispatchCommand("session.redo")
+    const cleared = await waitForEditorText(setup, "")
+
+    expect(cleared.plainText).toBe("")
+    expect(paths).toContain("/api/session/dummy/revert/clear")
+    expect(paths).not.toContain("/session/dummy/unrevert")
 
     process.emit("SIGHUP")
     await task

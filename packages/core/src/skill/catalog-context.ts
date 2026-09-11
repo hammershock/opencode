@@ -33,7 +33,11 @@ const layer = Layer.effect(
               Effect.andThen(skills.catalog({ forceReload: true })),
               Effect.map((result) => result.snapshot),
             )
-          : (cached ?? (yield* skills.catalog().pipe(Effect.map((result) => result.snapshot))))
+          : (cached ??
+            (yield* skills.reload().pipe(
+              Effect.andThen(skills.catalog()),
+              Effect.map((result) => result.snapshot),
+            )))
         const transient = observed.diagnostics.some(isTransient)
         const snapshot = transient && cached ? cached : observed
         if (!transient || !cached) yield* Ref.set(current, observed)

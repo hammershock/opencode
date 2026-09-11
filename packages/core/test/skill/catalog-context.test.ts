@@ -118,7 +118,7 @@ describe("SkillCatalogContext", () => {
     }).pipe(Effect.provide(layer))
   })
 
-  it.effect("force reloads once, reuses the current snapshot, and retains it on transient failure", () => {
+  it.effect("materializes the first snapshot, reuses it, and retains it on transient reload failure", () => {
     let waits = 0
     let reloads = 0
     let reads = 0
@@ -145,7 +145,7 @@ describe("SkillCatalogContext", () => {
 
     return Effect.gen(function* () {
       const catalogs = yield* SkillCatalogContext.Service
-      const first = yield* catalogs.load({ forceReload: true })
+      const first = yield* catalogs.load({ forceReload: false })
       const cached = yield* catalogs.load({ forceReload: false })
 
       expect(first.snapshot.skills.map((skill) => skill.name)).toEqual(["review"])

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionMessage, SessionMessageUser } from "@opencode-ai/sdk/v2"
+import type { Message, SessionMessage, SessionMessageUser } from "@opencode-ai/sdk/v2"
 import {
   canonicalUserText,
   commitCanonicalRevert,
+  mergeCanonicalSessionMessages,
   projectCanonicalSessionMessages,
   restoreCanonicalPrompt,
 } from "../../src/util/session-message"
@@ -163,5 +164,32 @@ describe("projectCanonicalSessionMessages", () => {
     ] satisfies SessionMessage[]
 
     expect(commitCanonicalRevert(messages, "boundary").map((message) => message.id)).toEqual(["earlier"])
+  })
+})
+
+describe("mergeCanonicalSessionMessages", () => {
+  test("preserves durable order when admission timestamps cross assistant output", () => {
+    const canonical = [
+      { id: "input-1", role: "user", time: { created: 10 } },
+      { id: "output-1", role: "assistant", time: { created: 30 } },
+      { id: "input-2", role: "user", time: { created: 20 } },
+      { id: "output-2", role: "assistant", time: { created: 40 } },
+    ] as Message[]
+    const legacy = canonical.toSorted((a, b) => a.time.created - b.time.created)
+
+    expect(mergeCanonicalSessionMessages(legacy, canonical).map((message) => message.id)).toEqual([
+      "input-1",
+      "output-1",
+      "input-2",
+      "output-2",
+    ])
+  })
+
+  test("keeps live legacy rows and prefers their objects for projected IDs", () => {
+    const projected = { id: "input-1", role: "user", time: { created: 10 } } as Message
+    const live = { ...projected, time: { created: 11 } } as Message
+    const queued = { id: "input-2", role: "user", time: { created: 9 } } as Message
+
+    expect(mergeCanonicalSessionMessages([queued, live], [projected])).toEqual([live, queued])
   })
 })

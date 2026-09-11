@@ -193,6 +193,16 @@ export function projectCanonicalSessionMessages(input: {
   })
 }
 
+export function mergeCanonicalSessionMessages(legacy: readonly Message[], canonical: readonly Message[]) {
+  if (canonical.length === 0) return legacy
+  const projected = new Set(canonical.map((message) => message.id))
+  const live = new Map(legacy.map((message) => [message.id, message]))
+  return [
+    ...canonical.map((message) => live.get(message.id) ?? message),
+    ...legacy.filter((message) => !projected.has(message.id)),
+  ]
+}
+
 function projectTool(sessionID: string, messageID: string, tool: SessionMessageAssistantTool): Part {
   const base = {
     id: tool.id,

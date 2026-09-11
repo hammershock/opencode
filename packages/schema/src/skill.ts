@@ -76,7 +76,7 @@ export const RegistrySnapshot = Schema.Struct({
 export const DiscoveryRootKind = Schema.Literals(["opencode-global", "imported", "url"])
 export type DiscoveryRootKind = typeof DiscoveryRootKind.Type
 
-export const DiscoveryRootStatus = Schema.Literals(["ready", "unavailable", "configured"])
+export const DiscoveryRootStatus = Schema.Literals(["ready", "undetected", "unavailable", "configured"])
 export type DiscoveryRootStatus = typeof DiscoveryRootStatus.Type
 
 export interface DiscoveryRoot extends Schema.Schema.Type<typeof DiscoveryRoot> {}

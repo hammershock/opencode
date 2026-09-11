@@ -79,6 +79,13 @@ describe("Skill settings HttpApi", () => {
     }
     expect(filtered.data.skills.some((item) => item.name === "review")).toBe(false)
 
+    const management = (await (
+      await request(`/api/skill/catalog?${location}&forceReload=true&includeInactive=true`)
+    ).json()) as {
+      data: { skills: Array<{ name: string }> }
+    }
+    expect(management.data.skills.some((item) => item.name === "review")).toBe(true)
+
     const invalidScope = await request(`/api/skill/settings/${skill!.id}/target-scope`, {
       method: "PUT",
       body: JSON.stringify({ scope: ["not-a-target"], expectedRevision: scoped.revision }),

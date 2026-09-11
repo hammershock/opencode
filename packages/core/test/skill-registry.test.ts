@@ -34,6 +34,32 @@ async function writeSkill(
 }
 
 describe("SkillRegistry", () => {
+  it.live("classifies Codex and Claude Skill roots", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const codex = path.join(tmp.path, ".codex", "skills")
+          const claude = path.join(tmp.path, ".claude", "skills")
+          yield* Effect.promise(() =>
+            Promise.all([
+              writeSkill(codex, "review", "review", "Codex instructions"),
+              writeSkill(claude, "deploy", "deploy", "Claude instructions"),
+            ]),
+          )
+
+          const registry = yield* SkillRegistry.Service
+          const result = yield* registry.load([source(codex), source(claude)])
+
+          expect(result.snapshot.skills.find((skill) => skill.name === "review")?.sourceLabel).toStartWith("Codex · ")
+          expect(result.snapshot.skills.find((skill) => skill.name === "deploy")?.sourceLabel).toStartWith("Claude · ")
+        }),
+      ),
+    ),
+  )
+
   it.live("produces stable identities and order-independent snapshots while retaining duplicate names", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

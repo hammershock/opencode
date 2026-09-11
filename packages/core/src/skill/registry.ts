@@ -355,7 +355,15 @@ function sourceLabelFor(
   if (kind === "opencode-project") return "Project .opencode"
   if (kind === "url" && source.type === "url")
     return normalizeUrl(source.url) ? `URL ${new URL(source.url).host}` : "URL source"
+  if (source.type === "directory" && isSkillRoot(source.path, process.env.CODEX_HOME, ".codex")) return "Codex"
+  if (source.type === "directory" && isSkillRoot(source.path, undefined, ".claude")) return "Claude"
   return "Imported"
+}
+
+function isSkillRoot(root: string, configuredHome: string | undefined, defaultHome: string) {
+  const resolved = path.resolve(root)
+  if (configuredHome?.trim() && resolved === path.resolve(configuredHome.trim(), "skills")) return true
+  return path.basename(resolved) === "skills" && path.basename(path.dirname(resolved)) === defaultHome
 }
 
 function labelForEntry(

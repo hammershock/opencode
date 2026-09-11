@@ -560,11 +560,16 @@ type Endpoint12_1Request = Parameters<RawClient["server.skill"]["skill.catalog"]
 type Endpoint12_1Input = {
   readonly location?: Endpoint12_1Request["query"]["location"]
   readonly forceReload?: Endpoint12_1Request["query"]["forceReload"]
+  readonly includeInactive?: Endpoint12_1Request["query"]["includeInactive"]
 }
 const Endpoint12_1 = (raw: RawClient["server.skill"]) => (input?: Endpoint12_1Input) =>
-  raw["skill.catalog"]({ query: { location: input?.["location"], forceReload: input?.["forceReload"] } }).pipe(
-    Effect.mapError(mapClientError),
-  )
+  raw["skill.catalog"]({
+    query: {
+      location: input?.["location"],
+      forceReload: input?.["forceReload"],
+      includeInactive: input?.["includeInactive"],
+    },
+  }).pipe(Effect.mapError(mapClientError))
 
 type Endpoint12_2Request = Parameters<RawClient["server.skill"]["skill.reload"]>[0]
 type Endpoint12_2Input = { readonly location?: Endpoint12_2Request["query"]["location"] }

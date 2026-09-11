@@ -39,12 +39,21 @@ const loadCatalog = (forceReload: boolean) =>
     Effect.map((value) => value.snapshot),
   )
 
+const loadManagementCatalog = (forceReload: boolean) =>
+  SkillCatalogContextService.Service.use((catalog) => catalog.load({ forceReload, includeInactive: true })).pipe(
+    Effect.map((value) => value.snapshot),
+  )
+
 export const SkillHandler = HttpApiBuilder.group(Api, "server.skill", (handlers) =>
   Effect.gen(function* () {
     const settings = yield* SkillSettings.Service
     return handlers
       .handle("skill.list", () => response(useSkill((skill) => skill.list())))
-      .handle("skill.catalog", (ctx) => response(loadCatalog(ctx.query.forceReload === "true")))
+      .handle("skill.catalog", (ctx) => {
+        if (ctx.query.includeInactive === "true")
+          return response(loadManagementCatalog(ctx.query.forceReload === "true"))
+        return response(loadCatalog(ctx.query.forceReload === "true"))
+      })
       .handle("skill.reload", () => response(loadCatalog(true)))
       .handle("skill.settings", () => read(settings.load))
       .handle("skill.discoveryUpdate", (ctx) => invoke(() => settings.updateDiscovery(ctx.payload)))

@@ -921,7 +921,11 @@ export function make(options: ClientOptions) {
           {
             method: "GET",
             path: `/api/skill/catalog`,
-            query: { location: input?.["location"], forceReload: input?.["forceReload"] },
+            query: {
+              location: input?.["location"],
+              forceReload: input?.["forceReload"],
+              includeInactive: input?.["includeInactive"],
+            },
             successStatus: 200,
             declaredStatuses: [500, 401, 400],
             empty: false,

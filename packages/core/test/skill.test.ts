@@ -71,7 +71,7 @@ description: ${description}
 }
 
 describe("SkillV2", () => {
-  it.live("registers sources and resolves later source precedence", () =>
+  it.live("registers sources and retains duplicate canonical names", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
@@ -104,12 +104,12 @@ describe("SkillV2", () => {
             { type: "directory", path: AbsolutePath.make(second) },
           ])
           expect(yield* skill.list()).toEqual([
-            SkillV2.Info.make({
-              name: "foo",
-              slash: true,
-              location: AbsolutePath.make(path.join(first, "foo.md")),
-              content: "# foo",
-            }),
+            {
+              name: "review",
+              description: "First",
+              location: AbsolutePath.make(path.join(first, "review", "SKILL.md")),
+              content: "# review",
+            },
             {
               name: "review",
               description: "Second",

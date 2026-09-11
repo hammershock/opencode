@@ -8,6 +8,7 @@ import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SkillRegistry } from "@opencode-ai/core/skill/registry"
 import { SkillResolver } from "@opencode-ai/core/skill/resolver"
+import { SkillPackageAccess } from "@opencode-ai/core/skill/package-access"
 import { SkillTool } from "@opencode-ai/core/tool/skill"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
@@ -36,10 +37,14 @@ const entry = (name: string, value: string): SkillRegistry.Entry => ({
 })
 
 describe("SkillTool", () => {
-  it.effect("loads a durable snapshot without exposing controller paths and authorizes the selected name", () => {
+  it.effect("loads one canonical snapshot and renders the current Location package path", () => {
     let current = [entry("effect", "1")]
     const assertions: PermissionV2.AssertInput[] = []
     let deny = false
+    let prepared: Effect.Effect<SkillPackageAccess.Prepared, SkillPackageAccess.Failure> = Effect.succeed({
+      path: AbsolutePath.make("/controller/skills/effect"),
+      temporary: false,
+    })
     const permission = Layer.succeed(
       PermissionV2.Service,
       PermissionV2.Service.of({
@@ -57,7 +62,6 @@ describe("SkillTool", () => {
     const resolver = Layer.succeed(
       SkillResolver.Service,
       SkillResolver.Service.of({
-        resolve: () => Effect.die("unused"),
         resolveName: (input) => {
           const found = current.find((candidate) => candidate.metadata.name === input.name)
           return found
@@ -72,6 +76,7 @@ describe("SkillTool", () => {
       [
         [PermissionV2.node, permission],
         [SkillResolver.node, resolver],
+        [SkillPackageAccess.node, Layer.mock(SkillPackageAccess.Service, { prepare: () => prepared })],
         [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
       ],
     )
@@ -87,8 +92,9 @@ describe("SkillTool", () => {
       expect(result).toMatchObject({ type: "text" })
       if (result.type !== "text") return
       expect(result.value).toContain('<skill_content name="effect" invocation="ski_')
-      expect(result.value).toContain("Use skill_resource")
-      expect(result.value).not.toContain("/controller/skills")
+      expect(result.value).toContain("Package directory: /controller/skills/effect")
+      expect(result.value).toContain("ordinary filesystem and shell tools")
+      expect(result.value).not.toContain("skill_resource")
 
       const settled = yield* settleTool(registry, {
         sessionID,
@@ -127,13 +133,44 @@ describe("SkillTool", () => {
       ).toEqual({ type: "error", value: "Unable to load skill effect" })
       deny = false
       current = [entry("public", "2")]
+      prepared = Effect.succeed({
+        path: AbsolutePath.make("/controller/skills/public"),
+        temporary: false,
+      })
       const flat = yield* executeTool(registry, {
         sessionID,
         ...toolIdentity,
         call: { type: "tool-call", id: "call-public-skill", name: "skill", input: { name: "public" } },
       })
       expect(flat).toMatchObject({ type: "text" })
-      if (flat.type === "text") expect(flat.value).not.toContain("/controller/skills")
+      if (flat.type === "text") expect(flat.value).toContain("Package directory: /controller/skills/public")
+
+      current = [entry("effect", "1")]
+      prepared = Effect.succeed({
+        path: AbsolutePath.make("/tmp/opencode-transit/skills/packages/remote"),
+        temporary: true,
+      })
+      const remote = yield* executeTool(registry, {
+        sessionID,
+        ...toolIdentity,
+        call: { type: "tool-call", id: "call-remote-skill", name: "skill", input: { name: "effect" } },
+      })
+      expect(remote).toMatchObject({ type: "text" })
+      if (remote.type === "text") {
+        expect(remote.value).toContain("Temporary package directory on this execution target")
+        expect(remote.value).toContain("shared, mutable runtime copy")
+        expect(remote.value).toContain("persistent background work")
+        expect(remote.value).not.toContain("/controller/skills")
+      }
+
+      prepared = Effect.fail(new SkillPackageAccess.Failure({ skillID: current[0]!.metadata.id, kind: "unavailable" }))
+      expect(
+        yield* executeTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "call-remote-failure", name: "skill", input: { name: "effect" } },
+        }),
+      ).toEqual({ type: "error", value: "Unable to load skill effect" })
     }).pipe(Effect.provide(skillToolLayer))
   })
 })

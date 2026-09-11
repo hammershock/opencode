@@ -177,12 +177,20 @@ describe("SkillV2", () => {
           expect(initial.snapshot.skills.map((item) => item.name)).toEqual(["review"])
           scopes[id] = [Location.TargetID.make("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")]
           expect((yield* skill.catalog()).snapshot.skills).toEqual([])
+          expect((yield* skill.catalog({ includeInactive: true })).snapshot.skills.map((item) => item.name)).toEqual([
+            "review",
+          ])
           scopes[id] = ["local"]
           expect((yield* skill.catalog()).snapshot.skills.map((item) => item.name)).toEqual(["review"])
           yield* skill.transform((editor) =>
             editor.target(Location.TargetID.make("9a858c60-01c7-4a3d-a137-f5df09560d42")),
           )
           expect((yield* skill.catalog()).snapshot.skills).toEqual([])
+          scopes[id] = []
+          expect((yield* skill.catalog()).snapshot.skills).toEqual([])
+          expect((yield* skill.catalog({ includeInactive: true })).snapshot.skills.map((item) => item.name)).toEqual([
+            "review",
+          ])
           delete scopes[id]
         }),
       ),

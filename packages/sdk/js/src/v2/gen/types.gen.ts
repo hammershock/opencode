@@ -5618,7 +5618,7 @@ export type SkillDiscoveryRoot = {
   value: string
   resolved?: string
   default: boolean
-  status: "ready" | "unavailable" | "configured"
+  status: "ready" | "undetected" | "unavailable" | "configured"
 }
 
 export type SkillSettingsDiagnostic = {
@@ -15756,6 +15756,7 @@ export type V2SkillCatalogData = {
       target?: string
     }
     forceReload?: "true" | "false"
+    includeInactive?: "true" | "false"
   }
   url: "/api/skill/catalog"
 }

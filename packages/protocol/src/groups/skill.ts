@@ -9,6 +9,7 @@ const mutationErrors = [ConflictError, InvalidRequestError, UnknownError] as con
 const catalogQuery = Schema.Struct({
   ...LocationQuery.fields,
   forceReload: Schema.Literals(["true", "false"]).pipe(Schema.optional),
+  includeInactive: Schema.Literals(["true", "false"]).pipe(Schema.optional),
 }).annotate({ identifier: "Skill.CatalogQuery" })
 
 export const SkillGroup = HttpApiGroup.make("server.skill")

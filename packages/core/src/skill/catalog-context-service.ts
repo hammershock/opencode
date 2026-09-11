@@ -16,7 +16,7 @@ export interface Loaded {
 }
 
 export interface Interface {
-  readonly load: (input: { readonly forceReload: boolean }) => Effect.Effect<Loaded>
+  readonly load: (input: { readonly forceReload: boolean; readonly includeInactive?: boolean }) => Effect.Effect<Loaded>
   readonly resolve: (input: AdmissionInput) => Effect.Effect<ReadonlyArray<SkillInvocationPart>, AdmissionError>
 }
 

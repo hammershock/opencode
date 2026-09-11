@@ -44,8 +44,12 @@ export type Draft = {
 export interface Interface extends State.Transformable<Draft> {
   readonly sources: () => Effect.Effect<Source[]>
   readonly list: () => Effect.Effect<Info[]>
-  readonly catalog: (options?: SkillRegistry.LoadOptions) => Effect.Effect<SkillRegistry.Result>
+  readonly catalog: (options?: CatalogOptions) => Effect.Effect<SkillRegistry.Result>
   readonly lookup: (id: Skill.ID) => Effect.Effect<Lookup>
+}
+
+export interface CatalogOptions extends SkillRegistry.LoadOptions {
+  readonly includeInactive?: boolean
 }
 
 export type Lookup =
@@ -79,14 +83,16 @@ const layer = Layer.effect(
       }),
     })
 
-    const result = Effect.fn("SkillV2.registry")(function* (options?: SkillRegistry.LoadOptions) {
+    const result = Effect.fn("SkillV2.registry")(function* (options?: CatalogOptions) {
       const loaded = yield* registry.load(state.get().registrations, options)
       const configured = yield* Effect.promise(() => settings.load())
       const target = state.get().target
-      const entries = loaded.entries.filter((entry) => {
-        const scope = configured.targets[entry.metadata.id] ?? "*"
-        return scope === "*" || scope.includes(target)
-      })
+      const entries = options?.includeInactive
+        ? loaded.entries
+        : loaded.entries.filter((entry) => {
+            const scope = configured.targets[entry.metadata.id] ?? "*"
+            return scope === "*" || scope.includes(target)
+          })
       const diagnostics = [
         ...loaded.snapshot.diagnostics,
         ...state.get().diagnostics,
@@ -106,7 +112,9 @@ const layer = Layer.effect(
           a.message.localeCompare(b.message),
       )
       const skills = entries.map((entry) => entry.metadata)
-      const digest = Skill.Digest.make(Hash.sha256(JSON.stringify({ skills, diagnostics, target })))
+      const digest = Skill.Digest.make(
+        Hash.sha256(JSON.stringify({ skills, diagnostics, target: options?.includeInactive ? "*" : target })),
+      )
       return {
         entries,
         snapshot: Skill.RegistrySnapshot.make({ revision: digest, skills, diagnostics, digest }),

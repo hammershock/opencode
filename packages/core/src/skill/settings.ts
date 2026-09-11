@@ -339,7 +339,9 @@ async function filesystemStatus(root: string) {
   return fs
     .stat(root)
     .then((value) => (value.isDirectory() ? ("ready" as const) : ("unavailable" as const)))
-    .catch(() => "unavailable" as const)
+    .catch((error: NodeJS.ErrnoException) =>
+      error.code === "ENOENT" ? ("undetected" as const) : ("unavailable" as const),
+    )
 }
 
 async function normalizePathsForRead(

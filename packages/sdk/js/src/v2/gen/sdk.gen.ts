@@ -6985,6 +6985,7 @@ export class Skill extends HeyApiClient {
         target?: string
       }
       forceReload?: "true" | "false"
+      includeInactive?: "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6995,6 +6996,7 @@ export class Skill extends HeyApiClient {
           args: [
             { in: "query", key: "location" },
             { in: "query", key: "forceReload" },
+            { in: "query", key: "includeInactive" },
           ],
         },
       ],

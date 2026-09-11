@@ -32,6 +32,8 @@ export interface DialogSelectProps<T> {
   onMove?: (option: DialogSelectOption<T>) => void
   onFilter?: (query: string) => void
   onSelect?: (option: DialogSelectOption<T>) => void
+  onToggle?: (option: DialogSelectOption<T>) => void
+  onConfirm?: (option: DialogSelectOption<T> | undefined) => void
   skipFilter?: boolean
   renderFilter?: boolean
   locked?: boolean
@@ -359,6 +361,10 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
       return
     }
     const option = selected()
+    if (props.onConfirm) {
+      props.onConfirm(option)
+      return
+    }
     if (!option) return
     option.onSelect?.(dialog)
     props.onSelect?.(option)
@@ -467,6 +473,20 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           "dialog.select.submit",
         ]),
         ...visible.flatMap((item) => tuiConfig.keybinds.get(item.command)),
+        ...(props.onToggle
+          ? [
+              {
+                key: "space",
+                desc: "Toggle selected item",
+                group: "Dialog",
+                cmd: () => {
+                  if (props.locked) return
+                  const option = selected()
+                  if (option) props.onToggle?.(option)
+                },
+              },
+            ]
+          : []),
         ...(visible.length && !props.bindings?.some((binding) => binding.key === "tab")
           ? [
               {

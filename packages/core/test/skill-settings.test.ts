@@ -18,8 +18,18 @@ describe("SkillSettings", () => {
     expect(snapshot.valid).toBe(true)
     expect(String(snapshot.path)).toBe(path.join(config, "opencode.jsonc"))
     expect(snapshot.roots).toEqual([
-      expect.objectContaining({ kind: "opencode-global", value: path.join(config, "skill"), default: true }),
-      expect.objectContaining({ kind: "opencode-global", value: path.join(config, "skills"), default: true }),
+      expect.objectContaining({
+        kind: "opencode-global",
+        value: path.join(config, "skill"),
+        default: true,
+        status: "undetected",
+      }),
+      expect.objectContaining({
+        kind: "opencode-global",
+        value: path.join(config, "skills"),
+        default: true,
+        status: "undetected",
+      }),
     ])
     expect(snapshot.targets).toEqual({})
   })

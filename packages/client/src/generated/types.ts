@@ -3740,6 +3740,7 @@ export type SkillsCatalogInput = {
         }
       | undefined
     readonly forceReload?: "true" | "false" | undefined
+    readonly includeInactive?: "true" | "false" | undefined
   }["location"]
   readonly forceReload?: {
     readonly location?:
@@ -3750,7 +3751,19 @@ export type SkillsCatalogInput = {
         }
       | undefined
     readonly forceReload?: "true" | "false" | undefined
+    readonly includeInactive?: "true" | "false" | undefined
   }["forceReload"]
+  readonly includeInactive?: {
+    readonly location?:
+      | {
+          readonly directory?: string | undefined
+          readonly workspace?: string | undefined
+          readonly target?: string | undefined
+        }
+      | undefined
+    readonly forceReload?: "true" | "false" | undefined
+    readonly includeInactive?: "true" | "false" | undefined
+  }["includeInactive"]
 }
 
 export type SkillsCatalogOutput = {
@@ -3853,7 +3866,7 @@ export type SkillsSettingsOutput = {
     readonly value: string
     readonly resolved?: string
     readonly default: boolean
-    readonly status: "ready" | "unavailable" | "configured"
+    readonly status: "ready" | "undetected" | "unavailable" | "configured"
   }>
   readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
   readonly diagnostics: ReadonlyArray<{
@@ -3893,7 +3906,7 @@ export type SkillsDiscoveryUpdateOutput = {
     readonly value: string
     readonly resolved?: string
     readonly default: boolean
-    readonly status: "ready" | "unavailable" | "configured"
+    readonly status: "ready" | "undetected" | "unavailable" | "configured"
   }>
   readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
   readonly diagnostics: ReadonlyArray<{
@@ -3919,7 +3932,7 @@ export type SkillsDiscoveryResetOutput = {
     readonly value: string
     readonly resolved?: string
     readonly default: boolean
-    readonly status: "ready" | "unavailable" | "configured"
+    readonly status: "ready" | "undetected" | "unavailable" | "configured"
   }>
   readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
   readonly diagnostics: ReadonlyArray<{
@@ -3950,7 +3963,7 @@ export type SkillsTargetScopeUpdateOutput = {
     readonly value: string
     readonly resolved?: string
     readonly default: boolean
-    readonly status: "ready" | "unavailable" | "configured"
+    readonly status: "ready" | "undetected" | "unavailable" | "configured"
   }>
   readonly targets: { readonly [x: string]: "*" | ReadonlyArray<"local" | string> }
   readonly diagnostics: ReadonlyArray<{

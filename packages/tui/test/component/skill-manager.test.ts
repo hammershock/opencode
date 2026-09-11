@@ -3,6 +3,8 @@ import {
   buildSkillManagerRows,
   skillRootStatus,
   skillScopeLabel,
+  skillSourceLabel,
+  skillTargetsLabel,
   toggleSkillTargetScope,
   type SkillManagerModel,
 } from "../../src/component/skill-manager"
@@ -29,7 +31,7 @@ function model(): SkillManagerModel {
           value: "/Users/test/.codex/skills",
           resolved: "/Users/test/.codex/skills",
           default: false,
-          status: "unavailable",
+          status: "undetected",
         },
       ],
       targets: { [secondID]: ["local"], [dormantID]: [] },
@@ -61,23 +63,27 @@ function model(): SkillManagerModel {
         },
       ],
     },
-    targets: [{ id: "configured-target", name: "mywindows" }],
+    targets: [{ id: "configured-target", name: "a100-2gpu" }],
   }
 }
 
 describe("Skill Manager presentation", () => {
   test("uses stable status labels for roots and target scopes", () => {
     expect(skillRootStatus(model().settings.roots[0]!)).toBe("● default")
-    expect(skillRootStatus(model().settings.roots[1]!)).toBe("! unavailable")
-    expect(skillScopeLabel(undefined)).toBe("all targets")
-    expect(skillScopeLabel("*")).toBe("all targets")
-    expect(skillScopeLabel([])).toBe("disabled")
-    expect(skillScopeLabel(["local"])).toBe("local only")
-    expect(skillScopeLabel(["local", "configured-target"])).toBe("2 targets")
+    expect(skillRootStatus(model().settings.roots[1]!)).toBe("! undetected")
+    expect(skillScopeLabel(undefined)).toBe("all")
+    expect(skillScopeLabel("*")).toBe("all")
+    expect(skillScopeLabel([])).toBe("none")
+    expect(skillScopeLabel(["local"])).toBe("local")
+    expect(skillTargetsLabel(["local", "configured-target"], model().targets)).toBe("local, a100-2gpu")
+    expect(skillSourceLabel("Built-in")).toBe("opencode")
+    expect(skillSourceLabel("Codex · abcdef12")).toBe("codex")
+    expect(skillSourceLabel("Claude · abcdef12")).toBe("claude")
+    expect(skillSourceLabel("Imported · abcdef12")).toBe("others")
   })
 
   test("switches from future-inclusive access to an explicit checklist", () => {
-    expect(toggleSkillTargetScope("*", "local")).toEqual(["local"])
+    expect(toggleSkillTargetScope("*", "local", ["local", "configured-target"])).toEqual(["configured-target"])
     expect(toggleSkillTargetScope(["local"], "configured-target")).toEqual(["local", "configured-target"])
     expect(toggleSkillTargetScope(["local", "configured-target"], "local")).toEqual(["configured-target"])
     expect(toggleSkillTargetScope(["configured-target"], "configured-target")).toEqual([])
@@ -94,20 +100,20 @@ describe("Skill Manager presentation", () => {
     ])
     expect(rows.find((row) => row.key === "root:imported:/Users/test/.codex/skills")).toMatchObject({
       title: "~/.codex/skills",
-      footer: "! unavailable",
+      description: "codex",
+      footer: "! undetected",
       inspectionTitle: "/Users/test/.codex/skills",
     })
     expect(rows.filter((row) => row.title === "review")).toEqual([
       expect.objectContaining({
-        description: "OpenCode config · first",
+        skill: { source: "opencode", targets: "all", state: "active" },
         details: [expect.stringContaining("Duplicate")],
       }),
-      expect.objectContaining({ description: "Imported · second", footer: "local only" }),
+      expect.objectContaining({ skill: { source: "others", targets: "local", state: "active" } }),
     ])
     expect(rows.find((row) => row.key === `skill:${dormantID}`)).toMatchObject({
-      title: "Unavailable Skill · 33333333",
-      description: "Dormant target access",
-      footer: "disabled",
+      title: "Undetected Skill · 33333333",
+      skill: { source: "others", targets: "none", state: "undetected" },
     })
   })
 

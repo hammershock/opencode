@@ -7,6 +7,7 @@ import type { EventV2 } from "../event"
 import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
+import { SkillInvocationHistory } from "../skill/invocation-history"
 import { Token } from "../util/token"
 
 const DEFAULT_BUFFER = 20_000
@@ -126,13 +127,7 @@ const skillSnapshots = (entries: readonly Entry[]) =>
   Array.from(
     new Map(
       entries
-        .flatMap((entry) =>
-          entry.message.type === "user"
-            ? (entry.message.skills ?? []).map((skill) => skill.snapshot)
-            : entry.message.type === "compaction"
-              ? (entry.message.skills ?? [])
-              : [],
-        )
+        .flatMap((entry) => SkillInvocationHistory.snapshots(entry.message))
         .map((snapshot) => [snapshot.id, snapshot]),
     ).values(),
   )

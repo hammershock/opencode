@@ -6,6 +6,7 @@ import { SkillResource } from "@opencode-ai/schema/skill-resource"
 import { Effect, Layer, Schema } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { FSUtil } from "@opencode-ai/core/fs-util"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -31,7 +32,12 @@ describe("SkillResourceTool", () => {
         Effect.gen(function* () {
           const directory = path.join(tmp.path, "review")
           const outside = path.join(tmp.path, "outside.txt")
-          yield* Effect.promise(() => fs.mkdir(path.join(directory, "references"), { recursive: true }))
+          yield* Effect.promise(() =>
+            Promise.all([
+              fs.mkdir(path.join(directory, "references"), { recursive: true }),
+              fs.mkdir(path.join(directory, "many"), { recursive: true }),
+            ]),
+          )
           yield* Effect.promise(() =>
             Promise.all([
               fs.writeFile(path.join(directory, "SKILL.md"), "---\nname: review\n---\nReview carefully"),
@@ -39,8 +45,17 @@ describe("SkillResourceTool", () => {
               fs.writeFile(path.join(directory, "binary.dat"), new Uint8Array([0, 1, 2, 3])),
               fs.writeFile(path.join(directory, "large.txt"), new Uint8Array(1024 * 1024 + 1)),
               fs.writeFile(outside, "outside"),
+              ...Array.from({ length: 103 }, (_, index) =>
+                fs.writeFile(path.join(directory, "many", `${index.toString().padStart(3, "0")}.txt`), "resource"),
+              ),
+              ...Array.from({ length: 60 }, async (_, index) => {
+                const folder = path.join(directory, `long-${index.toString().padStart(3, "0")}-${"x".repeat(180)}`)
+                await fs.mkdir(folder)
+                await fs.writeFile(path.join(folder, `${"y".repeat(180)}.txt`), "resource")
+              }),
             ]),
           )
+          yield* Effect.promise(() => fs.link(outside, path.join(directory, "hardlink.txt")))
           if (process.platform !== "win32")
             yield* Effect.promise(() => fs.symlink(outside, path.join(directory, "escape.txt")))
 
@@ -63,10 +78,14 @@ describe("SkillResourceTool", () => {
             content: "Review carefully",
           }
           const assertions: PermissionV2.AssertInput[] = []
+          let deny = false
           const permission = Layer.succeed(
             PermissionV2.Service,
             PermissionV2.Service.of({
-              assert: (input) => Effect.sync(() => assertions.push(input)),
+              assert: (input) =>
+                Effect.sync(() => assertions.push(input)).pipe(
+                  Effect.andThen(deny ? Effect.fail(new PermissionV2.BlockedError({ rules: [] })) : Effect.void),
+                ),
               ask: () => Effect.die("unused"),
               reply: () => Effect.die("unused"),
               get: () => Effect.die("unused"),
@@ -74,19 +93,41 @@ describe("SkillResourceTool", () => {
               list: () => Effect.die("unused"),
             }),
           )
+          let reads = 0
           const resolver = Layer.succeed(
             SkillResolver.Service,
             SkillResolver.Service.of({
               resolve: () => Effect.succeed({ entry }),
               resolveName: () => Effect.die("unused"),
-              read: Effect.succeed,
+              read: (resolved) =>
+                Effect.sync(() => {
+                  reads++
+                  return resolved
+                }),
             }),
           )
+          const locationFilesystem = Layer.effect(
+            FSUtil.Service,
+            Effect.gen(function* () {
+              const filesystem = yield* FSUtil.Service
+              const unavailable = () => Effect.die("skill_resource used the Location filesystem")
+              return FSUtil.Service.of({
+                ...filesystem,
+                ensureDir: unavailable,
+                open: unavailable,
+                readDirectoryEntries: unavailable,
+                realPath: unavailable,
+                stat: unavailable,
+                writeFileString: unavailable,
+              })
+            }),
+          ).pipe(Layer.provide(LayerNode.compile(FSUtil.node)))
           const resourceLayer = AppNodeBuilder.build(
             LayerNode.group([ToolRegistry.node, ToolRegistry.toolsNode, SkillResourceTool.node]),
             [
               [PermissionV2.node, permission],
               [SkillResolver.node, resolver],
+              [FSUtil.locationNode, locationFilesystem],
               [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
             ],
           )
@@ -105,18 +146,48 @@ describe("SkillResourceTool", () => {
               })
 
             const listed = yield* call("call-manifest", { skill: skillID })
-            expect(listed.output?.structured).toMatchObject({
+            const listedOutput = yield* Schema.decodeUnknownEffect(SkillResource.Output)(listed.output?.structured)
+            expect(listedOutput).toMatchObject({
               type: "manifest",
               skill: { skillID, name: "review", digest: "2".repeat(64) },
-              entries: [
-                { resource: "binary.dat", size: 4 },
-                { resource: "large.txt", size: 1024 * 1024 + 1 },
-                { resource: "references/guide.md", mime: "text/markdown" },
-              ],
+              truncated: true,
             })
+            if (listedOutput.type !== "manifest" || typeof listedOutput.nextCursor !== "string") return
+            expect(listedOutput.entries.length).toBeLessThan(SkillResource.MAX_MANIFEST_ENTRIES)
+            expect(Buffer.byteLength(JSON.stringify(listedOutput))).toBeLessThanOrEqual(
+              SkillResource.MAX_MANIFEST_BYTES,
+            )
+            expect(listedOutput.entries[0]).toMatchObject({ resource: "binary.dat", size: 4 })
+            expect(listedOutput.entries[1]).toMatchObject({ resource: "large.txt", size: 1024 * 1024 + 1 })
+            const pages = [listedOutput]
+            let nextCursor: string | undefined = listedOutput.nextCursor
+            while (nextCursor) {
+              const settlement: ToolRegistry.Settlement = yield* call(`call-manifest-${pages.length}`, {
+                skill: skillID,
+                cursor: nextCursor,
+              })
+              const output: SkillResource.Output = yield* Schema.decodeUnknownEffect(SkillResource.Output)(
+                settlement.output?.structured,
+              )
+              if (output.type !== "manifest") return
+              expect(Buffer.byteLength(JSON.stringify(output))).toBeLessThanOrEqual(SkillResource.MAX_MANIFEST_BYTES)
+              pages.push(output)
+              nextCursor = output.nextCursor
+            }
+            const resources = pages.flatMap((page) => page.entries)
+            expect(resources).toHaveLength(166)
+            expect(resources.at(-1)).toMatchObject({
+              resource: "references/guide.md",
+              mime: "text/markdown",
+            })
+            expect(resources.map((entry) => entry.resource)).toEqual(
+              resources.map((entry) => entry.resource).toSorted((a, b) => a.localeCompare(b)),
+            )
+            expect(listed.outputPaths).toBeUndefined()
             expect(JSON.stringify(listed)).not.toContain(tmp.path)
             expect(JSON.stringify(listed)).not.toContain("SKILL.md")
             expect(JSON.stringify(listed)).not.toContain("escape.txt")
+            expect(JSON.stringify(listed)).not.toContain("hardlink.txt")
 
             const first = yield* call("call-text-first", {
               skill: skillID,
@@ -164,12 +235,39 @@ describe("SkillResourceTool", () => {
               type: "error",
               value: "skill_resource failed: invalid_resource_path",
             })
+            expect((yield* call("call-root", { skill: skillID, resource: "SKILL.md" })).result).toEqual({
+              type: "error",
+              value: "skill_resource failed: invalid_resource_path",
+            })
+            expect((yield* call("call-directory", { skill: skillID, resource: "references" })).result).toEqual({
+              type: "error",
+              value: "skill_resource failed: unsupported_resource_type",
+            })
+            expect((yield* call("call-missing", { skill: skillID, resource: "missing.txt" })).result).toEqual({
+              type: "error",
+              value: "skill_resource failed: resource_not_found",
+            })
+            expect((yield* call("call-hardlink", { skill: skillID, resource: "hardlink.txt" })).result).toEqual({
+              type: "error",
+              value: "skill_resource failed: resource_outside_package",
+            })
+            expect((yield* call("call-cursor", { skill: skillID, cursor: "invalid!" })).result).toEqual({
+              type: "error",
+              value: "skill_resource failed: invalid_cursor",
+            })
             if (process.platform !== "win32")
               expect((yield* call("call-symlink", { skill: skillID, resource: "escape.txt" })).result).toEqual({
                 type: "error",
                 value: "skill_resource failed: resource_outside_package",
               })
-            expect(assertions).toHaveLength(process.platform === "win32" ? 7 : 8)
+            const readsBeforeDenied = reads
+            deny = true
+            expect((yield* call("call-denied", { skill: skillID, resource: "references/guide.md" })).result).toEqual({
+              type: "error",
+              value: "skill_resource failed: permission_denied",
+            })
+            expect(reads).toBe(readsBeforeDenied)
+            expect(assertions.every((assertion) => assertion.action === "skill")).toBe(true)
           }).pipe(Effect.provide(resourceLayer))
         }),
       ),

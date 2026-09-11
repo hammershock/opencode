@@ -6,11 +6,10 @@ import { SkillResource } from "@opencode-ai/schema/skill-resource"
 import { Context, Effect, Layer, Schema } from "effect"
 import { AgentV2 } from "../agent"
 import { makeLocationNode } from "../effect/app-node"
-import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { SessionStore } from "../session/store"
 import { SkillV2 } from "../skill"
-import { SkillGuidanceSnapshot } from "./guidance-snapshot"
+import { SkillInvocationHistory } from "./invocation-history"
 import { SkillRegistry } from "./registry"
 
 export interface Resolved {
@@ -65,17 +64,13 @@ const layer = Layer.effect(
       const context = yield* sessions
         .context(sessionID)
         .pipe(Effect.mapError(() => new Error({ kind: "resource_unavailable_on_device" })))
-      const snapshots = context.flatMap(invocations).filter((snapshot) => snapshot.id === id)
+      const snapshots = context.flatMap(SkillInvocationHistory.snapshots).filter((snapshot) => snapshot.id === id)
       const snapshot = snapshots[0]
       if (!snapshot || snapshots.some((candidate) => !sameInvocation(snapshot, candidate)))
         return yield* new Error({ kind: "resource_unavailable_on_device" })
       const catalog = yield* skills.catalog()
       const matches = catalog.entries.filter(
-        (entry) =>
-          entry.metadata.name === snapshot.name &&
-          entry.metadata.digest === snapshot.digest &&
-          entry.source.kind === snapshot.source.kind &&
-          SkillGuidanceSnapshot.sourceLabel(entry.source.label) === snapshot.source.label,
+        (entry) => entry.metadata.name === snapshot.name && entry.metadata.digest === snapshot.digest,
       )
       if (matches.length !== 1) return yield* new Error({ kind: "resource_unavailable_on_device" })
       const applicable = yield* permitted(agent, matches)
@@ -112,19 +107,6 @@ export const node = makeLocationNode({
   layer,
   deps: [AgentV2.node, SessionStore.node, SkillV2.node, SkillRegistry.node],
 })
-
-function invocations(message: SessionMessage.Message) {
-  if (message.type === "user") return (message.skills ?? []).map((invocation) => invocation.snapshot)
-  if (message.type === "compaction") return message.skills ?? []
-  if (message.type !== "assistant") return []
-  return message.content.flatMap((item) => {
-    if (item.type !== "tool" || item.name !== "skill" || item.state.status !== "completed") return []
-    const snapshot = Schema.decodeUnknownOption(SkillInvocation.Snapshot)(
-      item.state.structured.snapshot,
-    ).valueOrUndefined
-    return snapshot ? [snapshot] : []
-  })
-}
 
 function sameInvocation(a: SkillInvocation.Snapshot, b: SkillInvocation.Snapshot) {
   return (

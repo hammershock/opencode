@@ -7,6 +7,8 @@ import { LLM, LLMEvent, Model, type LLMRequest } from "@opencode-ai/llm"
 import { route } from "@opencode-ai/llm/protocols/openai-chat"
 import { Skill } from "@opencode-ai/schema/skill"
 import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
+import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@opencode-ai/core/provider"
 import { DateTime, Effect, Stream } from "effect"
 
 test("compaction prompt preserves detailed work state and relevant files", () => {
@@ -72,6 +74,11 @@ test("compaction carries exact Skill snapshots without re-reading their package"
     content: "Exact durable Skill body",
     status: "loaded",
   })
+  const implicit = SkillInvocation.Snapshot.make({
+    ...snapshot,
+    id: SkillInvocation.ID.make("ski_compactedimplicit"),
+    content: "Exact durable implicit Skill body",
+  })
   const model = Model.make({
     id: "compact",
     provider: "test",
@@ -101,6 +108,30 @@ test("compaction carries exact Skill snapshots without re-reading their package"
             time: { created: DateTime.makeUnsafe(1) },
           }),
         },
+        {
+          seq: 2,
+          message: SessionMessage.Assistant.make({
+            id: SessionMessage.ID.make("msg_compaction_skill_tool"),
+            type: "assistant",
+            agent: "build",
+            model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("test") },
+            content: [
+              SessionMessage.AssistantTool.make({
+                type: "tool",
+                id: "call_compaction_skill",
+                name: "skill",
+                state: SessionMessage.ToolStateCompleted.make({
+                  status: "completed",
+                  input: { name: "review" },
+                  content: [{ type: "text", text: "Skill loaded" }],
+                  structured: { snapshot: implicit },
+                }),
+                time: { created: DateTime.makeUnsafe(2), completed: DateTime.makeUnsafe(3) },
+              }),
+            ],
+            time: { created: DateTime.makeUnsafe(2), completed: DateTime.makeUnsafe(3) },
+          }),
+        },
       ],
       model,
       request: LLM.request({ model, prompt: "continue" }),
@@ -110,7 +141,8 @@ test("compaction carries exact Skill snapshots without re-reading their package"
   expect(compacted).toBe(true)
   expect(published[1]).toMatchObject({
     type: "session.next.compaction.ended",
-    data: { skills: [snapshot] },
+    data: { skills: [snapshot, implicit] },
   })
   expect(JSON.stringify(requests[0])).not.toContain(snapshot.content)
+  expect(JSON.stringify(requests[0])).not.toContain(implicit.content)
 })

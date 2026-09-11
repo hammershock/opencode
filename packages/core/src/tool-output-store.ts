@@ -20,6 +20,7 @@ export interface BoundInput {
   readonly sessionID: SessionSchema.ID
   readonly toolCallID: string
   readonly output: ToolOutput
+  readonly retain?: boolean
 }
 
 export interface BoundResult {
@@ -154,6 +155,23 @@ const layer = Layer.effect(
           output: input.output,
           outputPaths: [],
         }
+
+      if (input.retain === false) {
+        const marker = "... output truncated; full content was not retained ..."
+        return {
+          output: {
+            structured: input.output.structured,
+            content: [
+              {
+                type: "text" as const,
+                text: boundedPreview(contextual, marker, outputLimits.maxLines, outputLimits.maxBytes),
+              },
+              ...media,
+            ],
+          },
+          outputPaths: [],
+        }
+      }
 
       const outputPath = yield* write(contextual)
       const marker = `... output truncated; full content saved to ${outputPath} ...`

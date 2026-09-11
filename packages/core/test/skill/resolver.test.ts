@@ -38,7 +38,7 @@ const entry = (id: string, location: string): SkillRegistry.Entry => ({
 
 describe("SkillResolver", () => {
   it.effect(
-    "resolves durable invocations by unique local provenance and rejects ambiguous or inapplicable matches",
+    "resolves durable invocations by unique local content identity and rejects ambiguous or inapplicable matches",
     () => {
       const first = entry("1", "review")
       let catalog = [first]
@@ -119,11 +119,29 @@ describe("SkillResolver", () => {
         expect((yield* resolver.read(resolved)).entry).toBe(first)
         expect(reads).toBe(1)
 
+        const portable = {
+          ...entry("2", "review-global"),
+          metadata: {
+            ...entry("2", "review-global").metadata,
+            sourceLabel: "OpenCode · global · 22222222",
+          },
+          source: {
+            ...entry("2", "review-global").source,
+            kind: "opencode-global" as const,
+            label: "OpenCode · global · 22222222",
+          },
+        }
+        catalog = [portable]
+        expect(yield* resolver.resolve({ sessionID, agent: agentID, reference: invocationID })).toEqual({
+          entry: portable,
+          invocationID,
+        })
+
         catalog = [
           first,
           {
-            ...entry("2", "review-copy"),
-            source: { ...entry("2", "review-copy").source, label: "Imported · 22222222" },
+            ...entry("3", "review-copy"),
+            source: { ...entry("3", "review-copy").source, label: "Imported · 33333333" },
           },
         ]
         expect(

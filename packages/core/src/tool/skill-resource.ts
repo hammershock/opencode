@@ -54,6 +54,8 @@ const layer = Layer.effectDiscard(
             description,
             input: SkillResource.Input,
             output: SkillResource.Output,
+            // Resource data belongs to the controller and must not spill into local or Rexd Location storage.
+            retainOverflow: false,
             toModelOutput: ({ output }) => [{ type: "text", text: JSON.stringify(output) }],
             execute: (input, context) =>
               Effect.gen(function* () {
@@ -174,7 +176,24 @@ const manifest = Effect.fn("SkillResource.manifest")(function* (
     return yield* new AccessError({ kind: "invalid_cursor" })
   const offset = cursor?.offset ?? 0
   if (offset > entries.length) return yield* new AccessError({ kind: "invalid_cursor" })
-  const selected = entries.slice(offset, offset + SkillResource.MAX_MANIFEST_ENTRIES)
+  const maximum = Math.min(SkillResource.MAX_MANIFEST_ENTRIES, entries.length - offset)
+  const page = Array.from({ length: Math.max(maximum, 1) }, (_, index) => (maximum === 0 ? 0 : index + 1))
+    .map((count) => manifestPage(identity, entries, offset, count, digest, limited))
+    .filter((output) => Buffer.byteLength(JSON.stringify(output)) <= SkillResource.MAX_MANIFEST_BYTES)
+    .at(-1)
+  if (!page) return yield* new AccessError({ kind: "unsupported_resource_type" })
+  return page
+})
+
+function manifestPage(
+  identity: SkillResource.Identity,
+  entries: ReadonlyArray<SkillResource.Entry>,
+  offset: number,
+  count: number,
+  digest: Skill.Digest,
+  limited: boolean,
+) {
+  const selected = entries.slice(offset, offset + count)
   const next = offset + selected.length
   const hasNext = next < entries.length
   return SkillResource.Manifest.make({
@@ -185,7 +204,7 @@ const manifest = Effect.fn("SkillResource.manifest")(function* (
     ...(hasNext ? { nextCursor: encodeCursor({ type: "manifest", offset: next, digest }) } : {}),
     ...(limited ? { diagnostic: "manifest_limit" as const } : {}),
   })
-})
+}
 
 const read = Effect.fn("SkillResource.read")(function* (
   fs: FSUtil.Interface,

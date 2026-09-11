@@ -7,6 +7,7 @@ import { SkillInvocation } from "./skill-invocation"
 
 export const MAX_MANIFEST_ENTRIES = 100
 export const MAX_MANIFEST_SCAN_ENTRIES = 1_000
+export const MAX_MANIFEST_BYTES = 16 * 1024
 export const MAX_RESOURCE_BYTES = 1024 * 1024
 export const MAX_PAGE_BYTES = 16 * 1024
 

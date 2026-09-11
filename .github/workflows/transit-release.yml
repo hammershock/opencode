@@ -1,0 +1,313 @@
+name: transit release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Transit release sequence for the current upstream version
+        required: true
+        default: "0"
+        type: string
+      stability:
+        description: Unsigned prerelease or signed, notarized, and stapled stable release
+        required: true
+        default: prerelease
+        type: choice
+        options:
+          - prerelease
+          - stable
+      publish:
+        description: Publish the verified artifacts as a GitHub Release
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: transit-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Guard fork release boundary
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -euo pipefail
+          case "$REPOSITORY" in
+            hammershock/opencode|hammershock/opencode-transit) ;;
+            *) echo "Transit releases are restricted to Hammer's fork" >&2; exit 1 ;;
+          esac
+          test "$REF" = "refs/heads/dev"
+          [[ "$RELEASE" =~ ^[0-9]+$ ]]
+
+      - name: Checkout exact dev commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release identity
+        id: release
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -euo pipefail
+          test -z "$(git status --short)"
+          commit=$(git rev-parse HEAD)
+          upstream=$(node -p "require('./packages/opencode/package.json').version")
+          version="${upstream}-transit.${RELEASE}+${commit:0:12}"
+          tag="v${upstream}-transit.${RELEASE}"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Build Linux x64
+        env:
+          OPENCODE_TRANSIT_RELEASE: ${{ inputs.release }}
+        run: ./packages/opencode/script/transit-build.ts --target=linux-x64 --skip-install
+
+      - name: Verify and package Linux x64
+        env:
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          binary=packages/opencode/dist/opencode-linux-x64/bin/opencode-transit
+          manifest=packages/opencode/dist/opencode-linux-x64/bin/opencode-transit.build.json
+          test "$("$binary" --version)" = "$VERSION"
+          test "$(jq -r .commit "$manifest")" = "$COMMIT"
+          test "$(jq -r .version "$manifest")" = "$VERSION"
+          test "$(jq -r .target "$manifest")" = "opencode-linux-x64"
+          test "$(jq -r .dirty "$manifest")" = "false"
+          mkdir -p release/opencode-transit-linux-x64
+          cp "$binary" "$manifest" packages/opencode/script/install-transit release/opencode-transit-linux-x64/
+          chmod 755 release/opencode-transit-linux-x64/opencode-transit release/opencode-transit-linux-x64/install-transit
+          tar -C release -czf "release/opencode-transit-linux-x64-${TAG}.tar.gz" opencode-transit-linux-x64
+          cp "$manifest" "release/opencode-transit-linux-x64-${TAG}.build.json"
+          cd release
+          sha256sum "opencode-transit-linux-x64-${TAG}.tar.gz" "opencode-transit-linux-x64-${TAG}.build.json" > "opencode-transit-linux-x64-${TAG}.sha256"
+
+      - name: Upload Linux release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: transit-linux-x64
+          path: |
+            release/*.tar.gz
+            release/*.build.json
+            release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    needs: prepare
+    runs-on: macos-14
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Build macOS arm64
+        env:
+          OPENCODE_TRANSIT_RELEASE: ${{ inputs.release }}
+        run: ./packages/opencode/script/transit-build.ts --target=darwin-arm64 --skip-install
+
+      - name: Verify macOS build identity
+        env:
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          binary=packages/opencode/dist/opencode-darwin-arm64/bin/opencode-transit
+          manifest=packages/opencode/dist/opencode-darwin-arm64/bin/opencode-transit.build.json
+          test "$(uname -m)" = "arm64"
+          test "$("$binary" --version)" = "$VERSION"
+          test "$(jq -r .commit "$manifest")" = "$COMMIT"
+          test "$(jq -r .version "$manifest")" = "$VERSION"
+          test "$(jq -r .target "$manifest")" = "opencode-darwin-arm64"
+          test "$(jq -r .dirty "$manifest")" = "false"
+
+      - name: Package unsigned macOS prerelease
+        if: inputs.stability == 'prerelease'
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          binary=packages/opencode/dist/opencode-darwin-arm64/bin/opencode-transit
+          manifest=packages/opencode/dist/opencode-darwin-arm64/bin/opencode-transit.build.json
+          mkdir -p release/opencode-transit-darwin-arm64
+          cp "$binary" "$manifest" packages/opencode/script/install-transit release/opencode-transit-darwin-arm64/
+          chmod 755 release/opencode-transit-darwin-arm64/opencode-transit release/opencode-transit-darwin-arm64/install-transit
+          tar -C release -czf "release/opencode-transit-darwin-arm64-${TAG}.tar.gz" opencode-transit-darwin-arm64
+          cp "$manifest" "release/opencode-transit-darwin-arm64-${TAG}.build.json"
+          cd release
+          shasum -a 256 "opencode-transit-darwin-arm64-${TAG}.tar.gz" "opencode-transit-darwin-arm64-${TAG}.build.json" > "opencode-transit-darwin-arm64-${TAG}.sha256"
+
+      - name: Require stable-release credentials
+        if: inputs.stability == 'stable'
+        env:
+          CERTIFICATES_P12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+          CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+          APPLICATION_IDENTITY: ${{ secrets.APPLE_APPLICATION_IDENTITY }}
+          INSTALLER_IDENTITY: ${{ secrets.APPLE_INSTALLER_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in CERTIFICATES_P12 CERTIFICATES_PASSWORD APPLICATION_IDENTITY INSTALLER_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            test -n "${!name}" || { echo "Missing stable-release secret: $name" >&2; exit 1; }
+          done
+
+      - name: Import Developer ID certificates
+        if: inputs.stability == 'stable'
+        env:
+          CERTIFICATES_P12: ${{ secrets.APPLE_CERTIFICATES_P12 }}
+          CERTIFICATES_PASSWORD: ${{ secrets.APPLE_CERTIFICATES_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/transit.keychain-db"
+          password=$(openssl rand -hex 24)
+          printf '%s' "$CERTIFICATES_P12" | base64 -D > "$RUNNER_TEMP/transit.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/transit.p12" -P "$CERTIFICATES_PASSWORD" -k "$keychain" -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/productsign
+          security list-keychains -d user -s "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+
+      - name: Sign, notarize, and staple stable macOS package
+        if: inputs.stability == 'stable'
+        env:
+          APPLICATION_IDENTITY: ${{ secrets.APPLE_APPLICATION_IDENTITY }}
+          INSTALLER_IDENTITY: ${{ secrets.APPLE_INSTALLER_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          binary=packages/opencode/dist/opencode-darwin-arm64/bin/opencode-transit
+          manifest=packages/opencode/dist/opencode-darwin-arm64/bin/opencode-transit.build.json
+          codesign --force --options runtime --timestamp --sign "$APPLICATION_IDENTITY" "$binary"
+          codesign --verify --strict --verbose=2 "$binary"
+          mkdir -p pkgroot/usr/local/bin release
+          cp "$binary" pkgroot/usr/local/bin/opencode-transit
+          cp "$manifest" pkgroot/usr/local/bin/opencode-transit.build.json
+          cp packages/opencode/script/install-transit pkgroot/usr/local/bin/install-opencode-transit
+          chmod 755 pkgroot/usr/local/bin/opencode-transit pkgroot/usr/local/bin/install-opencode-transit
+          cat > pkgroot/usr/local/bin/opencode-rexd <<'EOF'
+          #!/usr/bin/env sh
+          echo "opencode-rexd is deprecated; use opencode-transit" >&2
+          exec /usr/local/bin/opencode-transit "$@"
+          EOF
+          chmod 755 pkgroot/usr/local/bin/opencode-rexd
+          pkgbuild --root pkgroot --identifier ai.opencode.transit --version "${TAG#v}" "$RUNNER_TEMP/transit-component.pkg"
+          productbuild --package "$RUNNER_TEMP/transit-component.pkg" --sign "$INSTALLER_IDENTITY" "release/opencode-transit-darwin-arm64-${TAG}.pkg"
+          xcrun notarytool submit "release/opencode-transit-darwin-arm64-${TAG}.pkg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "release/opencode-transit-darwin-arm64-${TAG}.pkg"
+          xcrun stapler validate "release/opencode-transit-darwin-arm64-${TAG}.pkg"
+          pkgutil --check-signature "release/opencode-transit-darwin-arm64-${TAG}.pkg"
+          spctl --assess --type install --verbose=2 "release/opencode-transit-darwin-arm64-${TAG}.pkg"
+          cp "$manifest" "release/opencode-transit-darwin-arm64-${TAG}.build.json"
+          cd release
+          shasum -a 256 "opencode-transit-darwin-arm64-${TAG}.pkg" "opencode-transit-darwin-arm64-${TAG}.build.json" > "opencode-transit-darwin-arm64-${TAG}.sha256"
+
+      - name: Upload macOS release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: transit-darwin-arm64
+          path: |
+            release/*.tar.gz
+            release/*.pkg
+            release/*.build.json
+            release/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: inputs.publish
+    needs: [prepare, linux, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Guard publisher and exact commit
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          case "$REPOSITORY" in
+            hammershock/opencode|hammershock/opencode-transit) ;;
+            *) exit 1 ;;
+          esac
+          test "$COMMIT" = "$SHA"
+
+      - name: Download verified candidates
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: transit-*
+          path: release
+          merge-multiple: true
+
+      - name: Verify release set
+        env:
+          STABILITY: ${{ inputs.stability }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum --check opencode-transit-linux-x64-*.sha256
+          sha256sum --check opencode-transit-darwin-arm64-*.sha256
+          test "$(find . -maxdepth 1 -name '*.build.json' | wc -l | tr -d ' ')" = "2"
+          if [ "$STABILITY" = "stable" ]; then
+            test "$(find . -maxdepth 1 -name '*.pkg' | wc -l | tr -d ' ')" = "1"
+            test "$(find . -maxdepth 1 -name '*darwin*.tar.gz' | wc -l | tr -d ' ')" = "0"
+          else
+            test "$(find . -maxdepth 1 -name '*.pkg' | wc -l | tr -d ' ')" = "0"
+            test "$(find . -maxdepth 1 -name '*darwin*.tar.gz' | wc -l | tr -d ' ')" = "1"
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          STABILITY: ${{ inputs.stability }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          prerelease=()
+          if [ "$STABILITY" = "prerelease" ]; then prerelease=(--prerelease); fi
+          gh release create "$TAG" release/* --repo "$REPOSITORY" --target "$COMMIT" --title "OpenCode Transit $TAG" --generate-notes "${prerelease[@]}"

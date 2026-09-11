@@ -441,7 +441,7 @@ compaction 必须保留仍适用 Skill invocation 的语义和 digest。它可�
 
 Rexd Session 在 Agent 获得 package path 前，把准确版本的完整 package 加载到 target 上的真实临时目录。实现只编排现有 Rexd `fs.write`、`fs.read`、`fs.list`、`fs.stat`、`fs.patch` 与 `exec`，不得新增 Skill 专用 Rexd method、修改 Rexd server，或依赖 SSHFS、反向 SSH、rsync、scp、tar、压缩或 target 摘要工具。托管 Rexd 的现有配置生成器为 `/tmp/opencode-transit/skills` 增加 allowed root 并在 `session.open` 请求它；自定义 Rexd 必须配置一个已由握手确认的 `skillStagingRoot`，否则 remote Skill package access 明确不可用。
 
-controller 先建立稳定、排序的 package manifest，再以 256 KiB 块通过 `fs.write` 写入唯一 staging directory。大文件写成多个块，使用现有 `exec` 的非 Shell argv 调用基础 POSIX `cat` 合并；controller 通过带 offset/length 的 `fs.read` 分块读回并验证每个文件与完整 manifest digest。校验完成后使用 `exec` 的非 Shell argv 原子 rename 到 content-addressed directory。失败不暴露半个 package，后续相同 digest 命中已验证目录而不重复传输。
+controller 先建立稳定、排序的 package manifest，再以 256 KiB 块通过 `fs.write` 写入唯一 staging directory。大文件的首块使用既有 `replace` mode，后续块使用既有 `append` mode；这两个 mode 已由固定的 Rexd baseline 提供，不增加协议或 target 工具依赖。controller 通过带 offset/length 的 `fs.read` 分块读回并验证每个文件与完整 manifest digest。校验完成后使用 `exec` 的非 Shell argv 原子 rename 到 content-addressed directory。失败不暴露半个 package，后续相同 digest 命中已验证目录而不重复传输。
 
 单个 package 最多 64 MiB、4,096 files，单文件最多 16 MiB。package root 可以是 canonicalized symlink；root 内 symlink 只有在最终目标仍位于 package root 时才可按普通文件或目录 materialize。拒绝 escape、cycle、special file、大小写 collision、不稳定读取与 limit overflow。nested Skill directory 由自己的 `SKILL.md` 拥有，不进入父 package。任何失败拒绝整个 remote materialization，不截断 package。
 

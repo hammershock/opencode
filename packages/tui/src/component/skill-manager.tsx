@@ -6,12 +6,15 @@ import type {
   SkillSettingsSnapshot,
   SkillTargetScope,
 } from "@opencode-ai/sdk/v2"
+import { TextAttributes } from "@opentui/core"
+import { useTerminalDimensions } from "@opentui/solid"
 import { createMemo, createSignal } from "solid-js"
 import { useSDK } from "../context/sdk"
+import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { DialogPrompt } from "../ui/dialog-prompt"
-import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
+import { DialogSelect, displayTruncate, type DialogSelectOption } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
 import { errorMessage } from "../util/error"
 import { completeLocalDirectory } from "./location-directory-workflow"
@@ -35,9 +38,15 @@ type ManagerRow = {
   readonly category: string
   readonly inspectTitle?: boolean
   readonly inspectionTitle?: string
+  readonly skill?: {
+    readonly source: string
+    readonly targets: string
+    readonly state: "active" | "inactive" | "undetected"
+  }
 }
 
 export function skillRootStatus(root: SkillDiscoveryRoot) {
+  if (root.status === "undetected") return "! undetected"
   if (root.status === "unavailable") return "! unavailable"
   if (root.default) return "● default"
   if (root.status === "configured") return "○ configured"
@@ -45,16 +54,39 @@ export function skillRootStatus(root: SkillDiscoveryRoot) {
 }
 
 export function skillScopeLabel(scope: SkillTargetScope | undefined) {
-  if (scope === undefined || scope === "*") return "all targets"
-  if (scope.length === 0) return "disabled"
-  if (scope.length === 1 && scope[0] === "local") return "local only"
-  return `${scope.length} ${scope.length === 1 ? "target" : "targets"}`
+  if (scope === undefined || scope === "*") return "all"
+  if (scope.length === 0) return "none"
+  return scope.join(", ")
 }
 
-export function toggleSkillTargetScope(scope: SkillTargetScope, target: "local" | string): SkillTargetScope {
-  if (scope === "*") return [target]
+export function toggleSkillTargetScope(
+  scope: SkillTargetScope,
+  target: "local" | string,
+  targets: readonly string[] = [target],
+): SkillTargetScope {
+  if (scope === "*") return targets.filter((item) => item !== target)
   if (scope.includes(target)) return scope.filter((item) => item !== target)
   return [...scope, target]
+}
+
+export function skillSourceLabel(sourceLabel: string) {
+  const source = sourceLabel.replace(/ · [0-9a-f]{8}$/i, "").toLowerCase()
+  if (source === "built-in" || source.startsWith("opencode ") || source.startsWith("project .opencode"))
+    return "opencode"
+  if (source === "codex") return "codex"
+  if (source === "claude") return "claude"
+  return "others"
+}
+
+export function skillTargetsLabel(scope: SkillTargetScope | undefined, targets: readonly SkillManagerTarget[]) {
+  if (scope === undefined || scope === "*") return "all"
+  if (scope.length === 0) return "none"
+  return scope
+    .map((targetID) => {
+      if (targetID === "local") return "local"
+      return targets.find((target) => target.id === targetID)?.name ?? `missing:${targetID.slice(0, 8)}`
+    })
+    .join(", ")
 }
 
 export function buildSkillManagerRows(model: SkillManagerModel, home?: string): ManagerRow[] {
@@ -71,8 +103,8 @@ export function buildSkillManagerRows(model: SkillManagerModel, home?: string): 
     .map(
       (skillID): SkillMetadata => ({
         id: skillID,
-        name: `Unavailable Skill · ${skillID.slice(4, 12)}`,
-        sourceLabel: "Dormant target access",
+        name: `Undetected Skill · ${skillID.slice(4, 12)}`,
+        sourceLabel: "Other",
         digest: "",
       }),
     )
@@ -129,7 +161,7 @@ export function buildSkillManagerRows(model: SkillManagerModel, home?: string): 
       key: rootKey(root),
       title: rootTitle(root, home),
       description:
-        root.kind === "opencode-global" ? "OpenCode config" : root.kind === "url" ? "Configured URL" : "Imported path",
+        root.kind === "opencode-global" ? "opencode" : root.kind === "url" ? "others" : rootSourceLabel(root, home),
       footer: skillRootStatus(root),
       category: "Discovery paths",
       inspectTitle: true,
@@ -137,14 +169,25 @@ export function buildSkillManagerRows(model: SkillManagerModel, home?: string): 
     })),
     ...[...skills.values(), ...dormant]
       .toSorted((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
-      .map((skill) => ({
-        key: `skill:${skill.id}`,
-        title: skill.name,
-        description: skill.sourceLabel,
-        footer: skillScopeLabel(targetScope(model.settings, skill.id)),
-        details: duplicateNames.has(skill.name) ? ["Duplicate name · source identity is preserved"] : undefined,
-        category: "Skills",
-      })),
+      .map((skill) => {
+        const scope = targetScope(model.settings, skill.id)
+        const undetected = !skills.has(skill.id)
+        return {
+          key: `skill:${skill.id}`,
+          title: skill.name,
+          details: duplicateNames.has(skill.name) ? ["Duplicate name · source identity is preserved"] : undefined,
+          category: "Skills",
+          skill: {
+            source: skillSourceLabel(skill.sourceLabel),
+            targets: skillTargetsLabel(scope, model.targets),
+            state: undetected
+              ? ("undetected" as const)
+              : scope === "*" || scope.length > 0
+                ? ("active" as const)
+                : ("inactive" as const),
+          },
+        }
+      }),
     ...failures,
     ...diagnostics.slice(0, 20).map((item, index) => ({
       key: `diagnostic:${index}`,
@@ -170,6 +213,8 @@ export function useSkillManager() {
   const dialog = useDialog()
   const sdk = useSDK()
   const toast = useToast()
+  const dimensions = useTerminalDimensions()
+  const { theme } = useTheme()
   const [model, setModel] = createSignal<SkillManagerModel>()
   const [loading, setLoading] = createSignal(false)
   const home = process.env.HOME
@@ -178,9 +223,10 @@ export function useSkillManager() {
     const settings = await sdk.client.v2.skill.settings({ throwOnError: true })
     const location = { directory: path.dirname(settings.data.path) }
     const [catalog, targets] = await Promise.allSettled([
-      force
-        ? sdk.client.v2.skill.reload({ location }, { throwOnError: true })
-        : sdk.client.v2.skill.catalog({ location }, { throwOnError: true }),
+      sdk.client.v2.skill.catalog(
+        { location, forceReload: force ? "true" : "false", includeInactive: "true" },
+        { throwOnError: true },
+      ),
       sdk.client.v2.target.list({ throwOnError: true }),
     ])
     return {
@@ -369,66 +415,99 @@ export function useSkillManager() {
         (target) => target !== "local" && !current.targets.some((configured) => configured.id === target),
       )
     })
+    const targetIDs = ["local", ...current.targets.map((target) => target.id)]
+    const toggle = (value: string) => {
+      if (value === "all") return setScope((current) => (current === "*" ? [] : "*"))
+      setScope((current) => toggleSkillTargetScope(current, value.slice(7), targetIDs))
+    }
+    const apply = () => {
+      if (loading()) return
+      void save(
+        (snapshot) =>
+          sdk.client.v2.skill.targetScope.update(
+            {
+              skillID: skill.id,
+              skillTargetScopeUpdate: { scope: scope(), expectedRevision: snapshot.settings.revision },
+            },
+            { throwOnError: true },
+          ),
+        "Target access saved",
+      ).then(() => open(false))
+    }
     const options = createMemo(() => [
       {
-        title: "Save target access",
-        description: "Device-local setting; active Sessions are unchanged",
-        footer: skillScopeLabel(scope()),
-        value: "save",
-        category: "Actions",
-      },
-      {
-        title: "All targets",
+        title: `${scope() === "*" ? "[x]" : "[ ]"} all`,
         description: "Includes future targets",
-        footer: scope() === "*" ? "● allowed" : "○ explicit list",
         value: "all",
-        category: "Target access",
+        category: "Targets",
+        onSelect: () => toggle("all"),
       },
-      targetOption("local", "Local", scope()),
-      ...current.targets.map((target) => targetOption(target.id, target.name, scope())),
+      targetOption("local", "local", scope(), toggle),
+      ...current.targets.map((target) => targetOption(target.id, target.name, scope(), toggle)),
       ...missing().map((targetID) => ({
-        title: `Missing target · ${targetID}`,
+        title: `${scope() !== "*" && scope().includes(targetID) ? "[x]" : "[ ]"} missing:${targetID.slice(0, 8)}`,
         description: "The stable target ID is preserved",
-        footer: "! missing · allowed",
         value: `target:${targetID}`,
-        category: "Target access",
+        category: "Targets",
+        onSelect: () => toggle(`target:${targetID}`),
       })),
     ])
     const Content = () => (
       <DialogSelect<string>
         title={`Target access · ${skill.name}`}
         options={options()}
+        renderFilter={false}
         preserveSelection
-        footer={<text>Selecting one target switches from All targets to an explicit list.</text>}
-        onSelect={(option) => {
-          if (option.value === "all") return setScope("*")
-          if (option.value !== "save") return setScope((value) => toggleSkillTargetScope(value, option.value.slice(7)))
-          void save(
-            (snapshot) =>
-              sdk.client.v2.skill.targetScope.update(
-                {
-                  skillID: skill.id,
-                  skillTargetScopeUpdate: { scope: scope(), expectedRevision: snapshot.settings.revision },
-                },
-                { throwOnError: true },
-              ),
-            "Target access saved",
-          ).then(() => open(false))
-        }}
+        locked={loading()}
+        footer={<TargetAccessFooter onConfirm={apply} />}
+        onToggle={(option) => toggle(option.value)}
+        onConfirm={apply}
       />
     )
     dialog.replace(Content)
+    dialog.setSize("large")
   }
 
   const rows = createMemo(() => (model() ? buildSkillManagerRows(model()!, home) : []))
+  const skillTitle = (name: string, skill: NonNullable<ManagerRow["skill"]>) => {
+    const widths = skillColumnWidths(dimensions().width)
+    return `${column(name, widths.name)} ${column(skill.source, widths.source)} ${column(skill.targets, widths.targets)}`
+  }
+  const skillHeader = () => {
+    const widths = skillColumnWidths(dimensions().width)
+    return (
+      <text fg={theme.accent} attributes={TextAttributes.BOLD}>
+        {column("Name", widths.name)} {column("Source", widths.source)} {column("Targets", widths.targets)} State
+      </text>
+    )
+  }
   const options = createMemo(() =>
     rows().map(
       (row): DialogSelectOption<string> => ({
-        title: row.title,
+        title: row.skill ? skillTitle(row.title, row.skill) : row.title,
+        titleWidth: row.skill ? skillTitleWidth(dimensions().width) : undefined,
         description: row.description,
-        footer: row.footer,
+        footer: row.skill ? (
+          <span
+            style={{
+              fg:
+                row.skill.state === "active"
+                  ? theme.success
+                  : row.skill.state === "undetected"
+                    ? theme.warning
+                    : theme.textMuted,
+            }}
+          >
+            {skillStateLabel(row.skill.state)}
+          </span>
+        ) : (
+          row.footer
+        ),
+        footerWidth: row.skill ? 12 : undefined,
         details: row.details,
         category: row.category,
+        categoryView:
+          row.skill && rows().find((item) => item.category === "Skills")?.key === row.key ? skillHeader() : undefined,
         inspectTitle: row.inspectTitle,
         inspectionTitle: row.inspectionTitle,
         value: row.key,
@@ -480,6 +559,7 @@ export function useSkillManager() {
         onSelect={(option) => select(option.value)}
       />
     ))
+    dialog.setSize("xlarge")
     if (load) void refresh()
   }
 
@@ -494,6 +574,17 @@ function rootTitle(root: SkillDiscoveryRoot, home?: string) {
 
 function rootKey(root: SkillDiscoveryRoot) {
   return `root:${root.kind}:${root.value}`
+}
+
+function rootSourceLabel(root: SkillDiscoveryRoot, home?: string) {
+  const value = path.resolve(root.resolved ?? root.value)
+  const codex = path.resolve(process.env.CODEX_HOME?.trim() || path.join(home ?? "~", ".codex"), "skills")
+  const claude = path.resolve(path.join(home ?? "~", ".claude", "skills"))
+  if (value === codex || (path.basename(value) === "skills" && path.basename(path.dirname(value)) === ".codex"))
+    return "codex"
+  if (value === claude || (path.basename(value) === "skills" && path.basename(path.dirname(value)) === ".claude"))
+    return "claude"
+  return "others"
 }
 
 function targetScope(settings: SkillSettingsSnapshot, skillID: string): SkillTargetScope {
@@ -511,23 +602,57 @@ function configuredUrls(settings: SkillSettingsSnapshot) {
   return settings.roots.filter((root) => root.kind === "url").map((root) => root.value)
 }
 
-function targetOption(targetID: string, name: string, scope: SkillTargetScope) {
+function targetOption(targetID: string, name: string, scope: SkillTargetScope, toggle: (value: string) => void) {
+  const value = `target:${targetID}`
   return {
-    title: name,
+    title: `${scope === "*" || scope.includes(targetID) ? "[x]" : "[ ]"} ${name}`,
     description: targetID === "local" ? "This controller" : "Configured Rexd target",
-    footer: scope !== "*" && scope.includes(targetID) ? "● allowed" : "○ blocked",
-    value: `target:${targetID}`,
-    category: "Target access",
+    value,
+    category: "Targets",
+    onSelect: () => toggle(value),
   }
 }
 
 function unavailableSkill(skillID: string): SkillMetadata {
   return {
     id: skillID,
-    name: `Unavailable Skill · ${skillID.slice(4, 12)}`,
-    sourceLabel: "Dormant target access",
+    name: `Undetected Skill · ${skillID.slice(4, 12)}`,
+    sourceLabel: "Other",
     digest: "",
   }
+}
+
+function TargetAccessFooter(props: { onConfirm: () => void }) {
+  const { theme } = useTheme()
+  return (
+    <text fg={theme.textMuted} onMouseUp={props.onConfirm}>
+      <span style={{ fg: theme.text }}>[ Confirm ]</span> enter · space toggle
+    </text>
+  )
+}
+
+function skillStateLabel(state: "active" | "inactive" | "undetected") {
+  if (state === "active") return "● active"
+  if (state === "undetected") return "! undetected"
+  return "○ inactive"
+}
+
+function skillColumnWidths(terminalWidth: number) {
+  const available = Math.max(46, Math.min(104, terminalWidth - 14))
+  const source = 10
+  const state = 12
+  const targets = Math.max(14, Math.min(36, Math.floor((available - source - state - 3) * 0.45)))
+  return { name: Math.max(10, available - source - targets - state - 3), source, targets }
+}
+
+function skillTitleWidth(terminalWidth: number) {
+  const widths = skillColumnWidths(terminalWidth)
+  return widths.name + widths.source + widths.targets + 2
+}
+
+function column(value: string, width: number) {
+  const visible = displayTruncate(value, width)
+  return visible + " ".repeat(Math.max(0, width - Bun.stringWidth(visible)))
 }
 
 export type { ManagerRow, SkillManagerModel, SkillManagerTarget }

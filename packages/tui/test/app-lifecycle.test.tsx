@@ -229,10 +229,12 @@ test.each([
 })
 
 test("Ctrl+P opens the production Skill Manager without a model turn", async () => {
-  const setup = await createTestRenderer({ width: 100, height: 34, useThread: false })
+  const setup = await createTestRenderer({ width: 100, height: 44, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   const events = createEventSource()
+  const catalogRequests: URL[] = []
+  let scopeUpdates = 0
   const calls = createFetch((url) => {
     if (url.pathname === "/api/target")
       return json({
@@ -242,6 +244,25 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
         diagnostics: [],
         valid: true,
       })
+    if (url.pathname.startsWith("/api/skill/settings/") && url.pathname.endsWith("/target-scope")) {
+      scopeUpdates++
+      return json({
+        path: "/tmp/opencode/opencode.jsonc",
+        revision: `settings-${scopeUpdates}`,
+        roots: [
+          {
+            kind: "opencode-global",
+            value: "/tmp/opencode/skills",
+            resolved: "/tmp/opencode/skills",
+            default: true,
+            status: "ready",
+          },
+        ],
+        targets: {},
+        diagnostics: [],
+        valid: true,
+      })
+    }
     if (url.pathname === "/api/skill/settings")
       return json({
         path: "/tmp/opencode/opencode.jsonc",
@@ -259,7 +280,8 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
         diagnostics: [],
         valid: true,
       })
-    if (url.pathname === "/api/skill/catalog")
+    if (url.pathname === "/api/skill/catalog") {
+      catalogRequests.push(url)
       return json({
         location: { target: { type: "local" }, directory: "/tmp/opencode", project: { id: "test", directory } },
         data: {
@@ -277,6 +299,7 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
           diagnostics: [],
         },
       })
+    }
     if (url.pathname === "/config/providers")
       return json({
         providers: [{ id: "test", name: "Test", source: "custom", env: [], options: {}, models: {} }],
@@ -337,9 +360,31 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
     await waitForFrame(setup, "Discovery paths")
 
     const frame = setup.captureCharFrame()
-    expect(frame).toContain("OpenCode config")
+    expect(frame).toContain("/tmp/opencode/skills")
+    expect(frame).toContain("Source")
+    expect(frame).toContain("Targets")
+    expect(frame).toContain("State")
+    expect(frame).toContain("● active")
     expect(frame).toContain("1 paths · 1 Skills")
+    expect(catalogRequests.at(-1)?.searchParams.get("includeInactive")).toBe("true")
     expect(calls.session).toHaveLength(sessionRequests)
+
+    await waitForEditor(setup)
+    await setup.mockInput.typeText("review")
+    await waitForFrame(setup, "review")
+    setup.mockInput.pressEnter()
+    await waitForFrame(setup, "Target access · review")
+    const targetFrame = setup.captureCharFrame()
+    expect(targetFrame).toContain("[ Confirm ] enter · space toggle")
+    expect(targetFrame).not.toContain("Save target access")
+    expect(targetFrame).not.toContain("Actions")
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressKey(" ")
+    await waitForFrame(setup, "[ ] local")
+    expect(scopeUpdates).toBe(0)
+    setup.mockInput.pressEnter()
+    await waitForFrame(setup, "Target access saved")
+    expect(scopeUpdates).toBe(1)
 
     process.emit("SIGHUP")
     await task

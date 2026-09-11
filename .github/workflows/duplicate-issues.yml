@@ -59,7 +59,7 @@ jobs:
           Issue number: ${{ github.event.issue.number }}
           Issue author association: ${{ github.event.issue.author_association }}
 
-          Lookup this issue with gh issue view ${{ github.event.issue.number }}.
+          Lookup this issue with gh issue view ${{ github.event.issue.number }} -R ${{ github.repository }}.
 
           You have TWO tasks. Perform both, then post a SINGLE comment (if needed).
 
@@ -71,20 +71,15 @@ jobs:
 
           If the issue author association is OWNER or MEMBER, skip this compliance check. Do not add the needs:compliance label for organization-owned issues.
 
-          This project has three issue templates that every issue MUST use one of:
+          This project has three public issue forms:
 
-          1. Bug Report - requires a Description field with real content
-          2. Feature Request - requires a verification checkbox and description, title should start with [FEATURE]:
-          3. Question - requires the Question field with real content
+          1. Bug Report - requires version, controller, Location, actual/expected behavior, reproduction, and confirmations
+          2. Feature Request - requires a problem, one desired outcome, affected areas, boundaries/alternatives, and confirmations
+          3. Question - requires the question, what the reporter tried, and confirmations
 
-          Additionally check:
-          - No AI-generated walls of text (long, AI-generated descriptions are not acceptable)
-          - The issue has real content, not just template placeholder text left unchanged
-          - Bug reports should include some context about how to reproduce
-          - Feature requests should explain the problem or need
-          - We want to push for having the user provide system description & information
+          The Maintainer implementation task form is reserved for accepted internal planning and should not be required from external reporters.
 
-          Do NOT be nitpicky about optional fields. Only flag real problems like: no template used, required fields empty or placeholder text only, obviously AI-generated walls of text, or completely empty/nonsensical content.
+          Check that required sections contain real, relevant content rather than unchanged placeholders or nonsense. Automated or AI assistance is allowed; judge whether the author supplied concise, reproducible information, not the perceived writing style. Do not be nitpicky about optional fields.
 
           ---
 
@@ -97,8 +92,6 @@ jobs:
           3. Related functionality or components
           4. Similar feature requests
 
-          Additionally, if the issue mentions keybinds, keyboard shortcuts, or key bindings, note the pinned keybinds issue #4997.
-
           ---
 
           POSTING YOUR COMMENT:
@@ -107,13 +100,11 @@ jobs:
 
           If the issue is NOT compliant and the author association is not OWNER or MEMBER, start the comment with:
           <!-- issue-compliance -->
-          Then explain what needs to be fixed and that they have 2 hours to edit the issue before it is automatically closed. Also add the label needs:compliance to the issue using: gh issue edit ${{ github.event.issue.number }} --add-label needs:compliance
+          Then explain what needs to be fixed and that they have 7 days to edit the issue before it is automatically closed. Also add the label needs:compliance to the issue using: gh issue edit ${{ github.event.issue.number }} -R ${{ github.repository }} --add-label needs:compliance
 
           If duplicates were found, include a section about potential duplicates with links.
 
-          If the issue mentions keybinds/keyboard shortcuts, include a note about #4997.
-
-          If the issue IS compliant AND no duplicates were found AND no keybind reference, do NOT comment at all.
+          If the issue IS compliant AND no duplicates were found, do NOT comment at all.
 
           Use this format for the comment:
 
@@ -124,15 +115,12 @@ jobs:
           **What needs to be fixed:**
           - [specific reasons]
 
-          Please edit this issue to address the above within **2 hours**, or it will be automatically closed.
+          Please edit this issue to address the above within **7 days**, or it will be automatically closed.
 
           [If duplicates found, add:]
           ---
           This issue might be a duplicate of existing issues. Please check:
           - #[issue_number]: [brief description of similarity]
-
-          [If keybind-related, add:]
-          For keybind-related issues, please also check our pinned keybinds documentation: #4997
 
           [End with if not compliant:]
           If you believe this was flagged incorrectly, please let a maintainer know.
@@ -191,29 +179,24 @@ jobs:
           opencode run -m opencode/claude-sonnet-4-6 "Issue #${{ github.event.issue.number }} was previously flagged as non-compliant and has been edited.
           Issue author association: ${{ github.event.issue.author_association }}
 
-          Lookup this issue with gh issue view ${{ github.event.issue.number }}.
+          Lookup this issue with gh issue view ${{ github.event.issue.number }} -R ${{ github.repository }}.
 
           If the issue author association is OWNER or MEMBER, remove the needs:compliance label if present, delete the previous compliance comment if present, and do not post a new comment.
 
           Re-check whether the issue now follows our contributing guidelines and issue templates.
 
-          This project has three issue templates that every issue MUST use one of:
+          This project has three public issue forms:
 
-          1. Bug Report - requires a Description field with real content
-          2. Feature Request - requires a verification checkbox and description, title should start with [FEATURE]:
-          3. Question - requires the Question field with real content
+          1. Bug Report - requires version, controller, Location, actual/expected behavior, reproduction, and confirmations
+          2. Feature Request - requires a problem, one desired outcome, affected areas, boundaries/alternatives, and confirmations
+          3. Question - requires the question, what the reporter tried, and confirmations
 
-          Additionally check:
-          - No AI-generated walls of text (long, AI-generated descriptions are not acceptable)
-          - The issue has real content, not just template placeholder text left unchanged
-          - Bug reports should include some context about how to reproduce
-          - Feature requests should explain the problem or need
-          - We want to push for having the user provide system description & information
+          The Maintainer implementation task form is reserved for accepted internal planning and should not be required from external reporters.
 
-          Do NOT be nitpicky about optional fields. Only flag real problems like: no template used, required fields empty or placeholder text only, obviously AI-generated walls of text, or completely empty/nonsensical content.
+          Check that required sections contain real, relevant content rather than unchanged placeholders or nonsense. Automated or AI assistance is allowed; judge whether the author supplied concise, reproducible information, not the perceived writing style. Do not be nitpicky about optional fields.
 
           If the issue is NOW compliant:
-          1. Remove the needs:compliance label: gh issue edit ${{ github.event.issue.number }} --remove-label needs:compliance
+          1. Remove the needs:compliance label: gh issue edit ${{ github.event.issue.number }} -R ${{ github.repository }} --remove-label needs:compliance
           2. Find and delete the previous compliance comment (the one containing <!-- issue-compliance -->) using: gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments --jq '.[] | select(.body | contains(\"<!-- issue-compliance -->\")) | .id' then delete it with: gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments/{id}
           3. Post a short comment thanking them for updating the issue.
 

@@ -2,6 +2,17 @@
 
 Every functional change in this fork must pass automated verification and real-device acceptance. Unit tests alone are insufficient because Location, SSH/Rexd, TUI input, secure storage, provider authentication and multi-device synchronization depend on real operating-system behavior. Fork-owned TUI checks also follow [`ui-design-guidelines.md`](ui-design-guidelines.md).
 
+## Contributor and maintainer responsibility
+
+The verification gate belongs to the project, not to an external contributor's hardware inventory.
+
+- External contributors run the relevant automated checks and real workflow on every supported controller they can access. Their pull request lists exact results and every platform or scenario not run.
+- Missing access to Mac Apple Silicon or `mywindows`/WSL2 does not block opening or reviewing an external pull request.
+- Before a functional change merges, the accepting maintainer builds the exact candidate commit and completes any missing canonical-device rows. Maintainer evidence is added to the same pull request.
+- Documentation-only and template-only changes normally use rendering, link, schema, and formatting checks instead of runtime device acceptance.
+
+This division of responsibility is not a waiver: a functional change still cannot merge until all applicable project-level checks below pass.
+
 ## Required test ladder
 
 Run tests in this order:
@@ -29,7 +40,7 @@ Canonical environments:
 
 | Device      | Environment                               | Required invocation boundary                                                                                                                                                      |
 | ----------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mac         | macOS on Apple Silicon                    | Run the locally built/installed `opencode-transit` directly                                                                                                                          |
+| Mac         | macOS on Apple Silicon                    | Run the locally built/installed `opencode-transit` directly                                                                                                                       |
 | `mywindows` | WSL2 distribution `Ubuntu`, user `hammer` | Connect with `ssh mywindows`, then explicitly invoke `wsl.exe -d Ubuntu -u hammer`; set a Linux HOME/cwd explicitly and never inherit `/mnt/c/Users/Mickey` as the test workspace |
 
 Record the actual hostname, OS/architecture, Git commit, executable path, `--version` output and executable hash for every real-device run. Both devices must test binaries built from the same accepted commit; platform-specific build artifacts may differ.
@@ -46,7 +57,7 @@ Record the actual hostname, OS/architecture, Git commit, executable path, `--ver
 
 ## Task-level real-device gate
 
-Every functional task issue names the relevant rows below. After automated checks pass, its owner installs the exact candidate build as `opencode-transit` on both devices and records evidence in the PR.
+Every functional task issue names the relevant rows below. After automated checks pass, its owner or accepting maintainer installs the exact candidate build as `opencode-transit` on both devices and records combined evidence in the PR.
 
 Minimum evidence:
 

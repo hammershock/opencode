@@ -1,6 +1,8 @@
 # Fork Development Workflow
 
-This document defines how this fork turns accepted RFCs into maintainable work when multiple people or Agents develop in parallel. It supplements the upstream `AGENTS.md` and `CONTRIBUTING.md`; package-local `AGENTS.md` files still apply to files below their directories.
+This document defines how this fork turns accepted RFCs into maintainable work when multiple people or Agents develop in parallel. It supplements the root `AGENTS.md` and `CONTRIBUTING.md`; package-local `AGENTS.md` files still apply to files below their directories.
+
+External contributors follow the public [`CONTRIBUTING.md`](../CONTRIBUTING.md). They run relevant checks on supported platforms they can access and disclose gaps. The accepting maintainer owns any missing canonical Mac/WSL2 evidence and the final merge gate; external contributors are not expected to own project hardware.
 
 User-facing README, contribution, security, release and visual documentation follows [the human-facing documentation standard](development/human-documentation.md). Its [Simplified Chinese version](development/human-documentation.zh.md) is maintained alongside the English canonical document.
 

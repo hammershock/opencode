@@ -1,0 +1,42 @@
+name: Question
+description: Ask about using or contributing to OpenCode Transit
+title: "[Question]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the independent OpenCode Transit project. For shared upstream OpenCode configuration, the upstream documentation may be the better starting point.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to understand or accomplish?
+    validations:
+      required: true
+
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Link relevant Transit documentation and summarize what remains unclear.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Transit version
+      description: If behavior is involved, paste `opencode-transit --version`.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing documentation and issues first.
+          required: true
+        - label: I removed credentials and private machine, account, and Session data.
+          required: true

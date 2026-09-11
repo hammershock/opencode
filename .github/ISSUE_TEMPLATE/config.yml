@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 💬 Discord Community
-    url: https://discord.gg/opencode
-    about: For support, troubleshooting, how-to questions, and real-time discussion.
+  - name: Report a security vulnerability privately
+    url: https://github.com/hammershock/opencode-transit/security/advisories/new
+    about: Use a private GitHub Security Advisory instead of a public issue.
+  - name: Read the upstream OpenCode documentation
+    url: https://opencode.ai/docs
+    about: Use this for shared base-agent configuration; Transit is maintained independently.

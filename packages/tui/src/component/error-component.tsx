@@ -192,7 +192,7 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
                 ? "Report copied — paste it into a new GitHub issue."
                 : "Copy the report and open a GitHub issue to help us fix this."}
             </text>
-            <text fg={colors.muted}>opencode {InstallationVersion}</text>
+            <text fg={colors.muted}>opencode-transit {InstallationVersion}</text>
           </box>
         </Show>
       </box>
@@ -201,17 +201,15 @@ export function ErrorComponent(props: { error: Error; reset: () => void; mode?: 
 }
 
 function buildIssueURL(message: string, stack: string) {
-  // Field keys match the ids in .github/ISSUE_TEMPLATE/bug-report.yml so the issue
-  // form opens pre-filled. Populating os/terminal/reproduce keeps the report past
-  // the contributing-guidelines compliance check, which pushes for system info.
-  const url = new URL("https://github.com/anomalyco/opencode/issues/new?template=bug-report.yml")
+  // Field keys match .github/ISSUE_TEMPLATE/bug-report.yml so the Transit-owned
+  // issue form opens pre-filled. The reporter still selects the controller and
+  // reviews the public payload before submitting it.
+  const url = new URL("https://github.com/hammershock/opencode-transit/issues/new?template=bug-report.yml")
   url.searchParams.set("title", `TUI crash: ${message}`)
-  url.searchParams.set("opencode-version", InstallationVersion)
-  url.searchParams.set("os", describeOS())
-  url.searchParams.set("terminal", describeTerminal())
+  url.searchParams.set("version", InstallationVersion)
   url.searchParams.set(
     "reproduce",
-    "Reported automatically from the opencode crash screen. If you can, describe what you were doing when it crashed.",
+    "Reported automatically from the OpenCode Transit crash screen. Describe what you were doing when it crashed.",
   )
 
   // Budget the stack against the fully URL-encoded length (not the raw length) so
@@ -220,8 +218,8 @@ function buildIssueURL(message: string, stack: string) {
   // so measuring url.toString() is both correct and safe on any input.
   const MAX_URL_LENGTH = 6000
   const marker = "\n… (truncated)"
-  const head = `The opencode TUI crashed with an unexpected error.\n\n**Error:** ${message}\n\n**Stack trace:**\n`
-  const setBody = (body: string) => url.searchParams.set("description", head + "```\n" + body + "\n```")
+  const head = `OpenCode Transit crashed on ${describeOS()} in ${describeTerminal()}.\n\n**Error:** ${message}\n\n**Stack trace:**\n`
+  const setBody = (body: string) => url.searchParams.set("actual", head + "```\n" + body + "\n```")
 
   setBody(stack)
   if (url.toString().length <= MAX_URL_LENGTH) return url

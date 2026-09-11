@@ -34,6 +34,7 @@ import type {
   UserMessage,
   TextPart,
   ReasoningPart,
+  SessionMessageUser,
   SessionStatus,
 } from "@opencode-ai/sdk/v2"
 import { useLocal } from "../../context/local"
@@ -113,6 +114,9 @@ import {
   type ModelContextGeneration,
 } from "../../command-toolkit/model-context"
 import { showModelContext } from "../../component/dialog-model-context"
+import { useData } from "../../context/data"
+import { SkillInvocationRow } from "../../component/skill-invocation"
+import { projectCanonicalSessionMessages } from "../../util/session-message"
 
 addDefaultParsers(parsers.parsers)
 
@@ -219,6 +223,7 @@ export function Session() {
   const [locationAccessReady, setLocationAccessReady] = createSignal(route.accessMode === "read-only")
   const { navigate } = useRoute()
   const sync = useSync()
+  const data = useData()
   const event = useEvent()
   const project = useProject()
   const paths = useTuiPaths()
@@ -253,7 +258,56 @@ export function Session() {
       .filter((x) => x.parentID === parentID || x.id === parentID)
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
-  const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
+  const canonicalProjection = createMemo(() =>
+    projectCanonicalSessionMessages({
+      sessionID: route.sessionID,
+      directory: data.session.get(route.sessionID)?.location.directory ?? session()?.directory ?? "",
+      agent: data.session.get(route.sessionID)?.agent ?? "build",
+      model: data.session.get(route.sessionID)?.model,
+      messages: data.session.message.list(route.sessionID) ?? [],
+    }),
+  )
+  const canonicalParts = createMemo(
+    () => new Map(canonicalProjection().map((item) => [item.message.id, item.parts] as const)),
+  )
+  const messages = createMemo(() => {
+    const legacy = sync.data.message[route.sessionID] ?? []
+    const ids = new Set(legacy.map((message) => message.id))
+    return [
+      ...legacy,
+      ...canonicalProjection().flatMap((item) => (ids.has(item.message.id) ? [] : [item.message])),
+    ].toSorted((a, b) => a.time.created - b.time.created)
+  })
+  const messageParts = (messageID: string) => sync.data.part[messageID] ?? canonicalParts().get(messageID) ?? []
+  const durableUsers = createMemo(
+    () =>
+      new Map(
+        (data.session.message.list(route.sessionID) ?? [])
+          .filter((message): message is SessionMessageUser => message.type === "user")
+          .map((message) => [message.id, message]),
+      ),
+  )
+  const skillSnapshots = createMemo(() => {
+    const unique = new Map<string, NonNullable<SessionMessageUser["skills"]>[number]["snapshot"]>()
+    for (const message of durableUsers().values()) {
+      for (const invocation of message.skills ?? []) unique.set(invocation.snapshot.id, invocation.snapshot)
+    }
+    return [...unique.values()]
+  })
+  const [expandedSkills, setExpandedSkills] = createSignal(new Set<string>())
+  const toggleSkill = (skillID: string) =>
+    setExpandedSkills((current) => {
+      const next = new Set(current)
+      if (next.has(skillID)) next.delete(skillID)
+      else next.add(skillID)
+      return next
+    })
+  createEffect(
+    on(
+      () => route.sessionID,
+      (sessionID) => void data.session.message.refresh(sessionID).catch(() => undefined),
+    ),
+  )
   const messagesBeforeRevert = () => {
     const messageID = session()?.revert?.messageID
     if (!messageID) return messages()
@@ -263,7 +317,7 @@ export function Session() {
   const foregroundTasks = createMemo(() =>
     sync.data.capabilities.experimentalBackgroundSubagents
       ? messages().flatMap((message) =>
-          (sync.data.part[message.id] ?? []).filter(
+          messageParts(message.id).filter(
             (part): part is ToolPart =>
               part.type === "tool" &&
               part.tool === "task" &&
@@ -508,7 +562,7 @@ export function Session() {
         if (!message) return false
 
         // Check if message has valid non-synthetic, non-ignored text parts
-        const parts = sync.data.part[message.id]
+        const parts = messageParts(message.id)
         if (!parts || !Array.isArray(parts)) return false
 
         return parts.some((part) => part && part.type === "text" && !part.synthetic && !part.ignored)
@@ -897,7 +951,7 @@ export function Session() {
           .then(() => {
             toBottom()
           })
-        const parts = sync.data.part[message.id]
+        const parts = messageParts(message.id)
         prompt?.set(
           parts.reduce(
             (agg, part) => {
@@ -1107,7 +1161,7 @@ export function Session() {
       category: "Session",
       hidden: true,
       run: () => {
-        const messages = sync.data.message[route.sessionID]
+        const messages = messagesBeforeRevert()
         if (!messages || !messages.length) return
 
         // Find the most recent user message with non-ignored, non-synthetic text parts
@@ -1115,7 +1169,7 @@ export function Session() {
           const message = messages[i]
           if (!message || message.role !== "user") continue
 
-          const parts = sync.data.part[message.id]
+          const parts = messageParts(message.id)
           if (!parts || !Array.isArray(parts)) continue
 
           const hasValidTextPart = parts.some(
@@ -1158,7 +1212,7 @@ export function Session() {
           return
         }
 
-        const parts = sync.data.part[lastAssistantMessage.id] ?? []
+        const parts = messageParts(lastAssistantMessage.id)
         const textParts = parts.filter((part) => part.type === "text")
         if (textParts.length === 0) {
           toast.show({ message: "No text parts found in last assistant message", variant: "error" })
@@ -1201,7 +1255,7 @@ export function Session() {
           const sessionMessages = messages()
           const transcript = formatTranscript(
             sessionData,
-            sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
+            sessionMessages.map((msg) => ({ info: msg, parts: messageParts(msg.id) })),
             {
               thinking: showThinking(),
               toolDetails: showDetails(),
@@ -1246,7 +1300,7 @@ export function Session() {
 
           const transcript = formatTranscript(
             sessionData,
-            sessionMessages.map((msg) => ({ info: msg, parts: sync.data.part[msg.id] ?? [] })),
+            sessionMessages.map((msg) => ({ info: msg, parts: messageParts(msg.id) })),
             {
               thinking: options.thinking,
               toolDetails: options.toolDetails,
@@ -1356,6 +1410,21 @@ export function Session() {
         moveChild(-1)
       }),
     },
+    ...skillSnapshots().map((snapshot) => ({
+      title: `${expandedSkills().has(snapshot.id) ? "Collapse" : "Expand"} Skill context: ${snapshot.name}`,
+      description: `${snapshot.source.label} · durable admitted snapshot`,
+      value: `session.skill.${snapshot.id}`,
+      category: "Session",
+      slash: undefined as { name: string; aliases?: string[] } | undefined,
+      run: () => {
+        toggleSkill(snapshot.id)
+        dialog.clear()
+        setTimeout(() => {
+          const row = scroll.getChildren().find((child) => child.id === `skill-${snapshot.id}`)
+          if (row) scroll.scrollBy(row.y - scroll.y - 1)
+        }, 0)
+      },
+    })),
   ])
 
   const sessionCommands = createMemo(() =>
@@ -1364,7 +1433,8 @@ export function Session() {
       name: "value" in command ? command.value : command.name,
       desc: "description" in command ? command.description : undefined,
       slashName: "slash" in command ? command.slash?.name : undefined,
-      slashAliases: "slash" in command ? command.slash?.aliases : undefined,
+      slashAliases:
+        "slash" in command && command.slash && "aliases" in command.slash ? command.slash.aliases : undefined,
       ...command,
     })),
   )
@@ -1554,7 +1624,10 @@ export function Session() {
                             ))
                           }}
                           message={message as UserMessage}
-                          parts={sync.data.part[message.id] ?? []}
+                          parts={messageParts(message.id)}
+                          skills={durableUsers().get(message.id)?.skills}
+                          expandedSkills={expandedSkills()}
+                          onSkillToggle={toggleSkill}
                           pending={pending()}
                         />
                       </Match>
@@ -1562,7 +1635,7 @@ export function Session() {
                         <AssistantMessage
                           last={lastAssistant()?.id === message.id}
                           message={message as AssistantMessage}
-                          parts={sync.data.part[message.id] ?? []}
+                          parts={messageParts(message.id)}
                         />
                       </Match>
                     </Switch>
@@ -1677,6 +1750,9 @@ export function Session() {
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
+  skills?: SessionMessageUser["skills"]
+  expandedSkills: ReadonlySet<string>
+  onSkillToggle: (skillID: string) => void
   onMouseUp: () => void
   index: number
   pending?: number
@@ -1747,6 +1823,18 @@ function UserMessage(props: {
                 </For>
               </box>
             </Show>
+            <For each={props.skills}>
+              {(invocation) => (
+                <box id={`skill-${invocation.snapshot.id}`}>
+                  <SkillInvocationRow
+                    snapshot={invocation.snapshot}
+                    width={ctx.width}
+                    expanded={props.expandedSkills.has(invocation.snapshot.id)}
+                    onToggle={() => props.onSkillToggle(invocation.snapshot.id)}
+                  />
+                </box>
+              )}
+            </For>
             <Show
               when={queued()}
               fallback={

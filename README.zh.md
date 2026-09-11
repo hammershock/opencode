@@ -1,128 +1,136 @@
 <p align="center">
-  <a href="https://opencode.ai">
-    <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
-    </picture>
-  </a>
+  <picture>
+    <source srcset="docs/assets/transit-logo-dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="docs/assets/transit-logo-light.svg" media="(prefers-color-scheme: light)">
+    <img src="docs/assets/transit-logo-light.svg" alt="OpenCode Transit——两个相连的终端窗口" width="720">
+  </picture>
 </p>
-<p align="center">开源的 AI Coding Agent。</p>
-<p align="center">
-  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
-  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
-  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
-</p>
+
+<p align="center"><strong>让编码会话留在手边，即使工作区在另一台机器上。</strong></p>
 
 <p align="center">
-  <a href="README.md">English</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.zht.md">繁體中文</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.da.md">Dansk</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.pl.md">Polski</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.bs.md">Bosanski</a> |
-  <a href="README.ar.md">العربية</a> |
-  <a href="README.no.md">Norsk</a> |
-  <a href="README.br.md">Português (Brasil)</a> |
-  <a href="README.th.md">ไทย</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.uk.md">Українська</a> |
-  <a href="README.bn.md">বাংলা</a> |
-  <a href="README.gr.md">Ελληνικά</a> |
-  <a href="README.vi.md">Tiếng Việt</a>
+  <a href="README.md">English</a> ·
+  <a href="README.zh.md">简体中文</a>
 </p>
 
-[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
+> [!IMPORTANT]
+> OpenCode Transit 是基于 [OpenCode](https://github.com/anomalyco/opencode) 构建的独立项目。它并非由 OpenCode 团队开发、认可或维护，与 OpenCode 团队也不存在隶属关系。
 
----
+<p align="center">
+  <a href="https://github.com/hammershock/opencode-transit/actions/workflows/typecheck.yml"><img alt="类型检查状态" src="https://img.shields.io/github/actions/workflow/status/hammershock/opencode-transit/typecheck.yml?branch=dev&style=flat-square&label=typecheck"></a>
+  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-0f766e?style=flat-square"></a>
+  <a href="#平台支持"><img alt="支持的控制端：macOS arm64 与 WSL2 x64" src="https://img.shields.io/badge/controllers-macOS_arm64_%7C_WSL2_x64-6d28d9?style=flat-square"></a>
+  <a href="#功能状态"><img alt="项目状态：积极开发中" src="https://img.shields.io/badge/status-active_development-d97706?style=flat-square"></a>
+</p>
 
-### 安装
+<p align="center">
+  <img src="docs/assets/transit-overview.svg" alt="Mac 或 WSL2 控制端把一个会话连接到明确的本地或 SSH 与 Rexd Location；可选的百度会话同步在控制端之间传递会话" width="960">
+</p>
 
-```bash
-# 直接安装 (YOLO)
-curl -fsSL https://opencode.ai/install | bash
+OpenCode Transit 把终端编码 Agent 变成围绕 Location 工作的工具。只需选择一次本地工作区或 SSH 主机，Agent 工具、Shell 补全、终端、项目指令和会话恢复都会持续绑定到这个明确的 Location。可选的百度会话同步还能让你在自己的 Mac 与 WSL2 控制端之间继续同一段对话。
 
-# 软件包管理器
-npm i -g opencode-ai@latest        # 也可使用 bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS 和 Linux（推荐，始终保持最新）
-brew install opencode              # macOS 和 Linux（官方 brew formula，更新频率较低）
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # 任意系统
-nix run nixpkgs#opencode           # 或用 github:anomalyco/opencode 获取最新 dev 分支
-```
+## 为什么选择 Transit
 
-> [!TIP]
-> 安装前请先移除 0.1.x 之前的旧版本。
+- **从头到尾只有一个明确 Location。** QuickStart 选择本地或 SSH 后，所有与工作区有关的操作都会遵循同一个目标与工作目录。远程失败绝不会静默回退到控制机文件系统。
+- **通过 SSH 托管 Rexd。** Transit 会校验 SSH 主机、准备或复用兼容的 Rexd 运行时，并把访问约束在选定的工作区根目录。
+- **会话记得自己属于哪里。** Location 身份会持久化。目标消失时历史仍然可读，重新绑定则是明确的恢复动作。
+- **上下文可以检查。** 模型会得到真实的目标平台、项目规则和选定 Skills；`/context` 可以查看该会话冻结的上下文来源。
+- **围绕真实终端工作的 TUI。** 包括感知 Location 的 bash/zsh 补全、连续 Shell 模式、清晰的 `target · cwd`、可信命令解析，以及统一管理 OpenCode、Codex、Claude 与自定义 Skills 的入口。
+- **跨设备会话同步——Beta。** 百度同步可在 Mac 与 WSL2 间传递完整会话和附件，支持离线发件箱与 remove-wins 删除；它不负责同步工作区、Git 仓库、配置、目标、凭据或通用 UI 状态。
 
-### 桌面应用程序 (BETA)
+## 快速开始
 
-OpenCode 也提供桌面版应用。可直接从 [发布页 (releases page)](https://github.com/anomalyco/opencode/releases) 或 [opencode.ai/download](https://opencode.ai/download) 下载。
+Transit 目前从源码交付。独立的 `opencode-transit` 入口不会覆盖已安装的上游 `opencode` 命令。请先安装 [Bun](https://bun.sh/docs/installation) 与 Git，再选择控制端对应的命令。
 
-| 平台                  | 下载文件                           |
-| --------------------- | ---------------------------------- |
-| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
-| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
-| Windows               | `opencode-desktop-windows-x64.exe` |
-| Linux                 | `.deb`、`.rpm` 或 AppImage         |
+### macOS Apple Silicon
 
 ```bash
-# macOS (Homebrew Cask)
-brew install --cask opencode-desktop
-# Windows (Scoop)
-scoop bucket add extras; scoop install extras/opencode-desktop
+git clone https://github.com/hammershock/opencode-transit.git
+cd opencode-transit
+bun install --frozen-lockfile
+cd packages/opencode
+bun run script/transit-build.ts --single --skip-install
+./script/install-transit \
+  --binary dist/opencode-darwin-arm64/bin/opencode-transit \
+  --manifest dist/opencode-darwin-arm64/bin/opencode-transit.build.json
+opencode-transit
 ```
 
-#### 安装目录
+### Windows + WSL2（Ubuntu x64）
 
-安装脚本按照以下优先级决定安装路径：
-
-1. `$OPENCODE_INSTALL_DIR` - 自定义安装目录
-2. `$XDG_BIN_DIR` - 符合 XDG 基础目录规范的路径
-3. `$HOME/bin` - 如果存在或可创建的用户二进制目录
-4. `$HOME/.opencode/bin` - 默认备用路径
+请在 WSL2 内运行以下命令，不要使用 PowerShell 或命令提示符：
 
 ```bash
-# 示例
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
+git clone https://github.com/hammershock/opencode-transit.git
+cd opencode-transit
+bun install --frozen-lockfile
+cd packages/opencode
+bun run script/transit-build.ts --single --skip-install
+./script/install-transit \
+  --binary dist/opencode-linux-x64/bin/opencode-transit \
+  --manifest dist/opencode-linux-x64/bin/opencode-transit.build.json
+opencode-transit
 ```
 
-### Agents
+在项目目录启动，在 QuickStart 中选择 **Local** 或 **SSH** 目标，然后进入 TUI。几个常用命令：
 
-OpenCode 内置两种 Agent，可用 `Tab` 键快速切换：
+| 命令        | 用途                                   |
+| ----------- | -------------------------------------- |
+| `/target`   | 管理执行目标并测试连接                 |
+| `/context`  | 查看目标、指令与模型上下文来源         |
+| `/skills`   | 发现并控制本地或远程使用的 Skills      |
+| `/env list` | 查看 Location 环境来源，但不显示变量值 |
+| `/sync`     | 配置或查看百度会话同步                 |
 
-- **build** - 默认模式，具备完整权限，适合开发工作
-- **plan** - 只读模式，适合代码分析与探索
-  - 默认拒绝修改文件
-  - 运行 bash 命令前会询问
-  - 便于探索未知代码库或规划改动
+构建元数据、自定义安装目录、签名与 `opencode-rexd` 兼容入口请参阅[开发入口指南](docs/development/opencode-transit.md)。
 
-另外还包含一个 **general** 子 Agent，用于复杂搜索和多步任务，内部使用，也可在消息中输入 `@general` 调用。
+## 平台支持
 
-了解更多 [Agents](https://opencode.ai/docs/agents) 相关信息。
+| 控制端                        | 本地工作区         | SSH + 托管 Rexd    | 状态                               |
+| ----------------------------- | ------------------ | ------------------ | ---------------------------------- |
+| macOS Apple Silicon（arm64）  | 是                 | 是                 | 支持                               |
+| Windows WSL2、Ubuntu x64      | 是                 | 是                 | 支持                               |
+| 原生 Windows                  | 否                 | 否                 | 不支持，请使用 WSL2                |
+| Intel Mac 或通用 Linux 控制端 | 不在公开支持契约内 | 不在公开支持契约内 | 可能存在构建路径，但未经发布级验证 |
 
-### 文档
+远程 Rexd 工作区可运行在兼容的 Linux 或 macOS SSH 目标上。Transit 不是云调度器，Rexd 也不是主机沙箱。
 
-更多配置说明请查看我们的 [**官方文档**](https://opencode.ai/docs)。
+## 功能状态
 
-### 参与贡献
+| 能力                                         | 状态                     | 边界                                             |
+| -------------------------------------------- | ------------------------ | ------------------------------------------------ |
+| 本地与 SSH Location、托管 Rexd               | 可用                     | 远程使用需要可访问且可信的 SSH 主机              |
+| 感知 Location 的工具、终端、上下文与会话恢复 | 可用                     | 目标丢失后的重新绑定是显式动作                   |
+| Skill 管理与结构化 `$skill` 调用             | 可用                     | Skill 启用状态保存在设备本地，包不会通过云端同步 |
+| 百度会话同步                                 | **Beta**                 | 使用用户自己的百度应用凭据；没有应用层端到端加密 |
+| Location `.env` 来源与 Shell `cwd` 连续性    | **Experimental**         | 选择性启用的设备本地设置                         |
+| 模型页脚中的 Provider 用量                   | 支持相应 Provider 时可用 | OpenAI Codex OAuth 用量为 **Experimental**       |
 
-如有兴趣贡献代码，请在提交 PR 前阅读 [贡献指南 (Contributing Docs)](./CONTRIBUTING.md)。
+## 先了解这些边界
 
-### 基于 OpenCode 进行开发
+- **远程访问能力很强，但不等于隔离。** Agent 可以使用本地账户或 SSH 账户获准访问的文件与 Shell。需要安全边界时，请使用容器、虚拟机或受限账户。
+- **工作区根目录检查不是主机沙箱。** 托管 Rexd 会约束 Transit 暴露的工作区，但不会把远程操作系统账户变成隔离租户。
+- **同步没有由 Transit 提供端到端加密。** 百度负责传输存储的会话数据。请使用自己的百度应用凭据，不要把同步当作秘密保险箱。
+- **Transit 与上游 OpenCode 共用内部命名空间。** 配置与数据格式仍然紧密相关；不要因为可执行文件名称不同，就认为两套安装完全隔离。
+- **持久化能力有明确边界。** 已接纳的输入与 Location 绑定会持久化，但进程崩溃中断的 Provider 工作不会自动重试。
 
-如果你在项目名中使用了 “opencode”（如 “opencode-dashboard” 或 “opencode-mobile”），请在 README 里注明该项目不是 OpenCode 团队官方开发，且不存在隶属关系。
+## 文档与帮助
 
----
+- [OpenCode Transit 开发与安装](docs/development/opencode-transit.md)
+- [发布制品与来源证明](docs/development/transit-release.md)
+- [开发工作流](docs/development-workflow.md)与[测试工作流](docs/testing-workflow.md)
+- [架构 RFC 索引](docs/rfcs/README.md)
+- [Issue Tracker](https://github.com/hammershock/opencode-transit/issues)：提交缺陷与聚焦的功能建议
+- [上游 OpenCode 文档](https://opencode.ai/docs)：了解共用的基础 Agent 与配置模型
 
-**加入我们的社区** [飞书](https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=52ao9352-5623-4fa0-b7dd-3407c392c1af&qr_code=true) | [X.com](https://x.com/opencode)
+## 参与贡献
+
+提交 Issue 或 Pull Request 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。Fork 开发以 `dev` 为目标分支，使用与 Issue 对应的聚焦分支，并明确记录设备验证情况。
+
+## 安全
+
+请通过 [SECURITY.md](SECURITY.md) 中的私密渠道报告漏洞，不要公开提交 Issue。
+
+## 上游与许可证
+
+Transit 得以存在，离不开 [OpenCode 项目](https://github.com/anomalyco/opencode)及其贡献者的工作。我们保留其版权声明与 [MIT 许可证](LICENSE)。Fork 专属改动由 OpenCode Transit 项目独立维护。

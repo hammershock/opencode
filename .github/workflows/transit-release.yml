@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$REPOSITORY" in
-            hammershock/opencode|hammershock/opencode-transit) ;;
+            hammershock/opencode-transit) ;;
             *) echo "Transit releases are restricted to Hammer's fork" >&2; exit 1 ;;
           esac
           test "$REF" = "refs/heads/dev"
@@ -270,7 +270,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$REPOSITORY" in
-            hammershock/opencode|hammershock/opencode-transit) ;;
+            hammershock/opencode-transit) ;;
             *) exit 1 ;;
           esac
           test "$COMMIT" = "$SHA"

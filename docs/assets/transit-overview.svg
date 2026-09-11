@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="450" viewBox="0 0 1120 450" role="img" aria-labelledby="title desc">
+  <title id="title">OpenCode Transit architecture overview</title>
+  <desc id="desc">A Mac or WSL2 controller connects one coding session to either a local workspace or an SSH and Rexd remote workspace. Optional Baidu Session sync carries sessions and attachments between controllers.</desc>
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f9f91"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 10 5 0 10z" fill="#65758b"/>
+    </marker>
+  </defs>
+  <rect width="1120" height="450" rx="28" fill="#f6f8fb"/>
+  <text x="560" y="46" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="21" font-weight="700" fill="#172033">One session, one explicit Location</text>
+
+  <g transform="translate(48 96)">
+    <rect width="248" height="184" rx="22" fill="#fff" stroke="#cbd5e1" stroke-width="2"/>
+    <rect x="24" y="25" width="86" height="69" rx="10" fill="#e7f8f5" stroke="#0f9f91" stroke-width="4"/>
+    <path d="m40 52 12 10-12 10m22 0h25" fill="none" stroke="#0f766e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="138" y="25" width="86" height="69" rx="10" fill="#f2edff" stroke="#7c3aed" stroke-width="4"/>
+    <path d="m154 52 12 10-12 10m22 0h25" fill="none" stroke="#6d28d9" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="124" y="126" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="19" font-weight="700" fill="#172033">Controller</text>
+    <text x="124" y="154" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16" fill="#526174">macOS arm64 · WSL2 x64</text>
+  </g>
+
+  <path d="M310 188h106" stroke="#65758b" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g transform="translate(430 91)">
+    <rect width="260" height="194" rx="26" fill="url(#brand)"/>
+    <circle cx="130" cy="63" r="27" fill="none" stroke="#fff" stroke-width="7"/>
+    <path d="M130 92v36m-30 0h60" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+    <text x="130" y="159" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="23" font-weight="750" fill="#fff">Location boundary</text>
+    <text x="130" y="183" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#fff">tools · shell · terminal · context</text>
+  </g>
+
+  <path d="M704 188h84" stroke="#65758b" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g transform="translate(804 72)">
+    <rect width="268" height="120" rx="20" fill="#fff" stroke="#53b7ad" stroke-width="3"/>
+    <text x="134" y="42" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#172033">Local workspace</text>
+    <text x="134" y="73" text-anchor="middle" font-family="ui-monospace, monospace" font-size="15" fill="#526174">project root + local shell</text>
+    <text x="134" y="98" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0f766e">no transport hop</text>
+
+    <rect y="152" width="268" height="142" rx="20" fill="#fff" stroke="#9b7ce7" stroke-width="3"/>
+    <text x="134" y="194" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700" fill="#172033">Remote workspace</text>
+    <text x="134" y="225" text-anchor="middle" font-family="ui-monospace, monospace" font-size="15" fill="#526174">SSH + managed Rexd</text>
+    <text x="134" y="251" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#6d28d9">verified host · constrained root</text>
+    <text x="134" y="276" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#526174">Linux or macOS target</text>
+  </g>
+
+  <path d="M172 302v18h776v-18" fill="none" stroke="#0f9f91" stroke-width="3" stroke-dasharray="8 7"/>
+  <rect x="248" y="337" width="624" height="74" rx="18" fill="#fff" stroke="#0f9f91" stroke-width="2"/>
+  <text x="560" y="368" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" fill="#172033">Optional Baidu Session sync · Beta</text>
+  <text x="560" y="394" text-anchor="middle" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#526174">macOS controller ↔ sessions + attachments ↔ WSL2 controller</text>
+</svg>

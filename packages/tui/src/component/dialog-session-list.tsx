@@ -29,6 +29,7 @@ import { SESSION_FORCE_REBIND_SETTING } from "../command-toolkit/experimental-se
 import path from "node:path"
 import { TextAttributes } from "@opentui/core"
 import { useTuiPaths } from "../context/runtime"
+import { syncOperationFailure } from "../context/sync-settings"
 
 type SessionListFilter = { scope?: "project"; path?: string }
 export type DialogSessionListFilters = {
@@ -541,7 +542,7 @@ export function DialogSessionList() {
             }
           } catch (err) {
             await refetchSyncedSessions()
-            toast.show({ title: "Failed to download session", message: errorMessage(err), variant: "error" })
+            toast.show({ title: "Failed to download session", message: syncOperationFailure(err), variant: "error" })
             return
           }
         }

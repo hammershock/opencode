@@ -880,16 +880,27 @@ export type SessionsModelContextOutput = {
     readonly generation: number
     readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
     readonly locationRevision: number
-    readonly environment: {
-      readonly harness: "OpenCode Transit"
-      readonly entrypoint: "opencode-transit"
-      readonly targetKind: "local" | "rexd"
-      readonly targetName: string
-      readonly directory: string
-      readonly projectRoot: string
-      readonly vcs?: string
-      readonly platform: string
-    }
+    readonly environment:
+      | {
+          readonly harness: "OpenCode Transit"
+          readonly entrypoint: "opencode-transit"
+          readonly targetKind: "local" | "rexd"
+          readonly targetName: string
+          readonly directory: string
+          readonly projectRoot: string
+          readonly vcs?: string
+          readonly platform: string
+        }
+      | {
+          readonly harness: "OpenCode REXD"
+          readonly entrypoint: "opencode-rexd"
+          readonly targetKind: "local" | "rexd"
+          readonly targetName: string
+          readonly directory: string
+          readonly projectRoot: string
+          readonly vcs?: string
+          readonly platform: string
+        }
     readonly instructions: ReadonlyArray<{
       readonly id: string
       readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
@@ -1024,16 +1035,27 @@ export type SessionsHistoryOutput = {
             readonly generation: number
             readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
             readonly locationRevision: number
-            readonly environment: {
-              readonly harness: "OpenCode Transit"
-              readonly entrypoint: "opencode-transit"
-              readonly targetKind: "local" | "rexd"
-              readonly targetName: string
-              readonly directory: string
-              readonly projectRoot: string
-              readonly vcs?: string
-              readonly platform: string
-            }
+            readonly environment:
+              | {
+                  readonly harness: "OpenCode Transit"
+                  readonly entrypoint: "opencode-transit"
+                  readonly targetKind: "local" | "rexd"
+                  readonly targetName: string
+                  readonly directory: string
+                  readonly projectRoot: string
+                  readonly vcs?: string
+                  readonly platform: string
+                }
+              | {
+                  readonly harness: "OpenCode REXD"
+                  readonly entrypoint: "opencode-rexd"
+                  readonly targetKind: "local" | "rexd"
+                  readonly targetName: string
+                  readonly directory: string
+                  readonly projectRoot: string
+                  readonly vcs?: string
+                  readonly platform: string
+                }
             readonly instructions: ReadonlyArray<{
               readonly id: string
               readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
@@ -1207,16 +1229,27 @@ export type SessionsHistoryOutput = {
             readonly generation: number
             readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
             readonly locationRevision: number
-            readonly environment: {
-              readonly harness: "OpenCode Transit"
-              readonly entrypoint: "opencode-transit"
-              readonly targetKind: "local" | "rexd"
-              readonly targetName: string
-              readonly directory: string
-              readonly projectRoot: string
-              readonly vcs?: string
-              readonly platform: string
-            }
+            readonly environment:
+              | {
+                  readonly harness: "OpenCode Transit"
+                  readonly entrypoint: "opencode-transit"
+                  readonly targetKind: "local" | "rexd"
+                  readonly targetName: string
+                  readonly directory: string
+                  readonly projectRoot: string
+                  readonly vcs?: string
+                  readonly platform: string
+                }
+              | {
+                  readonly harness: "OpenCode REXD"
+                  readonly entrypoint: "opencode-rexd"
+                  readonly targetKind: "local" | "rexd"
+                  readonly targetName: string
+                  readonly directory: string
+                  readonly projectRoot: string
+                  readonly vcs?: string
+                  readonly platform: string
+                }
             readonly instructions: ReadonlyArray<{
               readonly id: string
               readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
@@ -1834,16 +1867,27 @@ export type SessionsEventsOutput =
           readonly generation: number
           readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
           readonly locationRevision: number
-          readonly environment: {
-            readonly harness: "OpenCode Transit"
-            readonly entrypoint: "opencode-transit"
-            readonly targetKind: "local" | "rexd"
-            readonly targetName: string
-            readonly directory: string
-            readonly projectRoot: string
-            readonly vcs?: string
-            readonly platform: string
-          }
+          readonly environment:
+            | {
+                readonly harness: "OpenCode Transit"
+                readonly entrypoint: "opencode-transit"
+                readonly targetKind: "local" | "rexd"
+                readonly targetName: string
+                readonly directory: string
+                readonly projectRoot: string
+                readonly vcs?: string
+                readonly platform: string
+              }
+            | {
+                readonly harness: "OpenCode REXD"
+                readonly entrypoint: "opencode-rexd"
+                readonly targetKind: "local" | "rexd"
+                readonly targetName: string
+                readonly directory: string
+                readonly projectRoot: string
+                readonly vcs?: string
+                readonly platform: string
+              }
           readonly instructions: ReadonlyArray<{
             readonly id: string
             readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"
@@ -2017,16 +2061,27 @@ export type SessionsEventsOutput =
           readonly generation: number
           readonly reason: "created" | "legacy-backfill" | "location-rebound" | "init"
           readonly locationRevision: number
-          readonly environment: {
-            readonly harness: "OpenCode Transit"
-            readonly entrypoint: "opencode-transit"
-            readonly targetKind: "local" | "rexd"
-            readonly targetName: string
-            readonly directory: string
-            readonly projectRoot: string
-            readonly vcs?: string
-            readonly platform: string
-          }
+          readonly environment:
+            | {
+                readonly harness: "OpenCode Transit"
+                readonly entrypoint: "opencode-transit"
+                readonly targetKind: "local" | "rexd"
+                readonly targetName: string
+                readonly directory: string
+                readonly projectRoot: string
+                readonly vcs?: string
+                readonly platform: string
+              }
+            | {
+                readonly harness: "OpenCode REXD"
+                readonly entrypoint: "opencode-rexd"
+                readonly targetKind: "local" | "rexd"
+                readonly targetName: string
+                readonly directory: string
+                readonly projectRoot: string
+                readonly vcs?: string
+                readonly platform: string
+              }
           readonly instructions: ReadonlyArray<{
             readonly id: string
             readonly origin: "global-file" | "project-file" | "configured-file" | "configured-url" | "nested-file"

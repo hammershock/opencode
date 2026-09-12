@@ -76,6 +76,18 @@ describe("sync settings credential errors", () => {
     expect(syncOperationFailure({ data: { kind: "provider", diagnostic: { stage: "delete" } } })).toContain(
       "Sync failed during delete",
     )
+    expect(
+      syncOperationFailure({
+        data: {
+          kind: "provider",
+          diagnostic: {
+            stage: "hydrate",
+            retryable: false,
+            message: "Sync hydrate failed: apply remote generation 153: SchemaError",
+          },
+        },
+      }),
+    ).toContain("apply remote generation 153: SchemaError")
     expect(syncOperationFailure({ data: { diagnostic: { stage: "token secret" } } })).toBe("Sync operation failed")
     expect(syncOperationFailure({ message: "provider failed with token secret" })).toBe("Sync operation failed")
   })

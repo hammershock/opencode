@@ -469,6 +469,14 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       const application = mode === "connect" ? await promptBaiduApplication(dialog) : undefined
       if (mode === "connect" && !application) return
       owner = dialog.stack.at(-1)?.element
+      setModel((current) => ({
+        ...current,
+        account: { state: "disconnected", oauth: { state: "opening" } },
+      }))
+      if (dialog.isCurrent(owner)) {
+        showSyncSettings(dialog, model, actions)
+        owner = dialog.stack.at(-1)?.element
+      }
       loopback?.close()
       loopback = createLoopbackCallback()
       const result = await sdk.client.global.syncOAuthBegin(

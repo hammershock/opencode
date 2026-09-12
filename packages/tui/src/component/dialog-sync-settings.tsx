@@ -225,6 +225,7 @@ export function showPostLoginSyncChoice(dialog: DialogContext) {
 }
 
 export function promptBaiduApplication(dialog: DialogContext) {
+  let enteringCredentials = false
   return new Promise<BaiduApplication | undefined>((resolve) =>
     dialog.replace(
       () => (
@@ -244,6 +245,7 @@ export function promptBaiduApplication(dialog: DialogContext) {
           ]}
           onSelect={async (option) => {
             if (option.value === "legacy") return resolve({ type: "legacy" })
+            enteringCredentials = true
             const appKey = await DialogPrompt.show(dialog, "Baidu AppKey", { placeholder: "AppKey" })
             if (!appKey?.trim()) return resolve(undefined)
             const secretKey = await DialogPrompt.show(dialog, "Baidu SecretKey", { placeholder: "SecretKey" })
@@ -252,7 +254,9 @@ export function promptBaiduApplication(dialog: DialogContext) {
           }}
         />
       ),
-      () => resolve(undefined),
+      () => {
+        if (!enteringCredentials) resolve(undefined)
+      },
     ),
   )
 }

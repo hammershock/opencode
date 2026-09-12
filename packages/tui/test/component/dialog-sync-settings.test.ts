@@ -58,6 +58,12 @@ describe("Sync Settings presentation", () => {
   })
 
   test("shows OAuth progress and manual fallback without redisplaying application credentials", () => {
+    expect(
+      buildSyncOverviewRows({
+        ...connected,
+        account: { state: "disconnected", oauth: { state: "opening" } },
+      }),
+    ).toEqual([expect.objectContaining({ title: "Connect Baidu Netdisk", status: "◐ opening" })])
     const rows = buildSyncOverviewRows({
       ...connected,
       account: {

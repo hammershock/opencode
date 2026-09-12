@@ -75,7 +75,12 @@ import { optimisticPrompt } from "./optimistic"
 import { useLocation } from "../../context/location"
 import { canAdjustVariant } from "../../model-variant"
 import { sessionFooterLocation } from "../session-footer-location"
-import { resolveSubmittedSkillMentions } from "../../prompt/skill"
+import {
+  invalidateSkillMention,
+  resolveSubmittedSkillMentions,
+  skillMentionFailure,
+  skillMentionFailureTitle,
+} from "../../prompt/skill"
 import {
   activateCommandHost,
   createCommandHost,
@@ -173,11 +178,14 @@ function formatEditorContext(selection: EditorSelection) {
   return `<system-reminder>${ranges.join("\n")} This may or may not be relevant to the current task.</system-reminder>\n`
 }
 
-let stashed: { prompt: PromptInfo; cursor: number } | undefined
+type FailedSkillAdmission = { sessionID: string; signature: string; messageID: string }
+
+let stashed: { prompt: PromptInfo; cursor: number; failedSkillAdmission?: FailedSkillAdmission } | undefined
 
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
   let anchor: BoxRenderable
+  let failedSkillAdmission: FailedSkillAdmission | undefined
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = useLeaderActive()
@@ -767,6 +775,7 @@ export function Prompt(props: PromptProps) {
   onMount(() => {
     const saved = stashed
     stashed = undefined
+    failedSkillAdmission = saved?.failedSkillAdmission
     if (store.prompt.input) return
     if (saved && saved.prompt.input) {
       input.setText(saved.prompt.input)
@@ -778,7 +787,7 @@ export function Prompt(props: PromptProps) {
 
   onCleanup(() => {
     if (store.prompt.input) {
-      stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset }
+      stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset, failedSkillAdmission }
     }
     setInputTarget(undefined)
     props.ref?.(undefined)
@@ -1301,7 +1310,7 @@ export function Prompt(props: PromptProps) {
           variant: "error",
         })
 
-        return true
+        return false
       }
 
       sessionID = res.data.data.id
@@ -1354,11 +1363,38 @@ export function Prompt(props: PromptProps) {
       })
     } else {
       move.startSubmit()
+      const skillPrompt = {
+        text: inputText,
+        files: [
+          ...nonTextParts
+            .filter((part) => part.type === "file")
+            .map((part) => ({ uri: part.url, name: part.filename })),
+          ...editorParts.map((part) => ({
+            uri: `data:text/plain;base64,${Buffer.from(part.text).toString("base64")}`,
+            name: "editor-context.txt",
+            description: "Current editor selection context",
+          })),
+        ],
+        agents: nonTextParts.filter((part) => part.type === "agent").map((part) => ({ name: part.name })),
+        skills: skillMentions,
+      }
+      const admissionSignature = skillMentions.length
+        ? JSON.stringify({ agent: agent.name, model: selectedModel, variant, prompt: skillPrompt })
+        : undefined
+      // The server may durably admit the prompt before the response is lost.
+      // An unchanged retry must reuse its message ID so V2 can reconcile it exactly.
+      const retry =
+        admissionSignature &&
+        failedSkillAdmission?.sessionID === sessionID &&
+        failedSkillAdmission.signature === admissionSignature
+          ? failedSkillAdmission
+          : undefined
       const optimistic = optimisticPrompt({
         sessionID,
         agent: agent.name,
         model: selectedModel,
         variant,
+        messageID: retry?.messageID,
         parts: [
           ...editorParts,
           {
@@ -1389,21 +1425,7 @@ export function Prompt(props: PromptProps) {
               {
                 sessionID,
                 id: optimistic.message.id,
-                prompt: {
-                  text: inputText,
-                  files: [
-                    ...nonTextParts
-                      .filter((part) => part.type === "file")
-                      .map((part) => ({ uri: part.url, name: part.filename })),
-                    ...editorParts.map((part) => ({
-                      uri: `data:text/plain;base64,${Buffer.from(part.text).toString("base64")}`,
-                      name: "editor-context.txt",
-                      description: "Current editor selection context",
-                    })),
-                  ],
-                  agents: nonTextParts.filter((part) => part.type === "agent").map((part) => ({ name: part.name })),
-                  skills: skillMentions,
-                },
+                prompt: skillPrompt,
               },
               { throwOnError: true },
             )
@@ -1420,14 +1442,51 @@ export function Prompt(props: PromptProps) {
             },
             { throwOnError: true },
           )
-      request.catch((error) => {
-        sync.message.optimistic.remove(sessionID, optimistic.message.id)
-        toast.show({
-          title: "Failed to send prompt",
-          message: errorMessage(error),
-          variant: "error",
+      if (admissionSignature) {
+        try {
+          await request
+          failedSkillAdmission = undefined
+        } catch (error) {
+          failedSkillAdmission = { sessionID, signature: admissionSignature, messageID: optimistic.message.id }
+          sync.message.optimistic.remove(sessionID, optimistic.message.id)
+          const failure = skillMentionFailure(error)
+          if (failure) {
+            syncExtmarksWithPromptParts()
+            const invalid = invalidateSkillMention(store.prompt.input, store.prompt.parts, failure)
+            if (invalid.parts !== store.prompt.parts) {
+              setStore("prompt", "parts", invalid.parts)
+              restoreExtmarksFromParts(invalid.parts)
+            }
+            await sdk.client.v2.session.activate({ sessionID }).catch(() => undefined)
+            await auto()?.loadSkills()
+            if (invalid.source && props.sessionID) auto()?.showSkill(invalid.source)
+          }
+          toast.show({
+            title: failure ? skillMentionFailureTitle(failure) : "Failed to send prompt",
+            message: errorMessage(error),
+            variant: "error",
+          })
+          input.focus()
+          if (!props.sessionID) {
+            route.navigate({
+              type: "session",
+              sessionID,
+              prompt: { ...unwrap(store.prompt), mode: currentMode },
+            })
+          }
+          if (finishMoveProgress) move.finishSubmit()
+          return false
+        }
+      } else {
+        request.catch((error) => {
+          sync.message.optimistic.remove(sessionID, optimistic.message.id)
+          toast.show({
+            title: "Failed to send prompt",
+            message: errorMessage(error),
+            variant: "error",
+          })
         })
-      })
+      }
       if (editorParts.length > 0) editor.markSelectionSent()
     }
     history.append({

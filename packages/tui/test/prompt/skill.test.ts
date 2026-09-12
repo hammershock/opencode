@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test"
 import {
   admittedSkills,
   bareSkillMentions,
+  invalidateSkillMention,
   resolveSubmittedSkillMentions,
   resolveSkillMentions,
   skillCatalogInput,
   skillDisplayLabel,
+  skillMentionFailure,
+  skillMentionFailureTitle,
   structuredSkillMentions,
 } from "../../src/prompt/skill"
 
@@ -231,5 +234,49 @@ describe("resolveSubmittedSkillMentions", () => {
         show: () => {},
       }),
     ).toBeUndefined()
+  })
+})
+
+describe("Skill admission failures", () => {
+  const failure = {
+    _tag: "SkillMentionError" as const,
+    message: "The selected Skill changed",
+    kind: "stale-catalog" as const,
+    skillID: "skl_review",
+    name: "review",
+  }
+
+  test("finds a typed failure through the generated client error wrapper", () => {
+    expect(skillMentionFailure({ cause: { body: failure } })).toEqual(failure)
+    expect(skillMentionFailureTitle(failure)).toBe("Skill changed; select it again")
+    expect(skillMentionFailure(new Error("offline"))).toBeUndefined()
+  })
+
+  test("invalidates only the failed structured mention and keeps its editable text range", () => {
+    const deploy = {
+      type: "skill" as const,
+      id: "skl_deploy",
+      name: "deploy",
+      sourceLabel: "OpenCode",
+      digest: "b".repeat(64),
+      source: { start: 12, end: 19, value: "$deploy" },
+    }
+    const review = {
+      ...deploy,
+      id: "skl_review",
+      name: "review",
+      source: { start: 0, end: 7, value: "$review" },
+    }
+    expect(invalidateSkillMention("$review and $deploy", [review, deploy], failure)).toEqual({
+      parts: [deploy],
+      source: { start: 0, end: 7 },
+    })
+  })
+
+  test("points a bare failed mention back at its visible token", () => {
+    expect(invalidateSkillMention("Try $review again", [], failure)).toEqual({
+      parts: [],
+      source: { start: 4, end: 11 },
+    })
   })
 })

@@ -421,17 +421,25 @@ describe("v2 location HttpApi", () => {
     }
     expect(admitted.data.prompt.text).toBe(prompt.text)
     expect(admitted.data.prompt.invocations).toHaveLength(1)
+    const skillContent = [
+      "# Skill: review",
+      "",
+      "Keep $ARGUMENTS and $1 literal.",
+      "",
+      `Package directory: ${path.join(tmp.path, "explicit-skills", "review")}`,
+      "Relative paths in this Skill are relative to this directory.",
+      "Use the ordinary filesystem and shell tools to read, modify, or execute files in this directory.",
+    ].join("\n")
     expect(admitted.data.prompt.invocations[0]).toMatchObject({
       source: prompt.skills[0]!.source,
       snapshot: {
         id: expect.stringMatching(/^ski_/),
         name: "review",
         source: { label: "Imported" },
-        content: "Keep $ARGUMENTS and $1 literal.",
+        content: skillContent,
       },
     })
     expect(JSON.stringify(admitted)).not.toContain("skl_")
-    expect(JSON.stringify(admitted)).not.toContain(tmp.path)
     expect(await concurrent.json()).toEqual(admitted)
 
     await fs.writeFile(skillFile, "---\nname: review\ndescription: Review a patch\n---\nChanged body")
@@ -644,7 +652,7 @@ describe("v2 location HttpApi", () => {
     expect(admitted).toHaveLength(2)
     expect(admitted[0]?.data.prompt).toMatchObject({
       text: "$slash-review inspect $ARGUMENTS and $1",
-      invocations: [{ snapshot: { content: "Keep $ARGUMENTS and $1 literal." } }],
+      invocations: [{ snapshot: { content: expect.stringContaining("Keep $ARGUMENTS and $1 literal.") } }],
     })
     expect(admitted[0]?.data.prompt?.invocations?.[0]?.snapshot).toMatchObject({
       name: canonicalPrompt.data.prompt.invocations[0]!.snapshot.name,

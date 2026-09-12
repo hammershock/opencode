@@ -40,24 +40,7 @@ export const description = [
 export const toModelOutput = (snapshot: SkillInvocation.Snapshot, prepared?: SkillPackageAccess.Prepared) => {
   return [
     `<skill_content name="${snapshot.name}" invocation="${snapshot.id}">`,
-    `# Skill: ${snapshot.name}`,
-    "",
-    snapshot.content.trim(),
-    "",
-    ...(prepared?.path === undefined
-      ? ["This Skill has no filesystem package directory."]
-      : prepared.temporary
-        ? [
-            `Temporary package directory on this execution target: ${prepared.path}`,
-            "This is a shared, mutable runtime copy and can be reclaimed when the Session disconnects or expires.",
-            "Before starting persistent background work, copy every required file into a persistent target directory.",
-            "Use the ordinary filesystem and shell tools to read, modify, or execute files in this directory.",
-          ]
-        : [
-            `Package directory: ${prepared.path}`,
-            "Relative paths in this Skill are relative to this directory.",
-            "Use the ordinary filesystem and shell tools to read, modify, or execute files in this directory.",
-          ]),
+    SkillPackageAccess.toModelContent({ name: snapshot.name, content: snapshot.content, prepared }),
     "</skill_content>",
   ].join("\n")
 }

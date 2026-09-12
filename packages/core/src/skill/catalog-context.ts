@@ -12,6 +12,7 @@ import { SkillGuidanceSnapshot } from "./guidance-snapshot"
 import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
 import { Hash } from "../util/hash"
 import { SessionSkillCatalog } from "../session/skill-catalog"
+import { SkillPackageAccess } from "./package-access"
 
 export type { Loaded, Interface } from "./catalog-context-service"
 export { Service } from "./catalog-context-service"
@@ -23,6 +24,7 @@ const layer = Layer.effect(
     const skills = yield* SkillV2.Service
     const agents = yield* AgentV2.Service
     const registry = yield* SkillRegistry.Service
+    const packages = yield* SkillPackageAccess.Service
     const current = yield* Ref.make<Skill.RegistrySnapshot | undefined>(undefined)
 
     return SkillCatalogContextService.Service.of({
@@ -109,6 +111,16 @@ const layer = Layer.effect(
                   }),
               ),
             )
+            const prepared = yield* packages.prepare({ entry, sessionID: input.sessionID }).pipe(
+              Effect.mapError(
+                (error) =>
+                  new SkillCatalogContextService.AdmissionError({
+                    kind: error.kind,
+                    skillID: mention.id,
+                    name: mention.name,
+                  }),
+              ),
+            )
             const sourceLabel = SkillGuidanceSnapshot.sourceLabel(entry.metadata.sourceLabel)
             return {
               source: mention.source,
@@ -122,7 +134,11 @@ const layer = Layer.effect(
                 description: entry.metadata.description,
                 digest: entry.metadata.digest,
                 source: { kind: entry.source.kind, label: sourceLabel },
-                content: entry.content,
+                content: SkillPackageAccess.toModelContent({
+                  name: entry.metadata.name,
+                  content: entry.content,
+                  prepared,
+                }),
                 status: "loaded",
               }),
             }
@@ -136,7 +152,7 @@ const layer = Layer.effect(
 export const node = makeLocationNode({
   service: SkillCatalogContextService.Service,
   layer,
-  deps: [PluginV2.node, SkillV2.node, AgentV2.node, SkillRegistry.node],
+  deps: [PluginV2.node, SkillV2.node, AgentV2.node, SkillRegistry.node, SkillPackageAccess.node],
 })
 
 function validate(text: string, mentions: SkillCatalogContextService.AdmissionInput["mentions"]) {

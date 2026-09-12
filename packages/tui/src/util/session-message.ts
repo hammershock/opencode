@@ -193,6 +193,24 @@ export function projectCanonicalSessionMessages(input: {
   })
 }
 
+export function mergeCanonicalSessionMessages(legacy: readonly Message[], canonical: readonly Message[]) {
+  const projected = new Set(canonical.map((message) => message.id))
+  const live = new Map(legacy.map((message) => [message.id, message]))
+  const messages = [
+    ...canonical.map((message) => live.get(message.id) ?? message),
+    ...legacy.filter((message) => !projected.has(message.id)),
+  ]
+  const users = new Map(messages.flatMap((message) => (message.role === "user" ? [[message.id, message]] : [])))
+  return messages.toSorted((left, right) => {
+    const leftUser = (left.role === "assistant" ? users.get(left.parentID) : left) ?? left
+    const rightUser = (right.role === "assistant" ? users.get(right.parentID) : right) ?? right
+    const turn = leftUser.time.created - rightUser.time.created || leftUser.id.localeCompare(rightUser.id)
+    if (turn !== 0) return turn
+    if (left.role !== right.role) return left.role === "user" ? -1 : 1
+    return left.time.created - right.time.created || left.id.localeCompare(right.id)
+  })
+}
+
 function projectTool(sessionID: string, messageID: string, tool: SessionMessageAssistantTool): Part {
   const base = {
     id: tool.id,

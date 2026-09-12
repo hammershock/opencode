@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import type { SessionMessage, SessionMessageUser } from "@opencode-ai/sdk/v2"
+import type { Message, SessionMessage, SessionMessageUser } from "@opencode-ai/sdk/v2"
 import {
   canonicalUserText,
   commitCanonicalRevert,
+  mergeCanonicalSessionMessages,
   projectCanonicalSessionMessages,
   restoreCanonicalPrompt,
 } from "../../src/util/session-message"
@@ -163,5 +164,52 @@ describe("projectCanonicalSessionMessages", () => {
     ] satisfies SessionMessage[]
 
     expect(commitCanonicalRevert(messages, "boundary").map((message) => message.id)).toEqual(["earlier"])
+  })
+})
+
+describe("mergeCanonicalSessionMessages", () => {
+  test("preserves durable order when admission timestamps cross assistant output", () => {
+    const canonical = [
+      { id: "input-1", role: "user", time: { created: 10 } },
+      { id: "output-1", role: "assistant", parentID: "input-1", time: { created: 30 } },
+      { id: "input-2", role: "user", time: { created: 20 } },
+      { id: "output-2", role: "assistant", parentID: "input-2", time: { created: 40 } },
+    ] as Message[]
+    const legacy = canonical.toSorted((a, b) => a.time.created - b.time.created)
+
+    expect(mergeCanonicalSessionMessages(legacy, canonical).map((message) => message.id)).toEqual([
+      "input-1",
+      "output-1",
+      "input-2",
+      "output-2",
+    ])
+  })
+
+  test("merges a later canonical Skill turn after an earlier legacy-only turn", () => {
+    const firstInput = { id: "input-1", role: "user", time: { created: 10 } } as Message
+    const firstOutput = {
+      id: "output-1",
+      role: "assistant",
+      parentID: "input-1",
+      time: { created: 20 },
+    } as Message
+    const skillInput = { id: "input-2", role: "user", time: { created: 30 } } as Message
+    const skillOutput = {
+      id: "output-2",
+      role: "assistant",
+      parentID: "input-2",
+      time: { created: 40 },
+    } as Message
+
+    expect(
+      mergeCanonicalSessionMessages([firstInput, firstOutput], [skillInput, skillOutput]).map((message) => message.id),
+    ).toEqual(["input-1", "output-1", "input-2", "output-2"])
+  })
+
+  test("prefers the live object when both projections contain the same message", () => {
+    const projected = { id: "input-1", role: "user", time: { created: 10 } } as Message
+    const live = { ...projected, time: { created: 11 } } as Message
+
+    expect(mergeCanonicalSessionMessages([live], [projected])).toEqual([live])
   })
 })

@@ -116,7 +116,11 @@ import {
 import { showModelContext } from "../../component/dialog-model-context"
 import { useData } from "../../context/data"
 import { SkillInvocationRow } from "../../component/skill-invocation"
-import { projectCanonicalSessionMessages, restoreCanonicalPrompt } from "../../util/session-message"
+import {
+  mergeCanonicalSessionMessages,
+  projectCanonicalSessionMessages,
+  restoreCanonicalPrompt,
+} from "../../util/session-message"
 import { skillCommand, type SkillCommandContext } from "../../command-toolkit/skill"
 import { useSkillManager } from "../../component/skill-manager"
 
@@ -274,11 +278,10 @@ export function Session() {
   )
   const messages = createMemo(() => {
     const legacy = sync.data.message[route.sessionID] ?? []
-    const ids = new Set(legacy.map((message) => message.id))
-    return [
-      ...legacy,
-      ...canonicalProjection().flatMap((item) => (ids.has(item.message.id) ? [] : [item.message])),
-    ].toSorted((a, b) => a.time.created - b.time.created)
+    return mergeCanonicalSessionMessages(
+      legacy,
+      canonicalProjection().map((item) => item.message),
+    )
   })
   // Canonical projection creates fresh adapters per delta; stable IDs keep Solid from remounting the transcript.
   const messageIDs = createMemo(() => messages().map((message) => message.id))

@@ -20,8 +20,11 @@ const target: TargetRegistry.Definition = {
   workspaceRoots: ["/"],
 }
 
-function session(location: Location.Ref, portableTargetLabel?: string) {
-  return { id: sessionID, location, portableTargetLabel } as SessionSchema.Info
+function session(
+  location: Location.Ref,
+  options: { portableTargetLabel?: string; syncSpaceID?: string; locationRevision?: number } = {},
+) {
+  return { id: sessionID, location, ...options } as SessionSchema.Info
 }
 
 function adapter(
@@ -29,6 +32,7 @@ function adapter(
   options: {
     targets?: readonly TargetRegistry.Definition[]
     bindings?: ReadonlyMap<string, Location.TargetID>
+    foreignOwner?: boolean
     probe?: SessionLocationAccess.Adapter["probe"]
   } = {},
 ): SessionLocationAccess.Adapter {
@@ -36,6 +40,7 @@ function adapter(
     session: async () => info,
     targets: async () => options.targets ?? [],
     bindings: async () => options.bindings ?? new Map(),
+    foreignOwner: async () => options.foreignOwner ?? false,
     referencedSessions: async () => [sessionID],
     probe: options.probe ?? (async () => ({ status: "ready", stages: [] })),
   }
@@ -69,12 +74,60 @@ describe("SessionLocationAccess", () => {
 
   test("uses an exact-name target when a portable target has no device-local binding", async () => {
     const access = SessionLocationAccess.make(
-      adapter(session(remote, "lab-gpu"), { targets: [{ ...target, name: "lab-gpu" }] }),
+      adapter(session(remote, { portableTargetLabel: "lab-gpu" }), { targets: [{ ...target, name: "lab-gpu" }] }),
     )
 
     expect(await Effect.runPromise(access.require(sessionID))).toMatchObject({
       target: { type: "rexd", targetID },
       directory,
+    })
+  })
+
+  test("recovers a legacy foreign synchronized Rexd projection as portable", async () => {
+    const localTargetID = Location.TargetID.make("12c3b174-eab2-4dc3-8c2a-bf8a2b63a652")
+    const access = SessionLocationAccess.make(
+      adapter(
+        session(
+          Location.Ref.make({
+            target: { type: "rexd", targetID },
+            directory,
+            lastKnownTargetName: "gpu",
+          }),
+          { syncSpaceID: "account-v2:test", locationRevision: 0 },
+        ),
+        {
+          foreignOwner: true,
+          targets: [{ ...target, id: localTargetID }],
+          bindings: new Map([["gpu", localTargetID]]),
+        },
+      ),
+    )
+
+    expect(await Effect.runPromise(access.require(sessionID))).toMatchObject({
+      target: { type: "rexd", targetID: localTargetID },
+      directory,
+    })
+  })
+
+  test("does not guess a locally rebound foreign target by its last-known name", async () => {
+    const localTargetID = Location.TargetID.make("12c3b174-eab2-4dc3-8c2a-bf8a2b63a652")
+    const access = SessionLocationAccess.make(
+      adapter(
+        session(
+          Location.Ref.make({
+            target: { type: "rexd", targetID },
+            directory,
+            lastKnownTargetName: "gpu",
+          }),
+          { syncSpaceID: "account-v2:test", locationRevision: 1 },
+        ),
+        { foreignOwner: true, targets: [{ ...target, id: localTargetID }] },
+      ),
+    )
+
+    await expect(Effect.runPromise(access.require(sessionID))).rejects.toMatchObject({
+      _tag: "SessionLocationAccess.UnresolvedError",
+      status: "missing_local_target",
     })
   })
 

@@ -559,6 +559,70 @@ describe("SessionSync", () => {
     })
   })
 
+  test("persists a foreign Rexd Created event with its portable target label", async () => {
+    await using tmp = await tmpdir()
+    const layer = LayerNode.compile(LayerNode.group([Database.node, EventV2.node, SessionProjector.node]), [
+      [Database.node, Database.layerFromPath(path.join(tmp.path, "session.db"))],
+    ])
+    const sessionID = Session.ID.make("ses_remote_portable_target")
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const database = (yield* Database.Service).db
+        const events = yield* EventV2.Service
+        const projector = SessionSync.projector(events, SyncEvent.DeviceID.make("remote"))
+        yield* projector.project({
+          id: EventV2.ID.create(),
+          aggregateID: sessionID,
+          seq: 0,
+          type: "session.created.1",
+          data: {
+            sessionID,
+            info: {
+              id: sessionID,
+              slug: "remote-portable-target",
+              projectID: "global",
+              directory: "/remote/project",
+              target: { type: "rexd", targetID: "a1de9af7-cb29-4525-accc-88ed3bf87b29" },
+              lastKnownTargetName: "a100-2gpu",
+              title: "Remote portable target",
+              version: "test",
+              time: { created: 1, updated: 1 },
+            },
+          },
+        })
+        yield* projector.project({
+          id: EventV2.ID.create(),
+          aggregateID: sessionID,
+          seq: 1,
+          type: "session.updated.1",
+          data: {
+            sessionID,
+            info: {
+              id: sessionID,
+              slug: "remote-portable-target",
+              projectID: "global",
+              directory: "/remote/project",
+              target: { type: "rexd", targetID: "a1de9af7-cb29-4525-accc-88ed3bf87b29" },
+              lastKnownTargetName: "a100-2gpu",
+              title: "Updated remote portable target",
+              version: "test",
+              time: { created: 1, updated: 2 },
+            },
+          },
+        })
+
+        expect(
+          yield* database
+            .select({ portableTargetLabel: SessionTable.portable_target_label })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get(),
+        ).toEqual({ portableTargetLabel: "a100-2gpu" })
+      }).pipe(Effect.scoped, Effect.provide(layer)),
+    )
+  })
+
   test("persists real versioned Created ownership across restart reconciliation", async () => {
     await using tmp = await tmpdir()
     const sessionPath = path.join(tmp.path, "session.db")

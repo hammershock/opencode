@@ -50,11 +50,19 @@ const snapshot: SkillPackageSnapshot.Snapshot = {
   digest: Skill.Digest.make("4".repeat(64)),
 }
 
+const builtInEntry: SkillRegistry.Entry = {
+  ...entry,
+  source: Skill.SourceDetail.make({ kind: "built-in", label: "Built-in" }),
+  sourceKey: "embedded:opencode/customize-opencode",
+  location: AbsolutePath.make("/builtin/customize-opencode.md"),
+}
+
 describe("Rexd Skill package access", () => {
   let calls: string[] = []
   let closed = 0
   let failing = false
   let released: string[] = []
+  let snapshots = 0
   let listener: EventV2.Subscriber | undefined
   const session = makeLocationNode({
     service: RexdLocationSession,
@@ -95,11 +103,29 @@ describe("Rexd Skill package access", () => {
     [
       SkillPackageSnapshot.node,
       Layer.mock(SkillPackageSnapshot.Service, {
-        create: () => Effect.succeed(snapshot),
+        create: () =>
+          Effect.sync(() => {
+            snapshots++
+            return snapshot
+          }),
       }),
     ],
   ])
   const it = testEffect(layer)
+
+  it.effect("does not materialize a built-in Skill", () =>
+    Effect.gen(function* () {
+      calls = []
+      snapshots = 0
+      const packages = yield* SkillPackageAccess.Service
+
+      expect(
+        yield* packages.prepare({ entry: builtInEntry, sessionID: SessionSchema.ID.make("session-built-in") }),
+      ).toEqual({ temporary: false })
+      expect(snapshots).toBe(0)
+      expect(calls).toEqual([])
+    }),
+  )
 
   it.effect("returns a temporary target path and deduplicates one Session digest", () =>
     Effect.gen(function* () {

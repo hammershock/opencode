@@ -27,7 +27,7 @@ OpenCode 必须把 Skill 作为结构化能力，而不是把完整 `SKILL.md` �
 
 Skill package、发现路径和 target 适用范围由控制设备拥有。账户同步可以显式开启 OpenCode Skill sync，但只同步 OpenCode 用户配置目录 `skill/` 与 `skills/` 中的完整 Skill package；Codex、Claude、自定义 imported roots、project Skill、built-in Skill 和 target scope 均保持 device-local。每个 Skill 默认适用于全部 execution target，用户可以在统一设置入口中改为 `local` 与具体 target ID 的名单。本地 Session 直接向 Agent 提供正式 Skill 目录；Rexd Session 复用现有 Rexd filesystem 与 exec 管道，把已调用的完整 package 加载到 target 上的真实共享临时目录，使 Agent 继续使用原生文件与 Shell tools。Rexd protocol 不增加 Skill 专用方法，控制设备目录也不直接暴露给 target。
 
-Agent 可用 Skill 的元信息在 Session model context 初始化时接纳一次，普通 provider turn 不重新扫描。新建、resume 或切回 Session 时执行一次强制 catalog reload；变化通过 RFC-0011 当前 Context Generation 内的隐藏 context advance 生效，不重写原始 system baseline，也不建立新的 Location generation。显式或隐式加载的 Skill 正文形成隐藏、可展开的 durable invocation snapshot，并随完整 Session 同步，以保证跨设备续聊使用已经接纳的准确内容。
+Agent 可用 Skill 的元信息是 controller-local runtime capability，不属于 Session durable history。新建、resume 或切回 Session 时执行一次强制 catalog reload，并以可替换的启动上下文声明提供给后续 provider request；普通 provider turn 不重新扫描。显式或隐式加载的 Skill 正文形成隐藏、可展开的 durable invocation snapshot，并随完整 Session 同步，以保证跨设备续聊使用已经接纳的准确内容。
 
 ## 背景与现有缺陷
 
@@ -380,20 +380,20 @@ Skill 正文作为与用户文本分离的 contextual user fragment 发送给模
 
 普通自定义 command 继续使用既有 placeholder 语义。Skill compatibility adapter 与 command toolkit 分离，避免改变非 Skill command。
 
-## Catalog 生命周期与 Context Epoch
+## Catalog 生命周期与启动上下文
 
 ### 初始化一次
 
-`core/skill-guidance` 改为 activation-scoped System Context source。它不参加 ordinary-turn reconcile。
+未调用 Skill 的 catalog 不注册为 System Context source，也不进入 RFC-0011 Context Epoch、Session event 或 sync。控制设备为每个已激活 Session 只保留一个可替换的 device-local 当前视图。
 
 新 Session 在接纳首个模型输入前：
 
 1. force reload controller Skill Registry；
 2. 按 Session target 和 selected Agent permissions 构造 catalog；
-3. 把有界 name/description metadata 写入 RFC-0011 generation baseline 与 structured snapshot；
-4. 记录 catalog digest。
+3. 把完整 admitted identities 与有界 name/description 启动声明原子写入 device-local 当前视图；
+4. 记录 catalog digest，用于 picker、mention admission 与 provider request 一致性校验。
 
-“初始化一次”指一个 admitted context lifecycle 中只发现、比较并建立一次 catalog。无状态 provider 后续请求仍需要序列化当前 baseline 和 history；这是传输层重放，不是重新扫描、重新选择或新增 model-visible context event。
+“初始化一次”指一个 activation lifecycle 中只发现、比较并建立一次 catalog。无状态 provider 后续请求仍需要把当前启动声明与 durable baseline、history 一起序列化；这是传输层重放，不是重新扫描、重新选择或新增 model-visible history。
 
 Agent switch 会从已加载的 registry snapshot 重新应用 permission filter，并作为一次 Agent context activation 接纳新 catalog；它不扫描 filesystem。普通 turn、tool continuation、compaction、transparent reconnect 和 retry 都不刷新 Skill。
 
@@ -408,20 +408,20 @@ Agent switch 会从已加载的 registry snapshot 重新应用 permission filter
 
 activation 调用 `skills.list(forceReload: true)` 等价的 Core workflow，清除相关 root scan cache并重新读取 metadata。TUI picker 使用同一返回快照，不能自行维护第二份发现结果。
 
-Core 将新 catalog 与 Context Epoch 中的 `core/skill-guidance` snapshot 比较：
+Core 将新 catalog 与该 Session 的 device-local 当前视图比较：
 
-- digest 未变化：不写 Session event，不增加 model context；
-- digest 变化：在当前 Context Generation 发布 typed hidden `ContextAdvanced`，cause 为 `skill-catalog-reloaded`，正文声明新 catalog supersede 旧 catalog；
+- digest 与启动声明均未变化：保持当前视图；
+- catalog 变化：原子替换当前视图，下一次 provider request 只携带新启动声明；
 - 临时读取失败：保留已接纳 catalog，显示诊断，不把所有 Skill 当作已删除；
 - confirmed root removal 或 target policy change：新 snapshot 可以明确移除对应 Skill。
 
-Skill reload 不修改 RFC-0011 的原始 baseline，不增加 Location `generation`，也不刷新 environment、AGENTS instructions、references 或其他 context source。它只推进 `core/skill-guidance` 的 source snapshot。Context advance 必须在下一条 prompt admission 前 durable commit；正在运行的 turn 不被中途改变。
+Skill reload 不修改 RFC-0011 的 baseline、source snapshot 或 Location `generation`，也不刷新 environment、AGENTS instructions、references 或其他 context source。它不发布 Session event；正在运行的 turn 不被中途改变。
 
-unresolved/read-only Session 可以刷新 TUI 的 device-local preview catalog，但不能写 ContextAdvanced。Location 恢复并准备提交下一条 prompt 时再执行正常 activation admission。
+unresolved/read-only Session 可以刷新 TUI 的 device-local preview catalog，但不能替换可写 Session 的 admitted 当前视图。Location 恢复并准备提交下一条 prompt 时再执行正常 activation。
 
 ### Model-visible catalog 量化预算
 
-`core/skill-guidance` 使用与 provider tokenizer 无关的确定性预算：一个 admitted catalog 最多保留 64 个 Skill；每条 description 最多保留 256 个 Unicode code point，末尾省略号计入限制；包含固定说明、标记、name、description、source 与省略提示在内的最终 baseline 最多为 16,384 UTF-8 bytes。字节上限同时给出最保守的 16,384 token 上界，不依赖特定 provider 的 tokenizer。
+Skill 启动声明使用与 provider tokenizer 无关的确定性预算：一个 admitted catalog 最多保留 64 个 Skill；每条 description 最多保留 256 个 Unicode code point，末尾省略号计入限制；包含固定说明、标记、name、description、source 与省略提示在内的最终声明最多为 16,384 UTF-8 bytes。字节上限同时给出最保守的 16,384 token 上界，不依赖特定 provider 的 tokenizer。
 
 预算在 target scope 与 Agent permission 过滤之后应用。候选沿既有的 name、脱敏 source label、digest 稳定顺序处理；先缩短 description，再因 64 项或总字节限制省略条目。name 不得截断；如果一个条目的完整 name 与结构标记无法放入剩余预算，该条目整体省略，后续较短条目仍可继续尝试。相同输入必须产生相同保留项、description、omitted count 与 catalog digest。
 
@@ -495,9 +495,9 @@ Prompt API 接受 structured Skill mention。公共 Protocol 或 Server `HttpApi
 
 - controller-global Skill Registry 负责 roots、filesystem discovery、SkillID、cache、diagnostics 与 target policy；
 - Skill Sync domain 负责 eligible-root inventory、package manifest、outbox、cloud projection、conflict、tombstone 与 atomic local materialization；
-- Location-scoped model context assembler 消费 registry snapshot并应用当前 target/Agent filter，但不扫描 target filesystem；
+- Session activation workflow 消费 registry snapshot并应用当前 target/Agent filter，但不扫描 target filesystem；
 - Session admission 负责 mention resolution 与 durable invocation snapshot；
-- Session Context Epoch 负责 activation-scoped catalog baseline/advance；
+- provider request assembler 读取 device-local 当前视图并注入唯一的 Skill 启动声明；
 - Tool registry 只提供 implicit `skill`；Location-scoped materializer 使用 canonical resolver 与既有 Rexd filesystem/exec services 准备 package path；
 - TUI 只渲染 typed state、维护 composer extmark、dispatch registry/session actions，并在共享 remote status surface 展示 Skill materialization；
 - sync adapter 传输正式 Session events 与 Skill Sync operations；它不能上传 registry 配置、非 eligible root 或当前 filesystem 的临时扫描结果。
@@ -507,11 +507,11 @@ legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一
 ## 失败行为
 
 - 一个 root 发现失败不会阻止其余 root；已接纳 Session catalog 不因临时 I/O failure 被清空。
-- 初次 Session 初始化若 registry 整体不可用，Skill guidance 可以带诊断建立为空；它不能阻止基本 Agent 使用，除非用户显式 mention 的 Skill 无法验证。
+- 初次 Session 初始化若 registry 整体不可用，Skill 启动声明可以带诊断建立为空；它不能阻止基本 Agent 使用，除非用户显式 mention 的 Skill 无法验证。
 - explicit mention 在 admission 前读取失败或 digest stale 时，整条 prompt 不接纳；用户文本与 draft 保留。
 - implicit load 失败形成正常 failed tool result，不伪造 loaded snapshot。
 - manager mutation conflict、permission failure 或 invalid path 不改变已有配置和当前 selection。
-- Session activation reload failure 不修改 Context Epoch；下一次重新进入可以重试，同一活跃会话不后台轮询。
+- Session activation reload failure 不修改 device-local 当前视图；下一次重新进入可以重试，同一活跃会话不后台轮询。
 - target scope 中出现 missing target 只产生设置诊断，不影响其他明确 target。
 - remote materialization 失败不得回退 controller filesystem、controller Shell、网络 URL、同名 Skill 或已移除的 resource tool；
 - explicit mention 的 remote materialization 在 admission 前失败时整条 prompt 不接纳且 draft 保留；implicit load 失败形成正常 failed tool result；
@@ -529,7 +529,7 @@ legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一
 3. 当前按 name 覆盖重复 Skill 的行为迁移为同时保留多个 `SkillID`；唯一 name 的用户行为不变，重名调用从静默覆盖变为显式选择。
 4. `/<skill>` 在兼容期继续工作，但不再作为 template 展开；普通 custom command 不受影响。
 5. 已有 Session 中作为普通 user text 保存的历史 Skill 展开不重写。新的调用使用 structured snapshot；旧消息首次 resume 不尝试反向猜测 Skill identity。
-6. 没有 `core/skill-guidance` snapshot 的旧 Session 在首次可写 activation 时建立一次 catalog advance；不重写 RFC-0011 baseline。
+6. 带有历史 `core/skill-guidance` source 的 Session 在新版本首次使用时，仅在本地 projection 中删除该 source，并从其余 durable source snapshots 重建 runtime baseline；不发布迁移 event、不改写同步历史。
 7. 现有 Skill permission 继续生效。target scope 是额外 availability filter，不替代 allow/ask/deny。
 8. Skill Registry、discovery/target 配置、target 临时路径与非 eligible package 始终排除在 RFC-0010 sync 外；invocation snapshot 跟随 Session，runtime path 在当前设备重新渲染。
 9. 用户显式开启 Skill sync 后，OpenCode global roots 的 eligible package 通过独立 Skill namespace 同步，不混入 Session payload。
@@ -548,7 +548,7 @@ legacy Skill discovery、slash registration 与 Core V2 实现必须收敛到一
 7. 同一 prompt 的多 Skill 顺序稳定且去重；重名 Skill 通过 SkillID 精确选择。
 8. 新 Session 初始化只接纳一次 catalog；普通 turn、retry、tool continuation 与 compaction 不扫描 Skill roots 或创建重复 context event。
 9. 活跃 Session 新增 Skill 后保持冻结；退出并重新进入后，TUI picker 与下一次 model request 都能发现它。
-10. unchanged activation 不写 event；changed activation 只推进 `core/skill-guidance`，不重写 system baseline、不增加 Location generation、不刷新其他 context source。
+10. unchanged 与 changed activation 都不写 Session event；changed activation 只替换 device-local 当前视图，不重写 durable system baseline、不增加 Location generation、不刷新其他 context source。
 11. local、all targets、具体 Rexd target、空名单、renamed target、missing target 与 restored same-ID target 的 availability 都符合本 RFC。
 12. model request 收到完整 invocation snapshot，TUI 默认只显示 `$name` 与折叠行；展开显示准确 snapshot 而不重新读盘。
 13. copy、fork、edit、timeline title 与 rendered export 不把 Skill body 当作用户输入；raw export、replay 与 compaction 保留结构化内容。

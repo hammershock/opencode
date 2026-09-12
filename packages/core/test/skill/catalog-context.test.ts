@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer } from "effect"
 import { Skill } from "@opencode-ai/schema/skill"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { PluginV2 } from "@opencode-ai/core/plugin"
@@ -8,10 +8,8 @@ import { SkillCatalogContext } from "@opencode-ai/core/skill/catalog-context"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { SkillRegistry } from "@opencode-ai/core/skill/registry"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
-import { ModelContext } from "@opencode-ai/schema/model-context"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { SessionID } from "@opencode-ai/schema/session-id"
-import { SkillGuidanceSnapshot } from "@opencode-ai/core/skill/guidance-snapshot"
 import { SkillPackageAccess } from "@opencode-ai/core/skill/package-access"
 import { it } from "../lib/effect"
 
@@ -102,25 +100,6 @@ describe("SkillCatalogContext", () => {
       messageID: SessionMessage.ID.make("msg_skill_failures"),
       text: "$review inspect",
       mentions: [{ id: review.id, name: review.name, source: { start: 0, end: 7, text: "$review" } }],
-      catalog: {
-        [ModelContext.Key.make("core/skill-guidance")]: {
-          value: Schema.encodeSync(SkillGuidanceSnapshot.Catalog)(
-            SkillGuidanceSnapshot.Catalog.make({
-              enabled: true,
-              skills: [
-                SkillGuidanceSnapshot.Summary.make({
-                  name: review.name,
-                  description: review.description,
-                  sourceLabel: "Imported",
-                  digest: review.digest,
-                }),
-              ],
-              diagnostics: [],
-            }),
-          ),
-          baseline: "Skill guidance",
-        },
-      },
       admittedCatalog: Skill.AdmittedCatalog.make({
         revision: review.digest,
         skills: [

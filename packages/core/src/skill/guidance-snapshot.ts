@@ -1,7 +1,6 @@
 export * as SkillGuidanceSnapshot from "./guidance-snapshot"
 
 import { Schema } from "effect"
-import { ModelContext } from "@opencode-ai/schema/model-context"
 import { Skill } from "@opencode-ai/schema/skill"
 import { NonNegativeInt, optional } from "../schema"
 
@@ -25,18 +24,6 @@ export const Catalog = Schema.Struct({
   omitted: NonNegativeInt.pipe(optional),
 })
 export type Catalog = typeof Catalog.Type
-
-export function admitted(snapshot: ModelContext.SourceState, metadata: Skill.Metadata) {
-  const source = snapshot[ModelContext.Key.make("core/skill-guidance")]
-  const decoded = Schema.decodeUnknownOption(Catalog)(source?.value).valueOrUndefined
-  if (!decoded?.enabled) return false
-  return decoded.skills.some(
-    (skill) =>
-      skill.name === metadata.name &&
-      skill.digest === metadata.digest &&
-      skill.sourceLabel === sourceLabel(metadata.sourceLabel),
-  )
-}
 
 export function sourceLabel(value: string) {
   return value.replace(/ · [0-9a-f]{8}$/i, "")

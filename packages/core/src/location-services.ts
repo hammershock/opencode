@@ -145,11 +145,12 @@ export function buildLocationServiceMap(
 }
 
 function canonicalRef(ref: Location.Ref): Location.Ref {
+  // The target name is display/recovery metadata and is absent from ordinary HTTP Location queries.
+  // Treating it as placement identity splits one Session across independent Location-scoped caches.
   return Location.Ref.make({
     target: ref.target,
     directory: ref.directory,
     ...(ref.workspaceID === undefined ? {} : { workspaceID: ref.workspaceID }),
-    ...(ref.lastKnownTargetName === undefined ? {} : { lastKnownTargetName: ref.lastKnownTargetName }),
   })
 }
 

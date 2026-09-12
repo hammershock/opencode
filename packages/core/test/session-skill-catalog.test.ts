@@ -47,12 +47,13 @@ describe("SessionSkillCatalog", () => {
       const first = metadata("1")
       const second = metadata("2")
       const catalog = SessionSkillCatalog.make(digest, [second, first])
-      yield* SessionSkillCatalog.replace(db, sessionID, catalog)
+      yield* SessionSkillCatalog.replace(db, sessionID, { catalog, guidance: "Available skills" })
 
       expect((yield* SessionSkillCatalog.get(db, sessionID))?.skills.map((skill) => skill.id)).toEqual([
         first.id,
         second.id,
       ])
+      expect(yield* SessionSkillCatalog.guidance(db, sessionID)).toBe("Available skills")
       expect(SessionSkillCatalog.admitted(catalog, first)).toBe(true)
       expect(SessionSkillCatalog.admitted(catalog, { ...first, id: Skill.ID.make(`skl_${"3".repeat(64)}`) })).toBe(
         false,

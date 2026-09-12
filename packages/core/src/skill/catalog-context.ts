@@ -92,10 +92,7 @@ const layer = Layer.effect(
                 skillID: mention.id,
                 name: mention.name,
               })
-            if (
-              !SessionSkillCatalog.admitted(input.admittedCatalog, match.entry.metadata) ||
-              !SkillGuidanceSnapshot.admitted(input.catalog, match.entry.metadata)
-            )
+            if (!SessionSkillCatalog.admitted(input.admittedCatalog, match.entry.metadata))
               return yield* new SkillCatalogContextService.AdmissionError({
                 kind: "stale-catalog",
                 skillID: mention.id,

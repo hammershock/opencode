@@ -47,6 +47,7 @@ import {
   SessionTable,
 } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionSkillCatalog } from "@opencode-ai/core/session/skill-catalog"
 import { SessionTurn } from "@opencode-ai/core/session/turn"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
@@ -58,6 +59,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelContext } from "@opencode-ai/schema/model-context"
+import { Skill } from "@opencode-ai/schema/skill"
 import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
@@ -824,6 +826,32 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("delivers device-local Skill startup guidance without adding Session history", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      const { db } = yield* Database.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
+
+      requests.length = 0
+      response = []
+      yield* session.resume(sessionID)
+      const digest = Skill.Digest.make("a".repeat(64))
+      yield* SessionSkillCatalog.replace(db, sessionID, {
+        catalog: SessionSkillCatalog.make(digest, []),
+        guidance: "Available Skills: review, verify",
+      })
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Second" }), resume: false })
+      yield* (yield* SessionRunner.Service).run({ sessionID, force: true })
+
+      const request = requests[1]
+      if (!request) throw new Error("Missing second provider request")
+      expect(request.messages.map((message) => message.role)).toEqual(["user", "user"])
+      expect(request.system.map((part) => part.text)).toContain("Available Skills: review, verify")
+      expect((yield* session.messages({ sessionID })).filter((message) => message.type === "system")).toHaveLength(0)
+    }),
+  )
+
   it.effect("includes the effective default agent system before durable context", () =>
     Effect.gen(function* () {
       yield* setup
@@ -923,10 +951,10 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
-        ["Initial context\n\nBuild skills"],
-        ["Initial context\n\nBuild skills"],
+        ["Initial context", "Build skills"],
+        ["Initial context", "Reviewer skills"],
       ])
-      expect(systemTexts(requests[1]!)).toContainEqual(expect.stringContaining("Reviewer skills"))
+      expect((yield* session.messages({ sessionID })).filter((message) => message.type === "system")).toHaveLength(0)
     }),
   )
 
@@ -957,7 +985,7 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
-        ["Initial context\n\nBuild skills"],
+        ["Initial context", "Reviewer skills"],
       ])
     }),
   )

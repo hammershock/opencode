@@ -1059,6 +1059,16 @@ export function Autocomplete(props: {
     positionTick()
     return Math.min(8, count, Math.max(1, props.anchor().y))
   })
+  const contentWidth = createMemo(() => {
+    if (store.visible !== "$") return position().width
+    return Math.max(
+      position().width,
+      ...options().map(
+        (option) =>
+          Bun.stringWidth(option.display + (option.description ? ` ${option.description.trimStart()}` : "")) + 2,
+      ),
+    )
+  })
 
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
   onCleanup(() => scroll?.verticalScrollBar.off("change", syncSelectionWindow))
@@ -1082,7 +1092,10 @@ export function Autocomplete(props: {
         }}
         backgroundColor={theme.backgroundMenu}
         height={height()}
-        scrollbarOptions={{ visible: false }}
+        verticalScrollbarOptions={{ visible: false }}
+        horizontalScrollbarOptions={{ visible: false }}
+        scrollX
+        contentOptions={{ width: contentWidth(), minWidth: contentWidth() }}
         scrollAcceleration={scrollAcceleration()}
       >
         <Index
@@ -1096,6 +1109,8 @@ export function Autocomplete(props: {
           {(option, index) => (
             <box
               id={optionID(index)}
+              height={1}
+              width={contentWidth()}
               paddingLeft={1}
               paddingRight={1}
               backgroundColor={index === store.selected ? theme.primary : undefined}
@@ -1104,11 +1119,19 @@ export function Autocomplete(props: {
               onMouseDown={() => focusFromPointer(index)}
               onMouseUp={() => select()}
             >
-              <text fg={index === store.selected ? selectedForeground(theme) : theme.text} flexShrink={0}>
+              <text
+                fg={index === store.selected ? selectedForeground(theme) : theme.text}
+                flexShrink={0}
+                wrapMode="none"
+              >
                 {option().display}
               </text>
               <Show when={option().description}>
-                <text fg={index === store.selected ? selectedForeground(theme) : theme.textMuted} wrapMode="none">
+                <text
+                  fg={index === store.selected ? selectedForeground(theme) : theme.textMuted}
+                  flexShrink={0}
+                  wrapMode="none"
+                >
                   {" " + option().description?.trimStart()}
                 </text>
               </Show>

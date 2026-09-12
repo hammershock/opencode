@@ -52,6 +52,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { ModelContextAssembler } from "@opencode-ai/core/model-context-assembler"
 import { InstructionContext } from "@opencode-ai/core/instruction-context"
 import { SessionContextEpoch } from "@opencode-ai/core/session/context-epoch"
+import { SessionSkillCatalog } from "@opencode-ai/core/session/skill-catalog"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { eq } from "drizzle-orm"
@@ -1381,7 +1382,7 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [context, mcpInstructions, modelMsgs] = yield* Effect.all([
+            const [context, skillGuidance, mcpInstructions, modelMsgs] = yield* Effect.all([
               SessionContextEpoch.forPrompt(
                 db,
                 events,
@@ -1389,6 +1390,7 @@ const layer = Layer.effect(
                 sessionID,
                 locationContext.locationRevision,
               ).pipe(Effect.catch(Effect.die)),
+              SessionSkillCatalog.guidance(db, sessionID),
               sys.mcp(agent, session.permission),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
@@ -1396,6 +1398,7 @@ const layer = Layer.effect(
               `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
               context.baseline,
               ...context.advances,
+              ...(skillGuidance ? [skillGuidance] : []),
               ...(mcpInstructions ? [mcpInstructions] : []),
             ].filter((part) => part.length > 0)
             const format = lastUser.format ?? { type: "text" as const }

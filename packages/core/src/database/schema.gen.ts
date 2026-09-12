@@ -186,6 +186,7 @@ export default {
         CREATE TABLE \`session_skill_catalog\` (
           \`session_id\` text PRIMARY KEY,
           \`catalog\` text NOT NULL,
+          \`guidance\` text,
           CONSTRAINT \`fk_session_skill_catalog_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
       `)

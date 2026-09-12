@@ -17,6 +17,7 @@ import { KeyedMutex } from "../effect/keyed-mutex"
 
 type DatabaseService = Database.Interface["db"]
 const locks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
+const legacySkillGuidanceKey = SystemContext.Key.make("core/skill-guidance")
 
 interface Prepared {
   readonly baseline: string
@@ -26,11 +27,6 @@ interface Prepared {
 export interface PromptContext extends Prepared {
   /** Durable context deltas after the active generation baseline, in aggregate order. */
   readonly advances: ReadonlyArray<string>
-}
-
-export interface Activation<A> {
-  readonly status: "initialized" | "advanced" | "unchanged"
-  readonly value: A
 }
 
 export function initialize(
@@ -57,18 +53,6 @@ export function prepare(
     .pipe(Effect.withSpan("SessionContextEpoch.prepare"))
 }
 
-export function activate<A, E, R>(
-  db: DatabaseService,
-  events: EventV2.Interface,
-  load: Effect.Effect<{ readonly context: SystemContext.SystemContext; readonly value: A }, E, R>,
-  sessionID: SessionSchema.ID,
-  locationRevision: number,
-): Effect.Effect<Activation<A>, E | SystemContext.InitializationBlocked | ContextSnapshotDecodeError, R> {
-  return locks
-    .withLock(sessionID)(activateOnce(db, events, load, sessionID, locationRevision))
-    .pipe(Effect.withSpan("SessionContextEpoch.activate"))
-}
-
 /**
  * Resolve the exact durable context prefix consumed by legacy prompt callers.
  * Core V2 obtains the same advances through SessionHistory; keeping this query
@@ -83,7 +67,7 @@ export const forPrompt = Effect.fn("SessionContextEpoch.forPrompt")(function* (
 ) {
   const prepared = yield* prepare(db, events, context, sessionID, locationRevision)
   const rows = yield* db
-    .select({ data: SessionMessageTable.data })
+    .select({ id: SessionMessageTable.id, type: SessionMessageTable.type, data: SessionMessageTable.data })
     .from(SessionMessageTable)
     .where(
       and(
@@ -96,60 +80,72 @@ export const forPrompt = Effect.fn("SessionContextEpoch.forPrompt")(function* (
     .all()
     .pipe(Effect.orDie)
   const advances = rows.flatMap((row) => {
-    const decoded = Schema.decodeUnknownOption(SessionMessage.System)(row.data)
+    const decoded = Schema.decodeUnknownOption(SessionMessage.System)({ ...row.data, id: row.id, type: row.type })
     return decoded._tag === "Some" && decoded.value.text.length > 0 ? [decoded.value.text] : []
   })
   return { ...prepared, advances } satisfies PromptContext
 })
 
-const prepareOnce = Effect.fnUntraced(function* (
+function prepareOnce(
   db: DatabaseService,
   events: EventV2.Interface,
   context: Effect.Effect<SystemContext.SystemContext>,
   sessionID: SessionSchema.ID,
   locationRevision: number,
-) {
-  const [value, stored, compaction] = yield* Effect.all(
-    [context, find(db, sessionID), SessionHistory.latestCompaction(db, sessionID)],
-    { concurrency: "unbounded" },
-  )
-  if (!stored) {
-    const generation = yield* SystemContext.initialize(value)
-    const baselineSeq = yield* establish(events, sessionID, generation, {
-      generation: 1,
-      reason: "legacy-backfill",
-      locationRevision,
+): Effect.Effect<Prepared, SystemContext.InitializationBlocked | ContextSnapshotDecodeError> {
+  return Effect.gen(function* () {
+    const [value, stored, compaction] = yield* Effect.all(
+      [context, find(db, sessionID), SessionHistory.latestCompaction(db, sessionID)],
+      { concurrency: "unbounded" },
+    )
+    if (!stored) {
+      const generation = yield* SystemContext.initialize(value)
+      const baselineSeq = yield* establish(events, sessionID, generation, {
+        generation: 1,
+        reason: "legacy-backfill",
+        locationRevision,
+      })
+      return { baseline: generation.baseline, baselineSeq }
+    }
+
+    const snapshot = yield* Schema.decodeUnknownEffect(SystemContext.Snapshot)(stored.snapshot).pipe(
+      Effect.mapError((error) => new ContextSnapshotDecodeError({ sessionID, details: String(error) })),
+    )
+    if (snapshot[legacySkillGuidanceKey]) {
+      const sources = Object.fromEntries(Object.entries(snapshot).filter(([key]) => key !== legacySkillGuidanceKey))
+      const migration = SystemContext.rebaseline(value, sources)
+      if (migration._tag === "ReplacementReady") {
+        // Skill availability is controller-local runtime state. Rebaseline the local
+        // projection so old synchronized guidance and its advances stop reaching the model.
+        yield* replace(db, sessionID, yield* EventV2.latestSequence(db, sessionID), migration.generation)
+        return yield* prepareOnce(db, events, context, sessionID, locationRevision)
+      }
+    }
+    const replacementSeq = compaction !== undefined && compaction.seq > stored.baseline_seq ? compaction.seq : undefined
+    const result = replacementSeq
+      ? SystemContext.rebaseline(value, snapshot)
+      : yield* SystemContext.reconcile(value, snapshot)
+    if (result._tag === "Unchanged" || result._tag === "ReplacementBlocked") {
+      return { baseline: stored.baseline, baselineSeq: stored.baseline_seq }
+    }
+    if (result._tag === "ReplacementReady") {
+      const baselineSeq = replacementSeq ?? (yield* EventV2.latestSequence(db, sessionID))
+      yield* replace(db, sessionID, baselineSeq, result.generation)
+      return { baseline: result.generation.baseline, baselineSeq }
+    }
+
+    yield* events.publish(SessionEvent.ContextAdvanced, {
+      sessionID,
+      messageID: SessionMessage.ID.create(),
+      timestamp: yield* DateTime.now,
+      cause: "dynamic",
+      text: result.text,
+      sources: result.snapshot,
+      digest: digest(result.snapshot),
     })
-    return { baseline: generation.baseline, baselineSeq }
-  }
-
-  const snapshot = yield* Schema.decodeUnknownEffect(SystemContext.Snapshot)(stored.snapshot).pipe(
-    Effect.mapError((error) => new ContextSnapshotDecodeError({ sessionID, details: String(error) })),
-  )
-  const replacementSeq = compaction !== undefined && compaction.seq > stored.baseline_seq ? compaction.seq : undefined
-  const result = replacementSeq
-    ? SystemContext.rebaseline(value, snapshot)
-    : yield* SystemContext.reconcile(value, snapshot)
-  if (result._tag === "Unchanged" || result._tag === "ReplacementBlocked") {
     return { baseline: stored.baseline, baselineSeq: stored.baseline_seq }
-  }
-  if (result._tag === "ReplacementReady") {
-    const baselineSeq = replacementSeq ?? (yield* EventV2.latestSequence(db, sessionID))
-    yield* replace(db, sessionID, baselineSeq, result.generation)
-    return { baseline: result.generation.baseline, baselineSeq }
-  }
-
-  yield* events.publish(SessionEvent.ContextAdvanced, {
-    sessionID,
-    messageID: SessionMessage.ID.create(),
-    timestamp: yield* DateTime.now,
-    cause: "dynamic",
-    text: result.text,
-    sources: result.snapshot,
-    digest: digest(result.snapshot),
   })
-  return { baseline: stored.baseline, baselineSeq: stored.baseline_seq }
-})
+}
 
 const initializeOnce = Effect.fnUntraced(function* (
   db: DatabaseService,
@@ -158,7 +154,19 @@ const initializeOnce = Effect.fnUntraced(function* (
   sessionID: SessionSchema.ID,
   locationRevision: number,
 ) {
-  if (yield* exists(db, sessionID)) return
+  const stored = yield* find(db, sessionID)
+  if (stored) {
+    const snapshot = Schema.decodeUnknownOption(SystemContext.Snapshot)(stored.snapshot).valueOrUndefined
+    if (!snapshot?.[legacySkillGuidanceKey]) return
+    const migration = SystemContext.rebaseline(
+      yield* context,
+      Object.fromEntries(Object.entries(snapshot).filter(([key]) => key !== legacySkillGuidanceKey)),
+    )
+    if (migration._tag === "ReplacementBlocked") return
+    const baselineSeq = yield* EventV2.latestSequence(db, sessionID)
+    yield* replace(db, sessionID, baselineSeq, migration.generation)
+    return { baseline: migration.generation.baseline, baselineSeq }
+  }
   const generation = yield* context.pipe(Effect.flatMap(SystemContext.initialize))
   const baselineSeq = yield* establish(events, sessionID, generation, {
     generation: 1,
@@ -166,49 +174,6 @@ const initializeOnce = Effect.fnUntraced(function* (
     locationRevision,
   })
   return { baseline: generation.baseline, baselineSeq }
-})
-
-const activateOnce = Effect.fnUntraced(function* <A, E, R>(
-  db: DatabaseService,
-  events: EventV2.Interface,
-  load: Effect.Effect<{ readonly context: SystemContext.SystemContext; readonly value: A }, E, R>,
-  sessionID: SessionSchema.ID,
-  locationRevision: number,
-) {
-  const loaded = yield* load
-  const stored = yield* find(db, sessionID)
-  if (!stored) {
-    const generation = yield* SystemContext.initialize(loaded.context)
-    yield* establish(events, sessionID, generation, { generation: 1, reason: "created", locationRevision })
-    return { status: "initialized" as const, value: loaded.value }
-  }
-
-  const snapshot = yield* Schema.decodeUnknownEffect(SystemContext.Snapshot)(stored.snapshot).pipe(
-    Effect.mapError((error) => new ContextSnapshotDecodeError({ sessionID, details: String(error) })),
-  )
-  const result = yield* SystemContext.reconcileActivation(loaded.context, snapshot)
-  if (result._tag === "Unchanged") return { status: "unchanged" as const, value: loaded.value }
-  yield* events.publish(SessionEvent.ContextAdvanced, {
-    sessionID,
-    messageID: SessionMessage.ID.create(),
-    timestamp: yield* DateTime.now,
-    cause: "skill-catalog-reloaded",
-    text: result.text,
-    sources: result.snapshot,
-    digest: digest(result.snapshot),
-  })
-  return { status: "advanced" as const, value: loaded.value }
-})
-
-const exists = Effect.fn("SessionContextEpoch.exists")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
-  return (
-    (yield* db
-      .select({ sessionID: SessionContextEpochTable.session_id })
-      .from(SessionContextEpochTable)
-      .where(eq(SessionContextEpochTable.session_id, sessionID))
-      .get()
-      .pipe(Effect.orDie)) !== undefined
-  )
 })
 
 const find = Effect.fn("SessionContextEpoch.find")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {

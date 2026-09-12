@@ -66,6 +66,19 @@ const makeApiLayer = (
   state: SyncSetup.Interface["state"] = () => Effect.succeed(syncState),
   now: SyncControl.Interface["now"] = () => Effect.void,
   deleteSpace: SyncControl.Interface["deleteSpace"] = () => Effect.succeed(["session-a"]),
+  authenticated: SyncSetup.Interface["authenticated"] = () => Effect.succeed(true),
+  status: SyncControl.Interface["status"] = () =>
+    Effect.succeed(
+      SyncControl.Status.make({
+        configured: false,
+        initialized: false,
+        authenticated: false,
+        enabled: false,
+        locked: false,
+        outbox: 0,
+        cursors: {},
+      }),
+    ),
 ) =>
   HttpRouter.serve(
     HttpApiBuilder.layer(RootHttpApi).pipe(
@@ -84,6 +97,7 @@ const makeApiLayer = (
     Layer.provide(
       Layer.mock(SyncSetup.Service)({
         state,
+        authenticated,
         initialize: () => Effect.succeed(syncState),
         begin: (input) =>
           input.redirectURI.endsWith("/missing-app")
@@ -117,18 +131,7 @@ const makeApiLayer = (
       Layer.mock(SyncControl.Service)({
         join: () => Effect.succeed(syncState),
         now,
-        status: () =>
-          Effect.succeed(
-            SyncControl.Status.make({
-              configured: false,
-              initialized: false,
-              authenticated: false,
-              enabled: false,
-              locked: false,
-              outbox: 0,
-              cursors: {},
-            }),
-          ),
+        status,
         sessions: () => Effect.succeed([remoteSession]),
         hydrate: (input) => Effect.succeed(SyncControl.HydrateResult.make({ ...input, availability: "ready" })),
         deleteSession: () => Effect.void,
@@ -162,6 +165,31 @@ const apiLayer = makeApiLayer()
 const it = testEffect(apiLayer)
 const incompatibleStateIt = testEffect(
   makeApiLayer(() => Effect.fail(new SyncSetup.SetupError({ kind: "incompatible-local-state" }))),
+)
+const unauthenticatedIt = testEffect(
+  makeApiLayer(
+    undefined,
+    undefined,
+    undefined,
+    () => Effect.succeed(false),
+    () =>
+      Effect.succeed(
+        SyncControl.Status.make({
+          configured: true,
+          initialized: true,
+          authenticated: true,
+          enabled: true,
+          locked: false,
+          provider: "baidu",
+          namespaceID: descriptor.namespaceID,
+          deviceID: syncState.deviceID,
+          account: syncState.account,
+          intervalSeconds: 30,
+          outbox: 1,
+          cursors: {},
+        }),
+      ),
+  ),
 )
 const failedSyncIt = testEffect(
   makeApiLayer(undefined, () =>
@@ -285,6 +313,20 @@ describe("global HttpApi", () => {
         name: "SyncSetupError",
         data: { kind: "incompatible-local-state", message: SyncIncompatibleLocalStateMessage },
       })
+    }),
+  )
+
+  unauthenticatedIt.live("does not present a persisted account summary as a current connection", () =>
+    Effect.gen(function* () {
+      const state = yield* HttpClientRequest.get(GlobalPaths.syncState).pipe(HttpClient.execute)
+      expect(state.status).toBe(200)
+      const stateBody = (yield* state.json) as Record<string, unknown>
+      expect(stateBody).toMatchObject({ enabled: true, activeSpaceID: descriptor.namespaceID })
+      expect(stateBody).toHaveProperty("account", null)
+
+      const status = yield* HttpClientRequest.get(GlobalPaths.syncStatus).pipe(HttpClient.execute)
+      expect(status.status).toBe(200)
+      expect(yield* status.json).toMatchObject({ authenticated: false, configured: true, outbox: 1 })
     }),
   )
 

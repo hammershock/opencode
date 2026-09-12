@@ -58,6 +58,12 @@ describe("Sync Settings presentation", () => {
   })
 
   test("shows OAuth progress and manual fallback without redisplaying application credentials", () => {
+    expect(
+      buildSyncOverviewRows({
+        ...connected,
+        account: { state: "disconnected", oauth: { state: "opening" } },
+      }),
+    ).toEqual([expect.objectContaining({ title: "Connect Baidu Netdisk", status: "◐ opening" })])
     const rows = buildSyncOverviewRows({
       ...connected,
       account: {
@@ -68,6 +74,19 @@ describe("Sync Settings presentation", () => {
     expect(rows.map((row) => row.title)).toEqual(["Connect Baidu Netdisk", "Copy authorization URL", "Use manual code"])
     expect(rows.join(" ")).not.toContain("AppKey")
     expect(rows.join(" ")).not.toContain("Secret")
+    expect(
+      buildSyncOverviewRows({
+        ...connected,
+        account: {
+          state: "disconnected",
+          oauth: { state: "manual", authorizationURL: "https://openapi.baidu.com/oauth/authorize" },
+        },
+      }),
+    ).toEqual([
+      expect.objectContaining({ title: "Connect Baidu Netdisk", status: "◐ waiting" }),
+      expect.objectContaining({ title: "Copy authorization URL" }),
+      expect.objectContaining({ title: "Enter authorization code" }),
+    ])
   })
 
   test("uses the shared status vocabulary", () => {

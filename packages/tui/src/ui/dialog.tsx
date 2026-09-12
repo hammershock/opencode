@@ -102,6 +102,15 @@ function init() {
     }, 1)
   }
 
+  function pop() {
+    const current = store.stack.at(-1)
+    current?.onClose?.()
+    setStore("stack", store.stack.slice(0, -1))
+    if (store.stack.length > 0) return
+    setStore("size", "medium")
+    refocus()
+  }
+
   useBindings(() => ({
     enabled: store.stack.length > 0 && !renderer.getSelection()?.getSelectedText(),
     bindings: [
@@ -113,10 +122,7 @@ function init() {
           if (renderer.getSelection()) {
             renderer.clearSelection()
           }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
+          pop()
         },
       },
       {
@@ -127,10 +133,7 @@ function init() {
           if (renderer.getSelection()) {
             renderer.clearSelection()
           }
-          const current = store.stack.at(-1)
-          current?.onClose?.()
-          setStore("stack", store.stack.slice(0, -1))
-          refocus()
+          pop()
         },
       },
     ],
@@ -163,6 +166,14 @@ function init() {
         },
       ])
     },
+    push(input: () => JSX.Element, onClose?: () => void) {
+      if (store.stack.length === 0) {
+        focus = renderer.currentFocusedRenderable
+        focus?.blur()
+      }
+      setStore("stack", store.stack.length, { element: input, onClose })
+    },
+    pop,
     get stack() {
       return store.stack
     },

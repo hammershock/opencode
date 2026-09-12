@@ -62,6 +62,15 @@ export class TargetNotFoundError extends Schema.TaggedErrorClass<TargetNotFoundE
   { httpApiStatus: 404 },
 ) {}
 
+export class SkillNotFoundError extends Schema.TaggedErrorClass<SkillNotFoundError>()(
+  "SkillNotFoundError",
+  {
+    skillID: Skill.ID,
+    message: Schema.String,
+  },
+  { httpApiStatus: 404 },
+) {}
+
 export class SessionNotFoundError extends Schema.TaggedErrorClass<SessionNotFoundError>()(
   "SessionNotFoundError",
   {

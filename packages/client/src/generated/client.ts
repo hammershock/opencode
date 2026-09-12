@@ -95,6 +95,8 @@ import type {
   SkillsListOutput,
   SkillsCatalogInput,
   SkillsCatalogOutput,
+  SkillsGetInput,
+  SkillsGetOutput,
   SkillsReloadInput,
   SkillsReloadOutput,
   SkillsSettingsOutput,
@@ -929,6 +931,18 @@ export function make(options: ClientOptions) {
             },
             successStatus: 200,
             declaredStatuses: [500, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      get: (input: SkillsGetInput, requestOptions?: RequestOptions) =>
+        request<SkillsGetOutput>(
+          {
+            method: "GET",
+            path: `/api/skill/${encodeURIComponent(input.skillID)}`,
+            query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [404, 409, 400, 500, 401],
             empty: false,
           },
           requestOptions,

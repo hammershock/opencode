@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   buildSkillManagerRows,
   skillRootStatus,
+  skillPreviewContent,
   skillScopeLabel,
   skillSourceLabel,
   skillTargetsLabel,
@@ -144,6 +145,38 @@ describe("Skill Manager presentation", () => {
     )
     expect(rows).toContainEqual(
       expect.objectContaining({ key: "diagnostic:target-error", description: "registry invalid" }),
+    )
+  })
+
+  test("formats safe metadata and the complete Skill entry body for preview", () => {
+    expect(
+      skillPreviewContent(
+        {
+          metadata: {
+            id: firstID,
+            name: "review",
+            description: "Review changes",
+            sourceLabel: "Codex · abcdef12",
+            digest: "a".repeat(64),
+          },
+          location: "/Users/test/.codex/skills/review/SKILL.md",
+          content: "# Review\n\nRead every changed file.",
+        },
+        "/Users/test",
+      ),
+    ).toBe(
+      [
+        "Name         review",
+        "Description  Review changes",
+        "Source       Codex · abcdef12",
+        "Entry        ~/.codex/skills/review/SKILL.md",
+        `Digest       ${"a".repeat(64)}`,
+        "",
+        "SKILL.md",
+        "# Review",
+        "",
+        "Read every changed file.",
+      ].join("\n"),
     )
   })
 })

@@ -234,8 +234,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           if (props.current !== undefined) {
             const index = flat().findIndex((option) => isDeepEqual(option.value, props.current))
             if (index >= 0) {
+              const option = flat()[index]
+              if (!option) return
               setStore("selected", index)
-              selection = flat()[index]
+              selection = option
+              scheduleScrollToValue(option.value)
               return
             }
           }
@@ -252,16 +255,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           setStore("selected", index)
           selection = option
           if (!moved) return
-          const value = option.value
-          const generation = ++visibilityGeneration
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              if (generation !== visibilityGeneration) return
-              if (!props.preserveSelection || store.filter.length > 0) return
-              if (!isDeepEqual(selected()?.value, value)) return
-              scrollToSelection()
-            })
-          })
+          scheduleScrollToValue(option.value)
           return
         }
         const next = Math.min(store.selected, flat().length - 1)
@@ -323,6 +317,18 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
 
   function scrollToSelection() {
     scroll?.scrollChildIntoView(optionID(store.selected))
+  }
+
+  function scheduleScrollToValue(value: T) {
+    const generation = ++visibilityGeneration
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (generation !== visibilityGeneration) return
+        if (!props.preserveSelection || store.filter.length > 0) return
+        if (!isDeepEqual(selected()?.value, value)) return
+        scrollToSelection()
+      })
+    })
   }
 
   function optionID(index: number) {

@@ -25,6 +25,9 @@ export type Source = typeof Source.Type
 export const Info = Skill.Info
 export type Info = Skill.Info
 
+export const Detail = Skill.Detail
+export type Detail = Skill.Detail
+
 export const available = <A extends { readonly name: string }>(skills: ReadonlyArray<A>, agent: AgentV2.Info) =>
   skills.filter((skill) => PermissionV2.evaluate("skill", skill.name, agent.permissions).effect !== "deny")
 
@@ -57,6 +60,7 @@ export interface Interface extends State.Transformable<Draft> {
   readonly list: () => Effect.Effect<Info[]>
   readonly catalog: (options?: CatalogOptions) => Effect.Effect<SkillRegistry.Result>
   readonly lookup: (id: Skill.ID) => Effect.Effect<Lookup>
+  readonly read: (id: Skill.ID) => Effect.Effect<Lookup, SkillRegistry.ReadError>
 }
 
 export interface CatalogOptions extends SkillRegistry.LoadOptions {
@@ -152,6 +156,16 @@ const layer = Layer.effect(
         .toSorted((a, b) => a.name.localeCompare(b.name) || a.location.localeCompare(b.location))
     })
 
+    const lookup = Effect.fn("SkillV2.lookup")(function* (id: Skill.ID) {
+      const loaded = yield* registry.load(state.get().registrations)
+      const entry = loaded.entries.find((item) => item.metadata.id === id)
+      if (!entry) return { status: "missing" as const }
+      const configured = yield* Effect.promise(() => settings.load())
+      const scope = configured.targets[id] ?? "*"
+      if (scope === "*" || scope.includes(state.get().target)) return { status: "available" as const, entry }
+      return { status: "target-inapplicable" as const, entry }
+    })
+
     return Service.of({
       transform: state.transform,
       reload: state.reload,
@@ -160,14 +174,11 @@ const layer = Layer.effect(
       }),
       list,
       catalog: result,
-      lookup: Effect.fn("SkillV2.lookup")(function* (id) {
-        const loaded = yield* registry.load(state.get().registrations)
-        const entry = loaded.entries.find((item) => item.metadata.id === id)
-        if (!entry) return { status: "missing" as const }
-        const configured = yield* Effect.promise(() => settings.load())
-        const scope = configured.targets[id] ?? "*"
-        if (scope === "*" || scope.includes(state.get().target)) return { status: "available" as const, entry }
-        return { status: "target-inapplicable" as const, entry }
+      lookup,
+      read: Effect.fn("SkillV2.read")(function* (id) {
+        const result = yield* lookup(id)
+        if (result.status === "missing") return result
+        return { ...result, entry: yield* registry.read(result.entry) }
       }),
     })
   }),

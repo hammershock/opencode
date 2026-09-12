@@ -38,6 +38,13 @@ export const Metadata = Schema.Struct({
   digest: Digest,
 }).annotate({ identifier: "Skill.Metadata" })
 
+export interface Detail extends Schema.Schema.Type<typeof Detail> {}
+export const Detail = Schema.Struct({
+  metadata: Metadata,
+  location: AbsolutePath,
+  content: Schema.String,
+}).annotate({ identifier: "Skill.Detail" })
+
 export interface SourceDetail extends Schema.Schema.Type<typeof SourceDetail> {}
 export const SourceDetail = Schema.Struct({
   kind: SourceKind,

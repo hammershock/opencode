@@ -482,6 +482,8 @@ import type {
   V2SkillDiscoveryResetResponses,
   V2SkillDiscoveryUpdateErrors,
   V2SkillDiscoveryUpdateResponses,
+  V2SkillGetErrors,
+  V2SkillGetResponses,
   V2SkillListErrors,
   V2SkillListResponses,
   V2SkillReloadErrors,
@@ -5940,7 +5942,7 @@ export class Session3 extends HeyApiClient {
   /**
    * Inspect session model context
    *
-   * Return the frozen canonical model-context generation and device-local admitted Skill identities without connecting to or reading from the Session target.
+   * Return the frozen canonical model-context generation, device-local admitted Skill identities, and exact current Skill startup declaration without connecting to or reading from the Session target.
    */
   public modelContext<ThrowOnError extends boolean = false>(
     parameters: {
@@ -7015,6 +7017,40 @@ export class Skill extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<V2SkillCatalogResponses, V2SkillCatalogErrors, ThrowOnError>({
       url: "/api/skill/catalog",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Read one controller Skill
+   *
+   * Returns safe metadata and the SKILL.md entry body for one exact device-local Skill ID.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      skillID: string
+      location?: {
+        directory?: string
+        workspace?: string
+        target?: string
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "skillID" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<V2SkillGetResponses, V2SkillGetErrors, ThrowOnError>({
+      url: "/api/skill/{skillID}",
       ...options,
       ...params,
     })

@@ -1,6 +1,7 @@
 import path from "path"
 import type {
   SkillDiscoveryRoot,
+  SkillDetail,
   SkillMetadata,
   SkillRegistrySnapshot,
   SkillSettingsSnapshot,
@@ -17,7 +18,19 @@ import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogSelect, displayTruncate, type DialogSelectOption } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
 import { errorMessage } from "../util/error"
+import { DialogContentPreview } from "./dialog-model-context"
 import { completeLocalDirectory } from "./location-directory-workflow"
+
+const skillPreviewCommands = {
+  namespace: "dialog.skill",
+  lineUp: "dialog.skill.line_up",
+  lineDown: "dialog.skill.line_down",
+  pageUp: "dialog.skill.page_up",
+  pageDown: "dialog.skill.page_down",
+  home: "dialog.skill.home",
+  end: "dialog.skill.end",
+  copy: "dialog.skill.copy",
+}
 
 type SkillManagerTarget = { readonly id: string; readonly name: string }
 
@@ -217,6 +230,7 @@ export function useSkillManager() {
   const { theme } = useTheme()
   const [model, setModel] = createSignal<SkillManagerModel>()
   const [loading, setLoading] = createSignal(false)
+  const [anchor, setAnchor] = createSignal<string>()
   const home = process.env.HOME
 
   const read = async (force: boolean) => {
@@ -468,6 +482,34 @@ export function useSkillManager() {
     dialog.setSize("large")
   }
 
+  const showSkillPreview = async (key: string) => {
+    const current = model()
+    if (!current || !key.startsWith("skill:")) return
+    const skillID = key.slice(6)
+    if (!current.catalog.skills.some((skill) => skill.id === skillID)) return
+    setAnchor(key)
+    setLoading(true)
+    try {
+      const result = await sdk.client.v2.skill.get(
+        { skillID, location: { directory: path.dirname(current.settings.path) } },
+        { throwOnError: true },
+      )
+      dialog.push(() => (
+        <DialogContentPreview
+          title={`Skill · ${result.data.data.metadata.name}`}
+          content={skillPreviewContent(result.data.data, home)}
+          commands={skillPreviewCommands}
+          copySuccess="Skill content copied to clipboard"
+          copyFailure="Failed to copy Skill content"
+        />
+      ))
+    } catch (error) {
+      toast.show({ title: "Skill content unavailable", message: errorMessage(error), variant: "error" })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const rows = createMemo(() => (model() ? buildSkillManagerRows(model()!, home) : []))
   const skillTitle = (name: string, skill: NonNullable<ManagerRow["skill"]>) => {
     const widths = skillColumnWidths(dimensions().width)
@@ -543,6 +585,7 @@ export function useSkillManager() {
         title="Manage skills"
         locked={loading()}
         preserveSelection
+        current={anchor()}
         options={options()}
         emptyView={<text>{loading() ? "Loading local Skill settings…" : "No Skill settings available"}</text>}
         footer={
@@ -557,6 +600,16 @@ export function useSkillManager() {
             </text>
           ) : undefined
         }
+        actions={[
+          {
+            command: "dialog.skill.preview",
+            title: "View",
+            disabled: (option) =>
+              !option?.value.startsWith("skill:") ||
+              !model()?.catalog.skills.some((skill) => `skill:${skill.id}` === option.value),
+            onTrigger: (option) => void showSkillPreview(option.value),
+          },
+        ]}
         onSelect={(option) => select(option.value)}
       />
     ))
@@ -565,6 +618,25 @@ export function useSkillManager() {
   }
 
   return { open, refresh, model }
+}
+
+export function skillPreviewContent(detail: SkillDetail, home?: string) {
+  const location =
+    home && (detail.location === home || detail.location.startsWith(home + path.sep))
+      ? detail.location === home
+        ? "~"
+        : `~${detail.location.slice(home.length)}`
+      : detail.location
+  return [
+    `Name         ${detail.metadata.name}`,
+    `Description  ${detail.metadata.description ?? "(none)"}`,
+    `Source       ${detail.metadata.sourceLabel}`,
+    `Entry        ${location}`,
+    `Digest       ${detail.metadata.digest}`,
+    "",
+    "SKILL.md",
+    detail.content || "(empty SKILL.md body)",
+  ].join("\n")
 }
 
 function rootTitle(root: SkillDiscoveryRoot, home?: string) {

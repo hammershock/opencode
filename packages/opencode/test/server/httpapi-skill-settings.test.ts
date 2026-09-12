@@ -24,12 +24,19 @@ describe("Skill settings HttpApi", () => {
     await using tmp = await tmpdir({ git: true })
     const workspace = tmp.path
     const imported = path.join(workspace, "imported")
+    const importedDuplicate = path.join(workspace, "imported-duplicate")
     const packageFile = path.join(imported, "review", "SKILL.md")
+    const duplicatePackageFile = path.join(importedDuplicate, "review", "SKILL.md")
     await fs.mkdir(path.dirname(packageFile), { recursive: true })
+    await fs.mkdir(path.dirname(duplicatePackageFile), { recursive: true })
     await fs.mkdir(Global.Path.config, { recursive: true })
     await fs.writeFile(
       packageFile,
       "---\nname: review\ndescription: Review changes through the API\n---\nReview carefully.",
+    )
+    await fs.writeFile(
+      duplicatePackageFile,
+      "---\nname: review\ndescription: A different review Skill\n---\nUse the duplicate body.",
     )
     await fs.writeFile(configFile, '{\n  // preserve me\n  "future": true\n}\n')
 
@@ -41,7 +48,7 @@ describe("Skill settings HttpApi", () => {
 
     const updateResponse = await request("/api/skill/settings/discovery", {
       method: "PUT",
-      body: JSON.stringify({ paths: [imported], urls: [], expectedRevision: initial.revision }),
+      body: JSON.stringify({ paths: [imported, importedDuplicate], urls: [], expectedRevision: initial.revision }),
     })
     expect(updateResponse.status).toBe(200)
     const updated = (await updateResponse.json()) as {
@@ -62,9 +69,30 @@ describe("Skill settings HttpApi", () => {
     const reloadResponse = await request(`/api/skill/reload?${location}`, { method: "POST" })
     expect(reloadResponse.status).toBe(200)
     const reloaded = (await reloadResponse.json()) as { data: { skills: Array<{ id: string; name: string }> } }
-    const skill = reloaded.data.skills.find((item) => item.name === "review")
+    const skill = reloaded.data.skills.find(
+      (item) =>
+        item.name === "review" && "description" in item && item.description === "Review changes through the API",
+    )
     expect(skill).toBeDefined()
     expect(skill).not.toHaveProperty("content")
+
+    const detailResponse = await request(`/api/skill/${skill!.id}?${location}`)
+    expect(detailResponse.status).toBe(200)
+    expect(await detailResponse.json()).toMatchObject({
+      data: {
+        metadata: {
+          id: skill!.id,
+          name: "review",
+          description: "Review changes through the API",
+        },
+        location: packageFile,
+        content: "Review carefully.",
+      },
+    })
+
+    const missingResponse = await request(`/api/skill/skl_${"f".repeat(64)}?${location}`)
+    expect(missingResponse.status).toBe(404)
+    expect(await missingResponse.json()).toMatchObject({ _tag: "SkillNotFoundError" })
 
     const scopeResponse = await request(`/api/skill/settings/${skill!.id}/target-scope`, {
       method: "PUT",
@@ -74,10 +102,22 @@ describe("Skill settings HttpApi", () => {
     const scoped = (await scopeResponse.json()) as { revision: string; targets: Record<string, unknown> }
     expect(scoped.targets[skill!.id]).toEqual([])
 
+    const inactiveDetail = await request(`/api/skill/${skill!.id}?${location}`)
+    expect(inactiveDetail.status).toBe(200)
+
+    await fs.writeFile(
+      packageFile,
+      "---\nname: review\ndescription: Review changes through the API\n---\nChanged after catalog load.",
+    )
+    const staleDetail = await request(`/api/skill/${skill!.id}?${location}`)
+    expect(staleDetail.status).toBe(409)
+    expect(await staleDetail.json()).toMatchObject({ _tag: "ConflictError", resource: "skill_catalog" })
+
     const filtered = (await (await request(`/api/skill/catalog?${location}&forceReload=true`)).json()) as {
-      data: { skills: Array<{ name: string }> }
+      data: { skills: Array<{ id: string; name: string }> }
     }
-    expect(filtered.data.skills.some((item) => item.name === "review")).toBe(false)
+    expect(filtered.data.skills.some((item) => item.id === skill!.id)).toBe(false)
+    expect(filtered.data.skills.some((item) => item.name === "review")).toBe(true)
 
     const management = (await (
       await request(`/api/skill/catalog?${location}&forceReload=true&includeInactive=true`)
@@ -110,6 +150,6 @@ describe("Skill settings HttpApi", () => {
     }
     expect(reset.roots.every((root) => root.default)).toBe(true)
     expect(reset.targets[skill!.id]).toEqual([])
-    expect(await fs.readFile(packageFile, "utf8")).toContain("Review carefully")
+    expect(await fs.readFile(packageFile, "utf8")).toContain("Changed after catalog load")
   })
 })

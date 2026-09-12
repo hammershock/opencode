@@ -3,7 +3,7 @@ import { Location } from "@opencode-ai/schema/location"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { LocationQuery, locationQueryOpenApi } from "./location"
-import { ConflictError, InvalidRequestError, UnknownError } from "../errors"
+import { ConflictError, InvalidRequestError, SkillNotFoundError, UnknownError } from "../errors"
 
 const mutationErrors = [ConflictError, InvalidRequestError, UnknownError] as const
 const catalogQuery = Schema.Struct({
@@ -41,6 +41,22 @@ export const SkillGroup = HttpApiGroup.make("server.skill")
           summary: "List controller Skill catalog metadata",
           description:
             "Returns metadata and diagnostics without Skill bodies. When agent is present, skills are filtered by that Location-scoped Agent without creating a Session.",
+        }),
+      ),
+  )
+  .add(
+    HttpApiEndpoint.get("skill.get", "/api/skill/:skillID", {
+      params: { skillID: Skill.ID },
+      query: LocationQuery,
+      success: Location.response(Skill.Detail),
+      error: [SkillNotFoundError, ConflictError, InvalidRequestError, UnknownError],
+    })
+      .annotateMerge(locationQueryOpenApi)
+      .annotateMerge(
+        OpenApi.annotations({
+          identifier: "v2.skill.get",
+          summary: "Read one controller Skill",
+          description: "Returns safe metadata and the SKILL.md entry body for one exact device-local Skill ID.",
         }),
       ),
   )

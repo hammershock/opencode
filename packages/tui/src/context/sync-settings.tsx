@@ -38,6 +38,35 @@ const initial: SyncSettingsViewModel = {
   pending: 0,
 }
 
+type LocalState = GlobalSyncStateResponse | null | undefined
+
+export function syncLocalPresentation(current: SyncSettingsViewModel, state: LocalState) {
+  if (!state)
+    return {
+      configured: false,
+      model: {
+        ...initial,
+        account: current.account.state === "disconnected" ? current.account : initial.account,
+      },
+    }
+  const configured = Boolean(state.activeSpaceID && SyncRoot.isAccountScope(state.activeSpaceID))
+  const authenticated = Boolean(state.account)
+  return {
+    configured,
+    model: {
+      ...current,
+      account: state.account
+        ? { state: "connected" as const, maskedAccount: state.account.maskedDisplay }
+        : current.account.state === "disconnected"
+          ? current.account
+          : initial.account,
+      enabled: authenticated && configured && state.enabled,
+      interval: state.intervalSeconds,
+      state: authenticated && configured && state.enabled ? ("idle" as const) : ("off" as const),
+    },
+  }
+}
+
 export const SYNC_REMOTE_REFRESH_TIMEOUT = 8_000
 
 export async function withSyncRefreshTimeout<A>(
@@ -214,29 +243,10 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       remoteAbort?.abort()
     })
 
-    type LocalState = GlobalSyncStateResponse | null | undefined
-
     const applyLocal = (state: LocalState) => {
-      if (!state) {
-        localConfigured = false
-        setModel((current) => ({
-          ...initial,
-          account: current.account.state === "disconnected" ? current.account : initial.account,
-        }))
-        return
-      }
-      localConfigured = Boolean(state.activeSpaceID && SyncRoot.isAccountScope(state.activeSpaceID))
-      setModel((current) => ({
-        ...current,
-        account: state.account
-          ? { state: "connected", maskedAccount: state.account.maskedDisplay }
-          : current.account.state === "disconnected"
-            ? current.account
-            : initial.account,
-        enabled: localConfigured && state.enabled,
-        interval: state.intervalSeconds,
-        state: localConfigured && state.enabled ? "idle" : "off",
-      }))
+      const presentation = syncLocalPresentation(model(), state)
+      localConfigured = presentation.configured
+      setModel(presentation.model)
     }
 
     const refreshLocal = async (notify = false) => {

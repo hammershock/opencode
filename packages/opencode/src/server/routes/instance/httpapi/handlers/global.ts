@@ -137,9 +137,19 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         Effect.mapError(() => new HttpApiError.BadRequest({})),
       )
 
-    const getSyncState = Effect.fn("GlobalHttpApi.syncState")(() =>
-      badSetup(syncSetup.state()).pipe(Effect.map((state) => state ?? null)),
-    )
+    const getSyncState = Effect.fn("GlobalHttpApi.syncState")(function* () {
+      const state = yield* badSetup(syncSetup.state())
+      if (!state?.account) return state ?? null
+      const authenticated = yield* badSetup(syncSetup.authenticated())
+      return authenticated ? state : { ...state, account: undefined }
+    })
+
+    const getSyncStatus = Effect.fn("GlobalHttpApi.syncStatus")(function* () {
+      const status = yield* syncControl.status()
+      if (!status.account) return status
+      const authenticated = yield* syncSetup.authenticated()
+      return SyncControl.Status.make({ ...status, authenticated })
+    })
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
       const method = yield* installation.method()
@@ -194,9 +204,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
         syncControl.unassigned().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
       )
       .handle("syncAssignUnassigned", (ctx) => badControl(syncControl.assignUnassigned(ctx.payload)))
-      .handle("syncStatus", () =>
-        syncControl.status().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))),
-      )
+      .handle("syncStatus", () => getSyncStatus().pipe(Effect.mapError(() => new HttpApiError.ServiceUnavailable({}))))
       .handle("syncNow", () => controlApi(syncControl.now()).pipe(Effect.as(true)))
       .handle("syncCloudStatus", () => controlApi(syncControl.cloudStatus()))
       .handle("syncCloudInitialize", () => controlApi(syncControl.initializeCloud()))

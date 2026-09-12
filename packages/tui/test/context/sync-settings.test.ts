@@ -1,5 +1,54 @@
 import { describe, expect, test } from "bun:test"
-import { createLoopbackCallback, syncOperationFailure, withSyncRefreshTimeout } from "../../src/context/sync-settings"
+import {
+  createLoopbackCallback,
+  syncLocalPresentation,
+  syncOperationFailure,
+  withSyncRefreshTimeout,
+} from "../../src/context/sync-settings"
+
+const connected = {
+  account: { state: "connected" as const, maskedAccount: "a••••" },
+  enabled: true,
+  interval: 30 as const,
+  state: "idle" as const,
+  cloud: "unknown" as const,
+  devices: [],
+  bindings: [],
+  pending: 0,
+}
+
+const state = {
+  version: 2 as const,
+  revision: 1,
+  provider: "baidu" as const,
+  deviceID: "device",
+  deviceName: "Mac",
+  activeSpaceID: "account-v2:instance",
+  enabled: true,
+  intervalSeconds: 30 as const,
+  spaces: [],
+}
+
+describe("sync settings local account projection", () => {
+  test("returns to the explicit connection flow when the current Auth credential is missing", () => {
+    const presentation = syncLocalPresentation(connected, state)
+    expect(presentation.configured).toBe(true)
+    expect(presentation.model).toMatchObject({
+      account: { state: "disconnected" },
+      enabled: false,
+      state: "off",
+    })
+  })
+
+  test("keeps a matching current Auth credential connected", () => {
+    expect(
+      syncLocalPresentation(connected, {
+        ...state,
+        account: { id: "account", maskedDisplay: "a••••" },
+      }).model,
+    ).toMatchObject({ account: connected.account, enabled: true, state: "idle" })
+  })
+})
 
 describe("sync settings credential errors", () => {
   test("maps missing application credentials to an actionable message", () => {

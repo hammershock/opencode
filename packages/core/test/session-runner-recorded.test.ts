@@ -70,7 +70,7 @@ const model = OpenAIChat.route
 const models = SessionRunnerModel.layerWith(() => Effect.succeed(model))
 const directory = AbsolutePath.make(process.cwd())
 const systemContext = AppNodeBuilder.build(SystemContextRegistry.node)
-const skillGuidance = Layer.mock(SkillGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
+const skillGuidance = Layer.mock(SkillGuidance.Service, { load: () => Effect.succeed("") })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 const config = Layer.succeed(Config.Service, Config.Service.of({ entries: () => Effect.succeed([]) }))
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [

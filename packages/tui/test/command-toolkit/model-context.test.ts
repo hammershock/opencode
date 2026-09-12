@@ -48,6 +48,18 @@ const generation: ModelContextGeneration = {
     "core/instructions": { value: [] },
     "core/skills": { value: [], baseline: "skill body" },
   },
+  skillCatalog: {
+    digest: "bbbbbbbbbbbbbbbb",
+    skills: [
+      {
+        id: `skl_${"1".repeat(64)}`,
+        name: "review-agent",
+        sourceLabel: "Imported",
+        digest: "cccccccccccccccc",
+      },
+    ],
+  },
+  skillGuidance: "<available_skills>\n  <skill><name>review-agent</name></skill>\n</available_skills>",
 }
 
 describe("model context inspector", () => {
@@ -91,8 +103,11 @@ describe("model context inspector", () => {
       ["Instructions", "/controller/AGENTS.md"],
       ["Instructions", "/workspace/project/AGENTS.md"],
       ["Context", "core/skills"],
+      ["Skills", "available_skills"],
     ])
     expect(options[2]?.value.content).toBe("global rules")
     expect(options[3]?.footer).toBe("read failed")
+    expect(options[5]?.description).toBe("1 available · controller-local")
+    expect(options[5]?.value.content).toBe(generation.skillGuidance!)
   })
 })

@@ -8,7 +8,7 @@ import { SkillV2 } from "../skill"
 import { SkillCatalogContextService } from "./catalog-context-service"
 import { AgentV2 } from "../agent"
 import { SkillRegistry } from "./registry"
-import { SkillGuidanceSnapshot } from "./guidance-snapshot"
+import { SkillPresentation } from "./presentation"
 import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
 import { Hash } from "../util/hash"
 import { SessionSkillCatalog } from "../session/skill-catalog"
@@ -118,7 +118,7 @@ const layer = Layer.effect(
                   }),
               ),
             )
-            const sourceLabel = SkillGuidanceSnapshot.sourceLabel(entry.metadata.sourceLabel)
+            const sourceLabel = SkillPresentation.sourceLabel(entry.metadata.sourceLabel)
             return {
               source: mention.source,
               snapshot: SkillInvocation.Snapshot.make({

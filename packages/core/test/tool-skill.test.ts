@@ -66,7 +66,7 @@ describe("SkillTool", () => {
           const found = current.find((candidate) => candidate.metadata.name === input.name)
           return found
             ? Effect.succeed({ entry: found })
-            : Effect.fail(new SkillResolver.Error({ kind: "resource_unavailable_on_device" }))
+            : Effect.fail(new SkillResolver.Error({ kind: "not_admitted" }))
         },
         read: Effect.succeed,
       }),
@@ -84,6 +84,7 @@ describe("SkillTool", () => {
     return Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       expect((yield* toolDefinitions(registry))[0]).toMatchObject({ name: "skill", description: SkillTool.description })
+      expect(SkillTool.description).toContain("not a Skill listing or search tool")
       const result = yield* executeTool(registry, {
         sessionID,
         ...toolIdentity,
@@ -122,7 +123,24 @@ describe("SkillTool", () => {
           ...toolIdentity,
           call: { type: "tool-call", id: "call-missing-skill", name: "skill", input: { name: "missing" } },
         }),
-      ).toEqual({ type: "error", value: "Unable to load skill missing" })
+      ).toEqual({
+        type: "error",
+        value:
+          'Skill "missing" is not available in this Session. Read <available_skills> directly; the skill tool does not list or search Skills.',
+      })
+      current = []
+      expect(
+        yield* executeTool(registry, {
+          sessionID,
+          ...toolIdentity,
+          call: { type: "tool-call", id: "call-list-skill", name: "skill", input: { name: "list" } },
+        }),
+      ).toEqual({
+        type: "error",
+        value:
+          'Skill "list" is not available in this Session. Read <available_skills> directly; the skill tool does not list or search Skills.',
+      })
+      current = [entry("effect", "1")]
       deny = true
       expect(
         yield* executeTool(registry, {

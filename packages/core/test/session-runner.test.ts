@@ -222,19 +222,7 @@ const systemContext = Layer.effectDiscard(
   ),
 ).pipe(Layer.provideMerge(AppNodeBuilder.build(SystemContextRegistry.node)))
 const skillGuidance = Layer.mock(SkillGuidance.Service, {
-  load: (agent) =>
-    Effect.succeed(
-      skillBaselines.has(agent.id)
-        ? SystemContext.make({
-            key: SystemContext.Key.make("test/skill-guidance"),
-            codec: Schema.toCodecJson(Schema.String),
-            load: Effect.succeed(skillBaselines.get(agent.id)!),
-            baseline: String,
-            update: (_previous, current) => current,
-            removed: () => "Skill guidance removed",
-          })
-        : SystemContext.empty,
-    ),
+  load: (agent) => Effect.succeed(skillBaselines.get(agent.id) ?? ""),
 })
 const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(SystemContext.empty) })
 const instructionContext = Layer.mock(InstructionContext.Service, {
@@ -832,11 +820,15 @@ describe("SessionRunnerLLM", () => {
       const session = yield* SessionV2.Service
       const { db } = yield* Database.Service
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "First" }), resume: false })
+      const digest = Skill.Digest.make("a".repeat(64))
+      yield* SessionSkillCatalog.replace(db, sessionID, {
+        catalog: SessionSkillCatalog.make(digest, []),
+        guidance: "Available Skills: old-review",
+      })
 
       requests.length = 0
       response = []
       yield* session.resume(sessionID)
-      const digest = Skill.Digest.make("a".repeat(64))
       yield* SessionSkillCatalog.replace(db, sessionID, {
         catalog: SessionSkillCatalog.make(digest, []),
         guidance: "Available Skills: review, verify",
@@ -848,6 +840,7 @@ describe("SessionRunnerLLM", () => {
       if (!request) throw new Error("Missing second provider request")
       expect(request.messages.map((message) => message.role)).toEqual(["user", "user"])
       expect(request.system.map((part) => part.text)).toContain("Available Skills: review, verify")
+      expect(request.system.map((part) => part.text)).not.toContain("Available Skills: old-review")
       expect((yield* session.messages({ sessionID })).filter((message) => message.type === "system")).toHaveLength(0)
     }),
   )

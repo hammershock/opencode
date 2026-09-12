@@ -56,6 +56,9 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { AgentV2 } from "@opencode-ai/core/agent"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
 import { LocationServiceMap, locationServiceMapLayer } from "@opencode-ai/core/location-services"
 
 const summary = Layer.succeed(
@@ -641,10 +644,54 @@ withSessionActivation.instance("legacy loop receives Skill guidance changed by S
     expect(hits).toHaveLength(2)
     expect(JSON.stringify(hits[0]?.body)).not.toContain("<name>activation-added</name>")
     const body = JSON.stringify(hits[1]?.body)
+    const system = ((hits[1]?.body as { messages: Array<{ role: string; content: string }> }).messages ?? [])
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n")
     expect(body).not.toContain("The available skills have changed.")
     expect(body).toContain("<name>activation-added</name>")
     expect(body).toContain("<description>Added after entering the Session</description>")
-    expect(body.match(/<available_skills>/g)).toHaveLength(1)
+    expect(system.match(/<available_skills>/g)).toHaveLength(1)
+  }),
+)
+
+withSessionActivation.instance("QuickStart creation injects Skill guidance into the first legacy prompt", () =>
+  Effect.gen(function* () {
+    const { dir, llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      skills: { paths: ["./quickstart-skills"] },
+    }))
+    yield* writeText(
+      path.join(dir, "quickstart-skills", "quickstart-review", "SKILL.md"),
+      "---\nname: quickstart-review\ndescription: Review from the first QuickStart prompt\n---\nFollow the workflow.",
+    )
+    const prompt = yield* SessionPrompt.Service
+    const session = yield* SessionV2.Service
+    const chat = yield* session.create({
+      location: Location.Ref.make({ directory: AbsolutePath.make(dir) }),
+      approvalMode: "normal",
+      agent: AgentV2.ID.make("build"),
+      model: { providerID: ref.providerID, id: ref.modelID },
+    })
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Which Skills are available?" }],
+    })
+    yield* llm.text("quickstart-review")
+
+    yield* prompt.loop({ sessionID: chat.id })
+
+    const hits = yield* llm.hits
+    expect(hits).toHaveLength(1)
+    const system = ((hits[0]?.body as { messages: Array<{ role: string; content: string }> }).messages ?? [])
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n")
+    expect(system).toContain("<name>quickstart-review</name>")
+    expect(system).toContain("<description>Review from the first QuickStart prompt</description>")
+    expect(system.match(/<available_skills>/g)).toHaveLength(1)
   }),
 )
 

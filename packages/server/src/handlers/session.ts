@@ -136,6 +136,16 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.modelContext",
         Effect.fn(function* (ctx) {
+          const skillView = yield* session.skillView(ctx.params.sessionID).pipe(
+            Effect.catchTag("Session.NotFoundError", (error) =>
+              Effect.fail(
+                new SessionNotFoundError({
+                  sessionID: error.sessionID,
+                  message: `Session not found: ${error.sessionID}`,
+                }),
+              ),
+            ),
+          )
           return {
             data:
               (yield* session.modelContext(ctx.params.sessionID).pipe(
@@ -153,17 +163,8 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   ),
                 ),
               )) ?? null,
-            skillCatalog:
-              (yield* session.skillCatalog(ctx.params.sessionID).pipe(
-                Effect.catchTag("Session.NotFoundError", (error) =>
-                  Effect.fail(
-                    new SessionNotFoundError({
-                      sessionID: error.sessionID,
-                      message: `Session not found: ${error.sessionID}`,
-                    }),
-                  ),
-                ),
-              )) ?? null,
+            skillCatalog: skillView?.catalog ?? null,
+            skillGuidance: skillView?.guidance ?? null,
           }
         }),
       )

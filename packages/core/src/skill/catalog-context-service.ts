@@ -1,7 +1,6 @@
 export * as SkillCatalogContextService from "./catalog-context-service"
 
 import { Context, Effect, Schema } from "effect"
-import { ModelContext } from "@opencode-ai/schema/model-context"
 import { Prompt, SkillInvocationPart } from "@opencode-ai/schema/prompt"
 import { PromptInput } from "@opencode-ai/schema/prompt-input"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
@@ -28,7 +27,6 @@ export interface AdmissionInput {
   readonly text: string
   readonly mentions: ReadonlyArray<PromptInput.SkillMention>
   readonly agent?: string
-  readonly catalog: ModelContext.SourceState
   readonly admittedCatalog: Skill.AdmittedCatalog | undefined
 }
 

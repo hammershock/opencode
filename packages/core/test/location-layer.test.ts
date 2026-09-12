@@ -86,7 +86,7 @@ describe("LocationServiceMap", () => {
           )
 
           expect(resolved).toEqual(refs.map((ref) => ({ target: ref.target, directory: ref.directory })))
-          expect(routed).toContainEqual(refs[1]!)
+          expect(routed).toContainEqual({ target: refs[1]!.target, directory })
         }),
       ),
     ),
@@ -120,7 +120,7 @@ describe("LocationServiceMap", () => {
     }),
   )
 
-  it.live("reuses cached services for constructed and decoded location refs", () =>
+  itProvider.live("reuses cached services across equivalent location metadata", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -149,6 +149,14 @@ describe("LocationServiceMap", () => {
             expect(Hash.hash(constructed)).toBe(Hash.hash(decoded))
             expect(yield* locations.contextEffect(constructed)).toBe(yield* locations.contextEffect(decoded))
             expect(yield* locations.contextEffect(constructed)).toBe(yield* locations.contextEffect(explicitUndefined))
+            const remote = Location.Ref.make({ target: { type: "rexd", targetID }, directory })
+            const namedRemote = Location.Ref.make({
+              target: remote.target,
+              directory,
+              lastKnownTargetName: "gpu",
+            })
+            expect(Equal.equals(remote, namedRemote)).toBe(false)
+            expect(yield* locations.contextEffect(remote)).toBe(yield* locations.contextEffect(namedRemote))
           }),
         ),
       ),

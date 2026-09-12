@@ -195,4 +195,5 @@ export const SessionSkillCatalogTable = sqliteTable("session_skill_catalog", {
     .primaryKey()
     .references(() => SessionTable.id, { onDelete: "cascade" }),
   catalog: text({ mode: "json" }).notNull().$type<Skill.AdmittedCatalog>(),
+  guidance: text(),
 })

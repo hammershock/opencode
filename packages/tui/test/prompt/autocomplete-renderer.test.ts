@@ -8,15 +8,15 @@ import { Global } from "@opencode-ai/core/global"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "../fixture/tui-sdk"
 
-test("Skill autocomplete separates pointer focus from wheel and keyboard scrolling", async () => {
+test("Skill autocomplete keeps complete single-line rows horizontally scrollable", async () => {
   const setup = await createTestRenderer({ width: 100, height: 30, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   const events = createEventSource()
   const skills = Array.from({ length: 10 }, (_, index) => ({
     id: `skl_${String(index).padStart(64, "0")}`,
-    name: `skill-${String(index).padStart(2, "0")}`,
-    description: `Skill ${index}`,
+    name: index === 0 ? `skill-${"wide".repeat(30)}` : `skill-${String(index).padStart(2, "0")}`,
+    description: index === 0 ? "Long descriptions must stay on the same candidate row.".repeat(4) : `Skill ${index}`,
     sourceLabel: "OpenCode config",
     digest: `digest-${index}`,
   }))
@@ -75,6 +75,15 @@ test("Skill autocomplete separates pointer focus from wheel and keyboard scrolli
     await waitForFrame(setup, "1/10")
     const scroll = findAutocompleteScroll(setup.renderer.root)
     expect(scroll).toBeDefined()
+    expect(scroll!.getChildren().map((option) => option.height)).toEqual(Array(10).fill(1))
+    expect(scroll!.scrollWidth).toBeGreaterThan(scroll!.viewport.width)
+    await setup.mockMouse.scroll(scroll!.x + 2, scroll!.y + 1, "right")
+    await setup.waitForVisualIdle()
+    expect(scroll!.scrollLeft).toBeGreaterThan(0)
+    scroll!.scrollLeft = scroll!.scrollWidth
+    await setup.waitForVisualIdle()
+    expect(setup.captureCharFrame()).toContain("candidate row.")
+    scroll!.scrollLeft = 0
     const initialScrollTop = scroll!.scrollTop
     await setup.mockMouse.moveTo(scroll!.x + 2, scroll!.y + 4)
     await setup.waitForVisualIdle()

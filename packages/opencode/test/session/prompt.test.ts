@@ -256,6 +256,16 @@ const withMcpInstructions = testEffect(
     ],
   }),
 )
+const withSessionActivation = testEffect(
+  LayerNode.compile(LayerNode.group([promptRoot, testLLMServerNode, SessionV2.node]), [
+    [SessionSummary.node, summary],
+    [LSP.node, lsp],
+    [MCP.node, makeMcp()],
+    [RuntimeFlags.node, runtimeFlags],
+    [LocationServiceMap.node, locationServiceMapLayer],
+    [SessionExecution.node, SessionExecution.noopLayer],
+  ]),
+)
 const unix = process.platform !== "win32" ? it.instance : it.instance.skip
 const unixNoLLMServer = process.platform !== "win32" ? noLLMServer.instance : noLLMServer.instance.skip
 
@@ -585,6 +595,56 @@ it.instance("legacy loop consumes the canonical Location context and project ins
     expect(body).toContain(`Project root: ${dir}`)
     expect(body).toContain("REMOTE-SAFE PROJECT RULE")
     expect(body).not.toContain("Here is some useful information about the environment you are running in")
+  }),
+)
+
+withSessionActivation.instance("legacy loop receives Skill guidance changed by Session activation", () =>
+  Effect.gen(function* () {
+    const { dir, llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      skills: { paths: ["./activation-skills"] },
+    }))
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* SessionV2.Service
+    const chat = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+
+    expect(yield* session.activate(chat.id)).toMatchObject({ status: "initialized" })
+    yield* writeText(
+      path.join(dir, "activation-skills", "activation-added", "SKILL.md"),
+      "---\nname: activation-added\ndescription: Added after entering the Session\n---\nFollow the new workflow.",
+    )
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Before re-entering, which Skills are available?" }],
+    })
+    yield* llm.text("still frozen")
+    yield* prompt.loop({ sessionID: chat.id })
+    expect(yield* session.activate(chat.id)).toMatchObject({ status: "advanced" })
+    expect((yield* session.messages({ sessionID: chat.id })).map((message) => message.type)).not.toContain("system")
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "Which Skills are available?" }],
+    })
+    yield* llm.text("activation-added")
+
+    yield* prompt.loop({ sessionID: chat.id })
+
+    const hits = yield* llm.hits
+    expect(hits).toHaveLength(2)
+    expect(JSON.stringify(hits[0]?.body)).not.toContain("<name>activation-added</name>")
+    const body = JSON.stringify(hits[1]?.body)
+    expect(body).not.toContain("The available skills have changed.")
+    expect(body).toContain("<name>activation-added</name>")
+    expect(body).toContain("<description>Added after entering the Session</description>")
+    expect(body.match(/<available_skills>/g)).toHaveLength(1)
   }),
 )
 

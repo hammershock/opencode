@@ -28,6 +28,7 @@ import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
+import { SessionSkillCatalog } from "../skill-catalog"
 import { SessionTurn } from "../turn"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
@@ -210,6 +211,7 @@ const layer = Layer.effect(
           session.locationRevision,
         ))
       const model = yield* models.resolve(session)
+      const skillGuidance = yield* SessionSkillCatalog.guidance(db, session.id)
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
@@ -225,7 +227,7 @@ const layer = Layer.effect(
           },
         },
         providerOptions: { openai: { promptCacheKey } },
-        system: [agent.info?.system, system.baseline]
+        system: [agent.info?.system, system.baseline, skillGuidance]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),
         messages: [...toLLMMessages(context, model), ...(isLastStep ? [Message.assistant(MAX_STEPS_PROMPT)] : [])],

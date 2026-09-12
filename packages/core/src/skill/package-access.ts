@@ -28,6 +28,32 @@ export class Failure extends Schema.TaggedErrorClass<Failure>()("SkillPackageAcc
   kind: Schema.Literals(["unavailable"]),
 }) {}
 
+export const toModelContent = (input: {
+  readonly name: string
+  readonly content: string
+  readonly prepared?: Prepared
+}) =>
+  [
+    `# Skill: ${input.name}`,
+    "",
+    input.content.trim(),
+    "",
+    ...(input.prepared?.path === undefined
+      ? ["This Skill has no filesystem package directory."]
+      : input.prepared.temporary
+        ? [
+            `Temporary package directory on this execution target: ${input.prepared.path}`,
+            "This is a shared, mutable runtime copy and can be reclaimed when the Session disconnects or expires.",
+            "Before starting persistent background work, copy every required file into a persistent target directory.",
+            "Use the ordinary filesystem and shell tools to read, modify, or execute files in this directory.",
+          ]
+        : [
+            `Package directory: ${input.prepared.path}`,
+            "Relative paths in this Skill are relative to this directory.",
+            "Use the ordinary filesystem and shell tools to read, modify, or execute files in this directory.",
+          ]),
+  ].join("\n")
+
 const layer = Layer.succeed(
   Service,
   Service.of({

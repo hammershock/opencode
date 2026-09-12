@@ -12,6 +12,7 @@ import { ModelContext } from "@opencode-ai/schema/model-context"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { SessionID } from "@opencode-ai/schema/session-id"
 import { SkillGuidanceSnapshot } from "@opencode-ai/core/skill/guidance-snapshot"
+import { SkillPackageAccess } from "@opencode-ai/core/skill/package-access"
 import { it } from "../lib/effect"
 
 const digest = (value: string) => Skill.Digest.make(value.repeat(64))
@@ -44,6 +45,8 @@ describe("SkillCatalogContext", () => {
     let available = false
     let denied = false
     let reads = 0
+    let prepares = 0
+    let unavailable = false
     const agentID = AgentV2.ID.make("build")
     const layer = AppNodeBuilder.build(SkillCatalogContext.node, [
       [PluginV2.node, Layer.mock(PluginV2.Service, { wait: () => Effect.void })],
@@ -77,6 +80,20 @@ describe("SkillCatalogContext", () => {
               reads++
               return entry
             }),
+        }),
+      ],
+      [
+        SkillPackageAccess.node,
+        Layer.mock(SkillPackageAccess.Service, {
+          prepare: () => {
+            prepares++
+            return unavailable
+              ? Effect.fail(new SkillPackageAccess.Failure({ skillID: review.id, kind: "unavailable" }))
+              : Effect.succeed({
+                  path: AbsolutePath.make("/tmp/opencode-transit/skills/packages/review"),
+                  temporary: true,
+                })
+          },
         }),
       ],
     ])
@@ -122,11 +139,13 @@ describe("SkillCatalogContext", () => {
       const catalogs = yield* SkillCatalogContext.Service
       expect((yield* Effect.flip(catalogs.resolve(input))).kind).toBe("target-inapplicable")
       expect(reads).toBe(0)
+      expect(prepares).toBe(0)
 
       available = true
       denied = true
       expect((yield* Effect.flip(catalogs.resolve(input))).kind).toBe("permission-denied")
       expect(reads).toBe(0)
+      expect(prepares).toBe(0)
 
       denied = false
       const collision = Skill.AdmittedCatalog.make({
@@ -142,8 +161,21 @@ describe("SkillCatalogContext", () => {
         "stale-catalog",
       )
       expect(reads).toBe(0)
-      expect(yield* catalogs.resolve(input)).toHaveLength(1)
+      expect(prepares).toBe(0)
+      const resolved = yield* catalogs.resolve(input)
+      expect(resolved).toHaveLength(1)
+      expect(resolved[0]?.snapshot.content).toContain(
+        "Temporary package directory on this execution target: /tmp/opencode-transit/skills/packages/review",
+      )
+      expect(resolved[0]?.snapshot.content).toContain("persistent background work")
+      expect(resolved[0]?.snapshot.content).not.toContain("/controller/skills")
       expect(reads).toBe(1)
+      expect(prepares).toBe(1)
+
+      unavailable = true
+      expect((yield* Effect.flip(catalogs.resolve(input))).kind).toBe("unavailable")
+      expect(reads).toBe(2)
+      expect(prepares).toBe(2)
     }).pipe(Effect.provide(layer))
   })
 

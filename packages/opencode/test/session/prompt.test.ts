@@ -641,10 +641,14 @@ withSessionActivation.instance("legacy loop receives Skill guidance changed by S
     expect(hits).toHaveLength(2)
     expect(JSON.stringify(hits[0]?.body)).not.toContain("<name>activation-added</name>")
     const body = JSON.stringify(hits[1]?.body)
+    const system = ((hits[1]?.body as { messages: Array<{ role: string; content: string }> }).messages ?? [])
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n")
     expect(body).not.toContain("The available skills have changed.")
     expect(body).toContain("<name>activation-added</name>")
     expect(body).toContain("<description>Added after entering the Session</description>")
-    expect(body.match(/<available_skills>/g)).toHaveLength(1)
+    expect(system.match(/<available_skills>/g)).toHaveLength(1)
   }),
 )
 

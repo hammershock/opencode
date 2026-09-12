@@ -173,10 +173,10 @@ export interface Interface {
   readonly modelContext: (
     sessionID: SessionSchema.ID,
   ) => Effect.Effect<ModelContext.Generation | undefined, NotFoundError | ContextSnapshotDecodeError>
-  /** Inspect the exact device-local Skill identities admitted for this Session. */
-  readonly skillCatalog: (
+  /** Inspect the atomic controller-local Skill view appended to the next provider request. */
+  readonly skillView: (
     sessionID: SessionSchema.ID,
-  ) => Effect.Effect<Skill.AdmittedCatalog | undefined, NotFoundError>
+  ) => Effect.Effect<SessionSkillCatalog.View | undefined, NotFoundError>
   readonly events: (input: {
     sessionID: SessionSchema.ID
     after?: number
@@ -340,10 +340,7 @@ const layer = Layer.effect(
         return {
           loaded,
           admitted,
-          guidance: yield* guidance.load(selection, loaded.snapshot).pipe(
-            Effect.flatMap(SystemContext.initialize),
-            Effect.map((value) => value.baseline),
-          ),
+          guidance: yield* guidance.load(selection, loaded.snapshot),
         }
       }).pipe(Effect.provide(locations.get(location)), Effect.exit)
       if (Exit.isFailure(attempt)) {
@@ -705,13 +702,13 @@ const layer = Layer.effect(
                       loaded.snapshot.revision,
                       selection.info ? SkillV2.available(loaded.snapshot.skills, selection.info) : [],
                     ),
-                    guidance: yield* guidance.load(selection, loaded.snapshot).pipe(
-                      Effect.flatMap(SystemContext.initialize),
-                      Effect.map((value) => value.baseline),
-                      Effect.mapError(
-                        () => new LocationRebindError({ message: "Destination Skill guidance is unavailable" }),
+                    guidance: yield* guidance
+                      .load(selection, loaded.snapshot)
+                      .pipe(
+                        Effect.mapError(
+                          () => new LocationRebindError({ message: "Destination Skill guidance is unavailable" }),
+                        ),
                       ),
-                    ),
                   }
                 }),
               ).pipe(
@@ -847,9 +844,9 @@ const layer = Layer.effect(
         yield* result.get(sessionID)
         return yield* SessionContextEpoch.inspect(db, sessionID)
       }),
-      skillCatalog: Effect.fn("V2Session.skillCatalog")(function* (sessionID) {
+      skillView: Effect.fn("V2Session.skillView")(function* (sessionID) {
         yield* result.get(sessionID)
-        return yield* SessionSkillCatalog.get(db, sessionID)
+        return yield* SessionSkillCatalog.view(db, sessionID)
       }),
       events: (input) =>
         Stream.unwrap(

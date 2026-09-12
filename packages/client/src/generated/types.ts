@@ -922,6 +922,7 @@ export type SessionsModelContextOutput = {
     }>
     readonly digest: string
   } | null
+  readonly skillGuidance: string | null
 }
 
 export type SessionsHistoryInput = {

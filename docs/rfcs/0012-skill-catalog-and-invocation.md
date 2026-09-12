@@ -366,6 +366,8 @@ TUI 只提交 `SkillMention` identity，不读取 `SKILL.md`。Server 在 durabl
 
 如果 Skill 在选择与提交之间变化，提交返回 typed stale-catalog error，不用新正文悄悄替换用户选择。TUI refresh 当前 catalog，保留用户文本，并要求用户重新选择对应 mention。读取失败同样不创建半完成 prompt。
 
+implicit `skill` tool 不携带用户已经选择的 digest，因此采用不同但明确的规则：名称必须在当前 Session admitted catalog 中唯一，并以该条目的 `SkillID` 作为访问边界；执行时可以读取控制端该 `SkillID` 当前最新、仍适用于本 target 与 Agent 的正文，并把实际读取到的 digest 记录进 invocation snapshot。它不能按名字访问本次 activation 后新出现的 Skill，也不能退回同名的其他 `SkillID`。因此显式 mention 保证“用户选择的准确版本”，implicit tool 保证“当前会话准入的同一个 Skill 的最新版本”。
+
 Skill 正文作为与用户文本分离的 contextual user fragment 发送给模型。它不能拼接进 `Prompt.text`，也不能经过 command placeholder parser。用户请求在 fragment 顺序中保持独立且位于 Skill instructions 之后，使模型明确区分 workflow 与 task。
 
 ### Slash compatibility
@@ -498,7 +500,7 @@ Prompt API 接受 structured Skill mention。公共 Protocol 或 Server `HttpApi
 - Session activation workflow 消费 registry snapshot并应用当前 target/Agent filter，但不扫描 target filesystem；
 - Session admission 负责 mention resolution 与 durable invocation snapshot；
 - provider request assembler 读取 device-local 当前视图并注入唯一的 Skill 启动声明；
-- Tool registry 只提供 implicit `skill`；Location-scoped materializer 使用 canonical resolver 与既有 Rexd filesystem/exec services 准备 package path；
+- Tool registry 只提供按当前 `<available_skills>` 中准确名称加载单个 Skill 的 implicit `skill`，不提供 list/search 操作；Location-scoped materializer 使用 canonical resolver 与既有 Rexd filesystem/exec services 准备 package path；
 - TUI 只渲染 typed state、维护 composer extmark、dispatch registry/session actions，并在共享 remote status surface 展示 Skill materialization；
 - sync adapter 传输正式 Session events 与 Skill Sync operations；它不能上传 registry 配置、非 eligible root 或当前 filesystem 的临时扫描结果。
 

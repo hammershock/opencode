@@ -1,12 +1,10 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer } from "effect"
 import { Skill } from "@opencode-ai/schema/skill"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { SkillV2 } from "@opencode-ai/core/skill"
-import { SystemContext } from "@opencode-ai/core/system-context"
 import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
-import { SkillGuidanceSnapshot } from "@opencode-ai/core/skill/guidance-snapshot"
 import { it } from "../lib/effect"
 
 const build = AgentV2.ID.make("build")
@@ -41,22 +39,21 @@ const layer = (list: () => Skill.RegistrySnapshot) =>
   ])
 
 describe("SkillGuidance", () => {
-  it.effect("renders agent skills with optional descriptions and reconciles the complete available list", () => {
+  it.effect("renders the complete authoritative list with optional descriptions", () => {
     const agent = AgentV2.Info.make({
       ...AgentV2.Info.empty(build),
       permissions: [{ action: "skill", resource: "denied", effect: "deny" }],
     })
-    let skills = snapshot([hidden, denied, effect])
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      const initialized = yield* guidance
-        .load({ id: agent.id, info: agent })
-        .pipe(Effect.flatMap(SystemContext.initialize))
+      const rendered = yield* guidance.load({ id: agent.id, info: agent })
 
-      expect(initialized.baseline).toBe(
+      expect(rendered).toBe(
         [
           "Skills provide specialized instructions and workflows for specific tasks.",
-          "Use the skill tool to load a skill when a task matches its description.",
+          "The declaration below is the authoritative current Skill catalog for this Session and supersedes skill lists in conversation history.",
+          "Answer questions about available skills directly from this list. The skill tool only loads one exact skill by name; it does not list skills and must never be called with names such as list or all.",
+          "Use the skill tool to load one listed skill when the task matches its description.",
           "<available_skills>",
           "  <skill>",
           "    <name>effect</name>",
@@ -70,19 +67,9 @@ describe("SkillGuidance", () => {
           "</available_skills>",
         ].join("\n"),
       )
-      expect(JSON.stringify(initialized.snapshot)).not.toContain("skl_")
-      expect(JSON.stringify(initialized.snapshot)).not.toContain("/skills/")
-
-      skills = snapshot([])
-      expect(
-        yield* guidance
-          .load({ id: agent.id, info: agent })
-          .pipe(Effect.flatMap((context) => SystemContext.reconcileActivation(context, initialized.snapshot))),
-      ).toMatchObject({
-        _tag: "Updated",
-        text: expect.stringContaining("No skills are currently available."),
-      })
-    }).pipe(Effect.provide(layer(() => skills)))
+      expect(rendered).not.toContain("skl_")
+      expect(rendered).not.toContain("/skills/")
+    }).pipe(Effect.provide(layer(() => snapshot([hidden, denied, effect]))))
   })
 
   it.effect("omits guidance when the selected agent denies all skills", () => {
@@ -92,11 +79,7 @@ describe("SkillGuidance", () => {
     })
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      const initialized = yield* guidance
-        .load({ id: agent.id, info: agent })
-        .pipe(Effect.flatMap(SystemContext.initialize))
-      expect(initialized.baseline).toBe("")
-      expect(initialized.snapshot["core/skill-guidance"]?.refresh).toBe("activation")
+      expect(yield* guidance.load({ id: agent.id, info: agent })).toBe("")
     }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 
@@ -110,9 +93,7 @@ describe("SkillGuidance", () => {
     })
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      expect(
-        (yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize))).baseline,
-      ).toBe("")
+      expect(yield* guidance.load({ id: agent.id, info: agent })).toBe("")
     }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 
@@ -126,9 +107,7 @@ describe("SkillGuidance", () => {
     })
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      expect(
-        (yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize))).baseline,
-      ).toContain("<name>effect</name>")
+      expect(yield* guidance.load({ id: agent.id, info: agent })).toContain("<name>effect</name>")
     }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 
@@ -143,35 +122,22 @@ describe("SkillGuidance", () => {
         digest,
       }),
     )
-    let skills = snapshot(many)
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      const initialized = yield* guidance
-        .load({ id: agent.id, info: agent })
-        .pipe(Effect.flatMap(SystemContext.initialize))
-      const catalog = Schema.decodeUnknownSync(SkillGuidanceSnapshot.Catalog)(
-        initialized.snapshot["core/skill-guidance"]?.value,
-      )
+      const rendered = yield* guidance.load({ id: agent.id, info: agent })
+      const descriptions = [...rendered.matchAll(/<description>(.*?)<\/description>/g)].map((match) => match[1]!)
 
-      expect(new TextEncoder().encode(initialized.baseline).byteLength).toBeLessThanOrEqual(Skill.MAX_GUIDANCE_BYTES)
-      expect(catalog.skills).toHaveLength(Skill.MAX_GUIDANCE_ENTRIES)
-      expect(catalog.omitted).toBe(many.length - Skill.MAX_GUIDANCE_ENTRIES)
-      expect(catalog.skills.every((skill) => [...(skill.description ?? "")].length <= 256)).toBe(true)
-      expect(catalog.skills.some((skill) => [...(skill.description ?? "")].length < 256)).toBe(true)
-      expect(initialized.baseline).toContain(`<omitted count="${catalog.omitted}">`)
+      expect(new TextEncoder().encode(rendered).byteLength).toBeLessThanOrEqual(Skill.MAX_GUIDANCE_BYTES)
+      expect(rendered.match(/<skill>/g)).toHaveLength(Skill.MAX_GUIDANCE_ENTRIES)
+      expect(rendered).toContain(`<omitted count="${many.length - Skill.MAX_GUIDANCE_ENTRIES}">`)
+      expect(descriptions.every((description) => [...description].length <= 256)).toBe(true)
+      expect(descriptions.some((description) => [...description].length < 256)).toBe(true)
       expect(many.every((skill) => [...(skill.description ?? "")].length === Skill.MAX_DESCRIPTION_CHARACTERS)).toBe(
         true,
       )
 
-      skills = snapshot(many.toReversed())
-      const repeated = yield* guidance
-        .load({ id: agent.id, info: agent })
-        .pipe(Effect.flatMap(SystemContext.initialize))
-      expect(repeated.baseline).toBe(initialized.baseline)
-      expect(repeated.snapshot["core/skill-guidance"]?.value).toEqual(
-        initialized.snapshot["core/skill-guidance"]?.value,
-      )
-    }).pipe(Effect.provide(layer(() => skills)))
+      expect(yield* guidance.load({ id: agent.id, info: agent }, snapshot(many.toReversed()))).toBe(rendered)
+    }).pipe(Effect.provide(layer(() => snapshot(many))))
   })
 
   it.effect("omits an entry whose complete name cannot fit and continues with later names", () => {
@@ -188,18 +154,13 @@ describe("SkillGuidance", () => {
     })
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      const initialized = yield* guidance
-        .load({ id: agent.id, info: agent })
-        .pipe(Effect.flatMap(SystemContext.initialize))
-      const catalog = Schema.decodeUnknownSync(SkillGuidanceSnapshot.Catalog)(
-        initialized.snapshot["core/skill-guidance"]?.value,
-      )
+      const rendered = yield* guidance.load({ id: agent.id, info: agent })
 
-      expect(catalog.skills.map((skill) => skill.name)).toEqual([later.name])
-      expect(catalog.omitted).toBe(1)
-      expect(initialized.baseline).not.toContain(oversized.name)
-      expect(initialized.baseline).toContain(`<name>${later.name}</name>`)
-      expect(new TextEncoder().encode(initialized.baseline).byteLength).toBeLessThanOrEqual(Skill.MAX_GUIDANCE_BYTES)
+      expect(rendered.match(/<skill>/g)).toHaveLength(1)
+      expect(rendered).toContain('<omitted count="1">')
+      expect(rendered).not.toContain(oversized.name)
+      expect(rendered).toContain(`<name>${later.name}</name>`)
+      expect(new TextEncoder().encode(rendered).byteLength).toBeLessThanOrEqual(Skill.MAX_GUIDANCE_BYTES)
     }).pipe(Effect.provide(layer(() => snapshot([oversized, later]))))
   })
 
@@ -214,9 +175,7 @@ describe("SkillGuidance", () => {
     })
     return Effect.gen(function* () {
       const guidance = yield* SkillGuidance.Service
-      expect(
-        (yield* guidance.load({ id: agent.id, info: agent }).pipe(Effect.flatMap(SystemContext.initialize))).baseline,
-      ).toBe("")
+      expect(yield* guidance.load({ id: agent.id, info: agent })).toBe("")
     }).pipe(Effect.provide(layer(() => snapshot([effect]))))
   })
 })

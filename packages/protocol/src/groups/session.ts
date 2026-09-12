@@ -324,6 +324,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         success: Schema.Struct({
           data: Schema.NullOr(ModelContext.Generation),
           skillCatalog: Schema.NullOr(Skill.AdmittedCatalog),
+          skillGuidance: Schema.NullOr(Schema.String),
         }),
         error: [SessionNotFoundError, UnknownError],
       }).annotateMerge(
@@ -331,7 +332,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           identifier: "v2.session.modelContext",
           summary: "Inspect session model context",
           description:
-            "Return the frozen canonical model-context generation and device-local admitted Skill identities without connecting to or reading from the Session target.",
+            "Return the frozen canonical model-context generation, device-local admitted Skill identities, and exact current Skill startup declaration without connecting to or reading from the Session target.",
         }),
       ),
     )

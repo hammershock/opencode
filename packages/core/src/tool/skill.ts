@@ -6,7 +6,7 @@ import { SkillInvocation } from "@opencode-ai/schema/skill-invocation"
 import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
-import { SkillGuidanceSnapshot } from "../skill/guidance-snapshot"
+import { SkillPresentation } from "../skill/presentation"
 import { SkillPackageAccess } from "../skill/package-access"
 import { SkillResolver } from "../skill/resolver"
 import { Hash } from "../util/hash"
@@ -30,11 +30,13 @@ export const Structured = Schema.Struct({
 })
 
 export const description = [
-  "Load a specialized skill when the task at hand matches one of the available skills in the system context.",
+  "Load one specialized skill when the task at hand matches its entry in <available_skills>.",
   "",
   "Use this tool to inject the skill's instructions and resources into the current conversation. The output may contain detailed workflow guidance as well as references to scripts, files, etc. in the same directory as the skill.",
   "",
-  "The skill name must match one of the available skills in the system context.",
+  "This is not a Skill listing or search tool. To answer which Skills are available, read <available_skills> directly and do not call this tool.",
+  'Never call this tool with invented operation names such as "list", "all", or "search".',
+  "The name must exactly match one Skill in the current <available_skills> list.",
 ].join("\n")
 
 export const toModelOutput = (snapshot: SkillInvocation.Snapshot, prepared?: SkillPackageAccess.Prepared) => {
@@ -47,6 +49,19 @@ export const toModelOutput = (snapshot: SkillInvocation.Snapshot, prepared?: Ski
 
 const unableToLoad = (name: string, error?: unknown) =>
   new ToolFailure({ message: `Unable to load skill ${name}`, error })
+
+const resolutionFailure = (name: string, error: SkillResolver.Error) =>
+  new ToolFailure({
+    message:
+      error.kind === "not_admitted"
+        ? `Skill "${name}" is not available in this Session. Read <available_skills> directly; the skill tool does not list or search Skills.`
+        : error.kind === "ambiguous_skill"
+          ? `Skill "${name}" is ambiguous in this Session. Use an explicit $skill mention to choose its source.`
+          : error.kind === "skill_inapplicable"
+            ? `Skill "${name}" is no longer allowed for this Agent or execution target.`
+            : `Skill "${name}" is no longer available on this device.`,
+    error,
+  })
 
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -71,7 +86,9 @@ const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [{ type: "text", text: output.output }],
           execute: (input, context) =>
             Effect.gen(function* () {
-              const candidate = yield* resolver.resolveName({ agent: context.agent, name: input.name })
+              const candidate = yield* resolver
+                .resolveName({ sessionID: context.sessionID, agent: context.agent, name: input.name })
+                .pipe(Effect.mapError((error) => resolutionFailure(input.name, error)))
               yield* permission.assert({
                 action: name,
                 resources: [candidate.entry.metadata.name],
@@ -96,13 +113,15 @@ const layer = Layer.effectDiscard(
                 digest: resolved.entry.metadata.digest,
                 source: {
                   kind: resolved.entry.source.kind,
-                  label: SkillGuidanceSnapshot.sourceLabel(resolved.entry.source.label),
+                  label: SkillPresentation.sourceLabel(resolved.entry.source.label),
                 },
                 content: resolved.entry.content,
                 status: "loaded",
               })
               return { snapshot, output: toModelOutput(snapshot, prepared) }
-            }).pipe(Effect.mapError((error) => unableToLoad(input.name, error))),
+            }).pipe(
+              Effect.mapError((error) => (error instanceof ToolFailure ? error : unableToLoad(input.name, error))),
+            ),
         }),
       })
       .pipe(Effect.orDie)

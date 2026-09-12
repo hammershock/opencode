@@ -253,6 +253,7 @@ describe("v2 location HttpApi", () => {
           sources: Record<string, { value: unknown; refresh?: string }>
         }
         skillCatalog: { skills: Array<{ name: string }> }
+        skillGuidance: string
       }
     }
     const advances = async () => {
@@ -269,6 +270,9 @@ describe("v2 location HttpApi", () => {
     expect(initialResponse.skillCatalog.skills).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "activation-review" })]),
     )
+    expect(initialResponse.skillGuidance.match(/<available_skills>/g)).toHaveLength(1)
+    expect(initialResponse.skillGuidance).toContain("Review the first catalog")
+    expect(initialResponse.skillGuidance).not.toContain("PRIVATE ACTIVATION BODY")
     expect(JSON.stringify(initial)).not.toContain("PRIVATE ACTIVATION BODY")
     expect(await activate()).toMatchObject({ data: { status: "unchanged" } })
     expect(await advances()).toHaveLength(0)
@@ -298,6 +302,11 @@ describe("v2 location HttpApi", () => {
     expect(advancedResponse.skillCatalog.skills).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "activation-added" })]),
     )
+    expect(advancedResponse.skillGuidance.match(/<available_skills>/g)).toHaveLength(1)
+    expect(advancedResponse.skillGuidance).toContain("Review the second catalog")
+    expect(advancedResponse.skillGuidance).toContain("activation-added")
+    expect(advancedResponse.skillGuidance).not.toContain("Review the first catalog")
+    expect(advancedResponse.skillGuidance).not.toContain("CHANGED PRIVATE BODY")
     expect(await advances()).toHaveLength(0)
 
     await fs.rename(root, `${root}-offline`)
@@ -310,6 +319,7 @@ describe("v2 location HttpApi", () => {
       },
     })
     expect((await modelContext()).skillCatalog).toEqual(advancedResponse.skillCatalog)
+    expect((await modelContext()).skillGuidance).toBe(advancedResponse.skillGuidance)
     expect(await advances()).toHaveLength(0)
   })
 

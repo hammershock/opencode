@@ -79,6 +79,15 @@ export function modelContextOptions(generation: ModelContextGeneration): DialogS
       value: { title: key, content: source.baseline ?? JSON.stringify(source.value, null, 2) },
     })
   }
+  if (generation.skillGuidance) {
+    options.push({
+      category: "Skills",
+      title: "available_skills",
+      description: `${generation.skillCatalog?.skills.length ?? 0} available · controller-local`,
+      footer: generation.skillCatalog?.digest.slice(0, 12),
+      value: { title: "Available skills", content: generation.skillGuidance },
+    })
+  }
   return options
 }
 

@@ -28,7 +28,14 @@ export type ModelContextGeneration = {
   }>
   digest: string
   baseline: string
-  sources: Readonly<Record<string, { value: unknown; baseline?: string; removed?: string; refresh?: "generation" }>>
+  sources: Readonly<
+    Record<string, { value: unknown; baseline?: string; removed?: string; refresh?: "generation" | "activation" }>
+  >
+  skillCatalog?: {
+    digest: string
+    skills: ReadonlyArray<{ id: string; name: string; sourceLabel: string; digest: string }>
+  }
+  skillGuidance?: string
 }
 
 export type ModelContextCommandContext = InvocationContext & {

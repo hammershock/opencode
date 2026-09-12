@@ -263,7 +263,6 @@ describe("v2 location HttpApi", () => {
       return body.data.filter((event) => event.data.cause === "skill-catalog-reloaded")
     }
 
-    expect(await activate()).toMatchObject({ data: { status: "initialized" } })
     const initialResponse = await modelContext()
     const initial = initialResponse.data
     expect(initial.sources["core/skill-guidance"]).toBeUndefined()

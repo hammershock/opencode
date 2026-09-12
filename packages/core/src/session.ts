@@ -634,7 +634,12 @@ const layer = Layer.effect(
               )
             if (projected.type === "existing") return projected.session
             // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
-            return yield* result.get(sessionID).pipe(Effect.orDie)
+            const created = yield* result.get(sessionID).pipe(Effect.orDie)
+            // RFC-0012 defines creation and first display as a Session activation.
+            // Materialize the controller-local Skill view before any client can send
+            // the first prompt through either the V2 or compatibility prompt path.
+            yield* activateCatalog(created, input.location, true)
+            return created
           }),
         ),
       ),

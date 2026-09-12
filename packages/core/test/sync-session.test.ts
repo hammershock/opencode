@@ -435,15 +435,15 @@ describe("SessionSync", () => {
     expect(calls[1]).toEqual(["remove", "s1"])
   })
 
-  test("hydrates the complete frozen model context body and order", async () => {
+  test("hydrates the complete frozen legacy model context body and order", async () => {
     await using tmp = await tmpdir()
     const layer = LayerNode.compile(LayerNode.group([Database.node, EventV2.node, SessionProjector.node]), [
       [Database.node, Database.layerFromPath(path.join(tmp.path, "session.db"))],
     ])
     const sessionID = Session.ID.make("ses_context_hydrate")
     const environment = ModelContext.Environment.make({
-      harness: "OpenCode Transit",
-      entrypoint: "opencode-transit",
+      harness: "OpenCode REXD",
+      entrypoint: "opencode-rexd",
       targetKind: "rexd",
       targetName: "mywindows",
       directory: "/home/hammer/project",

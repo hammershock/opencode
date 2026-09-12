@@ -3335,16 +3335,27 @@ export type LocationRef = {
   lastKnownTargetName?: string
 }
 
-export type ModelContextEnvironment = {
-  harness: "OpenCode Transit"
-  entrypoint: "opencode-transit"
-  targetKind: "local" | "rexd"
-  targetName: string
-  directory: string
-  projectRoot: string
-  vcs?: string
-  platform: string
-}
+export type ModelContextEnvironment =
+  | {
+      harness: "OpenCode Transit"
+      entrypoint: "opencode-transit"
+      targetKind: "local" | "rexd"
+      targetName: string
+      directory: string
+      projectRoot: string
+      vcs?: string
+      platform: string
+    }
+  | {
+      harness: "OpenCode REXD"
+      entrypoint: "opencode-rexd"
+      targetKind: "local" | "rexd"
+      targetName: string
+      directory: string
+      projectRoot: string
+      vcs?: string
+      platform: string
+    }
 
 export type ModelContextInstruction = {
   id: string

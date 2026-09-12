@@ -23,16 +23,29 @@ export type SourceSnapshot = typeof SourceSnapshot.Type
 export const SourceState = Schema.Record(Key, SourceSnapshot).annotate({ identifier: "ModelContext.SourceState" })
 export type SourceState = Readonly<Record<string, SourceSnapshot>>
 
-export const Environment = Schema.Struct({
-  harness: Schema.Literal("OpenCode Transit"),
-  entrypoint: Schema.Literal("opencode-transit"),
+const EnvironmentFields = {
   targetKind: Schema.Literals(["local", "rexd"]),
   targetName: Schema.NonEmptyString,
   directory: Schema.NonEmptyString,
   projectRoot: Schema.NonEmptyString,
   vcs: optional(Schema.NonEmptyString),
   platform: Schema.NonEmptyString,
-}).annotate({ identifier: "ModelContext.Environment" })
+}
+
+export const Environment = Schema.Union([
+  Schema.Struct({
+    harness: Schema.Literal("OpenCode Transit"),
+    entrypoint: Schema.Literal("opencode-transit"),
+    ...EnvironmentFields,
+  }),
+  // Context generations are durable and retain the product identity accepted
+  // before the Transit rename. Preserve that exact historical snapshot.
+  Schema.Struct({
+    harness: Schema.Literal("OpenCode REXD"),
+    entrypoint: Schema.Literal("opencode-rexd"),
+    ...EnvironmentFields,
+  }),
+]).annotate({ identifier: "ModelContext.Environment" })
 export type Environment = typeof Environment.Type
 
 export const ControllerTime = Schema.Struct({

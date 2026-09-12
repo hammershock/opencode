@@ -85,6 +85,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     directory: info.directory,
     target: info.target ?? null,
     last_known_target_name: info.lastKnownTargetName ?? null,
+    portable_target_label: info.portableTargetLabel ?? null,
     sync_space_id: info.syncSpaceID ?? null,
     path: info.path,
     title: info.title,
@@ -288,6 +289,7 @@ const layer = Layer.effectDiscard(
         directory: _directory,
         target: _target,
         last_known_target_name: _lastKnownTargetName,
+        portable_target_label: _portableTargetLabel,
         workspace_id: _workspaceID,
         path: _path,
         ...metadata

@@ -177,7 +177,8 @@ export function projector(
     project: (event) => {
       const replay = Effect.gen(function* () {
         const restored = attachment ? yield* Effect.tryPromise(() => hydrate(event, attachment)) : event
-        const hydrated = spaceID ? bindCreatedSpace(restored, spaceID) : restored
+        const portable = sourceDeviceID ? bindPortableCreatedTarget(restored) : restored
+        const hydrated = spaceID ? bindCreatedSpace(portable, spaceID) : portable
         const existing = siblings.get(hydrated.aggregateID)
         if (existing) return yield* replayAs(events, hydrated, existing, sourceDeviceID)
         const replay = events.replay(
@@ -337,6 +338,22 @@ function bindCreatedSpace(event: SyncEvent.Envelope, spaceID: string) {
   return SyncEvent.Envelope.make({
     ...event,
     data: { ...event.data, info: { ...(info as Record<string, unknown>), syncSpaceID: spaceID } },
+  })
+}
+
+function bindPortableCreatedTarget(event: SyncEvent.Envelope) {
+  if (!isCreatedEnvelope(event)) return event
+  const info = event.data.info
+  if (!info || typeof info !== "object") return event
+  if ("portableTargetLabel" in info && typeof info.portableTargetLabel === "string" && info.portableTargetLabel)
+    return event
+  const target = "target" in info ? info.target : undefined
+  if (!target || typeof target !== "object" || !("type" in target) || target.type !== "rexd") return event
+  const label = "lastKnownTargetName" in info ? info.lastKnownTargetName : undefined
+  if (typeof label !== "string" || !label) return event
+  return SyncEvent.Envelope.make({
+    ...event,
+    data: { ...event.data, info: { ...info, portableTargetLabel: label } },
   })
 }
 

@@ -1526,26 +1526,30 @@ const make = (input: LayerOptions) =>
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })
       const metadata = metadataStore.scope(config.namespaceID)
-      const known = (yield* metadata.list()).find((item) => item.sessionID === input.sessionID)
+      const known = (yield* metadata.list().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))).find(
+        (item) => item.sessionID === input.sessionID,
+      )
       if (!known) return yield* new ControlError({ kind: "storage" })
-      yield* metadata.availability(input.sessionID, "hydrating")
+      yield* metadata
+        .availability(input.sessionID, "hydrating")
+        .pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       // Hydration is requested through the one device-wide worker. This keeps
       // Session projection fenced against clear/leave/remove in sibling TUIs.
       const result = yield* now().pipe(
         Effect.andThen(availability()),
         Effect.map((items) => items.find((item) => item.sessionID === input.sessionID)),
-        Effect.catch(() =>
-          metadata
-            .availability(input.sessionID, "partial")
-            .pipe(Effect.andThen(Effect.fail(new ControlError({ kind: "provider" })))),
+        Effect.catch((error) =>
+          metadata.availability(input.sessionID, "partial").pipe(
+            Effect.mapError(() => new ControlError({ kind: "storage" })),
+            Effect.andThen(Effect.fail(error)),
+          ),
         ),
       )
       lastSuccessAt = Date.now()
       lastDiagnostic = undefined
       return HydrateResult.make({ sessionID: input.sessionID, availability: result?.availability ?? "partial" })
     })
-    const hydrate = (input: typeof HydrateInput.Type) =>
-      hydrateRaw(input).pipe(Effect.mapError(() => new ControlError({ kind: "provider" })))
+    const hydrate = (input: typeof HydrateInput.Type) => hydrateRaw(input)
     const deleteSession = Effect.fn("SyncControl.deleteSession")(function* (input: typeof DeleteSessionInput.Type) {
       const config = yield* setup.config().pipe(Effect.mapError(() => new ControlError({ kind: "storage" })))
       if (!config) return yield* new ControlError({ kind: "unconfigured" })

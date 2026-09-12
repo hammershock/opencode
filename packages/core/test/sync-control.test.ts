@@ -11,6 +11,7 @@ import { BaiduCredential } from "@opencode-ai/core/sync/baidu-credential"
 import { SyncProvider } from "@opencode-ai/core/sync/provider"
 import { SyncRoot } from "@opencode-ai/core/sync/root"
 import { SyncMembership } from "@opencode-ai/core/sync/membership"
+import { SyncMetadata } from "@opencode-ai/core/sync/metadata"
 import { testEffect } from "./lib/effect"
 
 let remoteStarted = false
@@ -139,7 +140,7 @@ const recoveryControlNode = {
   }),
 }
 const recoveryControlIt = testEffect(
-  LayerNode.compile(recoveryControlNode, [
+  LayerNode.compile(LayerNode.group([recoveryControlNode, SyncMetadata.node]), [
     [Database.node, Database.layerFromPath(":memory:")],
     [SyncDatabase.node, SyncDatabase.layerFromPath(":memory:")],
     [
@@ -407,6 +408,28 @@ describe("SyncControl lifecycle policy", () => {
       yield* control.join({ namespaceID: active.namespaceID, recoveryString: "redacted-recovery" })
       expect((yield* control.now().pipe(Effect.exit))._tag).toBe("Failure")
       expect(runtimeConstructions).toBe(2)
+    }),
+  )
+
+  recoveryControlIt.live("preserves the runtime diagnostic when Session hydration fails", () =>
+    Effect.gen(function* () {
+      const metadata = (yield* SyncMetadata.Service).scope(active.namespaceID)
+      yield* metadata.apply("remote", [
+        {
+          sessionID: "session-remote",
+          title: "Remote Session",
+          ownerDeviceID: "remote",
+          directory: "/remote",
+          revision: 1,
+          updatedAt: 1,
+        },
+      ])
+      const control = yield* SyncControl.Service
+
+      const error = yield* control.hydrate({ sessionID: "session-remote" }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({ kind: "provider", diagnostic: { stage: "pull" } })
+      expect((yield* metadata.list())[0]?.availability).toBe("partial")
     }),
   )
 

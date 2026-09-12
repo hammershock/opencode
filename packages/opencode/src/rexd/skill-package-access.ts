@@ -50,6 +50,7 @@ export function rexdSkillPackageAccessNode(
 
         return SkillPackageAccess.Service.of({
           prepare: Effect.fn("RexdSkillPackageAccess.prepare")(function* (input) {
+            if (input.entry.source.kind === "built-in") return { temporary: false }
             const snapshot = yield* snapshots.create(input.entry).pipe(
               Effect.mapError(
                 () =>

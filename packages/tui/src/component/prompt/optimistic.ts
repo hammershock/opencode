@@ -8,9 +8,10 @@ export function optimisticPrompt(input: {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  messageID?: string
   parts: readonly InputPart[]
 }) {
-  const messageID = Identifier.ascending("message")
+  const messageID = input.messageID ?? Identifier.ascending("message")
   const requestParts = input.parts.map((part) => ({ ...part, id: part.id ?? Identifier.ascending("part") }))
   const message: UserMessage = {
     id: messageID,

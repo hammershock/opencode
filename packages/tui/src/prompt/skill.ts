@@ -1,5 +1,6 @@
 import { displayOffsetIndex } from "./display"
 import type { PromptInfo } from "./history"
+import type { SkillMentionError } from "@opencode-ai/sdk/v2"
 
 export type SkillCatalogEntry = {
   id: string
@@ -8,6 +9,8 @@ export type SkillCatalogEntry = {
   sourceLabel: string
   digest: string
 }
+
+export type SkillMentionFailure = SkillMentionError
 
 export function skillDisplayLabel(skill: SkillCatalogEntry, catalog: readonly SkillCatalogEntry[]) {
   return `$${skill.name}${catalog.filter((candidate) => candidate.name === skill.name).length > 1 ? ` · ${skill.sourceLabel}` : ""}`
@@ -125,6 +128,62 @@ export async function resolveSubmittedSkillMentions(input: {
   return undefined
 }
 
+export function skillMentionFailure(error: unknown) {
+  const pending = [error]
+  const seen = new Set<object>()
+
+  while (pending.length > 0) {
+    const current = pending.shift()
+    if (!isRecord(current) || seen.has(current)) continue
+    seen.add(current)
+    if (
+      current._tag === "SkillMentionError" &&
+      typeof current.message === "string" &&
+      isSkillMentionFailureKind(current.kind) &&
+      typeof current.skillID === "string" &&
+      typeof current.name === "string"
+    )
+      return {
+        _tag: "SkillMentionError" as const,
+        message: current.message,
+        kind: current.kind,
+        skillID: current.skillID,
+        name: current.name,
+      }
+    pending.push(current.data, current.body, current.cause, current.error)
+  }
+  return undefined
+}
+
+export function skillMentionFailureTitle(failure: SkillMentionFailure) {
+  if (failure.kind === "stale-catalog") return "Skill changed; select it again"
+  if (failure.kind === "permission-denied") return "Agent cannot use this Skill"
+  if (failure.kind === "target-inapplicable") return "Skill is unavailable on this target"
+  if (failure.kind === "malformed") return "Skill package is malformed"
+  if (failure.kind === "unavailable") return "Skill is no longer available"
+  return "Skill mention is invalid"
+}
+
+export function invalidateSkillMention(
+  input: string,
+  parts: PromptInfo["parts"],
+  failure: Pick<SkillMentionFailure, "skillID" | "name">,
+) {
+  const selected = parts.find(
+    (part) => part.type === "skill" && (part.id === failure.skillID || part.name === failure.name),
+  )
+  if (selected?.type === "skill")
+    return {
+      parts: parts.filter(
+        (part) => part.type !== "skill" || (part.id !== failure.skillID && part.name !== failure.name),
+      ),
+      source: { start: selected.source.start, end: selected.source.end },
+    }
+
+  const bare = bareSkillMentions(input, parts).find((mention) => mention.name === failure.name)
+  return { parts, source: bare?.display }
+}
+
 function structuredMentions(input: string, parts: readonly PromptInfo["parts"][number][]) {
   return parts
     .filter((part) => part.type === "skill")
@@ -164,4 +223,19 @@ function escaped(input: string, index: number) {
   let count = 0
   while (index - count - 1 >= 0 && input[index - count - 1] === "\\") count++
   return count % 2 === 1
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null
+}
+
+function isSkillMentionFailureKind(input: unknown): input is SkillMentionFailure["kind"] {
+  return (
+    input === "invalid-mention" ||
+    input === "unavailable" ||
+    input === "target-inapplicable" ||
+    input === "permission-denied" ||
+    input === "stale-catalog" ||
+    input === "malformed"
+  )
 }

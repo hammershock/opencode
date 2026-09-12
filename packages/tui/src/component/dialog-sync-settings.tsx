@@ -466,8 +466,8 @@ function connectedValues() {
 
 function oauthStatus(state: Extract<SyncSettingsViewModel["account"], { state: "disconnected" }>["oauth"]["state"]) {
   if (state === "opening") return "◐ opening"
-  if (state === "waiting") return "◐ waiting"
-  if (state === "manual" || state === "attention") return "! attention"
+  if (state === "waiting" || state === "manual") return "◐ waiting"
+  if (state === "attention") return "! attention"
   return "● ready"
 }
 

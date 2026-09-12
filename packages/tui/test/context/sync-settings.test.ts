@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
-  createLoopbackCallback,
+  baiduOAuthBeginInput,
   syncLocalPresentation,
   syncOperationFailure,
   withSyncRefreshTimeout,
@@ -81,25 +81,13 @@ describe("sync settings credential errors", () => {
   })
 })
 
-describe("sync settings OAuth loopback", () => {
-  test("accepts only the callback path and responds after completion", async () => {
-    const loopback = createLoopbackCallback(2_000)
-    expect((await fetch(loopback.redirectURI.replace("/callback", "/other"))).status).toBe(404)
-
-    const page = fetch(`${loopback.redirectURI}?code=abc`)
-    const callback = await loopback.callback
-    expect(callback?.callbackURL).toBe(`${loopback.redirectURI}?code=abc`)
-    callback?.respond({ status: "success" })
-    const response = await page
-    expect(response.status).toBe(200)
-    expect(await response.text()).toContain("Baidu Netdisk")
-    loopback.close()
-  })
-
-  test("times out without claiming authorization succeeded", async () => {
-    const loopback = createLoopbackCallback(5)
-    expect(await loopback.callback).toBeUndefined()
-    loopback.close()
+describe("sync settings OAuth admission", () => {
+  test("uses Baidu's installed-app out-of-band redirect", () => {
+    expect(baiduOAuthBeginInput({ type: "credentials", appKey: "app", secretKey: "secret" })).toEqual({
+      redirectURI: "oob",
+      completion: "manual",
+      application: { type: "credentials", appKey: "app", secretKey: "secret" },
+    })
   })
 })
 

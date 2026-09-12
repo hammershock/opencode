@@ -74,6 +74,19 @@ describe("Sync Settings presentation", () => {
     expect(rows.map((row) => row.title)).toEqual(["Connect Baidu Netdisk", "Copy authorization URL", "Use manual code"])
     expect(rows.join(" ")).not.toContain("AppKey")
     expect(rows.join(" ")).not.toContain("Secret")
+    expect(
+      buildSyncOverviewRows({
+        ...connected,
+        account: {
+          state: "disconnected",
+          oauth: { state: "manual", authorizationURL: "https://openapi.baidu.com/oauth/authorize" },
+        },
+      }),
+    ).toEqual([
+      expect.objectContaining({ title: "Connect Baidu Netdisk", status: "◐ waiting" }),
+      expect.objectContaining({ title: "Copy authorization URL" }),
+      expect.objectContaining({ title: "Enter authorization code" }),
+    ])
   })
 
   test("uses the shared status vocabulary", () => {

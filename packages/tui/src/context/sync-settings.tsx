@@ -1,6 +1,5 @@
 import { createSignal, onCleanup, onMount } from "solid-js"
 import type { GlobalSyncStateResponse } from "@opencode-ai/sdk/v2"
-import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
 import { BaiduAuth } from "@opencode-ai/core/sync/baidu-auth"
 import { SyncSetup } from "@opencode-ai/core/sync/setup"
 import { SyncRoot } from "@opencode-ai/core/sync/root"
@@ -21,6 +20,7 @@ import {
   showSyncDevices,
   showSyncSettings,
   syncStatus,
+  type BaiduApplication,
   type SyncSettingsActions,
   type SyncSettingsViewModel,
 } from "../component/dialog-sync-settings"
@@ -142,52 +142,9 @@ function hasMissingApp(value: unknown, depth: number): boolean {
   )
 }
 
-export function createLoopbackCallback(timeout = 120_000) {
-  type Callback = {
-    callbackURL: string
-    respond: (result: { status: "success" } | { status: "error"; detail: string }) => void
-  }
-  let finish: (value: Callback | undefined) => void = () => undefined
-  let settled = false
-  const callback = new Promise<Callback | undefined>((resolve) => {
-    finish = (value) => {
-      if (settled) return
-      settled = true
-      resolve(value)
-    }
-  })
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch(request) {
-      const url = new URL(request.url)
-      if (request.method !== "GET" || url.pathname !== "/callback") return new Response("Not found", { status: 404 })
-      return new Promise<Response>((resolve) => {
-        finish({
-          callbackURL: request.url,
-          respond: (result) =>
-            resolve(
-              new Response(
-                result.status === "success"
-                  ? OauthCallbackPage.success({ provider: "Baidu Netdisk" })
-                  : OauthCallbackPage.error(result.detail, { provider: "Baidu Netdisk" }),
-                { status: result.status === "success" ? 200 : 400, headers: { "Content-Type": "text/html" } },
-              ),
-            ),
-        })
-      })
-    },
-  })
-  const timer = setTimeout(() => finish(undefined), timeout)
-  return {
-    redirectURI: `http://127.0.0.1:${server.port}/callback`,
-    callback,
-    close() {
-      clearTimeout(timer)
-      finish(undefined)
-      server.stop(true)
-    },
-  }
+export function baiduOAuthBeginInput(application?: BaiduApplication) {
+  // Baidu's installed-app flow rejects localhost callbacks and requires the literal OOB redirect.
+  return { redirectURI: "oob", completion: "manual" as const, ...(application ? { application } : {}) }
 }
 
 export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSimpleContext({
@@ -203,10 +160,8 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       | {
           attemptID: string
           mode: "connect" | "switch"
-          completion: "loopback" | "manual"
         }
       | undefined
-    let loopback: ReturnType<typeof createLoopbackCallback> | undefined
     let bindingRevision = ""
     let localConfigured = false
     let remoteGeneration = 0
@@ -238,7 +193,6 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
     })
 
     onCleanup(() => {
-      loopback?.close()
       unsubscribe()
       remoteAbort?.abort()
     })
@@ -432,10 +386,7 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       if (choice === "enable-now") await runSyncNow()
     }
 
-    const completeOAuth = async (
-      response: { type: "loopback"; callbackURL: string } | { type: "manual"; code: string },
-      showChoice = true,
-    ) => {
+    const completeOAuth = async (response: { type: "manual"; code: string }, showChoice = true) => {
       if (!oauth) throw new Error("OAuth attempt is missing")
       const input = { attemptID: oauth.attemptID, response }
       if (oauth.mode === "switch") await sdk.client.global.syncOAuthSwitchAccount(input, { throwOnError: true })
@@ -445,30 +396,11 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
       if (showChoice) await applyPostLoginChoice()
     }
 
-    const beginManual = async () => {
-      const owner = dialog.stack.at(-1)?.element
-      loopback?.close()
-      loopback = undefined
-      const mode = oauth?.mode ?? "connect"
-      const result = await sdk.client.global.syncOAuthBegin(
-        { redirectURI: "oob", completion: "manual" },
-        { throwOnError: true },
-      )
-      oauth = { attemptID: result.data.attemptID, mode, completion: "manual" }
-      setModel((current) => ({
-        ...current,
-        account: { state: "disconnected", oauth: { state: "manual", authorizationURL: result.data.authorizationURL } },
-      }))
-      await openBrowser(result.data.authorizationURL).catch(() => undefined)
-      if (dialog.isCurrent(owner)) showSyncSettings(dialog, model, actions)
-    }
-
-    const beginOAuth = async (mode: "connect" | "switch" = "connect") => {
+    const beginManual = async (
+      mode: "connect" | "switch" = oauth?.mode ?? "connect",
+      application?: BaiduApplication,
+    ) => {
       let owner = dialog.stack.at(-1)?.element
-      await sdk.client.global.syncInitialize({ deviceName: hostname() }, { throwOnError: true })
-      const application = mode === "connect" ? await promptBaiduApplication(dialog) : undefined
-      if (mode === "connect" && !application) return
-      owner = dialog.stack.at(-1)?.element
       setModel((current) => ({
         ...current,
         account: { state: "disconnected", oauth: { state: "opening" } },
@@ -477,49 +409,23 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
         showSyncSettings(dialog, model, actions)
         owner = dialog.stack.at(-1)?.element
       }
-      loopback?.close()
-      loopback = createLoopbackCallback()
-      const result = await sdk.client.global.syncOAuthBegin(
-        { redirectURI: loopback.redirectURI, completion: "loopback", application },
-        { throwOnError: true },
-      )
-      oauth = { attemptID: result.data.attemptID, mode, completion: "loopback" }
+      const result = await sdk.client.global.syncOAuthBegin(baiduOAuthBeginInput(application), { throwOnError: true })
+      oauth = { attemptID: result.data.attemptID, mode }
       setModel((current) => ({
         ...current,
-        account: {
-          state: "disconnected",
-          oauth: { state: "waiting", authorizationURL: result.data.authorizationURL },
-        },
+        account: { state: "disconnected", oauth: { state: "manual", authorizationURL: result.data.authorizationURL } },
       }))
-      if (dialog.isCurrent(owner)) {
-        showSyncSettings(dialog, model, actions)
-        owner = dialog.stack.at(-1)?.element
-      }
-      const opened = await openBrowser(result.data.authorizationURL).then(
-        () => true,
-        () => false,
+      if (dialog.isCurrent(owner)) showSyncSettings(dialog, model, actions)
+      void openBrowser(result.data.authorizationURL).catch(() =>
+        toast.show({ message: "Could not open browser. Copy the authorization URL.", variant: "warning" }),
       )
-      if (!opened) {
-        if (oauth?.attemptID !== result.data.attemptID) return
-        return beginManual()
-      }
-      const callback = await loopback.callback
-      if (!callback) {
-        if (oauth?.attemptID !== result.data.attemptID) return
-        return beginManual()
-      }
-      try {
-        await completeOAuth({ type: "loopback", callbackURL: callback.callbackURL }, dialog.isCurrent(owner))
-        callback.respond({ status: "success" })
-      } catch {
-        callback.respond({ status: "error", detail: "Authorization could not be completed. Return to OpenCode." })
-        throw new Error("Baidu Netdisk authorization failed")
-      } finally {
-        setTimeout(() => {
-          loopback?.close()
-          loopback = undefined
-        }, 1_000)
-      }
+    }
+
+    const beginOAuth = async (mode: "connect" | "switch" = "connect") => {
+      await sdk.client.global.syncInitialize({ deviceName: hostname() }, { throwOnError: true })
+      const application = mode === "connect" ? await promptBaiduApplication(dialog) : undefined
+      if (mode === "connect" && !application) return
+      await beginManual(mode, application)
     }
 
     const mutate = async (effect: () => Promise<unknown>, remote = false) => {
@@ -530,12 +436,14 @@ export const { use: useSyncSettings, provider: SyncSettingsProvider } = createSi
 
     const actions: SyncSettingsActions = {
       connect: beginOAuth,
-      useManualOAuth: beginManual,
+      useManualOAuth: () => beginManual(),
       copy: async (value) => {
-        await clipboard.write?.(value)
+        if (!clipboard.write) throw new Error("Clipboard is unavailable")
+        await clipboard.write(value)
+        toast.show({ message: "Authorization URL copied", variant: "success" })
       },
       submitOAuthCode: async (code) => {
-        if (oauth?.completion !== "manual") throw new Error("Manual OAuth is not active")
+        if (!oauth) throw new Error("Manual OAuth is not active")
         await completeOAuth({ type: "manual", code })
       },
       checkCloud: () => checkCloud(true),

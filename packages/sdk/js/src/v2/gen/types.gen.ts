@@ -3049,6 +3049,12 @@ export type ProviderNotFoundError = {
   message: string
 }
 
+export type SkillNotFoundError = {
+  _tag: "SkillNotFoundError"
+  skillID: string
+  message: string
+}
+
 export type OutputFormat1 =
   | {
       type: "text"
@@ -5643,6 +5649,12 @@ export type SkillRegistrySnapshot = {
   skills: Array<SkillMetadata>
   diagnostics: Array<SkillDiagnostic>
   digest: string
+}
+
+export type SkillDetail = {
+  metadata: SkillMetadata
+  location: string
+  content: string
 }
 
 export type SkillDiscoveryRoot = {
@@ -14557,6 +14569,7 @@ export type V2SessionModelContextResponses = {
   200: {
     data: ModelContextGeneration
     skillCatalog: SkillAdmittedCatalog
+    skillGuidance: string
   }
 }
 
@@ -15836,6 +15849,58 @@ export type V2SkillCatalogResponses = {
 }
 
 export type V2SkillCatalogResponse = V2SkillCatalogResponses[keyof V2SkillCatalogResponses]
+
+export type V2SkillGetData = {
+  body?: never
+  path: {
+    skillID: string
+  }
+  query?: {
+    location?: {
+      directory?: string
+      workspace?: string
+      target?: string
+    }
+  }
+  url: "/api/skill/{skillID}"
+}
+
+export type V2SkillGetErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestError
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+  /**
+   * SkillNotFoundError
+   */
+  404: SkillNotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+  /**
+   * UnknownError
+   */
+  500: UnknownError1
+}
+
+export type V2SkillGetError = V2SkillGetErrors[keyof V2SkillGetErrors]
+
+export type V2SkillGetResponses = {
+  /**
+   * Success
+   */
+  200: {
+    location: LocationInfo
+    data: SkillDetail
+  }
+}
+
+export type V2SkillGetResponse = V2SkillGetResponses[keyof V2SkillGetResponses]
 
 export type V2SkillReloadData = {
   body?: never

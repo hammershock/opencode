@@ -277,6 +277,7 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
   const events = createEventSource()
   const catalogRequests: URL[] = []
+  const detailRequests: URL[] = []
   let scopeUpdates = 0
   const calls = createFetch((url) => {
     if (url.pathname === "/api/target")
@@ -287,6 +288,32 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
         diagnostics: [],
         valid: true,
       })
+    if (url.pathname === `/api/skill/skl_${"1".repeat(64)}`) {
+      detailRequests.push(url)
+      if (detailRequests.length > 1)
+        return json(
+          {
+            _tag: "SkillNotFoundError",
+            skillID: `skl_${"1".repeat(64)}`,
+            message: "Skill is no longer available",
+          },
+          { status: 404 },
+        )
+      return json({
+        location: { target: { type: "local" }, directory: "/tmp/opencode", project: { id: "test", directory } },
+        data: {
+          metadata: {
+            id: `skl_${"1".repeat(64)}`,
+            name: "review",
+            description: "Review changes",
+            sourceLabel: "OpenCode config",
+            digest: "digest",
+          },
+          location: "/tmp/opencode/skills/review/SKILL.md",
+          content: "# Review\n\nInspect the complete change before reporting.",
+        },
+      })
+    }
     if (url.pathname.startsWith("/api/skill/settings/") && url.pathname.endsWith("/target-scope")) {
       scopeUpdates++
       return json({
@@ -430,6 +457,22 @@ test("Ctrl+P opens the production Skill Manager without a model turn", async () 
     await waitForEditor(setup)
     await setup.mockInput.typeText("review")
     await waitForFrame(setup, "review")
+    expect(setup.captureCharFrame()).toContain("View ctrl+o")
+    setup.mockInput.pressKey("o", { ctrl: true })
+    await waitForFrame(setup, "Skill · review")
+    const previewFrame = setup.captureCharFrame()
+    expect(previewFrame).toContain("Description  Review changes")
+    expect(previewFrame).toContain("Entry        /tmp/opencode/skills/review/SKILL.md")
+    expect(previewFrame).toContain("Inspect the complete change before reporting.")
+    expect(previewFrame).toContain("copy c")
+    expect(detailRequests).toHaveLength(1)
+    setup.mockInput.pressEscape()
+    await waitForFrame(setup, "Manage skills")
+    expect(setup.captureCharFrame()).toContain("review")
+    setup.mockInput.pressKey("o", { ctrl: true })
+    await waitForFrame(setup, "Skill content unavailable")
+    expect(setup.captureCharFrame()).toContain("Manage skills")
+    expect(detailRequests).toHaveLength(2)
     setup.mockInput.pressEnter()
     await waitForFrame(setup, "Target access · review")
     const targetFrame = setup.captureCharFrame()

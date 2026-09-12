@@ -14,21 +14,27 @@ import { useToast } from "../ui/toast"
 
 type Preview = { title: string; content: string }
 
-const scrollCommands = [
-  "dialog.model_context.line_up",
-  "dialog.model_context.line_down",
-  "dialog.model_context.page_up",
-  "dialog.model_context.page_down",
-] as const
+type ContentPreviewCommands = {
+  readonly namespace: string
+  readonly lineUp: string
+  readonly lineDown: string
+  readonly pageUp: string
+  readonly pageDown: string
+  readonly home: string
+  readonly end: string
+  readonly copy: string
+}
 
-const scrollHintCommands = ["dialog.model_context.line_up", "dialog.model_context.line_down"] as const
-
-const commands = [
-  ...scrollCommands,
-  "dialog.model_context.home",
-  "dialog.model_context.end",
-  "dialog.model_context.copy",
-] as const
+const modelContextCommands = {
+  namespace: "dialog.model_context",
+  lineUp: "dialog.model_context.line_up",
+  lineDown: "dialog.model_context.line_down",
+  pageUp: "dialog.model_context.page_up",
+  pageDown: "dialog.model_context.page_down",
+  home: "dialog.model_context.home",
+  end: "dialog.model_context.end",
+  copy: "dialog.model_context.copy",
+} satisfies ContentPreviewCommands
 
 export function modelContextOptions(generation: ModelContextGeneration): DialogSelectOption<Preview>[] {
   const environment = generation.environment
@@ -114,6 +120,23 @@ export function showModelContext(dialog: DialogContext, generation: ModelContext
 }
 
 export function DialogModelContextPreview(props: Preview) {
+  return (
+    <DialogContentPreview
+      {...props}
+      commands={modelContextCommands}
+      copySuccess="Context source copied to clipboard"
+      copyFailure="Failed to copy context source"
+    />
+  )
+}
+
+export function DialogContentPreview(
+  props: Preview & {
+    commands: ContentPreviewCommands
+    copySuccess: string
+    copyFailure: string
+  },
+) {
   const dialog = useDialog()
   const clipboard = useClipboard()
   const dimensions = useTerminalDimensions()
@@ -123,14 +146,25 @@ export function DialogModelContextPreview(props: Preview) {
   const [copied, setCopied] = createSignal(false)
   const height = createMemo(() => Math.max(3, Math.floor((dimensions().height * 3) / 4) - 8))
   const scrollAcceleration = createMemo(() => getScrollAcceleration(tuiConfig))
-  const bindings = useKeymapSelector((keymap) => keymap.getCommandBindings({ visibility: "registered", commands }))
+  const commandNames = () => [
+    props.commands.lineUp,
+    props.commands.lineDown,
+    props.commands.pageUp,
+    props.commands.pageDown,
+    props.commands.home,
+    props.commands.end,
+    props.commands.copy,
+  ]
+  const bindings = useKeymapSelector((keymap) =>
+    keymap.getCommandBindings({ visibility: "registered", commands: commandNames() }),
+  )
   const scrollLabel = createMemo(() =>
     formatKeyBindings(
-      scrollHintCommands.flatMap((command) => bindings().get(command) ?? []),
+      [props.commands.lineUp, props.commands.lineDown].flatMap((command) => bindings().get(command) ?? []),
       tuiConfig,
     ),
   )
-  const copyLabel = createMemo(() => formatKeyBindings(bindings().get("dialog.model_context.copy"), tuiConfig))
+  const copyLabel = createMemo(() => formatKeyBindings(bindings().get(props.commands.copy), tuiConfig))
   let scroll: ScrollBoxRenderable | undefined
 
   dialog.setSize("xlarge")
@@ -143,11 +177,11 @@ export function DialogModelContextPreview(props: Preview) {
     void clipboard.write(props.content).then(
       () => {
         setCopied(true)
-        toast.show({ message: "Context source copied to clipboard", variant: "success" })
+        toast.show({ message: props.copySuccess, variant: "success" })
       },
       () => {
         setCopied(false)
-        toast.show({ message: "Failed to copy context source", variant: "error" })
+        toast.show({ message: props.copyFailure, variant: "error" })
       },
     )
   }
@@ -155,49 +189,49 @@ export function DialogModelContextPreview(props: Preview) {
   useBindings(() => ({
     commands: [
       {
-        name: "dialog.model_context.line_up",
+        name: props.commands.lineUp,
         title: "Scroll up",
         category: "Dialog",
         run: () => scroll?.scrollBy(-1),
       },
       {
-        name: "dialog.model_context.line_down",
+        name: props.commands.lineDown,
         title: "Scroll down",
         category: "Dialog",
         run: () => scroll?.scrollBy(1),
       },
       {
-        name: "dialog.model_context.page_up",
+        name: props.commands.pageUp,
         title: "Page up",
         category: "Dialog",
         run: () => scroll?.scrollBy(-scroll.height),
       },
       {
-        name: "dialog.model_context.page_down",
+        name: props.commands.pageDown,
         title: "Page down",
         category: "Dialog",
         run: () => scroll?.scrollBy(scroll.height),
       },
       {
-        name: "dialog.model_context.home",
+        name: props.commands.home,
         title: "First line",
         category: "Dialog",
         run: () => scroll?.scrollTo(0),
       },
       {
-        name: "dialog.model_context.end",
+        name: props.commands.end,
         title: "Last line",
         category: "Dialog",
         run: () => scroll?.scrollTo(scroll.scrollHeight),
       },
       {
-        name: "dialog.model_context.copy",
+        name: props.commands.copy,
         title: "Copy source",
         category: "Dialog",
         run: copy,
       },
     ],
-    bindings: tuiConfig.keybinds.gather("dialog.model_context", commands),
+    bindings: tuiConfig.keybinds.gather(props.commands.namespace, commandNames()),
   }))
 
   return (
@@ -206,7 +240,7 @@ export function DialogModelContextPreview(props: Preview) {
         <text attributes={TextAttributes.BOLD} fg={theme.text}>
           {props.title}
         </text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.pop()}>
           esc
         </text>
       </box>
